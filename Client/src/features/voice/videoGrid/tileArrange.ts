@@ -3,6 +3,7 @@
  * names, and the rows the tile menu offers to change them.
  */
 import { createMenuItem } from "@lib/ui/contextMenu";
+import type { IconName } from "@lib/icons";
 import { voiceText as t } from "../../../i18n/voice";
 import type { TileSize } from "./packLayout";
 
@@ -32,8 +33,8 @@ export function appendArrangeRows(
   arrange: TileMenuArrange,
   close: () => void,
 ): void {
-  const row = (label: string, action: string, run: () => void): HTMLElement => {
-    const item = createMenuItem(label, "context-menu-item");
+  const row = (label: string, action: string, icon: IconName, run: () => void): HTMLElement => {
+    const item = createMenuItem(label, "context-menu-item", { icon });
     item.setAttribute("data-action", action);
     item.addEventListener("click", () => {
       close();
@@ -42,10 +43,19 @@ export function appendArrangeRows(
     return item;
   };
   for (const size of TILE_SIZES) {
-    const item = row(tileSizeText(size), `size-${size}`, () => arrange.onSize(size));
+    const item = row(tileSizeText(size), `size-${size}`, `size-${size}`, () =>
+      arrange.onSize(size),
+    );
     item.setAttribute("role", "menuitemradio");
     item.setAttribute("aria-checked", String(arrange.size === size));
     menu.append(item);
   }
-  menu.append(row(arrange.pinned ? t("tile.unpin") : t("tile.pin"), "pin", arrange.onPin));
+  menu.append(
+    row(
+      arrange.pinned ? t("tile.unpin") : t("tile.pin"),
+      "pin",
+      arrange.pinned ? "pin-off" : "pin",
+      arrange.onPin,
+    ),
+  );
 }

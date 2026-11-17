@@ -34,6 +34,7 @@ func heldIDs(t *testing.T, database *db.DB, userID int64) []int64 {
 }
 
 func TestAddUserRole_Hierarchy(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		actor   int64
@@ -79,6 +80,7 @@ func TestAddUserRole_Hierarchy(t *testing.T) {
 }
 
 func TestAddUserRole_AuditsInvalidatesAndNotifiesOnce(t *testing.T) {
+	t.Parallel()
 	svc, database := newMemberRolesFixture(t)
 	ctx := context.Background()
 	rec := &permNotifyRecorder{probe: roleProbe(t, svc.perms, 5)}
@@ -121,6 +123,7 @@ func TestAddUserRole_AuditsInvalidatesAndNotifiesOnce(t *testing.T) {
 }
 
 func TestRemoveUserRole_LastRoleRefused(t *testing.T) {
+	t.Parallel()
 	svc, database := newMemberRolesFixture(t)
 	ctx := context.Background()
 
@@ -159,6 +162,7 @@ func TestRemoveUserRole_LastRoleRefused(t *testing.T) {
 }
 
 func TestRemoveUserRole_ConcurrentLastTwo(t *testing.T) {
+	t.Parallel()
 	for round := range 15 {
 		svc, database := newMemberRolesFixture(t)
 		ctx := context.Background()
@@ -200,6 +204,7 @@ func TestRemoveUserRole_ConcurrentLastTwo(t *testing.T) {
 }
 
 func TestPatchRoleID_ReplacesSet(t *testing.T) {
+	t.Parallel()
 	svc, database := newMemberRolesFixture(t)
 	ctx := context.Background()
 	if _, err := svc.AddUserRole(ctx, 3, 5, memberRolesHelperID); err != nil {
@@ -217,6 +222,7 @@ func TestPatchRoleID_ReplacesSet(t *testing.T) {
 }
 
 func TestDeleteRole_MemberWithOtherRoleKeepsIt(t *testing.T) {
+	t.Parallel()
 	modSvc, database := newMemberRolesFixture(t)
 	ctx := context.Background()
 	roles := NewRoleService(database, modSvc.perms)
@@ -246,6 +252,7 @@ func TestDeleteRole_MemberWithOtherRoleKeepsIt(t *testing.T) {
 }
 
 func TestReorder_ResyncsTopRole(t *testing.T) {
+	t.Parallel()
 	modSvc, database := newMemberRolesFixture(t)
 	ctx := context.Background()
 	roles := NewRoleService(database, modSvc.perms)
@@ -281,6 +288,7 @@ func TestReorder_ResyncsTopRole(t *testing.T) {
 }
 
 func TestUpdateRole_PositionMoveResyncsTopRole(t *testing.T) {
+	t.Parallel()
 	modSvc, database := newMemberRolesFixture(t)
 	ctx := context.Background()
 	roles := NewRoleService(database, modSvc.perms)
@@ -306,6 +314,7 @@ func TestUpdateRole_PositionMoveResyncsTopRole(t *testing.T) {
 }
 
 func TestRoleInput_HoistAndMentionable(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 	ctx := context.Background()
 	role, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Pingable"), Hoist: new(true), Mentionable: new(true)})
@@ -332,6 +341,7 @@ func TestRoleInput_HoistAndMentionable(t *testing.T) {
 
 // Concurrent duplicate requests change one row, so they write one audit row.
 func TestMemberRoles_ConcurrentDuplicatesAuditOnce(t *testing.T) {
+	t.Parallel()
 	svc, database := newMemberRolesFixture(t)
 	ctx := context.Background()
 

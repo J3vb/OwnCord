@@ -388,7 +388,7 @@ describe("Banner controls", () => {
     expect(q(container, "banner-upload-btn").disabled).toBe(false);
   });
 
-  it("saves an edited colour with Save Profile and sends nothing when unchanged", async () => {
+  it("saves an edited colour with Save profile and sends nothing when unchanged", async () => {
     applyReadyCapabilities({ profile_banners: true });
     setUser({ banner_color: "#112233" });
     const onUpdateProfile = vi.fn().mockResolvedValue(undefined);

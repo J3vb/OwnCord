@@ -42,6 +42,8 @@ export interface VoiceRowInputs {
   readonly timeout: SafetyState["timeout"];
   /** Sorted ids of the voice channels whose `canMoveVoice` is true: the rows a drag may move from. */
   readonly movable: readonly number[];
+  /** Members sharing music (you included), or absent when none does. */
+  readonly musicSharers?: ReadonlySet<number>;
   /** A fresh token per local-mute event: `localSilenced` answers differ after it. */
   readonly localMute: object;
 }
@@ -52,6 +54,8 @@ export interface VoiceUserContext {
   readonly avatarColor: (username: string) => string;
   /** Muted for this client only: the local Mute, or a volume of 0. */
   readonly localSilenced: (userId: number) => boolean;
+  /** Mute music is on for this member (their music is silent for you). */
+  readonly musicMuted?: (userId: number) => boolean;
   /** The page wired voice moderation (drag to move needs it). */
   readonly moderation: boolean;
 }
@@ -113,6 +117,8 @@ export function voiceUserModel(
     speaking: user.speaking,
     camera: user.camera,
     live: user.screenshare,
+    music: inputs.musicSharers?.has(user.userId) === true,
+    musicMuted: !self && ctx.musicMuted?.(user.userId) === true,
     audio: audioModel(user),
     localMuted: !self && ctx.localSilenced(user.userId),
     ownFingerprintTitle: self

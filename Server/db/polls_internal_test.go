@@ -6,6 +6,7 @@ import (
 )
 
 func TestAttachPolls_DeletedHidden(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemoryInternal(t)
 	ctx := context.Background()
 	u, err := database.CreateUser(ctx, "pa", "hash", 4)
@@ -45,6 +46,7 @@ func TestAttachPolls_DeletedHidden(t *testing.T) {
 }
 
 func TestAttachPolls_NoCandidatesNoQuery(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemoryInternal(t)
 	// A page of deleted and system rows is answered without touching the
 	// tables, which a closed database would otherwise fail.

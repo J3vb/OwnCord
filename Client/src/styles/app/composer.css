@@ -358,6 +358,26 @@
   display: none;
 }
 
+/* A DM whose message request the other person may not have accepted yet. */
+.dm-pending-request {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 16px 8px;
+  padding: 8px 12px;
+  border: 1px solid color-mix(in srgb, var(--yellow) 45%, transparent);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--yellow) 8%, transparent);
+  font-size: var(--font-size-sm);
+}
+.dm-pending-request > svg {
+  flex: none;
+  color: var(--yellow);
+}
+.dm-pending-request-text {
+  min-width: 0;
+}
+
 /* "Upload to #channel" while a file is dragged over the chat. Fixed to the
    chat area's box (set on show) and ignores the pointer, so the drop lands on
    the slot underneath. */

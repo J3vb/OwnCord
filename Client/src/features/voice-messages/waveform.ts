@@ -1,3 +1,5 @@
+import { formatDuration } from "@lib/text/duration";
+
 /**
  * Pure helpers for a voice message's waveform and clock. A waveform is
  * one byte (0-255) per bar; on the wire it is base64url without padding.
@@ -61,6 +63,5 @@ export function decodeWaveform(encoded: string): Uint8Array | null {
 
 /** Whole seconds as m:ss (no hours: a voice message is at most 5 minutes). */
 export function formatClock(totalSeconds: number): string {
-  const s = Math.max(0, Math.floor(totalSeconds));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  return formatDuration(totalSeconds * 1000);
 }

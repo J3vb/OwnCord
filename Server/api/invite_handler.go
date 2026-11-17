@@ -2,8 +2,12 @@ package api
 
 import (
 	"fmt"
+	"math"
 	"net/http"
+	"strconv"
+	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/permissions"
@@ -29,19 +33,20 @@ type inviteResponse struct {
 
 // MountInviteRoutes registers invite endpoints on the given router.
 // All routes require authentication and MANAGE_INVITES permission.
-func MountInviteRoutes(r chi.Router, svc *service.Services) {
+func MountInviteRoutes(r chi.Router, svc *service.Services, limiter *auth.RateLimiter) {
 	r.Route("/api/v1/invites", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Use(RequirePermission(permissions.ManageInvites))
 
-		r.Post("/", handleCreateInvite(svc))
+		r.Post("/", handleCreateInvite(svc, limiter))
 		r.Get("/", handleListInvites(svc))
 		r.Delete("/{code}", handleRevokeInvite(svc))
+		r.Delete("/id/{id}", handleRevokeInviteByID(svc))
 		r.Get("/{code}/redemptions", handleListInviteRedemptions(svc))
 	})
 }
 
-func handleCreateInvite(svc *service.Services) http.HandlerFunc {
+func handleCreateInvite(svc *service.Services, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		var req createInviteRequest
 		if !decodeOptionalJSON(w, r, &req) {
@@ -59,6 +64,22 @@ func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 			return
 		}
 
+		if req.MaxUses < 0 || req.ExpiresInHours < 0 {
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "max_uses and expires_in_hours must not be negative")
+			return
+		}
+
+		// Last check before the write, so a request that fails validation does not spend the budget.
+		if limiter != nil {
+			key := auth.Key("invite_create", user.ID)
+			if !limiter.Allow(key, inviteCreatePerHour, time.Hour) {
+				secs := max(int(math.Ceil(limiter.RetryAfter(key, inviteCreatePerHour, time.Hour).Seconds())), 1)
+				w.Header().Set("Retry-After", strconv.Itoa(secs))
+				writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many invites created, please try again later")
+				return
+			}
+		}
+
 		inv, err := svc.Invites.CreateInvite(r.Context(), user.ID, req.MaxUses, req.ExpiresInHours)
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
@@ -68,9 +89,29 @@ func handleCreateInvite(svc *service.Services) http.HandlerFunc {
 	}
 }
 
+// handleListInvites answers a plain array: live invites first, then the newest dead ones. The optional
+// state=live|dead, before=<id> and limit=<n> query parameters page one list by id.
 func handleListInvites(svc *service.Services) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		invites, err := svc.Invites.ListInvites(r.Context())
+		q := r.URL.Query()
+		before, limit := int64(0), 0
+		if v := q.Get("before"); v != "" {
+			n, err := strconv.ParseInt(v, 10, 64)
+			if err != nil || n < 0 {
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "before must be a non-negative integer")
+				return
+			}
+			before = n
+		}
+		if v := q.Get("limit"); v != "" {
+			n, err := strconv.Atoi(v)
+			if err != nil || n < 0 {
+				writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "limit must be a non-negative integer")
+				return
+			}
+			limit = n
+		}
+		invites, err := svc.Invites.ListInvites(r.Context(), q.Get("state"), before, limit)
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
@@ -92,6 +133,25 @@ func handleRevokeInvite(svc *service.Services) http.HandlerFunc {
 		}
 		code := chi.URLParam(r, "code")
 		if err := svc.Invites.RevokeInvite(r.Context(), user.ID, code); err != nil {
+			writeServiceError(r.Context(), w, err)
+			return
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}
+}
+
+func handleRevokeInviteByID(svc *service.Services) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user, ok := requireUser(w, r)
+		if !ok {
+			return
+		}
+		id, ok := pathID(r, "id")
+		if !ok {
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "invite not found")
+			return
+		}
+		if err := svc.Invites.RevokeInviteByID(r.Context(), user.ID, id); err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
 		}

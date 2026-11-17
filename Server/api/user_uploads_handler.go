@@ -34,7 +34,7 @@ func MountUserUploadRoutes(r chi.Router, svc *service.Services, store FileStore,
 		RateLimitMiddleware(limiter, "uploads:", ownUploadsRateLimitPerMinute, time.Minute, trustedProxies),
 	)
 	gated.Get("/api/v1/users/me/storage", handleOwnStorage(svc))
-	gated.Get("/api/v1/users/me/uploads", handleListOwnUploads(svc))
+	gated.With(compressJSON).Get("/api/v1/users/me/uploads", handleListOwnUploads(svc))
 	gated.Delete("/api/v1/users/me/uploads/{id}", handleRemoveOwnUpload(svc, store, broadcaster))
 }
 

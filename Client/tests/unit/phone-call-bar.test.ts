@@ -16,6 +16,7 @@ import {
   resetVoiceStore,
   setListenOnly,
   setLocalMuted,
+  setPhoneCallHold,
   setVoiceStatus,
   voiceStore,
 } from "../../src/stores/voice.store";
@@ -258,6 +259,82 @@ describe("PhoneCallBar", () => {
       joinCall(99);
       expect(q("pcb-name").textContent).toBe("Voice Channel");
       expect(q("pcb-open").disabled).toBe(true);
+    });
+  });
+
+  describe("while a phone call holds the call", () => {
+    function hold(held: boolean): void {
+      setPhoneCallHold(held);
+      flush();
+    }
+    const paused = (): boolean => root().classList.contains("phone-call-bar--paused");
+
+    it("reads as an ordinary call until a phone call comes", () => {
+      mountBar();
+      joinCall();
+      expect(paused()).toBe(false);
+      expect(q("pcb-hint").hidden).toBe(true);
+    });
+
+    it("turns amber, says the call is paused, and comes back by itself", () => {
+      mountBar();
+      joinCall();
+      vi.advanceTimersByTime(65_000);
+      hold(true);
+      expect(paused()).toBe(true);
+      expect(detail()).toBe("Paused for a phone call · 01:05");
+      expect(q("pcb-hint").hidden).toBe(false);
+      expect(q("pcb-hint").textContent).toBe(
+        "Your mic and sound come back when the phone call ends.",
+      );
+      // The call is still running: its time keeps counting.
+      vi.advanceTimersByTime(1000);
+      expect(detail()).toBe("Paused for a phone call · 01:06");
+
+      hold(false);
+      expect(paused()).toBe(false);
+      expect(q("pcb-hint").hidden).toBe(true);
+      expect(detail()).toBe("1 person · 01:06");
+    });
+
+    it("locks Mute and says why, and keeps Leave and the way into the call", () => {
+      mountBar();
+      joinCall();
+      hold(true);
+      const mute = q("pcb-mute");
+      expect(mute.disabled).toBe(true);
+      expect(mute.getAttribute("aria-pressed")).toBe("true");
+      expect(mute.getAttribute("aria-label")).toBe("Muted while paused");
+      expect(mute.querySelector("svg")?.dataset.icon).toBe("mic-off");
+      q("pcb-leave").click();
+      expect(onLeave).toHaveBeenCalledOnce();
+      q("pcb-open").click();
+      expect(onOpenCall).toHaveBeenCalledExactlyOnceWith(VOICE);
+
+      hold(false);
+      expect(mute.disabled).toBe(false);
+      expect(mute.getAttribute("aria-pressed")).toBe("false");
+      expect(mute.getAttribute("aria-label")).toBe("Mute");
+      expect(mute.querySelector("svg")?.dataset.icon).toBe("mic");
+    });
+
+    it("gives the mute you set yourself back as it was", () => {
+      mountBar();
+      joinCall();
+      setLocalMuted(true);
+      hold(true);
+      hold(false);
+      expect(q("pcb-mute").getAttribute("aria-pressed")).toBe("true");
+      expect(q("pcb-mute").getAttribute("aria-label")).toBe("Unmute");
+    });
+
+    it("says paused before it says reconnecting", () => {
+      mountBar();
+      joinCall();
+      hold(true);
+      setVoiceStatus("reconnecting");
+      flush();
+      expect(detail()).toBe("Paused for a phone call · 00:00");
     });
   });
 

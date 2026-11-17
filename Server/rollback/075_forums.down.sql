@@ -104,6 +104,9 @@ BEGIN
     SELECT RAISE(ABORT, 'invalid thread row: type, parent and starter are fixed, and a thread takes nsfw, archive, category, afk and slow mode from its parent');
 END;
 
+-- 092 indexes this column. Dropping the index here keeps this file working
+-- when 092 was not reversed first.
+DROP INDEX IF EXISTS idx_channels_thread_post_message;
 ALTER TABLE channels DROP COLUMN thread_post_message_id;
 ALTER TABLE channels DROP COLUMN forum_default_auto_archive_minutes;
 ALTER TABLE channels DROP COLUMN forum_require_tag;

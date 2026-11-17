@@ -80,7 +80,7 @@ describe("createMicProcessor", () => {
 
   it("gates the output: either gate closed is silence, both open is the input gain", async () => {
     const { processor, entry, output } = await started();
-    // Input Volume rides on the entry node, ahead of the detector's tap; the
+    // Input volume rides on the entry node, ahead of the detector's tap; the
     // output node carries only the gates.
     const level = () => entry.gain.value * output.gain.value;
     processor.setInputGain(0.8);
@@ -244,7 +244,7 @@ describe("createMicProcessor", () => {
       expect(entry.outputs).toEqual([ctx.node("analyser"), ctx.node("delay")]);
     });
 
-    it("keeps the verdict flowing while Enhanced Noise Suppression toggles", async () => {
+    it("keeps the verdict flowing while Enhanced noise suppression toggles", async () => {
       const { processor, ctx, entry } = await started();
       ctx.audioWorklet.addModule.mockResolvedValue(undefined);
       const speech = ctx.nodes.filter((n) => n.kind === "gain")[2]!;

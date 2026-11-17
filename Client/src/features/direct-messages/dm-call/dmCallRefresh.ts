@@ -1,22 +1,17 @@
 /** The DM call panel's in-place updates: rings, badges, controls, status and the timer. */
-import { createIcon } from "@lib/icons";
+import { createIcon, swapIcon } from "@lib/icons";
 import { clearChildren, setText } from "@lib/dom";
 import { isSelfMuted, voiceStore, type VoiceState } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import type { DmChannel } from "@stores/dm.store";
-import { formatElapsed, isConnecting } from "../../voice/voiceStatusText";
+import { isConnecting, isPhoneCallHold } from "../../voice/voiceStatusText";
 import { shareBlockReason } from "../../voice/shareGate";
 import { voiceText as t } from "../../../i18n/voice";
 import { dmCallText as d } from "../../../i18n/dmCall";
-import {
-  currentUserId,
-  resolvePerson,
-  swapIcon,
-  voiceUser,
-  type AvatarRef,
-} from "../DmCallViewModel";
+import { currentUserId, resolvePerson, voiceUser, type AvatarRef } from "../DmCallViewModel";
 import { connectedStatus } from "./dmCallRender";
 import type { DmCallState, DmCallApi } from "./dmCallState";
+import { formatDuration } from "@lib/text/duration";
 
 /** Why camera and share are inert now, if they are. */
 interface MediaLock {
@@ -55,17 +50,22 @@ function refreshAvatar(
   return speaking && !isSelf;
 }
 
+/** Why the mic button cannot be used now, or null: a phone call's hold, a
+ *  moderator's mute, a call joined without a microphone. */
+function micLockTitle(voice: VoiceState): string | null {
+  if (isPhoneCallHold(voice)) return t("widget.control.phoneCallHold");
+  if (voice.localServerMuted === true) return t("widget.mutedByModerator");
+  return voice.listenOnly ? t("widget.control.listenOnly") : null;
+}
+
 function refreshMute(btn: HTMLButtonElement, voice: VoiceState): void {
   const selfMuted = isSelfMuted(voice);
-  btn.setAttribute("aria-pressed", String(selfMuted));
-  swapIcon(btn, selfMuted || voice.listenOnly ? "mic-off" : "mic", 20);
-  btn.disabled = voice.localServerMuted === true || voice.listenOnly;
-  btn.title =
-    voice.localServerMuted === true
-      ? t("widget.mutedByModerator")
-      : voice.listenOnly
-        ? t("widget.control.listenOnly")
-        : t("widget.control.mute");
+  const held = isPhoneCallHold(voice);
+  const lock = micLockTitle(voice);
+  btn.setAttribute("aria-pressed", String(selfMuted || held));
+  swapIcon(btn, selfMuted || voice.listenOnly || held ? "mic-off" : "mic", 20);
+  btn.disabled = lock !== null;
+  btn.title = lock ?? t("widget.control.mute");
 }
 
 function refreshDeafen(btn: HTMLButtonElement, voice: VoiceState): void {
@@ -124,7 +124,8 @@ export function createDmCallRefresh(
     const voice = voiceStore.getState();
     refreshSpeaking(refreshAvatars(voice, view.dm, currentUserId()));
     if (view.kind === "connected" && st.statusEl !== null) {
-      setText(st.statusEl, connectedStatus(view, voice.voiceStatus));
+      setText(st.statusEl, connectedStatus(view, voice));
+      st.statusEl.classList.toggle("dcp-status--warn", isPhoneCallHold(voice));
     }
     st.secured?.sync(voice.voiceStatus === "connected", voice.encryptionDegraded === true);
     refreshControls(voice);
@@ -150,7 +151,8 @@ export function createDmCallRefresh(
   }
 
   function tick(): void {
-    const text = st.answeredAt === null ? "00:00" : formatElapsed(Date.now() - st.answeredAt);
+    const text =
+      st.answeredAt === null ? "00:00" : formatDuration(Date.now() - st.answeredAt, true);
     for (const el of st.timerEls) if (el.textContent !== text) setText(el, text);
   }
 

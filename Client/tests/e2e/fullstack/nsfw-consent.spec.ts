@@ -179,7 +179,10 @@ test.describe("NSFW consent gate (real server)", () => {
       await device2.page.getByTestId("pin-btn").click();
       await expect(device2.page.locator(".pinned-panel")).toBeVisible();
       await clearTraffic(device2.page);
-      await device2.page.getByTestId("nsfw-consent-revoke").click();
+      // The open panel lies over the right end of the consent bar, so the
+      // button is reached with the keyboard, as it is while a panel is open.
+      await device2.page.getByTestId("nsfw-consent-revoke").focus();
+      await device2.page.keyboard.press("Enter");
       await expect(gate(device2.page)).toBeVisible();
       await expect(device2.page.locator(".msg-text", { hasText: secret })).toHaveCount(0);
       await expect(device2.page.locator(".pinned-panel")).toHaveCount(0);

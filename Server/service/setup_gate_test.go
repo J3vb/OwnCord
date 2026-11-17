@@ -15,6 +15,7 @@ import (
 // not the user count, is the gate. NeedsSetup reports it, so the setup page
 // does not offer a wizard that Bootstrap would refuse.
 func TestSetupService_AnEmptiedUserTableDoesNotReopenSetup(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := setupFixture(t)
 	seedRole(t, database, &db.Role{ID: permissions.AdminRoleID, Name: "Admin", Position: permissions.OwnerRolePosition - 1})
 

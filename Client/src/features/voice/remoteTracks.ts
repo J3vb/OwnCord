@@ -13,6 +13,7 @@ import { isUnencryptedPublication } from "./mediaEncryption";
 import { autoPlayCameras } from "./autoPlayCameras";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
 import type { ShareSenderSample } from "./shareSenderStats";
+import { isMusicPublication } from "@lib/voice/musicTrack";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 /** One receiver sample of a remote video track (getReceiverStats plus
@@ -257,7 +258,13 @@ export class RemoteTracks {
     const name = source === "screenshare" ? "screen_share" : source;
     for (const participant of this.getRoom()?.remoteParticipants.values() ?? []) {
       if (parseUserId(participant.identity) !== userId) continue;
-      return participant.getTrackPublication(name);
+      const first = participant.getTrackPublication(name);
+      if (first === undefined || !isMusicPublication(first)) return first;
+      // A music share carries the screen-share audio source too: look past it.
+      for (const pub of participant.trackPublications.values()) {
+        if (pub.source === name && !isMusicPublication(pub)) return pub;
+      }
+      return undefined;
     }
     return undefined;
   }

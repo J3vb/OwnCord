@@ -10,6 +10,7 @@ import (
 // ─── handleServeFile ────────────────────────────────────────────────────────
 
 func TestServeFile_Success(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -48,6 +49,7 @@ func TestServeFile_Success(t *testing.T) {
 }
 
 func TestServeFile_Success_PNG(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -70,6 +72,7 @@ func TestServeFile_Success_PNG(t *testing.T) {
 }
 
 func TestServeFile_NotFound(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -80,6 +83,7 @@ func TestServeFile_NotFound(t *testing.T) {
 }
 
 func TestServeFile_EmptyID(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -92,6 +96,7 @@ func TestServeFile_EmptyID(t *testing.T) {
 }
 
 func TestServeFile_CORS_MatchingOrigin(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, []string{"https://app.example.com"})
@@ -116,6 +121,7 @@ func TestServeFile_CORS_MatchingOrigin(t *testing.T) {
 }
 
 func TestServeFile_CORS_NonMatchingOrigin(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, []string{"https://app.example.com"})
@@ -138,6 +144,7 @@ func TestServeFile_CORS_NonMatchingOrigin(t *testing.T) {
 }
 
 func TestServeFile_CORS_WildcardOrigin(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, []string{"*"})
@@ -160,6 +167,7 @@ func TestServeFile_CORS_WildcardOrigin(t *testing.T) {
 }
 
 func TestServeFile_CORS_NoOriginHeader(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, []string{"*"})
@@ -181,6 +189,7 @@ func TestServeFile_CORS_NoOriginHeader(t *testing.T) {
 }
 
 func TestServeFile_DBRecordMissing_ReturnsNotFound(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -192,6 +201,7 @@ func TestServeFile_DBRecordMissing_ReturnsNotFound(t *testing.T) {
 }
 
 func TestServeFile_StorageFileMissing_ReturnsNotFound(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -217,6 +227,7 @@ func TestServeFile_StorageFileMissing_ReturnsNotFound(t *testing.T) {
 // ─── Access Control Tests (BUG-092) ────────────────────────────────────────
 
 func TestServeFile_Unauthenticated_Returns401(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -235,6 +246,7 @@ func TestServeFile_Unauthenticated_Returns401(t *testing.T) {
 }
 
 func TestServeFile_UnlinkedFile_UploaderCanAccess(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -252,6 +264,7 @@ func TestServeFile_UnlinkedFile_UploaderCanAccess(t *testing.T) {
 }
 
 func TestServeFile_UnlinkedFile_OtherUserForbidden(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -270,6 +283,7 @@ func TestServeFile_UnlinkedFile_OtherUserForbidden(t *testing.T) {
 }
 
 func TestServeFile_AdminCannotReadAnotherUsersUnlinkedFile(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -287,6 +301,7 @@ func TestServeFile_AdminCannotReadAnotherUsersUnlinkedFile(t *testing.T) {
 }
 
 func TestServeFile_LinkedToGuildChannel_MemberWithPerm(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -324,6 +339,7 @@ func TestServeFile_LinkedToGuildChannel_MemberWithPerm(t *testing.T) {
 }
 
 func TestServeFile_LinkedToGuildChannel_MemberWithoutPerm(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -366,6 +382,7 @@ func TestServeFile_LinkedToGuildChannel_MemberWithoutPerm(t *testing.T) {
 }
 
 func TestServeFile_LinkedToDM_ParticipantAllowed(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -398,6 +415,7 @@ func TestServeFile_LinkedToDM_ParticipantAllowed(t *testing.T) {
 }
 
 func TestServeFile_LinkedToDM_NonParticipantForbidden(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -436,6 +454,7 @@ func TestServeFile_LinkedToDM_NonParticipantForbidden(t *testing.T) {
 // anyone else — the file route must match, not open every private DM to
 // anyone holding the admin bit.
 func TestServeFile_LinkedToDM_AdminNonParticipantForbidden(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)

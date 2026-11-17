@@ -36,6 +36,9 @@ var panelEditableKeys = []string{
 	"github.owner",
 	"github.repo",
 	"github.token",
+	"link_previews.enabled",
+	"link_previews.thumbnail_cache_mb",
+	"link_previews.thumbnail_unused_days",
 	"logging.level",
 	"moderation.action_retention_days",
 	"moderation.report_retention_days",
@@ -45,7 +48,6 @@ var panelEditableKeys = []string{
 	"plugins.http_allowlist",
 	"plugins.max_memory_mb",
 	"push.contact",
-	"push.dispatch_enabled",
 	"push.enabled",
 	"push.subscription_ttl_days",
 	"security.auth_rate_limit_multiplier",
@@ -105,6 +107,9 @@ var panelExcludedKeys = []string{
 	// A voice grant rule the person running the server sets in config.yaml
 	// or the environment, read once at start-up.
 	"voice.restrict_data_publishing",
+	// Retired: push.enabled alone turns on sending. A stored override is
+	// kept in the file for a downgrade but never applied.
+	"push.dispatch_enabled",
 }
 
 func TestEditableKeys_ExactInventory(t *testing.T) {
@@ -135,9 +140,9 @@ func TestEditableKeys_ProtectedKeysStayOut(t *testing.T) {
 			t.Errorf("IsEditable(%q) = true for a key that is not a config leaf", key)
 		}
 	}
-	// The two lists together hold 79 distinct keys.
-	if n := len(panelEditableKeys) + len(panelExcludedKeys); n != 79 {
-		t.Errorf("editable %d + excluded %d = %d keys, want 79",
+	// The two lists together hold 82 distinct keys.
+	if n := len(panelEditableKeys) + len(panelExcludedKeys); n != 82 {
+		t.Errorf("editable %d + excluded %d = %d keys, want 82",
 			len(panelEditableKeys), len(panelExcludedKeys), n)
 	}
 }

@@ -9,6 +9,7 @@ import { createAdminApi } from "./apiAdmin";
 import { createModerationApi } from "./apiModeration";
 import { createChannelsApi } from "./apiChannels";
 import { createDmsApi } from "./apiDms";
+import { createPushApi } from "./apiPush";
 import type { ApiTransport } from "./apiShared";
 import { SessionScope } from "./net/sessionScope";
 import {
@@ -36,6 +37,8 @@ export {
   serverErrorCopy,
   serverErrorText,
   errorText,
+  appealLine,
+  signInErrorText,
   channelMediaParams,
 } from "./apiShared";
 export type {
@@ -216,6 +219,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
       return {
         error: body.error ?? "UNKNOWN",
         message: body.message ?? res.statusText,
+        ...(typeof body.appeal_contact === "string" ? { appeal_contact: body.appeal_contact } : {}),
       };
     } catch {
       return {
@@ -287,6 +291,7 @@ export function createApiClient(initialConfig: ApiClientConfig, onUnauthorized?:
     ...createChannelsApi(t),
     ...createDmsApi(t),
     ...createAdminApi(t),
+    ...createPushApi(t),
   };
 }
 

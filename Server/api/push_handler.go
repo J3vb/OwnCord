@@ -7,10 +7,13 @@ package api
 
 import (
 	"errors"
+	"math"
 	"net/http"
 	"net/url"
+	"strconv"
 	"time"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -24,14 +27,14 @@ const pushSubscribeMaxBodySize = 8 << 10 // 8 KiB
 
 // MountPushRoutes registers the /api/v1/push endpoints; enabled is cfg.Push.Enabled at mount time (flip the
 // key and restart).
-func MountPushRoutes(r chi.Router, sessions *service.SessionService, push *service.PushService, enabled bool) {
+func MountPushRoutes(r chi.Router, sessions *service.SessionService, push *service.PushService, limiter *auth.RateLimiter, enabled bool) {
 	r.Route("/api/v1/push", func(r chi.Router) {
 		r.Use(AuthMiddleware(sessions))
 		r.Use(pushDisabledMiddleware(enabled))
 
 		r.Get("/vapid", handlePushVAPID(push))
 		r.Get("/subscriptions", handleListPushSubscriptions(push))
-		r.With(MaxBodySize(pushSubscribeMaxBodySize)).Post("/subscriptions", handleSubscribePush(push))
+		r.With(MaxBodySize(pushSubscribeMaxBodySize)).Post("/subscriptions", handleSubscribePush(push, limiter))
 		r.Delete("/subscriptions/{id}", handleRevokePushSubscription(push))
 	})
 }
@@ -135,7 +138,7 @@ type pushSubscribeResponse struct {
 	ID int64 `json:"id"`
 }
 
-func handleSubscribePush(push *service.PushService) http.HandlerFunc {
+func handleSubscribePush(push *service.PushService, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserKey).(*db.User)
 		if !ok || user == nil {
@@ -146,15 +149,33 @@ func handleSubscribePush(push *service.PushService) http.HandlerFunc {
 		if !decodeJSON(w, r, &req) {
 			return
 		}
+		if limiter != nil {
+			key := auth.Key("push_subscribe", user.ID)
+			if !limiter.Allow(key, pushSubscribePerHour, time.Hour) {
+				secs := max(int(math.Ceil(limiter.RetryAfter(key, pushSubscribePerHour, time.Hour).Seconds())), 1)
+				w.Header().Set("Retry-After", strconv.Itoa(secs))
+				writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many push registrations, please try again later")
+				return
+			}
+		}
 		id, err := push.Subscribe(r.Context(), user.ID, service.PushSubscribeInput{
 			Endpoint:   req.Endpoint,
 			P256dh:     req.Keys.P256dh,
 			Auth:       req.Keys.Auth,
 			DeviceName: req.DeviceName,
+			SessionID:  subscribingSession(r),
 		})
 		if err != nil {
 			if errors.Is(err, service.ErrInvalidSubscription) {
 				writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
+				return
+			}
+			if errors.Is(err, service.ErrPushServerNotPublic) {
+				writeErr(w, http.StatusBadRequest, httperr.CodePushServerNotPublic, "OwnCord only sends to public push servers")
+				return
+			}
+			if errors.Is(err, service.ErrPushServerPortNotSupported) {
+				writeErr(w, http.StatusBadRequest, httperr.CodePushServerPortNotSupported, "OwnCord only sends to push servers on port 443")
 				return
 			}
 			writeServiceError(r.Context(), w, err)
@@ -162,6 +183,17 @@ func handleSubscribePush(push *service.PushService) http.HandlerFunc {
 		}
 		writeJSON(w, http.StatusCreated, pushSubscribeResponse{ID: id})
 	}
+}
+
+// subscribingSession is the session a subscription is tied to, so ending the
+// session ends the pushes to that device; nil for an API-token principal.
+func subscribingSession(r *http.Request) *int64 {
+	sess, ok := r.Context().Value(SessionKey).(*db.Session)
+	if !ok || sess == nil {
+		return nil
+	}
+	id := sess.ID
+	return &id
 }
 
 func handleRevokePushSubscription(push *service.PushService) http.HandlerFunc {

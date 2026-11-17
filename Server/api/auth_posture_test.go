@@ -37,6 +37,7 @@ var publicSurface = map[string]string{
 	// the description behind. Corrected in B6-7, which adds the endpoint that
 	// does carry the epoch rather than quietly widening this one.
 	"GET /api/v1/info":        "server name only, for the client's handshake; no version (C-2) and no user data (TestAPIV1Info*)",
+	"GET /api/v1/server-icon": "the owner-uploaded server icon PNG, same exposure as server-info; 404 when none, nosniff, five-minute cache (TestServerIcon*)",
 	"GET /api/v1/server-info": "server name, protocol epoch, browser-hosting flag, registration mode, server-default message retention (B7-15a) and the upload transfer lifetime; no channel overrides, version (C-2) or user data (TestAPIV1ServerInfo*)",
 
 	"POST /api/v1/auth/login":       "the credential entry point; rate-limited and lockout-guarded (TestLogin_*)",
@@ -163,6 +164,7 @@ func walkAnonymousPosture(t *testing.T, h http.Handler) (total int, seen map[str
 // a 404 that would say whether the resource exists, never a 400 from a body
 // parser that ran ahead of authentication.
 func TestAuthPosture_EveryRouteOffThePublicSurfaceAnswers401(t *testing.T) {
+	t.Parallel()
 	handler := fullRouter(t)
 	total, seen, violations := walkAnonymousPosture(t, handler)
 
@@ -204,6 +206,7 @@ func TestAuthPosture_EveryRouteOffThePublicSurfaceAnswers401(t *testing.T) {
 // and nothing else may be. Without this, a green posture walk would prove
 // only that the walk ran.
 func TestAuthPosture_NegativeControl(t *testing.T) {
+	t.Parallel()
 	prod := fullRouter(t)
 	r := chi.NewRouter()
 	r.Get("/api/v1/zz-posture-probe/{id}", func(w http.ResponseWriter, _ *http.Request) {

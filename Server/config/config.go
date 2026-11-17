@@ -33,6 +33,7 @@ type Config struct {
 	GIF              GIFConfig              `yaml:"gif"`
 	Logging          LoggingConfig          `yaml:"logging"`
 	Moderation       ModerationConfig       `yaml:"moderation"`
+	LinkPreviews     LinkPreviewsConfig     `yaml:"link_previews"`
 	Push             PushConfig             `yaml:"push"`
 	Attention        AttentionConfig        `yaml:"attention"`
 }
@@ -88,6 +89,7 @@ func Load(cfgPath string) (*Config, error) {
 	if err := goyaml.Unmarshal(raw, &tree); err != nil {
 		return nil, fmt.Errorf("loading config file %s: %w", cfgPath, err)
 	}
+	logDeprecatedPushDispatch(tree)
 	for _, key := range unknownKeys(tree) {
 		slog.Warn("config: unknown key ignored — value has NO effect (typo?)",
 			"key", key, "file", cfgPath)
@@ -214,4 +216,16 @@ func warnInvalidCIDRs(key string, cidrs []string) {
 				"key", key, "entry", c)
 		}
 	}
+}
+
+// logDeprecatedPushDispatch logs one Info line when the config file or the environment still names the
+// retired push.dispatch_enabled key; the value is ignored.
+func logDeprecatedPushDispatch(tree map[string]any) {
+	_, inEnv := os.LookupEnv("OWNCORD_PUSH_DISPATCH_ENABLED")
+	push, _ := tree["push"].(map[string]any)
+	_, inFile := push["dispatch_enabled"]
+	if !inEnv && !inFile {
+		return
+	}
+	slog.Info("config: push.dispatch_enabled is deprecated and ignored; push.enabled alone turns on sending")
 }

@@ -94,8 +94,11 @@ func pickChannel(token, kind string) (channelRow, error) {
 	return channelRow{}, fmt.Errorf("the install has no %s channel, only %v", kind, rows)
 }
 
+// inviteMaxUses is how many registrations one drill invite admits.
+const inviteMaxUses = 10
+
 func createInvite(baseURL, token string) (string, error) {
-	body, err := json.Marshal(map[string]any{"max_uses": 10, "expires_in_hours": 24})
+	body, err := json.Marshal(map[string]any{"max_uses": inviteMaxUses, "expires_in_hours": 24})
 	if err != nil {
 		return "", err
 	}

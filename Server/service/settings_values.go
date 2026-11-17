@@ -7,7 +7,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 )
 
@@ -17,6 +19,8 @@ const (
 	// MaxServerNameLen and MaxMotdLen bound the trimmed value in bytes.
 	MaxServerNameLen = 100
 	MaxMotdLen       = 500
+	// MaxAppealContactLen bounds the appeal contact in characters (runes).
+	MaxAppealContactLen = 200
 	// MaxUploadSizeMB is the largest upload cap either surface accepts (10 GiB); the smallest is 1 MB.
 	MaxUploadSizeMB = 10240
 )
@@ -49,6 +53,27 @@ func NormalizeMotd(v string) (string, error) {
 	return motd, nil
 }
 
+// AppealContactKey is the settings key holding the line a banned member is shown when sign-in is refused.
+// A missing row means nothing is shown, so no migration seeds it.
+const AppealContactKey = "appeal_contact"
+
+// NormalizeAppealContact trims the appeal contact and requires single-line visible text of at most
+// MaxAppealContactLen characters: no control characters, invisible characters or stacked combining marks.
+// Empty clears it. It is stored and shown as text, so no markup is stripped.
+func NormalizeAppealContact(v string) (string, error) {
+	if len(v) > MaxAppealContactLen*4 {
+		return "", fmt.Errorf("%s must be at most %d characters", AppealContactKey, MaxAppealContactLen)
+	}
+	contact := auth.CollapseSpaces(v)
+	if err := auth.ValidateVisibleText(contact); err != nil {
+		return "", fmt.Errorf("%s %w", AppealContactKey, err)
+	}
+	if utf8.RuneCountInString(contact) > MaxAppealContactLen {
+		return "", fmt.Errorf("%s must be at most %d characters", AppealContactKey, MaxAppealContactLen)
+	}
+	return contact, nil
+}
+
 // NormalizeVoiceQuality lower-cases and trims a voice quality preset and requires one the voice code accepts.
 func NormalizeVoiceQuality(v string) (string, error) {
 	q := strings.ToLower(strings.TrimSpace(v))
@@ -77,6 +102,8 @@ func normalizeValueSetting(key, value string) (normalized string, ok bool, err e
 		normalized, err = NormalizeServerName(value)
 	case "motd":
 		normalized, err = NormalizeMotd(value)
+	case AppealContactKey:
+		normalized, err = NormalizeAppealContact(value)
 	case "voice_quality":
 		normalized, err = NormalizeVoiceQuality(value)
 	case "max_upload_bytes":

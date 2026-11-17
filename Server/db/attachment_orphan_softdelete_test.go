@@ -16,6 +16,7 @@ import (
 // disk). This test pins that the orphan sweep must reclaim attachments whose
 // owning message has been soft-deleted.
 func TestDeleteOrphanedAttachments_ReclaimsAttachmentOfSoftDeletedMessage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 
@@ -57,6 +58,7 @@ func TestDeleteOrphanedAttachments_ReclaimsAttachmentOfSoftDeletedMessage(t *tes
 // old uploaded_at is. Without this, a predicate that over-widens (e.g.
 // dropping the deleted check entirely) would start eating live attachments.
 func TestDeleteOrphanedAttachments_DoesNotReclaimAttachmentOfLiveMessage(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 
@@ -86,6 +88,7 @@ func TestDeleteOrphanedAttachments_DoesNotReclaimAttachmentOfLiveMessage(t *test
 // Each half of the sweep reads its own cutoff: a staged upload and a deleted
 // message's file of the same age go on different schedules.
 func TestDeleteOrphanedAttachmentsBefore_EachHalfHasItsOwnCutoff(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "two-cutoffs")

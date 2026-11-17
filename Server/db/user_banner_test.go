@@ -24,6 +24,7 @@ func setBanner(t *testing.T, f groupRowFixture, user int64, id *string, color *s
 }
 
 func TestOrphanSweep_KeepsLiveBanner(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "banner-old", f.alice)
@@ -47,6 +48,7 @@ func TestOrphanSweep_KeepsLiveBanner(t *testing.T) {
 }
 
 func TestDiscardUnlinked_KeepsLiveBanner(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "banner-live", f.alice)
@@ -63,6 +65,7 @@ func TestDiscardUnlinked_KeepsLiveBanner(t *testing.T) {
 }
 
 func TestLinkAttachments_RefusesLiveBanner(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "banner-live", f.alice)
@@ -79,6 +82,7 @@ func TestLinkAttachments_RefusesLiveBanner(t *testing.T) {
 }
 
 func TestIsBannerFile_OnlyWhileNamed(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "b1", f.alice)
@@ -105,6 +109,7 @@ func TestIsBannerFile_OnlyWhileNamed(t *testing.T) {
 // Both banner columns are in the migration-069 trigger, so the cached roster
 // refreshes when either changes, and not when a write changes nothing.
 func TestMemberGeneration_MovesOnBannerWrite(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "b1", f.alice)
@@ -135,6 +140,7 @@ func TestMemberGeneration_MovesOnBannerWrite(t *testing.T) {
 }
 
 func TestListMembers_CarriesBannerOnlyWhenSet(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "b1", f.alice)
@@ -160,6 +166,7 @@ func TestListMembers_CarriesBannerOnlyWhenSet(t *testing.T) {
 // is some user's avatar" must also name banner_id, so a future site cannot
 // forget banners the way a new avatar-aware query once could forget dm_icon.
 func TestFileLiveness_EverySiteNamesBanner(t *testing.T) {
+	t.Parallel()
 	liveness := regexp.MustCompile(`u\.avatar\s*=\s*'/api/v1/files/'`)
 	var sites, missing []string
 	check := func(path string, statements []string) {

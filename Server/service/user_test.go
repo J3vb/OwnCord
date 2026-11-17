@@ -39,6 +39,7 @@ func (f *pwStore) LogAudit(_ context.Context, _ int64, action, _ string, _ int64
 // error (the old password is dead; a "failed" report walks the user into the
 // confirm lockout), and the audit row must still be written.
 func TestChangePassword_RevokeFailureIsPartialSuccess(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 7, Username: "pat", PasswordHash: "oldhash"})
 	fs := &pwStore{DB: database, failRevokes: 99}
@@ -60,6 +61,7 @@ func TestChangePassword_RevokeFailureIsPartialSuccess(t *testing.T) {
 // TestChangePassword_RetryRecoversRevocation: a single transient revocation
 // failure is absorbed by the bounded compensating retry.
 func TestChangePassword_RetryRecoversRevocation(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 7, Username: "pat", PasswordHash: "oldhash"})
 	fs := &pwStore{DB: database, failRevokes: 1}
@@ -92,6 +94,7 @@ func (f *tokenFailStore) RevokeUserAPITokens(_ context.Context, _ int64) (int64,
 // A committed password with a failed token revoke is the same partial
 // success as a failed session revoke: no error, the password stays changed.
 func TestChangePassword_TokenRevokeFailureIsPartialSuccess(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 7, Username: "pat", PasswordHash: "oldhash"})
 	fs := &tokenFailStore{DB: database}
@@ -111,6 +114,7 @@ func TestChangePassword_TokenRevokeFailureIsPartialSuccess(t *testing.T) {
 }
 
 func TestChangePassword_TokensUntouchedUnlessAsked(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 7, Username: "pat", PasswordHash: "oldhash"})
 	fs := &tokenFailStore{DB: database}

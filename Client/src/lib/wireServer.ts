@@ -122,6 +122,12 @@ export interface ReadyPayload {
      */
     readonly polls?: boolean;
     /**
+     * The server builds link previews: `link_previews` on history messages and
+     * `message_link_previews` frames. False or absent means the client fetches
+     * previews itself.
+     */
+    readonly link_previews?: boolean;
+    /**
      * The server has custom stickers: `sticker_id` on `chat_send`,
      * `sticker` on `chat_message`, `sticker_update` and `/api/v1/stickers`.
      * Absent means an older server: no sticker button.
@@ -188,6 +194,11 @@ export interface ReadyPayload {
      * Absent means an older server: nothing is sent, no song shown.
      */
     readonly listening_activity?: boolean;
+    /**
+     * The server answers `GET /channels/{id}/media` and `/media/months`.
+     * Absent means an older server: no media gallery.
+     */
+    readonly channel_media?: boolean;
   };
   /**
    * The songs connected members are listening to, sorted by user id.
@@ -225,6 +236,12 @@ export interface ReadyPayload {
    * caller's own entry for anyone else. Absent from older servers.
    */
   readonly member_timeouts?: readonly MemberTimeoutEntry[];
+  /**
+   * The server's clock (Unix ms) when it built this ready. The client stamps
+   * `client_message_id` from it, so a device clock that runs fast or slow
+   * does not lock it out of sending. Absent from older servers.
+   */
+  readonly server_time_ms?: number;
 }
 
 /** One active timeout: who, and until when (RFC 3339). Never the reason or actor. */
@@ -321,6 +338,8 @@ export type {
   PollInfo,
   PollView,
   PollUpdatePayload,
+  LinkPreviewCard,
+  MessageLinkPreviewsPayload,
   PollCreateOkPayload,
   PollVoteOkPayload,
   PollEndOkPayload,

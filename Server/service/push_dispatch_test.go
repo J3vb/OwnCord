@@ -24,13 +24,14 @@ import (
 // ─── tests ──────────────────────────────────────────────────────────────────
 
 // TestPushDispatch_OffByDefaultSendsNothing proves the compiled-default
-// state (both push.enabled and push.dispatch_enabled false) at the point
+// state (push.enabled false) at the point
 // that matters: MessageService never calls a PushNotifier it was never
 // given. Storage, the dispatcher and a real subscriber all exist and work
 // (proved by the other tests below) — only the composition root's
 // SetPushNotifier call is what dispatch is gated on, and it is never made
 // here.
 func TestPushDispatch_OffByDefaultSendsNothing(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/a")
@@ -61,6 +62,7 @@ func TestPushDispatch_OffByDefaultSendsNothing(t *testing.T) {
 // {"t":"activity"} — HP-5 scorecard Question 6, decision 2 — for both a
 // guild-channel push and a DM push.
 func TestPushDispatch_PayloadIsGenericAlways(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	sub := f.subscribe(t, 2, "https://push.example.net/generic")
@@ -87,6 +89,7 @@ func TestPushDispatch_PayloadIsGenericAlways(t *testing.T) {
 // between the event and the dispatch gets nothing — even a generic ping
 // would be a timing oracle for a channel they can no longer read.
 func TestPushDispatch_SkipsAuthorOnlineAndUnauthorized(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 	for _, uid := range []int64{1, 2, 3} {
@@ -119,6 +122,7 @@ func TestPushDispatch_SkipsAuthorOnlineAndUnauthorized(t *testing.T) {
 // channel gets no push for a subscriber with no acknowledgement row — the
 // same CanReadContent verdict every content read path reaches for them.
 func TestPushDispatch_LabelledChannelSendsNothingUnacknowledged(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedLabelledChannel(t)
 	seedUserRole(t, f.database, 1, 4)
@@ -141,6 +145,7 @@ func TestPushDispatch_LabelledChannelSendsNothingUnacknowledged(t *testing.T) {
 // permissions.CanReadContent (eligibleFor), the same predicate every content
 // read path resolves, not a re-implementation of the rule.
 func TestPushDispatch_LabelledChannelPushesOnlyToAcknowledgedRecipient(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedLabelledChannel(t)
 	seedUserRole(t, f.database, 1, 4)
@@ -169,6 +174,7 @@ func TestPushDispatch_LabelledChannelPushesOnlyToAcknowledgedRecipient(t *testin
 // it this push would now be excluded by trustsAuthor instead, which is a
 // different property, covered by the Untrusted/Trusted tests below.
 func TestPushDispatch_DMOnlyParticipants(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 20, Type: "dm"})
 	seedUserRole(t, f.database, 1, 4)
@@ -200,6 +206,7 @@ func TestPushDispatch_DMOnlyParticipants(t *testing.T) {
 // accepts (TrustSender source "accepted", exactly what
 // MessageRequestService.Accept writes), the next message pushes normally.
 func TestPushDispatch_DMUntrustedRecipientExcluded_ThenPushesAfterAccept(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedDirectMessage(t)
 	f.subscribe(t, 2, "https://push.example.net/untrusted-then-trusted")
@@ -228,6 +235,7 @@ func TestPushDispatch_DMUntrustedRecipientExcluded_ThenPushesAfterAccept(t *test
 // signal: a 404 or 410 deletes the subscription row and counts it pruned,
 // never failed.
 func TestPushDispatch_410PrunesTheRow(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/gone")
@@ -252,6 +260,7 @@ func TestPushDispatch_410PrunesTheRow(t *testing.T) {
 // subscription row survives (a 5xx names a transient problem, not a dead
 // endpoint).
 func TestPushDispatch_RetryBudgetThenDrop(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/flaky")
@@ -275,6 +284,7 @@ func TestPushDispatch_RetryBudgetThenDrop(t *testing.T) {
 // channel coalescer: a second Notify for the same user and channel within
 // the window sends nothing more, even though the user is (still) eligible.
 func TestPushDispatch_CoalescesPerUserPerChannel(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/coalesce")
@@ -301,6 +311,7 @@ func TestPushDispatch_CoalescesPerUserPerChannel(t *testing.T) {
 // receive nothing even though it is well inside what would have been that
 // bogus reservation.
 func TestPushDispatch_CoalesceOnlyReservedAfterEligibility(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/was-online")
@@ -338,6 +349,7 @@ func TestPushDispatch_CoalesceOnlyReservedAfterEligibility(t *testing.T) {
 // subscriptions still wait for a first attempt. This is checked on the
 // actual global call order, not on timing, so it cannot be flaky.
 func TestPushDispatch_RetriesRunAfterEveryFirstAttempt(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 	seedUserRole(t, f.database, 1, 4)
@@ -402,6 +414,7 @@ func TestPushDispatch_RetriesRunAfterEveryFirstAttempt(t *testing.T) {
 // set of URLs dispatch ever calls Fetch with is exactly the set of stored
 // push_subscriptions.endpoint values, for every subscriber pushed to.
 func TestPushDispatch_EndpointsAreOnlyStoredOnes(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	seedUserRole(t, f.database, 3, 4)
@@ -437,6 +450,7 @@ func TestPushDispatch_EndpointsAreOnlyStoredOnes(t *testing.T) {
 // endpoint may be perfectly fine and just resolving to a poisoned or
 // misconfigured answer right now).
 func TestPushDispatch_HostileEndpointResolvingPrivateIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.hostile.example/x")
@@ -476,6 +490,7 @@ func TestPushDispatch_HostileEndpointResolvingPrivateIsRefused(t *testing.T) {
 // removed"), the Dial spy above DOES see a dial -- proving that spy is
 // actually load-bearing and not a vacuous assertion.
 func TestPushDispatch_ClassificationRemovedWouldDial(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.hostile.example/x")
@@ -511,6 +526,7 @@ func TestPushDispatch_ClassificationRemovedWouldDial(t *testing.T) {
 // twice more (delivering the same push up to three times) and counted
 // failed; it must now be exactly one request and one dispatched.
 func TestPushDispatch_Empty201IsSuccessNotRetry(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 
@@ -557,6 +573,7 @@ func TestPushDispatch_Empty201IsSuccessNotRetry(t *testing.T) {
 // the stored set — every push goes straight to the subscriber's own
 // endpoint, never to an OwnCord-operated host in between.
 func TestAbsenceContract_NoPushRelay(t *testing.T) {
+	t.Parallel()
 	relayPattern := regexp.MustCompile(`(?i)relay`)
 	pushType := reflect.TypeFor[config.PushConfig]()
 	for field := range pushType.Fields() {
@@ -591,6 +608,7 @@ func TestAbsenceContract_NoPushRelay(t *testing.T) {
 // network-level error (not a status code) is treated the same as a 5xx:
 // retried, then counted failed once the budget runs out.
 func TestPushDispatch_SendOneWrapsAFetchError(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/network-error")
@@ -635,6 +653,7 @@ func (listBlockersErrorStore) ListBlockersOf(context.Context, int64) ([]int64, e
 // TestPushDispatch_GroupDMExcluded is P2-3: a group DM has Type == "dm"
 // too, but only one-to-one DMs are in scope for push.
 func TestPushDispatch_GroupDMExcluded(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 20, Type: "dm"})
 	if _, err := f.database.ExecContext(context.Background(), `UPDATE channels SET is_group = 1 WHERE id = ?`, int64(20)); err != nil {
@@ -659,6 +678,7 @@ func TestPushDispatch_GroupDMExcluded(t *testing.T) {
 // treated as "assume it's a group" -- no push, same as P2-4's block-lookup
 // posture.
 func TestPushDispatch_GroupDMLookupFailureFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedDirectMessage(t)
 	f.subscribe(t, 2, "https://push.example.net/group-dm-lookup-fails")
@@ -676,6 +696,7 @@ func TestPushDispatch_GroupDMLookupFailureFailsClosed(t *testing.T) {
 // the author must never be pushed about the author's message, mirroring
 // applyMentionCounts' ListBlockersOf(authorID) exclusion for badges.
 func TestPushDispatch_BlockedByAuthorExcluded(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	seedBlock(t, f.database, 2, 1) // user 2 has blocked user 1 (the author)
@@ -693,6 +714,7 @@ func TestPushDispatch_BlockedByAuthorExcluded(t *testing.T) {
 // TestPushDispatch_BlockerLookupFailureFailsClosed: a ListBlockersOf failure
 // drops the whole round rather than risk pushing a blocker.
 func TestPushDispatch_BlockerLookupFailureFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/blocker-lookup-fails")
@@ -709,6 +731,7 @@ func TestPushDispatch_BlockerLookupFailureFailsClosed(t *testing.T) {
 // TestPushDispatch_CoalesceMapEvictsExpired is P2-5's expiry half: an
 // expired entry is swept on a later call.
 func TestPushDispatch_CoalesceMapEvictsExpired(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, newRecordingPushFetcher())
 
@@ -733,6 +756,7 @@ func TestPushDispatch_CoalesceMapEvictsExpired(t *testing.T) {
 // were actually up. Once an entry does expire, the freed slot admits a new
 // pair again.
 func TestPushDispatch_CoalesceMapAtCapacityRefusesNewPairsWithoutEvictingLiveOnes(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, newRecordingPushFetcher())
 
@@ -768,6 +792,7 @@ func TestPushDispatch_CoalesceMapAtCapacityRefusesNewPairsWithoutEvictingLiveOne
 // subscription must not stop the others sharing the dispatch from being
 // attempted promptly.
 func TestPushDispatch_ConcurrentSendsDoNotStarveOnAStall(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 	for _, uid := range []int64{1, 2, 3, 4} {
@@ -810,6 +835,7 @@ func TestPushDispatch_ConcurrentSendsDoNotStarveOnAStall(t *testing.T) {
 // TestPushDispatch_OffByDefaultSendsNothing, which already goes through the
 // same SendMessage path with no notifier installed.
 func TestPushDispatch_ThroughSendMessageHook(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/via-sendmessage")
@@ -858,6 +884,7 @@ func (deleteErrorStore) DeletePushSubscriptionByID(context.Context, int64) (bool
 // A mention that finds no subscription must not reserve the 60s window: the
 // user subscribes afterwards and the next mention must still be pushed.
 func TestNotify_NoSubscriptionDoesNotReserveCoalesceWindow(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 
@@ -875,6 +902,7 @@ func TestNotify_NoSubscriptionDoesNotReserveCoalesceWindow(t *testing.T) {
 
 // A failed subscription lookup sends nothing and so must not reserve the window.
 func TestNotify_FailedLookupDoesNotReserveWindow(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/after-error")
@@ -893,6 +921,7 @@ func TestNotify_FailedLookupDoesNotReserveWindow(t *testing.T) {
 
 // A delete that fails leaves the row in place, so it must not count as pruned.
 func TestPrune_DeleteFailureIsNotCounted(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	dispatcher := NewPushDispatcher(f.database, f.perms, f.push, nil, newRecordingPushFetcher())
 	dispatcher.st = deleteErrorStore{Store: dispatcher.st.(Store)}

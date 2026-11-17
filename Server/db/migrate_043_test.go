@@ -16,6 +16,7 @@ import (
 // audit rows an erasure unlinks rather than deletes, and the erasure_jobs
 // row it writes, are the traces that say so (Codex's fourth review of #1523).
 func TestMigration043_ClosesSetupOnEveryTraceOfAPriorLife(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	raw, err := fs.ReadFile(migrations.FS, "043_setup_completed.sql")
 	if err != nil {

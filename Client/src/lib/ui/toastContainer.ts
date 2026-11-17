@@ -24,11 +24,22 @@ export interface ToastAction {
   readonly run: () => void;
 }
 
+/** Optional parts of a richer toast. */
+export interface ToastExtras {
+  /** A second, quieter line under the message. */
+  readonly detail?: string;
+  /** A decorative leading icon. */
+  readonly icon?: SVGElement;
+  /** A dismiss button even on a toast that clears itself. */
+  readonly closable?: boolean;
+}
+
 const MAX_TOASTS = 5;
 const DEFAULT_DURATION_MS = 5000;
 
 interface ToastEntry {
   readonly el: HTMLDivElement;
+  /** The text an identical repeat matches: the message and any detail line. */
   readonly message: string;
   readonly type: ToastType;
   /** Stays until dismissed: an error, or a toast shown with an infinite duration. */
@@ -49,7 +60,13 @@ interface ToastEntry {
 
 export interface ToastContainer extends MountableComponent {
   /** Returns a function that removes the toast. */
-  show(message: string, type?: ToastType, durationMs?: number, action?: ToastAction): () => void;
+  show(
+    message: string,
+    type?: ToastType,
+    durationMs?: number,
+    action?: ToastAction,
+    extras?: ToastExtras,
+  ): () => void;
   clear(): void;
   /** Keep the stack just above `anchor` (the composer slot) and centred on
    *  it. While the anchor has no box, the CSS fallback places the stack. */
@@ -63,6 +80,31 @@ function pauseEntry(entry: ToastEntry): void {
   clearTimeout(entry.timer);
   entry.timer = null;
   entry.remainingMs -= Date.now() - entry.startedAt;
+}
+
+/** What an identical repeat must match: the message and any detail line. */
+function toastKey(message: string, extras: ToastExtras): string {
+  return extras.detail === undefined ? message : `${message}\n${extras.detail}`;
+}
+
+/** The optional icon, then the message and any detail line under it. */
+function appendToastBody(el: HTMLElement, message: string, extras: ToastExtras): void {
+  const { detail, icon } = extras;
+  if (icon !== undefined) {
+    icon.classList.add("toast-icon");
+    icon.setAttribute("aria-hidden", "true");
+    el.appendChild(icon);
+  }
+  const text = createElement("span", { class: "toast-text" });
+  if (detail === undefined) setText(text, message);
+  else {
+    el.classList.add("toast--detailed");
+    text.append(
+      createElement("span", { class: "toast-title" }, message),
+      createElement("span", { class: "toast-detail" }, detail),
+    );
+  }
+  el.appendChild(text);
 }
 
 export function createToastContainer(): ToastContainer {
@@ -161,14 +203,16 @@ export function createToastContainer(): ToastContainer {
     type: ToastType = "info",
     durationMs: number = DEFAULT_DURATION_MS,
     action?: ToastAction,
+    extras: ToastExtras = {},
   ): () => void {
     if (root === null) return () => {};
     const sticky = type === "error" || durationMs === Infinity;
+    const key = toastKey(message, extras);
 
     // Coalesce an identical repeat (same type and text) into the toast
     // already on screen instead of stacking a duplicate — five copies of the
     // same error show as one with a count.
-    const existing = toasts.find((t) => t.type === type && t.message === message);
+    const existing = toasts.find((t) => t.type === type && t.message === key);
     if (existing !== undefined) {
       setText(existing.countEl, String(++existing.count));
       // Restart the window so the repeat gets its full read time; a toast
@@ -197,7 +241,7 @@ export function createToastContainer(): ToastContainer {
       ...(sticky ? {} : { tabindex: "0" }),
     });
 
-    el.appendChild(createElement("span", { class: "toast-text" }, message));
+    appendToastBody(el, message, extras);
 
     // A coalesced duplicate fills this in; CSS hides it while empty.
     const countEl = createElement("span", { class: "toast-count" });
@@ -213,8 +257,9 @@ export function createToastContainer(): ToastContainer {
     }
 
     // Sticky toasts get a close button so they can be dismissed by hand.
-    // Others clear themselves, so a button there would only add noise.
-    if (sticky) {
+    // Others clear themselves, so a button there would only add noise,
+    // unless the caller asks for one.
+    if (sticky || extras.closable === true) {
       // The aria-label names the button, so the glyph is never announced.
       const close = createElement(
         "button",
@@ -227,7 +272,7 @@ export function createToastContainer(): ToastContainer {
 
     const entry: ToastEntry = {
       el,
-      message,
+      message: key,
       type,
       sticky,
       timer: null,

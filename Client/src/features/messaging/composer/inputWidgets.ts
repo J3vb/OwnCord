@@ -215,25 +215,58 @@ export function registerControls(st: InputState, api: InputApi, buttons: Compose
   );
 }
 
+/** On a phone, Emoji and GIF give way while the box holds text, so short
+ *  text does not wrap; they return once it is empty. Shortcuts still work. */
+function typingOnPhone(st: InputState, phone: boolean): boolean {
+  return phone && st.textarea !== null && st.textarea.value !== "";
+}
+
+/** A text-change hook that re-applies the button prefs only when the
+ *  typing state differs from the one applyButtonPrefs last applied, whatever
+ *  ran it (a pref change, a layout change or this hook). */
+export function trackTypingButtons(st: InputState, refresh: () => void): () => void {
+  return () => {
+    if (typingOnPhone(st, isPhoneLayout()) !== st.typingButtonsHidden) refresh();
+  };
+}
+
+/** Which of the row's optional buttons are hidden, as one comparable value. */
+function rowShape(buttons: ComposerButtons): string {
+  const { emojiBtn, gifBtn, stickerBtn, pollBtn, micBtn } = buttons;
+  return [emojiBtn, gifBtn, stickerBtn, pollBtn, micBtn].map((b) => b?.hidden === true).join();
+}
+
 /** Settings → Text & Images can hide each button; Sticker and Poll live in
- *  the "+" menu. On a phone the smiley also holds the sticker tab. */
+ *  the "+" menu. On a phone the smiley also holds the sticker tab. A row that
+ *  gains or loses a button changes the textarea's width, so text already in
+ *  it is measured again once the buttons are settled. */
 export function applyButtonPrefs(st: InputState, api: InputApi, buttons: ComposerButtons): void {
+  const before = rowShape(buttons);
+  applyButtonVisibility(st, buttons);
+  api.applyDisabledState();
+  if (rowShape(buttons) !== before && st.textarea !== null && st.textarea.value !== "") {
+    api.measureTextarea();
+  }
+}
+
+function applyButtonVisibility(st: InputState, buttons: ComposerButtons): void {
   const { emojiBtn, gifBtn, stickerBtn, pollBtn, hasPlusMenu } = buttons;
   const phone = isPhoneLayout();
+  const typing = typingOnPhone(st, phone);
+  st.typingButtonsHidden = typing;
   // GIF has its own button; on a phone the smiley also stands for stickers.
   const anyExpression =
     composerButtonShown("emoji") || (stickerBtn !== null && composerButtonShown("sticker"));
-  emojiBtn.hidden = phone ? !anyExpression : !composerButtonShown("emoji");
+  emojiBtn.hidden = typing || (phone ? !anyExpression : !composerButtonShown("emoji"));
   const emojiLabel = messagingText(phone ? "expression.label" : "emoji.label");
   emojiBtn.setAttribute("aria-label", emojiLabel);
   emojiBtn.title = phone ? emojiLabel : "";
-  gifBtn.hidden = !composerButtonShown("gif");
+  gifBtn.hidden = typing || !composerButtonShown("gif");
   // A composer without "+" (a thread's) keeps Sticker in its bar.
   if (stickerBtn !== null) {
     stickerBtn.hidden = hasPlusMenu || phone || !composerButtonShown("sticker");
   }
   if (pollBtn !== null) pollBtn.hidden = hasPlusMenu || phone || !composerButtonShown("poll");
-  api.applyDisabledState();
 }
 
 /** The recorder and its bar load on the first mic click, so they stay out of the app chunk. */

@@ -127,7 +127,7 @@ test.describe("Register Flow — Mode Toggle", () => {
     const toggleLink = page.locator(".form-switch button");
     await toggleLink.click();
 
-    await expect(page.locator(".btn-text")).toHaveText("Login");
+    await expect(page.locator(".btn-text")).toHaveText("Sign in");
 
     // Invite field parent should be hidden
     const inviteGroup = page.locator("#invite").locator("..");

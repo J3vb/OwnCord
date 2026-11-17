@@ -16,10 +16,12 @@ import {
   startRingChime,
   startRingback,
   stopRingback,
+  playCallEnded,
 } from "../../../src/lib/media/notificationSound";
 import {
   alertIncomingCall,
   alertMissedCall,
+  alertRedial,
 } from "../../../src/features/direct-messages/callAlerts";
 import {
   FakeWsClient,
@@ -39,6 +41,10 @@ import {
   incomingBannerEl,
 } from "../../helpers/mainPageHarness";
 import { withFakeTimers } from "../../helpers/withFakeTimers";
+import {
+  markRequestPending,
+  resetPendingRequests,
+} from "../../../src/features/direct-messages/pendingRequests";
 
 vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
@@ -416,11 +422,38 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(stopRingback).not.toHaveBeenCalled();
     expect(panel.dataset.state).toBe("outgoing");
 
+    vi.mocked(playCallEnded).mockClear();
     ws.emit("error", refusal, "ring-id");
 
     expect(stopRingback).toHaveBeenCalledTimes(1);
+    expect(playCallEnded).not.toHaveBeenCalled();
     expect(panel.dataset.state).not.toBe("outgoing");
     expect(panel.dataset.state).not.toBe("unanswered");
+    m.page.destroy?.();
+  });
+
+  it("accepted with no message: a click in a DM marked as waiting still places the call", async () => {
+    const ws = fakeWs();
+    connectedDm(50);
+    m.page = await mountSettled(m.container, ws);
+    // An earlier refusal marked the DM; the other person has since accepted
+    // without writing, which reaches this client as no frame at all.
+    markRequestPending(50);
+
+    startCall();
+    finishCallJoin();
+
+    expect(ws.send).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "voice_join",
+        payload: expect.objectContaining({ channel_id: 50 }),
+      }),
+    );
+    expect(ws.send).toHaveBeenCalledWith({ type: "call_ring", payload: { channel_id: 50 } });
+    expect(voiceStore.getState().currentChannelId).toBe(50);
+    expect(callPanelEl().dataset.state).toBe("outgoing");
+    expect(document.body.textContent).not.toContain("accepts your message request");
+    resetPendingRequests();
     m.page.destroy?.();
   });
 
@@ -464,9 +497,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 7 }));
     channelsStore.flush();
 
+    vi.mocked(playCallEnded).mockClear();
     callDeclined(ws);
 
     expect(stopRingback).toHaveBeenCalledTimes(1);
+    expect(playCallEnded).toHaveBeenCalledTimes(1);
     const toasts = m.container.querySelectorAll('[data-testid="toast"]');
     expect(toasts).toHaveLength(1);
     expect(toasts[0]!.textContent).toContain("bob declined");
@@ -735,19 +770,20 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     expect(ws.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: "call_decline" }));
   });
 
-  it("a ring raises one call alert, and a redial of the same ring none", async () => {
+  it("a ring raises one call alert, and a redial of the same ring only says it rang again", async () => {
     const ws = fakeWs();
     m.page = mountPage(m.container, ws);
     vi.mocked(alertIncomingCall).mockClear();
+    vi.mocked(alertRedial).mockClear();
 
     incomingCall(ws);
     incomingCall(ws);
 
-    await vi.waitFor(() => expect(alertIncomingCall).toHaveBeenCalledTimes(1));
-    expect(vi.mocked(alertIncomingCall).mock.calls[0]![0]).toMatchObject({
-      channelId: 50,
-      fromUserId: 10,
-    });
+    const ring = { channelId: 50, fromUserId: 10 };
+    await vi.waitFor(() => expect(alertRedial).toHaveBeenCalledTimes(1));
+    expect(vi.mocked(alertRedial).mock.calls[0]![0]).toMatchObject(ring);
+    expect(alertIncomingCall).toHaveBeenCalledTimes(1);
+    expect(vi.mocked(alertIncomingCall).mock.calls[0]![0]).toMatchObject(ring);
   });
 
   it("a ring that times out reports one missed call; one the ringer cancelled reports none", async () => {

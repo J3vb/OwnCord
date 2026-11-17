@@ -200,7 +200,7 @@ describe("channel menu as a bottom sheet on a phone", () => {
       const radios = [...sheet()!.querySelectorAll<HTMLElement>('[role="radio"]')];
       expect(radios.map((r) => r.querySelector(".menu-sheet-label")?.textContent)).toEqual([
         "Use Server Default (Only @mentions)",
-        "All Messages",
+        "All messages",
         "Only @mentions",
         "Nothing",
       ]);

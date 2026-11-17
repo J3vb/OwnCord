@@ -213,9 +213,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     byPlaceholder("New password").value = "new-password-1";
     byPlaceholder("Confirm new password").value = "new-password-1";
     const changeBtn = [...m.container.querySelectorAll<HTMLButtonElement>("button")].find(
-      (b) => b.textContent === "Change Password",
+      (b) => b.textContent === "Change password",
     );
-    if (changeBtn === undefined) throw new Error("no Change Password button");
+    if (changeBtn === undefined) throw new Error("no Change password button");
     changeBtn.click();
 
     await vi.waitFor(() => {
@@ -462,7 +462,11 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     await vi.waitFor(() => {
       const toast = m.container.querySelector('[data-testid="toast"]');
-      expect(toast?.textContent).toContain("OwnCord desktop from 198.51.100.2");
+      expect(toast?.querySelector(".toast-title")?.textContent).toBe(
+        "Unreviewed sign-in to your account",
+      );
+      expect(toast?.querySelector(".toast-detail")?.textContent).toMatch(/^OwnCord\sdesktop · /);
+      expect(toast?.querySelector(".toast-action")?.textContent).toBe("Review devices");
     });
   });
 });

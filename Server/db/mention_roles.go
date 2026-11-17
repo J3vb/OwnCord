@@ -56,7 +56,7 @@ func (d *DB) GetRoleMentionsByMessageIDs(ctx context.Context, msgIDs []int64) (m
 	if err != nil {
 		return nil, fmt.Errorf("GetRoleMentionsByMessageIDs: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	for rows.Next() {
 		var msgID, roleID int64
 		if scanErr := rows.Scan(&msgID, &roleID); scanErr != nil {
@@ -95,7 +95,7 @@ func (d *DB) GetReachableUserIDs(ctx context.Context, ids []int64) ([]int64, err
 	if err != nil {
 		return nil, fmt.Errorf("GetReachableUserIDs: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	out := make([]int64, 0, len(ids))
 	for rows.Next() {
 		var id int64
@@ -124,7 +124,7 @@ func (d *DB) ListUserIDsByRoles(ctx context.Context, roleIDs []int64) ([]int64, 
 	if err != nil {
 		return nil, fmt.Errorf("ListUserIDsByRoles: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	out := make([]int64, 0)
 	for rows.Next() {
 		var id int64

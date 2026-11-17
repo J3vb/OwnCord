@@ -18,6 +18,7 @@
 // enforce it).
 import type {
   AppAudio,
+  MusicAudio,
   AppMetadata,
   AppProcess,
   AppUpdater,
@@ -29,6 +30,8 @@ import type {
   ExternalContentBroker,
   GameDetector,
   MediaDetector,
+  MobileAudio,
+  PushRegistration,
   NativeFiles,
   GlobalShortcuts,
   HttpClient,
@@ -65,15 +68,42 @@ import { socket as browserSocket } from "./socket";
 import { inertUnsubscribe, refuse, UnsupportedKeysError } from "./unavailable";
 import { urlOpener } from "./urlOpener";
 
+const musicAudio: MusicAudio = {
+  support: async () => ({ ok: false, reason: "browser" }),
+  listApps: async () => ({ ok: false, code: "unavailable" }),
+  start: async () => ({ ok: false, code: "unavailable" }),
+  stop: async () => undefined,
+};
+
 const appAudio: AppAudio = {
   available: async () => false,
   start: async () => ({ ok: false, code: "unavailable" }),
   stop: async () => undefined,
 };
 
-// A browser tab has no service to keep a call alive in the background.
+// A browser tab has no service to keep a call alive in the background, and
+// no call notification with buttons.
 const callService: CallService = {
   update: () => undefined,
+  onAction: () => undefined,
+};
+
+// A tab plays a call wherever the browser does, and hears of no phone call.
+const mobileAudio: MobileAudio = {
+  watch: () => undefined,
+  setSession: () => undefined,
+  setRoute: () => undefined,
+  refresh: () => undefined,
+};
+
+// A tab gets no push to wake it: the server does not push to the web client.
+const pushRegistration: PushRegistration = {
+  supported: false,
+  status: async () => null,
+  choose: async () => false,
+  register: async () => ({ ok: false, reason: "failed" }),
+  unregister: async () => undefined,
+  follow: () => undefined,
 };
 
 // No share sheet in a tab: callers offer no Share.
@@ -282,6 +312,7 @@ const nativeFiles: NativeFiles = {
 
 const systemIdle: SystemIdle = {
   idleMs: async () => null,
+  follow: () => {},
 };
 
 // navigator.language is all a page can know.
@@ -338,6 +369,9 @@ export const browser: Platform = {
     isMetered: () => false,
     start: async () => undefined,
   },
+  mobileAudio,
+  musicAudio,
+  pushRegistration,
   deepLinks,
   devTools,
   fileSaver,

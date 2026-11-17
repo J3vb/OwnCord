@@ -75,6 +75,7 @@ func externalStub(t *testing.T) *httptest.Server {
 }
 
 func TestExternalContent_RequiresASession(t *testing.T) {
+	t.Parallel()
 	srv := externalStub(t)
 	router := externalRouter(t, newAuthTestDB(t), srv)
 	for _, p := range []string{"/api/v1/external/preview?url=x", "/api/v1/external/image?url=x"} {
@@ -85,6 +86,7 @@ func TestExternalContent_RequiresASession(t *testing.T) {
 }
 
 func TestExternalContent_PreviewThenImageByHandle(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	token := profileCreateToken(t, database, "viewer", 4)
 	srv := externalStub(t)
@@ -122,6 +124,7 @@ func TestExternalContent_PreviewThenImageByHandle(t *testing.T) {
 }
 
 func TestExternalContent_RefusalsAreTypedAnswers(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	token := profileCreateToken(t, database, "viewer", 4)
 	srv := externalStub(t)
@@ -152,6 +155,7 @@ func TestExternalContent_RefusalsAreTypedAnswers(t *testing.T) {
 // With the shipped configuration the broker is not mounted at all; it comes
 // with the browser client.
 func TestExternalContent_MountedOnlyWithTheBrowserClient(t *testing.T) {
+	t.Parallel()
 	has := func(h http.Handler) bool {
 		found := false
 		routes, _ := h.(chi.Routes)

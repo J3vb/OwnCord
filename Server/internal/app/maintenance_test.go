@@ -153,6 +153,7 @@ func TestMaintenance_StepOrderIsPinned(t *testing.T) {
 		"Push subscriptions: push subscription sweep failed",
 		"Backups: backup maintenance failed",
 		"Orphaned attachments: failed to delete orphaned attachments",
+		"Link preview thumbnails: link preview thumbnail sweep failed",
 		"Message retention: retention sweep failed",
 		"Report content retention: report content retention failed",
 		"Voice mute reconciliation: orphaned voice mute reconciliation failed",

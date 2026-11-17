@@ -630,10 +630,10 @@ describe("ptt release delay", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Tests: Input Mode (WP 1D-2) — a key bound in Voice Activity mode never gates
+// Tests: Input mode (WP 1D-2) — a key bound in Voice activity mode never gates
 // ---------------------------------------------------------------------------
 
-describe("Input Mode: Voice Activity keeps a bound key idle", () => {
+describe("Input mode: Voice activity keeps a bound key idle", () => {
   beforeEach(async () => {
     resetAll();
     await stopPtt();
@@ -642,7 +642,7 @@ describe("Input Mode: Voice Activity keeps a bound key idle", () => {
 
   const commands = (): unknown[] => mockInvoke.mock.calls.map((c) => c[0]);
 
-  it("init does not start polling for a key bound in Voice Activity mode", async () => {
+  it("init does not start polling for a key bound in Voice activity mode", async () => {
     testPrefs.set("pttVk", 0x41);
     testPrefs.set("inputMode", "vad");
 
@@ -653,7 +653,7 @@ describe("Input Mode: Voice Activity keeps a bound key idle", () => {
     expect(pttState.pollingLive).toBe(false);
   });
 
-  it("binding a key mid-call in Voice Activity mode saves it but does not gate the mic", async () => {
+  it("binding a key mid-call in Voice activity mode saves it but does not gate the mic", async () => {
     testPrefs.set("inputMode", "vad");
     pttState.currentChannelId = 7;
 
@@ -664,7 +664,7 @@ describe("Input Mode: Voice Activity keeps a bound key idle", () => {
     expect(mockSetPttGated).not.toHaveBeenCalledWith(true);
   });
 
-  it("binding a key in Voice Activity mode stops a poller left running", async () => {
+  it("binding a key in Voice activity mode stops a poller left running", async () => {
     testPrefs.set("pttVk", 0x41);
     testPrefs.set("inputMode", "ptt");
     await initPtt();
@@ -678,7 +678,7 @@ describe("Input Mode: Voice Activity keeps a bound key idle", () => {
     expect(pttState.pollingLive).toBe(false);
   });
 
-  it("re-arming the saved key after switching to Push to Talk gates the mic mid-call", async () => {
+  it("re-arming the saved key after switching to Push to talk gates the mic mid-call", async () => {
     testPrefs.set("pttVk", 0x41);
     testPrefs.set("inputMode", "vad");
     pttState.currentChannelId = 7;
@@ -692,7 +692,7 @@ describe("Input Mode: Voice Activity keeps a bound key idle", () => {
     expect(mockSetPttGated).toHaveBeenCalledWith(true);
   });
 
-  it("a profile from before Input Mode with a bound key still arms (no saved mode)", async () => {
+  it("a profile from before Input mode with a bound key still arms (no saved mode)", async () => {
     testPrefs.set("pttVk", 0x41);
 
     await initPtt();

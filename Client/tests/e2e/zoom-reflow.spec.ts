@@ -336,7 +336,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       ]);
       await openDrawer(page);
       await openSettings(page);
-      await openSettingsTab(page, "Privacy & Safety");
+      await openSettingsTab(page, "Privacy & safety");
       const section = page.getByRole("region", { name: "My reports" });
       await section.locator(".my-reports-item").first().waitFor();
       const screen: ZoomScreen = {
@@ -492,7 +492,7 @@ test.describe("B9 OS 200 % zoom reflow", () => {
       await expectScreenReflows(page, screen, testInfo);
     });
 
-    /** Open Settings from the connect page gear, a zoomed user's own entry point. */
+    /** Open settings from the connect page gear, a zoomed user's own entry point. */
     async function openConnectSettings(page: Page): Promise<Locator> {
       await page.addInitScript(
         buildTauriMockScript({ httpRoutes: [HEALTH], simulateWsFlow: false }),

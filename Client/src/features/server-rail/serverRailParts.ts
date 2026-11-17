@@ -1,8 +1,10 @@
 // Pieces of the server rail that need no per-rail state: its icons, drop zone
-// maths, round action buttons and the DM icons under Home.
-import { appendChildren, createElement } from "@lib/dom";
-import { type ItemRef } from "@lib/prefs/serverRailLayout";
+// maths, server names, round action buttons and the DM icons under Home.
+import { appendChildren, createElement, setText } from "@lib/dom";
+import { isIpAddressName, serverInitials, type ItemRef } from "@lib/prefs/serverRailLayout";
+import type { ServerProfile } from "@lib/presence/profiles";
 import { uiStore } from "@stores/ui.store";
+import { authStore } from "@stores/auth.store";
 import { dmDisplayName, dmStore, type DmChannel } from "@stores/dm.store";
 import { dmUnreadCount } from "@lib/dmUnread";
 import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
@@ -23,6 +25,12 @@ const RAIL_ICON_PATHS = {
   ],
   folder: [
     "M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z",
+  ],
+  server: [
+    "M4 2h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z",
+    "M4 14h16a2 2 0 0 1 2 2v4a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2v-4a2 2 0 0 1 2-2z",
+    "M6 6h.01",
+    "M6 18h.01",
   ],
   phone: [
     "M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.5 19.5 0 0 1-6-6 19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7A2 2 0 0 1 22 16.92z",
@@ -54,7 +62,7 @@ export function railIcon(name: keyof typeof RAIL_ICON_PATHS): SVGSVGElement {
   return svg;
 }
 
-export const FALLBACK_COLOR = "var(--accent)";
+const FALLBACK_COLOR = "var(--accent)";
 export const COLOR_NAME_KEYS = [
   "color.blurple",
   "color.green",
@@ -63,6 +71,31 @@ export const COLOR_NAME_KEYS = [
   "color.pink",
   "color.grey",
 ] as const;
+
+export interface ServerLook {
+  readonly name: string;
+  readonly color: string;
+}
+
+function isAddressName(name: string, host: string): boolean {
+  return name === host || name === host.split(":")[0] || isIpAddressName(name);
+}
+
+// A saved profile keeps a name the user chose; one still named after its
+// address gives way to the connected server's own name.
+export function describeServer(
+  host: string,
+  profiles: readonly ServerProfile[],
+  currentHost: string,
+): ServerLook {
+  const profile = profiles.find((p) => p.host === host);
+  const color = profile?.color ?? FALLBACK_COLOR;
+  const saved = profile?.name ?? "";
+  if (saved !== "" && !isAddressName(saved, host)) return { name: saved, color };
+  const live = host === currentHost ? (authStore.getState().serverName ?? "") : "";
+  if (live !== "") return { name: live, color };
+  return { name: saved !== "" ? saved : host, color };
+}
 
 export function defaultFolderId(): string {
   return `f-${globalThis.crypto.randomUUID()}`;
@@ -162,4 +195,33 @@ export function dmItem(
   );
   appendChildren(wrapper, btn, badge);
   return wrapper;
+}
+
+/** Home's name: its unread DMs and waiting requests, each said apart. */
+export function homeLabel(unread: number, requests: number): string {
+  if (requests === 0) {
+    return unread === 0 ? serverRailText("home") : serverRailText("homeUnread", { count: unread });
+  }
+  return unread === 0
+    ? serverRailText("homeRequests", { count: requests })
+    : serverRailText("homeUnreadRequests", { count: requests, unread });
+}
+
+/** A server's rail avatar: its icon when one is cached, else its initials (or a server glyph for a bare IP). */
+export function serverAvatar(
+  name: string,
+  color: string,
+  mini: boolean,
+  iconUrl: string | undefined,
+): HTMLElement {
+  const el = createElement("span", { class: mini ? "server-rail-mini" : "server-rail-avatar" });
+  el.style.background = color;
+  if (iconUrl !== undefined) {
+    el.appendChild(createElement("img", { class: "server-rail-icon", src: iconUrl, alt: name }));
+  } else if (!mini && isIpAddressName(name)) {
+    el.appendChild(railIcon("server"));
+  } else {
+    setText(el, serverInitials(name));
+  }
+  return el;
 }

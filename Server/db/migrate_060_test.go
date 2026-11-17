@@ -10,6 +10,7 @@ import (
 // Migration 060 adds message_mentions.reply_ping. A mention row written before
 // it ran was never a reply ping, so it must read back as 0.
 func TestMigrate_060ReplyPingDefaultsToZeroOnExistingRows(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 

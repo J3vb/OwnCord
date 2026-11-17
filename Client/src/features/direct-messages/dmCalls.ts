@@ -4,6 +4,7 @@
 import { showToast } from "@lib/ui/toast";
 import { accountText as account } from "../../i18n/account";
 import { shellText } from "../../i18n/shell";
+import { noteRingSent } from "./pendingRequests";
 import { joinBackoffText } from "../voice/joinBackoffText";
 import { switchWaiting } from "../voice/joinClick";
 import { uiStore } from "@stores/ui.store";
@@ -141,6 +142,7 @@ export function createDmCalls(st: PageState, _pg: PageApi, deps: DmCallsDeps) {
     if (uiStore.getState().connectionStatus !== "connected") return;
     st.lastRingAt = Date.now();
     st.lastRingId = st.ws.send({ type: "call_ring", payload: { channel_id: channelId } });
+    noteRingSent(st.lastRingId, channelId);
     const roster = voiceStore.getState().voiceUsers.get(channelId);
     const self = getCurrentUserId();
     // The ring above already went out to the whole DM (a group redial from inside

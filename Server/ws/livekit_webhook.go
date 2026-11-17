@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/livekit/protocol/auth"
@@ -217,6 +218,12 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 		"user_id", userID,
 		"channel_id", channelID)
 
+	if h.webhookSessionReplaced(ctx, channelID, p.Identity, p.Sid) {
+		slog.Info("livekit webhook: participant_left for a replaced session, identity still in room, keeping voice state",
+			"user_id", userID, "channel_id", channelID)
+		return
+	}
+
 	// Clean up if the user left LiveKit without a WS voice_leave (crash, network loss, reload).
 	txn := h.begin(userID)
 	defer txn.end()
@@ -229,6 +236,32 @@ func (h *Hub) handleWebhookParticipantLeft(ctx context.Context, event *livekit.W
 		// is not wiped. A grace entry parking this exact join dies with its row.
 		h.webhookLeftDeleteRow(ctx, txn, userID, channelID, joinToken, "client gone")
 	}
+}
+
+// webhookLeftPresenceTimeout bounds the SFU lookup (webhooks queue per room); on expiry the
+// teardown proceeds.
+const webhookLeftPresenceTimeout = time.Second
+
+// webhookSessionReplaced reports whether the SFU lists the leaving identity under a different
+// session id: a same-identity reconnect makes LiveKit post the old session's participant_left
+// before the new one joins. The same sid is the departing session itself; an empty event sid
+// falls back to identity only. An unavailable SFU or a vanished room reads as not replaced.
+func (h *Hub) webhookSessionReplaced(ctx context.Context, channelID int64, identity, leftSID string) bool {
+	if h.livekit == nil {
+		return false
+	}
+	ctx, cancel := context.WithTimeout(ctx, webhookLeftPresenceTimeout)
+	defer cancel()
+	sids, err := h.livekit.ListParticipantSIDs(ctx, channelID)
+	if err != nil {
+		if !liveKitParticipantMissing(err) {
+			slog.Warn("livekit webhook: participant_left presence check failed, tearing down",
+				"error", err, "channel_id", channelID)
+		}
+		return false
+	}
+	listed, ok := sids[identity]
+	return ok && (leftSID == "" || listed != leftSID)
 }
 
 // webhookLeftCleanupClient is the still-connected-client stage: compare-and-clear the client's

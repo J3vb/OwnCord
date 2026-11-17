@@ -40,6 +40,7 @@ func (s failingThreadStore) ArchiveDueThreads(context.Context, time.Time, int) (
 }
 
 func TestThreadService_WithoutThreadStorageAnswersInternal(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	// A Store that is not a ThreadStore leaves the service without storage.
 	svc := &ThreadService{st: f.database, perms: f.perms, limiter: auth.NewRateLimiter()}
@@ -55,6 +56,7 @@ func TestThreadService_WithoutThreadStorageAnswersInternal(t *testing.T) {
 }
 
 func TestThreadService_StoreFailuresAreInternalNotLeaked(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	secret := errors.New("disk exploded: /var/secret/path")
 	svc := &ThreadService{st: f.database, ts: failingThreadStore{secret}, perms: f.perms, limiter: auth.NewRateLimiter()}
@@ -67,6 +69,7 @@ func TestThreadService_StoreFailuresAreInternalNotLeaked(t *testing.T) {
 }
 
 func TestThreadService_GetIsUngatedAndNilForUnknown(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "open")
 	if got, err := f.threads.Get(bg(), th.ID); err != nil || got == nil || got.ID != th.ID {
@@ -78,6 +81,7 @@ func TestThreadService_GetIsUngatedAndNilForUnknown(t *testing.T) {
 }
 
 func TestThreadExistsError_NamesTheWinnerAndIsAConflict(t *testing.T) {
+	t.Parallel()
 	err := error(&ThreadExistsError{ThreadID: 9})
 	if !errors.Is(err, ErrThreadExists) || !errors.Is(err, ErrConflict) {
 		t.Error("ThreadExistsError must match ErrThreadExists and ErrConflict")
@@ -97,6 +101,7 @@ func contains(s, sub string) bool {
 }
 
 func TestThreadCreate_OwnerRetryNeedsViewOnParentAndRefusesBadInput(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "mine")
 	p := CreateThreadParams{UserID: thrOwner, ChannelID: thrParent, MessageID: *th.StarterMessageID, Name: "mine"}
@@ -115,6 +120,7 @@ func TestThreadCreate_OwnerRetryNeedsViewOnParentAndRefusesBadInput(t *testing.T
 }
 
 func TestThreadCreate_OnlyInTextChannels(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 12, Name: "voice", Type: "voice"})
 	voiceMsg := f.post(t, 12, thrOwner, "hello")
@@ -124,6 +130,7 @@ func TestThreadCreate_OnlyInTextChannels(t *testing.T) {
 }
 
 func TestThreadActor_Refusals(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "t")
 	name := "n"
@@ -153,6 +160,7 @@ func TestThreadActor_Refusals(t *testing.T) {
 }
 
 func TestThreadActor_TimedOutOwnerIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "t")
 	if _, err := f.database.ExecContext(bg(), `UPDATE roles SET permissions = permissions | ? WHERE id = ?`,
@@ -174,6 +182,7 @@ func TestThreadActor_TimedOutOwnerIsRefused(t *testing.T) {
 }
 
 func TestThreadUpdate_PatchValidation(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "t")
 	long := string(make([]rune, 101))
@@ -197,6 +206,7 @@ func TestThreadUpdate_PatchValidation(t *testing.T) {
 }
 
 func TestThreadDelete_ReportsThreadAsItWasAndRemovesIt(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "doomed")
 	f.post(t, th.ID, thrOwner, "inside")
@@ -215,6 +225,7 @@ func TestThreadDelete_ReportsThreadAsItWasAndRemovesIt(t *testing.T) {
 }
 
 func TestThreadList_LimitsAndGates(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	for i := range 3 {
 		f.start(t, thrMod, fmt.Sprintf("t%d", i))
@@ -243,6 +254,7 @@ func TestThreadList_LimitsAndGates(t *testing.T) {
 }
 
 func TestMapThreadErr_KindsAndWrapping(t *testing.T) {
+	t.Parallel()
 	cause := errors.New("boom")
 	cases := []struct {
 		name string
@@ -271,6 +283,7 @@ func TestMapThreadErr_KindsAndWrapping(t *testing.T) {
 }
 
 func TestAdmitThreadFocus_ThroughTheParent(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "focus")
 	channels := NewChannelService(f.database, f.perms)
@@ -301,6 +314,7 @@ func TestAdmitThreadFocus_ThroughTheParent(t *testing.T) {
 }
 
 func TestHandleThreadFocus_MarksTheThreadRead(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "read")
 	last := f.post(t, th.ID, thrOwner, "latest")
@@ -360,6 +374,7 @@ func fastArchiver(st threadArchiveStore) *ThreadArchiver {
 }
 
 func TestThreadArchiver_SweepDrainsFullBatchesAndSurfacesErrors(t *testing.T) {
+	t.Parallel()
 	full := make([]db.DueThread, threadArchiveBatch)
 	for i := range full {
 		full[i] = db.DueThread{ID: int64(i + 1), ParentID: 1}
@@ -405,6 +420,7 @@ func TestThreadArchiver_SweepDrainsFullBatchesAndSurfacesErrors(t *testing.T) {
 }
 
 func TestThreadArchiver_RunSweepsRetriesAndStops(t *testing.T) {
+	t.Parallel()
 	boom := errors.New("boom")
 	st := &recordingStore{
 		sweepErrs: []error{boom}, // the first sweep fails, then the retry succeeds
@@ -434,6 +450,7 @@ func TestThreadArchiver_RunSweepsRetriesAndStops(t *testing.T) {
 }
 
 func TestThreadArchiver_ReadFailureBacksOffWithoutSweeping(t *testing.T) {
+	t.Parallel()
 	st := &recordingStore{dueErr: errors.New("read failed")}
 	a := fastArchiver(st)
 	sleep, failed := a.nextSleep(bg())
@@ -461,23 +478,8 @@ func TestThreadArchiver_ReadFailureBacksOffWithoutSweeping(t *testing.T) {
 	}
 }
 
-func TestThreadArchiver_SleepOrDoneReturnsOnCancel(t *testing.T) {
-	a := fastArchiver(&recordingStore{})
-	ctx, cancel := context.WithCancel(bg())
-	cancel()
-	start := time.Now()
-	a.sleepOrDone(ctx, time.Hour)
-	if time.Since(start) > time.Second {
-		t.Error("sleepOrDone ignored a cancelled context")
-	}
-	start = time.Now()
-	a.sleepOrDone(bg(), 5*time.Millisecond)
-	if time.Since(start) < 4*time.Millisecond {
-		t.Error("sleepOrDone returned before its delay")
-	}
-}
-
 func TestThreadCursorFor_CreatedSortIsIDOnly(t *testing.T) {
+	t.Parallel()
 	c, err := ParseThreadCursorFor(ThreadSortCreated, "42")
 	if err != nil || c.ID != 42 || c.Activity != "" {
 		t.Fatalf("parse created = %+v, %v", c, err)

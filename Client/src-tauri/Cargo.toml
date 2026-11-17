@@ -1,6 +1,6 @@
 [package]
 name = "owncord-client"
-version = "2.9.1"
+version = "2.10.0"
 edition = "2021"
 # Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
@@ -59,18 +59,24 @@ serde_json = "1"
 # the trust-on-first-use fingerprint. The plugin's capability is scoped to
 # those loopback proxies only: external content (previews, images, YouTube) is
 # fetched by the external-content broker (external_content.rs), not the plugin.
-tauri-plugin-http = { version = "=2.7.0", features = ["rustls-tls"] }
+# gzip: the server compresses large JSON replies; the client asks for it
+# and decodes it transparently. The decoder (flate2) is already in the tree.
+tauri-plugin-http = { version = "=2.7.0", features = ["rustls-tls", "gzip"] }
 # The external-content broker's client (external_content.rs). Already in the
-# tree via tauri-plugin-http with these same features, so this adds no build:
+# tree via tauri-plugin-http, so this adds no build (its client turns gzip
+# off again, so outside sites see the same requests as before):
 # the broker needs it directly for what the plugin's fetch cannot do — a
 # resolver that answers only with classified addresses, and redirects off.
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
 # The broker parses Open Graph in native code (B7-16 Decision 6) with the spec
 # tokenizer, not a regex. Already in Cargo.lock via tauri-utils.
-html5ever = "0.38"
+html5ever = "0.39"
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
+# owncord:// links: the desktop installers register the scheme, and on Android
+# the plugin writes the intent filter into the manifest at build time.
+tauri-plugin-deep-link = "2"
 # Minor-pinned per the plugin's own guidance: configure_client hands it a
 # preconfigured rustls ClientConfig, and a 2.x minor bump can change the
 # plugin's bundled reqwest/rustls and break that seam at runtime. 2.13 is the
@@ -78,7 +84,7 @@ tauri-plugin-fs = "2"
 tauri-plugin-updater = "2.13"
 # Read authenticated artifact metadata with the same verifier as the updater.
 # Already present transitively through tauri-plugin-updater.
-minisign-verify = "0.2"
+minisign-verify = "0.3"
 tauri-plugin-process = "2"
 url = "2"
 # ws_proxy.rs always passes its own rustls Connector, so tungstenite needs the
@@ -100,31 +106,6 @@ log = "0.4"
 # TS client-logs) so a shipped user can retrieve them — a release build detaches
 # the console, so stdout/stderr logging is otherwise unreachable.
 tauri-plugin-log = "2"
-# The backend features are NOT optional extras — keyring 3.x declares no
-# `default` feature at all, and every platform arm in its lib.rs falls back to
-# `pub use mock as default` when its backend feature is off. A bare
-# `keyring = "3"` therefore compiles the in-memory mock store on Windows, macOS
-# AND Linux: `set_password` succeeds into a per-Entry cell that is dropped when
-# the Entry goes out of scope, and the next `Entry::new(..).get_password()`
-# returns NoEntry. Nothing ever reaches Credential Manager / Keychain /
-# Secret Service. Removing any of these silently reverts a platform to that
-# store — `secret_store::tests::compiled_keyring_backend_is_persistent` fails
-# the build if that happens.
-#   windows-native       -> Windows Credential Manager (DPAPI-backed)
-#   apple-native         -> macOS Keychain
-#   sync-secret-service  -> Secret Service (GNOME Keyring / KWallet) over libdbus.
-#                           Chosen over async-secret-service because our Tauri
-#                           commands are blocking `fn`s on Tauri's worker pool;
-#                           the async backend would need a nested runtime.
-#                           Build-time system dep: libdbus-1-dev.
-#   crypto-rust          -> pure-Rust session crypto for the Secret Service
-#                           transport (avoids linking OpenSSL for it).
-keyring = { version = "3", default-features = false, features = [
-    "windows-native",
-    "apple-native",
-    "sync-secret-service",
-    "crypto-rust",
-] }
 # Encodes the DPAPI ciphertext for the JSON fallback store. Already in the tree
 # via the tauri/rustls stack, so this costs no extra build.
 base64 = "0.22"
@@ -136,7 +117,6 @@ base64 = "0.22"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 tauri-plugin-window-state = "2"
 tauri-plugin-autostart = "2"
-tauri-plugin-deep-link = "2"
 # Message notifications that open their message on click on macOS
 # (message_notification.rs). The notification plugin's desktop backend drops
 # the click/action callback, so this calls notify-rust — already in the tree as
@@ -154,16 +134,28 @@ notify-rust = "4"
 # Desktop table because rfd's build script fails on Android.
 rfd = { version = "0.17", default-features = false }
 
+[target.'cfg(not(target_os = "android"))'.dependencies]
+# OS credential store (secret_store.rs). Android has none here: secret_store
+# uses the Android Keystore there (android_secrets.rs).
+# keyring 4 moved its platform backends into separate store crates behind
+# keyring-core, and its own `v1` wrapper picks the zbus Secret Service store on
+# Linux. secret_store names one store crate per target instead (the
+# platform tables below), so no target can silently compile an in-memory mock:
+# a target without a store fails to build, and
+# `secret_store::tests::compiled_keyring_backend_is_persistent` checks the
+# compiled store keeps secrets on disk.
+keyring-core = "1"
+
 [target.'cfg(windows)'.dependencies]
 # Win32_UI_Input_KeyboardAndMouse: push-to-talk key polling (ptt.rs) and,
 # with Win32_System_SystemInformation's GetTickCount, the last-input time
 # auto-idle reads (idle.rs).
 # Data_Xml_Dom + UI_Notifications: the protocol-activation message toast
 # (message_notification.rs), whose click must survive a banner timeout by
-# launching the owncord:// handler. These are features on the existing 0.58
-# direct dependency, so no new crate version; tauri-winrt-notification builds
-# its own separate windows 0.61 copy, so nothing here is shared with it.
-windows = { version = "0.58", features = [
+# launching the owncord:// handler.
+# 0.62 is the version tauri, tao, wry, cpal and tauri-winrt-notification
+# build, so the whole tree shares one copy of the crate; move it with them.
+windows = { version = "0.62", features = [
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_System_SystemInformation",
     # Per-app share audio (windows_app_audio.rs): WASAPI process loopback
@@ -190,9 +182,9 @@ windows = { version = "0.58", features = [
 ] }
 # DPAPI (CryptProtectData/CryptUnprotectData) for the last-resort credential
 # fallback in secret_store, and the window lookup that hides WebView2's
-# screen-sharing bar (windows_share_bar.rs). Version tracks keyring's own
-# windows-sys dep so the two share one build of the crate.
-windows-sys = { version = "0.60", features = [
+# screen-sharing bar (windows_share_bar.rs). Version tracks
+# windows-native-keyring-store's windows-sys dep so the two share one build.
+windows-sys = { version = "0.61", features = [
     "Win32_Foundation",
     "Win32_Security_Cryptography",
     "Win32_UI_WindowsAndMessaging",
@@ -201,16 +193,20 @@ windows-sys = { version = "0.60", features = [
     "Wdk_System_SystemServices",
     "Win32_System_SystemInformation",
     "Win32_System_Diagnostics_ToolHelp",
+    # Music share icons (windows_app_audio.rs): the exe's icon (Shell), its
+    # pixels (Gdi) and its FileDescription (Storage_FileSystem, below).
+    "Win32_UI_Shell",
+    "Win32_Graphics_Gdi",
     # game_activity.rs: the process list (Toolhelp, above), each process's
     # image path and start time (OpenProcess, QueryFullProcessImageNameW,
     # GetProcessTimes) and Steam's install folder (HKCU\Software\Valve\Steam).
-    # Features on the existing windows-sys 0.60 dependency, so no new crate.
+    # Features on the existing windows-sys 0.61 dependency, so no new crate.
     "Win32_System_Threading",
     "Win32_System_Registry",
     # exit_watch: this process's memory (ProcessStatus); exception_log: the
     # unhandled-exception filter (Diagnostics_Debug, Kernel), the faulting
     # module's name (LibraryLoader) and its one log write (Storage_FileSystem,
-    # IO). Features on the existing windows-sys 0.60 dependency, no new crate.
+    # IO). Features on the existing windows-sys 0.61 dependency, no new crate.
     "Win32_System_ProcessStatus",
     "Win32_System_Diagnostics_Debug",
     "Win32_System_Kernel",
@@ -221,6 +217,9 @@ windows-sys = { version = "0.60", features = [
     # date order and the default clock. A feature on the existing dependency.
     "Win32_Globalization",
 ] }
+# Windows Credential Manager (DPAPI-backed) for secret_store; the same
+# `{account}.{service}` target names keyring 3 wrote. Search is unused.
+windows-native-keyring-store = { version = "1", default-features = false }
 # WebView2 profile permission state (windows_media.rs). Both match the
 # versions tauri/wry already build, so no new crate enters the tree.
 webview2-com = "0.39"
@@ -229,7 +228,19 @@ windows-core = "0.62"
 # `#[cfg(windows)]`) has to materialize as `Vec<u8>` for the Win32 call.
 zeroize = "1"
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# macOS Keychain for secret_store: the same generic-password service/account
+# pairs keyring 3 wrote, in the user's login keychain.
+apple-native-keyring-store = { version = "1", features = ["keychain"] }
+
 [target.'cfg(target_os = "linux")'.dependencies]
+# Secret Service (GNOME Keyring / KWallet) for secret_store, over libdbus.
+# Chosen over the zbus store because our Tauri commands are blocking `fn`s on
+# Tauri's worker pool, and because no_os_store reads the dbus::Error in its
+# failures. It finds what keyring 3 saved: its search attributes (service,
+# username) are a subset of the ones keyring 3 wrote. crypto-rust: pure-Rust
+# session crypto (no OpenSSL link). Build-time system dep: libdbus-1-dev.
+dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] }
 device_query = "2"
 # XInput2 pointer query for Mouse 4/5 push to talk (mouse_buttons.rs):
 # device_query's core XQueryPointer stops at Button5. Loads Xlib and libXi at
@@ -241,8 +252,8 @@ libc = "0.2"
 # Session-bus idle queries for auto-idle (idle.rs): GNOME's Mutter
 # IdleMonitor and the freedesktop ScreenSaver interface; also the launcher
 # count (unread_badge.rs) and message notifications (notification_bus.rs).
-# Already in the tree as keyring's sync-secret-service transport, same
-# libdbus, no new build.
+# Already in the tree as the Secret Service store's transport, same libdbus,
+# no new build.
 dbus = "0.9"
 # System-wide input idle on Wayland compositors without a Mutter or
 # ScreenSaver idle source (KDE Plasma, wlroots): the ext-idle-notify-v1
@@ -287,7 +298,7 @@ livekit = "=0.10.0"
 # Names the SDK's permission/track-source protobuf types (its `proto` module
 # does not re-export them). Same version livekit 0.10.0 resolves, so no
 # new crate enters the tree.
-livekit-protocol = "=0.8.2"
+livekit-protocol = "=0.8.3"
 # Encodes the screen picker's thumbnails (native_voice/screen.rs). Already in
 # the tree via tauri's tray-icon, so this costs no extra build.
 png = "0.18"

@@ -65,7 +65,7 @@ test.describe("Settings Overlay", () => {
     await openTabIfPresent(nativePage, /appearance/i, "Appearance");
 
     // Theme options container with individual theme buttons
-    const themeOptions = nativePage.locator(".theme-opt");
+    const themeOptions = nativePage.locator(".theme-tiles [role='radio']");
     const count = await themeOptions.count();
     expect(count).toBeGreaterThan(0);
   });
@@ -93,7 +93,7 @@ test.describe("Settings Overlay", () => {
     // mounted.
     const pane = nativePage.locator(".settings-content .settings-pane.active");
     await expect(pane.getByRole("heading", { name: "Microphone", exact: true })).toBeVisible();
-    await expect(pane.getByRole("combobox", { name: "Input Device" })).toBeVisible();
+    await expect(pane.getByRole("combobox", { name: "Input device" })).toBeVisible();
     await expect(pane.locator(".mic-meter-wrap .mic-meter-bar")).toBeVisible();
   });
 

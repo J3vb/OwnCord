@@ -102,7 +102,7 @@ const httpUrls = (calls: readonly IpcCall[]): string[] =>
 const inboxReads = async (page: Page): Promise<number> =>
   httpUrls(await ipcLog(page)).filter((u) => u.includes("/api/v1/dm-requests")).length;
 
-/** Go to DM mode, where "Message Requests (N)" sits at the top. */
+/** Go to DM mode, where "Message requests" and its count sit at the top. */
 async function toDmMode(page: Page): Promise<void> {
   await openDmRow(page);
   await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
@@ -125,7 +125,7 @@ test.describe("Message Requests inbox", () => {
     // At desktop width the DM header lives behind Home; DM mode lists the
     // requests with their count (the header badge is covered at narrow width below).
     await toDmMode(page);
-    await expect(entry(page)).toHaveText("Message Requests (2)");
+    await expect(entry(page)).toHaveAccessibleName("Message requests, 2 waiting");
 
     // Everything the stranger's content could make the app load, from here on.
     const before = (await ipcLog(page)).length;
@@ -195,14 +195,14 @@ test.describe("Message Requests inbox", () => {
     );
     // Still pending: leaving is not accepting.
     await openHome(page);
-    await expect(entry(page)).toHaveText("Message Requests (2)");
+    await expect(entry(page)).toHaveAccessibleName("Message requests, 2 waiting");
   });
 
   test("live frames update the count, and a reconnect restores the server's inbox", async ({
     page,
   }) => {
     await toDmMode(page);
-    await expect(entry(page)).toHaveText("Message Requests (2)");
+    await expect(entry(page)).toHaveAccessibleName("Message requests, 2 waiting");
     const pending = {
       id: 9,
       state: "pending",
@@ -213,7 +213,7 @@ test.describe("Message Requests inbox", () => {
       decided_at: null,
     };
     await emitWsMessage(page, { type: "dm_request", payload: pending });
-    await expect(entry(page)).toHaveText("Message Requests (3)");
+    await expect(entry(page)).toHaveAccessibleName("Message requests, 3 waiting");
 
     await entry(page).click();
     await expect(items(page)).toHaveCount(3);
@@ -244,7 +244,7 @@ test.describe("Message Requests inbox", () => {
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
   });
 
-  test("text contrast meets Q1 in every built-in theme and High Contrast", async ({ page }) => {
+  test("text contrast meets Q1 in every built-in theme and High contrast", async ({ page }) => {
     const themes = ["neon-glow", "dark", "midnight", "light"] as const;
     for (const theme of themes) {
       for (const highContrast of [false, true]) {
@@ -291,7 +291,7 @@ test.describe("DM header badge at narrow width", () => {
   });
 });
 
-test.describe("inbox at the minimum window with 20px Large Font", () => {
+test.describe("inbox at the minimum window with 20px Large font", () => {
   test.use({ viewport: { width: 940, height: 500 } });
 
   test("keeps every request reachable, wrapped and still", async ({ page }, testInfo) => {

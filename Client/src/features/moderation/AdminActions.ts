@@ -4,6 +4,7 @@
  */
 
 import { openMenuShell, createMenuItem as buildMenuItem, type OpenMenu } from "@lib/ui/contextMenu";
+import type { IconName } from "@lib/icons";
 import { shellText } from "../../i18n/shell";
 import { copyWithToast, isDeveloperMode } from "../developer-mode/developerTools";
 import { TIMEOUT_PRESETS } from "./timeoutPresets";
@@ -39,6 +40,7 @@ interface AdminGates {
   readonly kick: boolean;
   readonly ban: boolean;
   readonly timeout: boolean;
+  readonly warn: boolean;
   readonly nicknames: boolean;
 }
 
@@ -51,6 +53,7 @@ function resolveGates(options: MemberContextMenuOptions, isSelf: boolean): Admin
     kick: gate(options.canKick),
     ban: gate(options.canBan),
     timeout: gate(options.canTimeout),
+    warn: gate(options.canWarn),
     nicknames: gate(options.canManageNicknames),
   };
 }
@@ -63,6 +66,7 @@ function appendClosingRow(
   closeMenu: () => void,
   signal: AbortSignal,
   testId: string,
+  icon: IconName,
   disabledReason?: string,
 ): void {
   appendRow(
@@ -73,7 +77,7 @@ function appendClosingRow(
       closeMenu();
     },
     signal,
-    disabledReason === undefined ? { testId } : { testId, disabledReason },
+    disabledReason === undefined ? { testId, icon } : { testId, icon, disabledReason },
   );
 }
 
@@ -89,6 +93,7 @@ function appendTopRows(
     const onProfile = options.onProfile;
     appendRow(top, shellText("member.profile"), () => onProfile(), signal, {
       testId: "member-menu-profile",
+      icon: "user",
     });
   }
   if (options.onMention !== undefined) {
@@ -99,6 +104,7 @@ function appendTopRows(
       closeMenu,
       signal,
       "member-menu-mention",
+      "at-sign",
       options.mentionDisabledReason,
     );
   }
@@ -110,6 +116,7 @@ function appendTopRows(
       closeMenu,
       signal,
       "member-menu-message",
+      "message-square",
     );
   }
   if (!isSelf && options.onCall !== undefined) {
@@ -120,18 +127,23 @@ function appendTopRows(
       closeMenu,
       signal,
       "member-menu-call",
+      "phone",
     );
   }
 }
 
 /** The Change Role flyout, one option per available role. */
-function buildRoleFlyout(options: MemberContextMenuOptions, signal: AbortSignal): HTMLElement {
+function buildRoleFlyout(
+  options: MemberContextMenuOptions,
+  closeMenu: () => void,
+  signal: AbortSignal,
+): HTMLElement {
   return buildFlyout(
     shellText("member.changeRole"),
     (roleSub) => {
-      // One guard across every option: `currentRole` only updates when the
-      // member_update echoes, so without it a double-click (or a second option
-      // clicked while the first PATCH is in flight) fires twice.
+      // One guard across every option: a double-click (or a second option
+      // clicked while the first PATCH is in flight) must not fire twice. The
+      // menu closes when the change settles, as its ticked role is the old one.
       let roleChangeRunning = false;
       for (const role of options.availableRoles) {
         const cls =
@@ -150,6 +162,7 @@ function buildRoleFlyout(options: MemberContextMenuOptions, signal: AbortSignal)
             const done = (): void => {
               roleChangeRunning = false;
               roleOption.classList.remove("context-menu__item--pending");
+              closeMenu();
             };
             options.onChangeRole(role).then(done, done);
           },
@@ -159,6 +172,7 @@ function buildRoleFlyout(options: MemberContextMenuOptions, signal: AbortSignal)
       }
     },
     signal,
+    "shield",
   );
 }
 
@@ -199,6 +213,7 @@ function appendTimeoutRows(
           }
         },
         signal,
+        "clock",
       ),
     );
   }
@@ -218,12 +233,12 @@ function appendTimeoutRows(
         onRemove().then(done, done);
       },
       signal,
-      { testId: "member-menu-remove-timeout" },
+      { testId: "member-menu-remove-timeout", icon: "clock" },
     );
   }
 }
 
-/** Role, nickname and timeout rows. */
+/** Role, nickname, warn and timeout rows. */
 function appendManageRows(
   manage: Node,
   options: MemberContextMenuOptions,
@@ -231,7 +246,7 @@ function appendManageRows(
   closeMenu: () => void,
   signal: AbortSignal,
 ): void {
-  if (gates.roles) manage.appendChild(buildRoleFlyout(options, signal));
+  if (gates.roles) manage.appendChild(buildRoleFlyout(options, closeMenu, signal));
 
   if (gates.nicknames && options.onChangeNickname !== undefined) {
     const onChangeNickname = options.onChangeNickname;
@@ -243,7 +258,21 @@ function appendManageRows(
         onChangeNickname();
       },
       signal,
-      { testId: "member-menu-change-nickname" },
+      { testId: "member-menu-change-nickname", icon: "pencil" },
+    );
+  }
+
+  if (gates.warn && options.onWarn !== undefined) {
+    const onWarn = options.onWarn;
+    appendRow(
+      manage,
+      shellText("member.warn"),
+      () => {
+        closeMenu();
+        onWarn();
+      },
+      signal,
+      { testId: "member-menu-warn" },
     );
   }
 
@@ -265,7 +294,7 @@ function appendDangerRows(
     const kickItem = buildMenuItem(
       shellText("member.forceLogout"),
       "context-menu__item context-menu__item--danger",
-      { testId: "force-logout" },
+      { testId: "force-logout", icon: "log-out" },
     );
     withConfirmation(
       kickItem,
@@ -286,7 +315,7 @@ function appendDangerRows(
         options.onBan();
       },
       signal,
-      { testId: "member-menu-ban" },
+      { testId: "member-menu-ban", icon: "ban" },
     ).classList.add("context-menu__item--danger");
   }
 }
@@ -295,6 +324,7 @@ function appendBottomRows(
   bottom: Node,
   options: MemberContextMenuOptions,
   isSelf: boolean,
+  closeMenu: () => void,
   signal: AbortSignal,
 ): void {
   // Developer Mode: copy the member's ID, just above Block (self included).
@@ -304,12 +334,13 @@ function appendBottomRows(
       shellText("member.copyId"),
       () => copyWithToast(String(options.userId), "toast.userIdCopied", "toast.userIdCopyFailed"),
       signal,
+      { icon: "copy" },
     );
   }
 
   // Block / Unblock — available to every other member, not just admins. Blocking
   // is disruptive (kills DMs both ways) so it confirms; unblocking is one click.
-  if (!isSelf) bottom.appendChild(buildBlockItem(options, signal));
+  if (!isSelf) bottom.appendChild(buildBlockItem(options, closeMenu, signal));
 }
 
 function buildMemberMenu(
@@ -336,7 +367,7 @@ function buildMemberMenu(
   const gates = resolveGates(options, isSelf);
   appendManageRows(manage, options, gates, closeMenu, signal);
   appendDangerRows(danger, options, gates, closeMenu, signal);
-  appendBottomRows(bottom, options, isSelf, signal);
+  appendBottomRows(bottom, options, isSelf, closeMenu, signal);
 
   let first = true;
   for (const group of [top, voice, manage, danger, bottom]) {

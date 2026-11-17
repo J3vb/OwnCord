@@ -176,7 +176,7 @@ func handleBackupLink(database *db.DB, paths backupPaths) http.HandlerFunc {
 		if !ok {
 			return
 		}
-		name, target, ok := resolveBackupName(w, r, paths.dir)
+		name, target, ok := resolveBackupName(w, r, paths.dir, paths.dbFile)
 		if !ok {
 			return
 		}

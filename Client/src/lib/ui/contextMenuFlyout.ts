@@ -1,7 +1,8 @@
 // Menu rows and flyout submenus: the row selectors, the focusable row builder,
 // the submenu trigger and where a flyout sits. contextMenu.ts re-exports the
 // public pieces.
-import { createElement } from "../dom";
+import { createElement, setText } from "../dom";
+import { createIcon, type IconName } from "../icons";
 import { setRovingTabindex } from "./a11y";
 
 /** A nested flyout submenu, whether or not its role is set yet. */
@@ -23,21 +24,79 @@ export function menuItems(menu: HTMLElement): HTMLElement[] {
   );
 }
 
+/** The icon column of a menu or sheet row. */
+export const MENU_ICON_CLASS = "menu-item-icon";
+const MENU_LABEL_CLASS = "context-menu-item__label";
+
+/**
+ * The leading icon of a row, decorative (the label stays the row's name).
+ * Without `icon` it is an empty slot, so a row with no icon lines up with its
+ * neighbours that have one.
+ */
+export function menuIconSlot(icon: IconName | undefined, size = 16): HTMLElement {
+  const slot = createElement("span", { class: MENU_ICON_CLASS, "aria-hidden": "true" });
+  if (icon !== undefined) slot.appendChild(createIcon(icon, size));
+  return slot;
+}
+
+function iconSlotOf(row: Element): HTMLElement | null {
+  return row.querySelector<HTMLElement>(`:scope > .${MENU_ICON_CLASS}`);
+}
+
 /**
  * Build one menu row as a real focusable element: a `<button role="menuitem">`
  * so Enter/Space activate it natively, or (for a row that owns a nested flyout,
  * which a button may not contain) a `role="menuitem"` div. Roving tabindex
- * starts at -1; enableMenuKeyboard raises the first visible row to 0.
+ * starts at -1; enableMenuKeyboard raises the first visible row to 0. With
+ * `icon`, the row leads with it and the label sits in its own span.
  */
 export function createMenuItem(
   label: string,
   className: string,
-  opts: { testId?: string; submenu?: boolean } = {},
+  opts: { testId?: string; submenu?: boolean; icon?: IconName } = {},
 ): HTMLElement {
   const attrs: Record<string, string> = { class: className, role: "menuitem", tabindex: "-1" };
   if (opts.submenu !== true) attrs["type"] = "button";
   if (opts.testId !== undefined) attrs["data-testid"] = opts.testId;
-  return createElement(opts.submenu === true ? "div" : "button", attrs, label);
+  const tag = opts.submenu === true ? "div" : "button";
+  if (opts.icon === undefined) return createElement(tag, attrs, label);
+  const row = createElement(tag, attrs);
+  row.append(menuIconSlot(opts.icon), createElement("span", { class: MENU_LABEL_CLASS }, label));
+  return row;
+}
+
+/** Change a row's label text, keeping its icon. */
+export function setMenuItemLabel(row: HTMLElement, label: string): void {
+  const span = row.querySelector<HTMLElement>(`:scope > .${MENU_LABEL_CLASS}`);
+  if (span !== null) {
+    span.textContent = label;
+    return;
+  }
+  const slot = iconSlotOf(row);
+  if (slot === null) setText(row, label);
+  else row.replaceChildren(slot, label);
+}
+
+const ROW_SELECTOR = ".context-menu-item, .context-menu__item";
+
+/**
+ * In each list of rows (the menu and each flyout) where any row has an icon,
+ * give every other row an empty slot, so all the labels start in one column.
+ * The emoji rows of a group are not in a list and keep their own layout.
+ */
+export function alignMenuIcons(menu: HTMLElement): void {
+  for (const list of [menu, ...menu.querySelectorAll<HTMLElement>(SUBMENU_SELECTOR)]) {
+    const rows = [...list.children].filter(
+      (el): el is HTMLElement =>
+        el instanceof HTMLElement &&
+        el.matches(ROW_SELECTOR) &&
+        !el.classList.contains("context-menu-item--content"),
+    );
+    if (!rows.some((row) => iconSlotOf(row) !== null)) continue;
+    for (const row of rows) {
+      if (iconSlotOf(row) === null) row.prepend(menuIconSlot(undefined));
+    }
+  }
 }
 
 /** The flyout a menu row owns: a child (the hand-built menus) or the next
@@ -85,6 +144,8 @@ export interface SubmenuTriggerOptions {
   readonly activates?: boolean;
   /** Runs for a click on the row itself, never for a click inside the flyout. */
   readonly onActivate?: (e: MouseEvent) => void;
+  /** The row's leading icon. */
+  readonly icon?: IconName;
 }
 
 /**
@@ -104,6 +165,7 @@ export function createSubmenuTrigger(
     {
       submenu: true,
       ...(opts.testId !== undefined ? { testId: opts.testId } : {}),
+      ...(opts.icon !== undefined ? { icon: opts.icon } : {}),
     },
   );
   trigger.setAttribute("aria-haspopup", "menu");

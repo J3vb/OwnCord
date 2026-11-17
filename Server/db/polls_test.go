@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -13,7 +14,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/dbtime"
 )
 
-var pollSeq int
+var pollSeq atomic.Int64
 
 type pollFixture struct {
 	database *db.DB
@@ -43,10 +44,10 @@ func pizzaPoll() *db.PollInput {
 }
 
 func (f pollFixture) params(poll *db.PollInput) db.MessageDeliveryParams {
-	pollSeq++
-	hash := sha256.Sum256([]byte(fmt.Sprintf("poll %d", pollSeq)))
+	seq := pollSeq.Add(1)
+	hash := sha256.Sum256([]byte(fmt.Sprintf("poll %d", seq)))
 	return db.MessageDeliveryParams{
-		UserID: f.author, ChannelID: f.channel, ClientMessageID: fmt.Sprintf("poll-%d", pollSeq),
+		UserID: f.author, ChannelID: f.channel, ClientMessageID: fmt.Sprintf("poll-%d", seq),
 		PayloadHash: hash[:], Content: "📊 Lunch?\n- Pizza\n- 🍣 Sushi",
 		ExpiresAtMS: time.Now().Add(time.Hour).UnixMilli(),
 		Poll:        poll,
@@ -84,6 +85,7 @@ func (f pollFixture) history(t *testing.T, viewer int64) []db.MessageAPIResponse
 }
 
 func TestCreateMessageDelivery_PollAtomic(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 
@@ -147,6 +149,7 @@ func TestCreateMessageDelivery_PollAtomic(t *testing.T) {
 }
 
 func TestCreateMessageDelivery_PollRefusedWhileErasing(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	f.exec(t, `INSERT INTO erasure_jobs (user_id, state) VALUES (?, 'queued')`, f.author)
 	if _, err := f.database.CreateMessageDelivery(context.Background(), f.params(pizzaPoll())); !errors.Is(err, db.ErrAccountErasing) {
@@ -155,6 +158,7 @@ func TestCreateMessageDelivery_PollRefusedWhileErasing(t *testing.T) {
 }
 
 func TestAttachPolls_HistoryBlockAndMe(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	input := pizzaPoll()
 	input.AllowMultiselect = true
@@ -191,6 +195,7 @@ func TestAttachPolls_HistoryBlockAndMe(t *testing.T) {
 }
 
 func TestAttachPolls_ZeroVotesAndOrdinaryRows(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	if _, err := f.database.CreateMessage(context.Background(), f.channel, f.author, "plain", nil); err != nil {
 		t.Fatal(err)
@@ -218,6 +223,7 @@ func TestAttachPolls_ZeroVotesAndOrdinaryRows(t *testing.T) {
 }
 
 func TestAttachPolls_ExpiredReadsEnded(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	id := f.create(t, pizzaPoll())
 	// Expired by the clock, though nothing has marked it ended.
@@ -240,6 +246,7 @@ func TestAttachPolls_ExpiredReadsEnded(t *testing.T) {
 }
 
 func TestGetPollInfo_NewPollIsEmpty(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	id := f.create(t, pizzaPoll())
 	info, err := f.database.GetPollInfo(context.Background(), id, 0)
@@ -255,6 +262,7 @@ func TestGetPollInfo_NewPollIsEmpty(t *testing.T) {
 }
 
 func TestEditMessageContent_RefusesPoll(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	id := f.create(t, pizzaPoll())
 	if _, err := f.database.EditMessage(context.Background(), id, f.author, "changed"); err == nil {
@@ -267,6 +275,7 @@ func TestEditMessageContent_RefusesPoll(t *testing.T) {
 }
 
 func TestPollCascade_ChannelDeleteAndPurge(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	other := seedChannel(t, f.database, "other-polls")
 	id := f.create(t, pizzaPoll())
@@ -293,6 +302,7 @@ func TestPollCascade_ChannelDeleteAndPurge(t *testing.T) {
 }
 
 func TestPollAnswerBounds(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	in := pizzaPoll()
 	in.Answers = nil
@@ -308,6 +318,7 @@ func TestPollAnswerBounds(t *testing.T) {
 }
 
 func TestErasure_PollVotes(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 	id := f.create(t, pizzaPoll())

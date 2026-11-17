@@ -15,7 +15,7 @@ import {
 // ---------------------------------------------------------------------------
 // B9-13: a report's warning, timeout and lift-timeout actions against the
 // owner's Q1 checks — keyboard, names, errors, targets, contrast in every
-// theme and High Contrast, motion, and reflow at 940x500 with 20 px Large Font.
+// theme and High contrast, motion, and reflow at 940x500 with 20 px Large font.
 //
 // The server is mocked with one report held by the signed-in moderator
 // (testuser, id 1) about otheruser (id 2), with a timeout still running, so
@@ -228,7 +228,7 @@ test.describe("moderation actions accessibility", () => {
     test(c.title, c.run);
   }
 
-  test.describe("reflow at the 940x500 minimum window with 20 px Large Font", () => {
+  test.describe("reflow at the 940x500 minimum window with 20 px Large font", () => {
     test.use({ viewport: { width: 940, height: 500 } });
 
     test("every action is reachable and nothing scrolls sideways", async ({ page }, testInfo) => {
@@ -342,7 +342,7 @@ test.describe("removal, kick and ban accessibility", () => {
     test(c.title, c.run);
   }
 
-  test.describe("reflow at the 940x500 minimum window with 20 px Large Font", () => {
+  test.describe("reflow at the 940x500 minimum window with 20 px Large font", () => {
     test.use({ viewport: { width: 940, height: 500 } });
 
     test("the actions and their dialog stay reachable with no sideways scroll", async ({

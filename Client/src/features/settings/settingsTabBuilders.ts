@@ -11,6 +11,7 @@ import { buildKeybindsTab } from "./KeybindsTab";
 import { buildAdvancedTab } from "./AdvancedTab";
 import type { SettingsOverlayOptions } from "./settingsOverlayOptions";
 import type { TabName } from "./settingsTabs";
+import type { UnsavedTopic } from "./settingsGuards";
 
 const log = createLogger("SettingsOverlay");
 
@@ -23,7 +24,7 @@ export interface TabBuilderDeps {
     fn: (...args: A) => Promise<R>,
   ) => (...args: A) => Promise<R>;
   /** The Account tab reports whether it holds a half-typed form. */
-  readonly setDirtyCheck: (isDirty: () => boolean) => void;
+  readonly setDirtyCheck: (isDirty: () => boolean, topic?: UnsavedTopic) => void;
   readonly buildVoiceTab: TabBuilder;
   readonly buildLogsTab: TabBuilder;
   /** Re-mark search hits once the lazily loaded About tab arrives. */
@@ -61,10 +62,16 @@ export function createTabBuilders(deps: TabBuilderDeps): Readonly<Record<TabName
         (isDirty) => {
           deps.setDirtyCheck(isDirty);
         },
+        (isShowing) => {
+          deps.setDirtyCheck(isShowing, "secret");
+        },
       ),
     // Only reachable through its tab button, which exists only with the option.
     Safety: (signal) => options.safetyTab?.(signal) ?? createElement("div"),
-    Appearance: (signal) => buildAppearanceTab(signal),
+    Appearance: (signal) =>
+      buildAppearanceTab(signal, (isDirty) => {
+        deps.setDirtyCheck(isDirty, "theme");
+      }),
     Notifications: (signal) => buildNotificationsTab(signal),
     // Only reachable through its tab button, which exists only with the option.
     "My uploads": (signal) => options.myUploadsTab?.(signal) ?? createElement("div"),

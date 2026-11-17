@@ -359,8 +359,8 @@ func TestAdminAPI_PatchSettings_RejectsMixedKeys(t *testing.T) {
 func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 	whitelistedKeys := []string{
 		"server_name",
-		"server_icon",
 		"motd",
+		"appeal_contact",
 		"require_2fa",
 		"registration_mode",
 		"backup_schedule",

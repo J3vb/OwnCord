@@ -506,7 +506,7 @@ test.describe("recovery lifecycle journey (real server)", () => {
 
     // Log out: the client returns to the connect page.
     await bob.locator(".settings-nav-item.danger").click();
-    // Log Out asks first.
+    // Log out asks first.
     await bob.locator("[data-testid='logout-confirm']").click();
     await expect(bob.locator("#host")).toBeVisible({ timeout: 30_000 });
 
@@ -664,7 +664,7 @@ test.describe("refused-role journey (real server)", () => {
 test.describe("integrated accessibility matrix (real server)", () => {
   // The plan's Task 3 matrix, run on the JOINED surfaces the journeys above
   // produce. Each surface's exhaustive Q1 pass (keyboard, names, focus,
-  // contrast in every theme and High Contrast, reduced motion, 940×500 with
+  // contrast in every theme and High contrast, reduced motion, 940×500 with
   // 20px text and 200% scale) already ships in its lane spec and is named per
   // requirement in the evidence manifest; this test proves the integrated
   // states do not regress that, on the real server.

@@ -10,6 +10,7 @@ import (
 // ─── GetAttachmentByID ──────────────────────────────────────────────────────
 
 func TestGetAttachmentByID_NotFound(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	att, err := database.GetAttachmentByID(context.Background(), "nonexistent-id")
@@ -22,6 +23,7 @@ func TestGetAttachmentByID_NotFound(t *testing.T) {
 }
 
 func TestGetAttachmentByID_Found(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	// Insert an attachment directly.
@@ -56,6 +58,7 @@ func TestGetAttachmentByID_Found(t *testing.T) {
 // ─── LinkAttachmentsToMessage ────────────────────────────────────────────────
 
 func TestLinkAttachmentsToMessage_Empty(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	n, err := database.LinkAttachmentsToMessage(context.Background(), 1, 1, nil)
@@ -66,6 +69,7 @@ func TestLinkAttachmentsToMessage_Empty(t *testing.T) {
 }
 
 func TestLinkAttachmentsToMessage_LinksUnlinked(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "linkuser")
 	chID := seedChannel(t, database, "linkchan")
@@ -97,6 +101,7 @@ func TestLinkAttachmentsToMessage_LinksUnlinked(t *testing.T) {
 }
 
 func TestLinkAttachmentsToMessage_SkipsAlreadyLinked(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "linkuser2")
 	chID := seedChannel(t, database, "linkchan2")
@@ -122,6 +127,7 @@ func TestLinkAttachmentsToMessage_SkipsAlreadyLinked(t *testing.T) {
 // can never be claimed, legacy NULL-uploader rows remain claimable, and
 // nonexistent ids are skipped without failing the statement.
 func TestLinkAttachmentsToMessage_OwnershipGuard(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	owner := seedUser(t, database, "att-owner")
 	other := seedUser(t, database, "att-other")
@@ -164,6 +170,7 @@ func TestLinkAttachmentsToMessage_OwnershipGuard(t *testing.T) {
 // file falls under the message's channel ACL / soft-delete state instead, so
 // the avatar permanently disagrees with users.avatar about who may read it.
 func TestLinkAttachmentsToMessage_SkipsLiveAvatar(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	owner := seedUser(t, database, "avatar-owner")
 	chID := seedChannel(t, database, "avatar-owner-ch")
@@ -190,6 +197,7 @@ func TestLinkAttachmentsToMessage_SkipsLiveAvatar(t *testing.T) {
 // TestLinkAttachmentsToMessage_ReturnsLinkedIDs locks the 2A-3 contract: the
 // returned ids are exactly the rows the UPDATE linked.
 func TestLinkAttachmentsToMessage_ReturnsLinkedIDs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	owner := seedUser(t, database, "ret-owner")
@@ -227,6 +235,7 @@ func TestLinkAttachmentsToMessage_ReturnsLinkedIDs(t *testing.T) {
 // ─── GetAttachmentsByMessageIDs ──────────────────────────────────────────────
 
 func TestGetAttachmentsByMessageIDs_Empty(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	result, err := database.GetAttachmentsByMessageIDs(context.Background(), nil)
@@ -237,6 +246,7 @@ func TestGetAttachmentsByMessageIDs_Empty(t *testing.T) {
 }
 
 func TestGetAttachmentsByMessageIDs_GroupsByMessage(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "attuser")
 	chID := seedChannel(t, database, "attchan")

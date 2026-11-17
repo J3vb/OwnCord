@@ -22,6 +22,7 @@ import type {
   ForwardInfo,
   GroupEventInfo,
   ImportedAuthor,
+  LinkPreviewCard,
   PollInfo,
   ReferencedMessage,
   ThreadInfo,
@@ -69,6 +70,8 @@ export type {
   PollInfo,
   PollView,
   PollUpdatePayload,
+  MessageLinkPreviewsPayload,
+  LinkPreviewCard,
   PollCreateOkPayload,
   PollVoteOkPayload,
   PollEndOkPayload,
@@ -247,6 +250,8 @@ export interface ServerInfoResponse {
   readonly retention?: { readonly messages_days: number };
   /** How long an upload may take before the server answers 408 TRANSFER_TIMED_OUT. */
   readonly upload?: { readonly transfer_lifetime_seconds: number };
+  /** Content hash of the owner-uploaded server icon; "" = none; absent on an older server. */
+  readonly icon?: string;
 }
 
 /** Single channel object from REST API. */
@@ -286,6 +291,8 @@ export interface MessageResponse {
   readonly group_event?: GroupEventInfo;
   /** Present on a forwarded message only. */
   readonly forward?: ForwardInfo;
+  /** Server-built link cards; absent from older servers or when none. */
+  readonly link_previews?: readonly LinkPreviewCard[];
   /** Present on a poll message only. */
   readonly poll?: PollInfo;
   /** Present on a sticker message only. */
@@ -400,6 +407,7 @@ export type {
   TotpEnrolmentResponse,
   RecoveryCodesResponse,
   TimeoutResult,
+  WarnResult,
   ReportActResult,
   NicknameResult,
 } from "./typesRest";

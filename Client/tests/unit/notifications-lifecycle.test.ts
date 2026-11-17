@@ -6,6 +6,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { ChannelActivityEntry } from "../../src/lib/types";
+import { paramSpy } from "../helpers/audioContextMock";
 
 // Everything the service imports is loaded up front, so the app-lifetime
 // listeners those modules install are not mistaken for the service's own.
@@ -49,7 +50,7 @@ class MockAudioContext {
   createOscillator() {
     return {
       connect: vi.fn(),
-      frequency: { setValueAtTime: vi.fn() },
+      frequency: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
       start: vi.fn(),
       stop: vi.fn(),
     };
@@ -57,7 +58,7 @@ class MockAudioContext {
   createGain() {
     return {
       connect: vi.fn(),
-      gain: { setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
+      gain: paramSpy(),
     };
   }
   close() {

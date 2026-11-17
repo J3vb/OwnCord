@@ -14,6 +14,7 @@ import (
 // attempt × mode × invite state, with the consequences — whether an account
 // exists afterwards, whether it is locked, and whether the invite was spent.
 func TestRegister_ModeMatrix(t *testing.T) {
+	t.Parallel()
 	type inviteState string
 	const (
 		valid   inviteState = "valid"
@@ -103,6 +104,7 @@ func TestRegister_ModeMatrix(t *testing.T) {
 // Approval mode (owner decision 1): the application is an account that
 // cannot sign in until an admin approves it; denial removes it.
 func TestRegister_ApprovalMode_LockedUntilApproved(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())

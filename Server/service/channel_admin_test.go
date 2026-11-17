@@ -22,6 +22,7 @@ func newChannelAdminService(t *testing.T) (*ChannelService, *db.DB) {
 // ─── S-03: rune/normalization contract ───────────────────────────────────────
 
 func TestChannelMeta_NameCountsRunesNotBytes(t *testing.T) {
+	t.Parallel()
 	// 100 two-byte runes = 200 bytes: legal by the contract, which counts
 	// runes; a byte-counting bound would reject it.
 	name100 := strings.Repeat("é", 100)
@@ -36,6 +37,7 @@ func TestChannelMeta_NameCountsRunesNotBytes(t *testing.T) {
 }
 
 func TestChannelMeta_TopicAndCategoryBounds(t *testing.T) {
+	t.Parallel()
 	if _, err := cleanChannelMeta("ok", strings.Repeat("t", MaxChannelTopicLen), ""); err != nil {
 		t.Fatalf("topic at the bound rejected: %v", err)
 	}
@@ -48,6 +50,7 @@ func TestChannelMeta_TopicAndCategoryBounds(t *testing.T) {
 }
 
 func TestChannelMeta_SanitizesAndTrimsLikeEverySidebarField(t *testing.T) {
+	t.Parallel()
 	meta, err := cleanChannelMeta("  <b>general</b>  ", " topic <i>x</i> ", "  Chat  ")
 	mustDo(t, "cleanChannelMeta", err)
 	if meta.Name != "general" {
@@ -62,6 +65,7 @@ func TestChannelMeta_SanitizesAndTrimsLikeEverySidebarField(t *testing.T) {
 }
 
 func TestChannelMeta_EmptyNameAfterCleaningIsRequired(t *testing.T) {
+	t.Parallel()
 	for _, name := range []string{"", "   ", "<b></b>"} {
 		if _, err := cleanChannelMeta(name, "", ""); !errors.Is(err, ErrBadRequest) {
 			t.Errorf("name %q: err = %v, want ErrBadRequest", name, err)
@@ -70,6 +74,7 @@ func TestChannelMeta_EmptyNameAfterCleaningIsRequired(t *testing.T) {
 }
 
 func TestChannelMeta_SharesTheGroupDMNameCap(t *testing.T) {
+	t.Parallel()
 	// The DM code has always documented MaxGroupDMNameLen as matching the
 	// channel name cap; S-03 makes that a checked fact, not a comment.
 	if MaxChannelNameLen != MaxGroupDMNameLen {
@@ -80,6 +85,7 @@ func TestChannelMeta_SharesTheGroupDMNameCap(t *testing.T) {
 // ─── S-04: one non-DM resolution policy ──────────────────────────────────────
 
 func TestResolveGuildChannel_MissingAndDMAreIndistinguishable(t *testing.T) {
+	t.Parallel()
 	svc, database := newChannelAdminService(t)
 	seedChannel(t, database, &db.Channel{ID: 30, Name: "dm-room", Type: "dm"})
 	seedChannel(t, database, &db.Channel{ID: 31, Name: "general", Type: "text"})
@@ -107,6 +113,7 @@ func TestResolveGuildChannel_MissingAndDMAreIndistinguishable(t *testing.T) {
 // ─── Admin CRUD through the service ──────────────────────────────────────────
 
 func TestAdminCreateChannel_DefaultsTypeValidatesAndAudits(t *testing.T) {
+	t.Parallel()
 	svc, database := newChannelAdminService(t)
 
 	ch, _, err := svc.AdminCreateChannel(context.Background(), 7, AdminChannelCreate{Name: " lounge "}, nil)
@@ -139,6 +146,7 @@ func TestAdminCreateChannel_DefaultsTypeValidatesAndAudits(t *testing.T) {
 }
 
 func TestAdminUpdateChannel_NumericBoundsAndNSFWAudit(t *testing.T) {
+	t.Parallel()
 	svc, database := newChannelAdminService(t)
 	seedChannel(t, database, &db.Channel{ID: 40, Name: "general", Type: "text"})
 	existing, _ := svc.ResolveGuildChannel(context.Background(), 40)
@@ -168,6 +176,7 @@ func TestAdminUpdateChannel_NumericBoundsAndNSFWAudit(t *testing.T) {
 }
 
 func TestAdminDeleteChannel_ArchivesBeforeEviction(t *testing.T) {
+	t.Parallel()
 	svc, database := newChannelAdminService(t)
 	seedChannel(t, database, &db.Channel{ID: 50, Name: "doomed", Type: "voice"})
 	existing, _ := svc.ResolveGuildChannel(context.Background(), 50)
@@ -195,6 +204,7 @@ func TestAdminDeleteChannel_ArchivesBeforeEviction(t *testing.T) {
 // ─── Channel name uniqueness ─────────────────────────────────────────────────
 
 func TestAdminChannel_DuplicateNameIsConflict(t *testing.T) {
+	t.Parallel()
 	svc, _ := newChannelAdminService(t)
 	ctx := context.Background()
 	first, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "Lobby", Type: "text", Category: "Chat"}, nil)
@@ -228,6 +238,7 @@ func fullUpdateFrom(ch *db.Channel) AdminChannelUpdate {
 }
 
 func TestAdminUpdateChannel_StaleSnapshotKeepsAConcurrentEdit(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	other := f.newChannel(t, "gamma", f.cat.ID)
@@ -263,6 +274,7 @@ func TestAdminUpdateChannel_StaleSnapshotKeepsAConcurrentEdit(t *testing.T) {
 }
 
 func TestAdminUpdateChannel_StaleSnapshotStillAppliesWhatTheRequestChanged(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	snap := *f.a
@@ -303,6 +315,7 @@ func (f *catPermFixture) requireNameAndCategory(t *testing.T, id int64, name str
 // move was checked with is then not the name it would write, so the name is
 // checked again inside the write.
 func TestAdminUpdateChannel_StaleMoveIsRefusedWhenTheKeptNameIsTakenThere(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	other := f.otherCategoryWith(t, "lobby")
@@ -323,6 +336,7 @@ func TestAdminUpdateChannel_StaleMoveIsRefusedWhenTheKeptNameIsTakenThere(t *tes
 
 // The mirror: a rename built from a snapshot keeps a move that landed since.
 func TestAdminUpdateChannel_StaleRenameIsRefusedWhenTheNameIsTakenInTheKeptCategory(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	other := f.otherCategoryWith(t, "lobby")

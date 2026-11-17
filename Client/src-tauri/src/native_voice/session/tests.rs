@@ -1,4 +1,4 @@
-use super::events::{mic_allowed, track_info};
+use super::events::{audio_slot, is_music, mic_allowed, release_music_slot, track_info};
 use super::*;
 use livekit::e2ee::key_provider::KeyDerivationAlgorithm;
 use livekit::options::{DegradationPreference, TrackPublishOptions, VideoCodec};
@@ -270,10 +270,58 @@ fn only_a_gcm_or_custom_track_counts_as_encrypted() {
         "TR_a".into(),
         TrackKind::Audio,
         TrackSource::Microphone,
+        String::new(),
         false,
         EncryptionType::None,
     );
     assert!(!info.encrypted);
+}
+
+#[test]
+fn a_republished_audio_track_lands_in_the_slot_its_name_says() {
+    assert_eq!(audio_slot("music"), 3);
+    assert_eq!(audio_slot("screen_share_audio"), 2);
+    assert!(is_music("music"));
+    assert!(!is_music("screen_share_audio"));
+}
+
+#[test]
+fn a_withdrawn_music_track_empties_only_the_music_slot_it_belongs_to() {
+    let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+    let mut slot = Some(VideoPublication::new(sid("TR_m")));
+    assert!(!release_music_slot(&mut slot, &sid("TR_other")));
+    assert!(slot.is_some());
+    assert!(release_music_slot(&mut slot, &sid("TR_m")));
+    assert!(slot.is_none());
+    // Nothing published: nothing to end.
+    assert!(!release_music_slot(&mut slot, &sid("TR_m")));
+}
+
+#[test]
+fn a_music_republish_after_a_reconnect_follows_its_new_sid() {
+    let sid = |s: &str| TrackSid::try_from(s.to_string()).unwrap();
+    let mut slot = Some(VideoPublication::new(sid("TR_m1")));
+    assert_eq!(
+        apply_republish(
+            &mut slot,
+            TrackSource::ScreenshareAudio,
+            &sid("TR_m1"),
+            &sid("TR_m2")
+        ),
+        None
+    );
+    assert!(slot.as_ref().is_some_and(|p| p.live == sid("TR_m2")));
+    // After a stop the slot is empty and the new publication is an orphan.
+    slot = None;
+    assert_eq!(
+        apply_republish(
+            &mut slot,
+            TrackSource::ScreenshareAudio,
+            &sid("TR_m2"),
+            &sid("TR_m3")
+        ),
+        Some(sid("TR_m3"))
+    );
 }
 
 #[test]

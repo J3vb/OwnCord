@@ -339,7 +339,7 @@ test.describe("Server profiles — invite deep link", () => {
     await emitDeepLink(page, ["owncord://message/12/345"]);
 
     // Negative case proved meaningful by the same emit path succeeding below.
-    await expect(page.locator(".btn-text")).toHaveText("Login");
+    await expect(page.locator(".btn-text")).toHaveText("Sign in");
     await expect(page.locator("#invite")).toHaveValue("");
 
     await emitDeepLink(page, ["owncord://invite/after-message"]);

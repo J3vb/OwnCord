@@ -36,6 +36,7 @@ func bearerDo(t *testing.T, h http.Handler, method, path, token string, body []b
 // non-holder must see the IDENTICAL status and body for an unknown id and a
 // real one, on every one of the four routes that take {id}.
 func TestModerationQueue_AuthorizationBeforeExistence(t *testing.T) {
+	t.Parallel()
 	handler, database := fullRouterWithDB(t)
 	ctx := context.Background()
 

@@ -24,7 +24,7 @@ func (d *DB) PurgeChannelMessages(ctx context.Context, channelID, before int64, 
 	if err != nil {
 		return nil, fmt.Errorf("PurgeChannelMessages begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	ids, err := purgeChannelMessagesTx(ctx, tx, channelID, before, limit)
 	if err != nil {
@@ -49,7 +49,7 @@ func (d *DB) PurgeChannelMessagesWithAction(ctx context.Context, channelID, befo
 	if err != nil {
 		return nil, fmt.Errorf("PurgeChannelMessagesWithAction begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	ids, err := purgeChannelMessagesTx(ctx, tx, channelID, before, limit)
 	if err != nil {
@@ -132,7 +132,7 @@ func (d *DB) DeleteMessageWithRemoval(ctx context.Context, msgID, deleterID int6
 	if err != nil {
 		return fmt.Errorf("DeleteMessageWithRemoval begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	q := dbgen.New(tx)
 	res, err := q.SoftDeleteMessage(ctx, msgID)

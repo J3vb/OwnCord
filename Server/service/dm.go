@@ -358,9 +358,9 @@ func (s *DMService) DMSummaryFor(ctx context.Context, viewerID, channelID int64)
 	if err != nil {
 		return db.DMChannelInfo{}, fmt.Errorf("%w: failed to read DM participants: %w", ErrInternal, err)
 	}
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return db.DMChannelInfo{}, fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, s.st, channelID)
+	if err != nil {
+		return db.DMChannelInfo{}, err
 	}
 	isGroup, err := s.st.IsGroupDM(ctx, channelID)
 	if err != nil {

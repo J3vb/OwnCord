@@ -11,6 +11,7 @@ import {
   makeMockApi,
   type RevokeInviteOpts,
 } from "../../helpers/overlayManagersHarness";
+import { ApiClientError } from "@lib/api";
 import { useMountContainer } from "../../helpers/mountContainer";
 
 vi.mock("@lib/logger", () => mocks.loggerMock());
@@ -118,21 +119,34 @@ describe("createInviteManagerController", () => {
     const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
 
     // The callback should re-throw so InviteManager's catch prevents optimistic removal
-    await expect(opts.onRevokeInvite("abc123xyz")).rejects.toThrow("network error");
+    await expect(opts.onRevokeInvite(7, "abc123xyz")).rejects.toThrow("network error");
 
     // Controller should log the error with context
     expect(mockLogError).toHaveBeenCalled();
   });
 
-  it("onRevokeInvite succeeds normally when API works", async () => {
+  it("onRevokeInvite falls back to revoke by code when the server has no by-id route", async () => {
+    const api = makeMockApi({
+      revokeInvite: vi.fn().mockRejectedValue(new ApiClientError(404, "NOT_FOUND", "not found")),
+      revokeInviteByCode: vi.fn().mockResolvedValue(undefined),
+    });
+    await openInvites(api);
+    const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
+    await expect(opts.onRevokeInvite(7, "abc123xyz")).resolves.toBeUndefined();
+    expect(api.revokeInviteByCode).toHaveBeenCalledWith("abc123xyz");
+  });
+
+  it("onRevokeInvite revokes by id when the API works", async () => {
     const api = makeMockApi();
 
     await openInvites(api);
 
     const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
 
-    await expect(opts.onRevokeInvite("abc123xyz")).resolves.toBeUndefined();
+    await expect(opts.onRevokeInvite(7, "abc123xyz")).resolves.toBeUndefined();
     expect(mockLogError).not.toHaveBeenCalled();
+    expect(api.revokeInvite).toHaveBeenCalledWith(7);
+    expect(api.revokeInviteByCode).not.toHaveBeenCalled();
   });
 
   it("opening with no live invite creates exactly one (7 days, no limit) and features it", async () => {
@@ -202,6 +216,23 @@ describe("createInviteManagerController", () => {
     expect(api.createInvite).toHaveBeenCalledTimes(1);
     const opts = firstCallOpts<FeaturedCodeOpts>(createInviteManager);
     expect(opts.featuredCode).toBe("mine-new");
+  });
+
+  it("credits the invite made on open to the signed-in user and names the server", async () => {
+    const api = makeMockApi({
+      getInvites: vi.fn().mockResolvedValue([]),
+      // The create reply carries an empty creator.
+      createInvite: vi
+        .fn()
+        .mockResolvedValue(makeInviteResponse({ code: "fresh1", creator_username: "" })),
+    });
+    await openInvites(api);
+    const opts = firstCallOpts<{
+      invites: Array<{ code: string; createdBy: string }>;
+      serverName: string | null;
+    }>(createInviteManager);
+    expect(opts.invites).toEqual([expect.objectContaining({ code: "fresh1", createdBy: "me" })]);
+    expect(opts.serverName).toBe("Game Night Crew");
   });
 
   it("a failed create-on-open still opens the manager with the list and toasts the reason", async () => {
@@ -286,7 +317,7 @@ describe("mapInviteResponse", () => {
     expect(result.uses).toBe(3);
     expect(result.maxUses).toBe(10);
     expect(result.expiresAt).toBe("2024-12-31");
-    expect(result.createdBy).toBe("unknown");
+    expect(result.createdBy).toBe("");
     // created_at is distinct from expires_at now (F4).
     expect(result.createdAt).toBe("");
   });
@@ -323,7 +354,13 @@ describe("mapInviteResponse", () => {
     expect(result.createdBy).toBe("Alice");
   });
 
-  it("falls back to 'unknown' when created_by has no username", () => {
+  it("uses the fallback creator only when the reply names none", () => {
+    const base = { id: 1, code: "abc", max_uses: null, expires_at: null };
+    expect(mapInviteResponse({ ...base, creator_username: "" }, "me").createdBy).toBe("me");
+    expect(mapInviteResponse({ ...base, creator_username: "mira" }, "me").createdBy).toBe("mira");
+  });
+
+  it("leaves the creator empty when created_by has no username", () => {
     const raw = {
       id: 1,
       code: "abc",
@@ -335,10 +372,10 @@ describe("mapInviteResponse", () => {
     };
 
     const result = mapInviteResponse(raw as never);
-    expect(result.createdBy).toBe("unknown");
+    expect(result.createdBy).toBe("");
   });
 
-  it("falls back to 'unknown' when created_by is not an object", () => {
+  it("leaves the creator empty when created_by is not an object", () => {
     const raw = {
       id: 1,
       code: "abc",
@@ -350,7 +387,7 @@ describe("mapInviteResponse", () => {
     };
 
     const result = mapInviteResponse(raw as never);
-    expect(result.createdBy).toBe("unknown");
+    expect(result.createdBy).toBe("");
   });
 
   it("uses 'uses' extra field when use_count is undefined", () => {
@@ -486,6 +523,8 @@ describe("createInviteManagerController (additional)", () => {
     const result = await opts.onCreateInvite({ expiresInHours: 24, maxUses: 5 });
     expect(api.createInvite).toHaveBeenCalledWith({ expires_in_hours: 24, max_uses: 5 });
     expect((result as { code: string }).code).toBe("new123");
+    // The create reply names no creator; this client made it.
+    expect((result as { createdBy: string }).createdBy).toBe("me");
   });
 
   it("onCopyLink copies an invite link to clipboard", async () => {
@@ -603,16 +642,5 @@ describe("createInviteManagerController (additional)", () => {
 
     expect(createInviteManager).not.toHaveBeenCalled();
     expect(mockInviteManagerMount).not.toHaveBeenCalled();
-  });
-
-  it("onRevokeInvite passes invite code directly to API", async () => {
-    const api = makeMockApi();
-
-    await openInvites(api);
-
-    const opts = firstCallOpts<RevokeInviteOpts>(createInviteManager);
-
-    await expect(opts.onRevokeInvite("abc123xyz")).resolves.toBeUndefined();
-    expect(api.revokeInvite).toHaveBeenCalledWith("abc123xyz");
   });
 });

@@ -216,6 +216,24 @@ func (c *LiveKitClient) ListParticipants(ctx context.Context, channelID int64) (
 	return ids, nil
 }
 
+// ListParticipantSIDs returns identity -> session id for a channel's room. A failure is returned,
+// never collapsed to an empty map.
+func (c *LiveKitClient) ListParticipantSIDs(ctx context.Context, channelID int64) (map[string]string, error) {
+	ctx, cancel := context.WithTimeout(ctx, lkTimeout)
+	defer cancel()
+	resp, err := c.roomSvc.ListParticipants(ctx, &livekit.ListParticipantsRequest{
+		Room: RoomName(channelID),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("livekit: listing participants: %w", err)
+	}
+	sids := make(map[string]string, len(resp.GetParticipants()))
+	for _, p := range resp.GetParticipants() {
+		sids[p.GetIdentity()] = p.GetSid()
+	}
+	return sids, nil
+}
+
 // ListRoomChannelIDs returns the OwnCord rooms the SFU has open, for the reconciler: a room can
 // hold participants after its last voice_states row is gone. Other rooms are skipped.
 func (c *LiveKitClient) ListRoomChannelIDs(ctx context.Context) ([]int64, error) {

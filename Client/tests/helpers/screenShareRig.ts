@@ -16,6 +16,7 @@ export function screenShareRig(wsSend: Mock = vi.fn(() => "id")) {
       publishTrack,
       unpublishTrack,
       setScreenShareEnabled: vi.fn().mockResolvedValue(undefined),
+      trackPublications: new Map(),
     },
   } as unknown as Room;
   const ws = { send: wsSend } as unknown as WsClient;

@@ -36,10 +36,11 @@ import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { errorText, TransportError, type BanMemberResponse } from "@lib/api";
 import { createElement, setOwnedTimeout, setText } from "@lib/dom";
-import { createModal, type ModalInstance } from "@lib/ui/modalFactory";
+import type { ModalInstance } from "@lib/ui/modalFactory";
 import type { ToastType } from "@lib/ui/toastContainer";
 import { shellText } from "../../i18n/shell";
 import { moderationText as t } from "../../i18n/moderation";
+import { createFormStatus, openFormModal } from "./formModal";
 
 /** The longest reason the server accepts. */
 export const BAN_REASON_MAX = 200;
@@ -151,12 +152,7 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
     deleteSelect.appendChild(createElement("option", { value: String(d.seconds) }, t(d.key)));
   }
 
-  const status = createElement("div", {
-    class: "form-group",
-    role: "alert",
-    style: "color: var(--text-danger); font-size: 13px; display: none;",
-    "data-testid": "ban-status",
-  });
+  const status = createFormStatus("ban-status");
 
   body.append(
     bodyText,
@@ -182,37 +178,36 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
   footer.append(cancel, confirm);
   content.append(header, body, footer);
 
-  let closed = false;
   let inFlight = false;
-  /** Set once the ban is in and only the purge is unfinished: what Retry resends. */
+  /** What Retry resends: a purge left unfinished, or a request that may not have arrived. */
   let pending: BanRequest | null = null;
+  /** Set once the server has answered the ban. */
+  let banConfirmed = false;
   let deletedSoFar = 0;
   /** Aborted on close, so the retry-window timer never outlives the dialog. */
   const lifetime = new Disposable();
   let cancelExpiry: (() => void) | null = null;
 
-  /** The unfinished-purge report for a dialog that closed before Retry. */
-  const stoppedText = (): string => t("banDialog.purgeStopped", { name, count: deletedSoFar });
+  /** The report for a dialog that closed before Retry. */
+  const stoppedText = (): string =>
+    banConfirmed
+      ? t("banDialog.purgeStopped", { name, count: deletedSoFar })
+      : t("banDialog.unconfirmed", { name });
 
-  const modal = createModal({
-    content,
-    ariaLabelledBy: titleId,
-    overlayAttrs: { "data-testid": "ban-dialog" },
-    // A stray backdrop click must not lose Retry.
-    closeOnBackdrop: false,
-    onClose: () => {
-      closed = true;
-      lifetime.destroy();
-      if (pending !== null && !inFlight) notify(stoppedText(), "warning");
+  const { modal, isClosed, showStatus, hideStatus } = openFormModal(
+    {
+      content,
+      titleId,
+      testId: "ban-dialog",
+      onClose: () => {
+        lifetime.destroy();
+        if (pending !== null && !inFlight) notify(stoppedText(), "warning");
+      },
+      ...(options.signal === undefined ? {} : { signal: options.signal }),
+      ...(options.fallbackFocus === undefined ? {} : { fallbackFocus: options.fallbackFocus }),
     },
-    ...(options.signal === undefined ? {} : { signal: options.signal }),
-    ...(options.fallbackFocus === undefined ? {} : { fallbackFocus: options.fallbackFocus }),
-  });
-
-  function showStatus(text: string): void {
-    status.style.display = "block";
-    setText(status, text);
-  }
+    status,
+  );
 
   function setBusy(busy: boolean): void {
     inFlight = busy;
@@ -246,7 +241,7 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
       lifetime.signal,
       () => {
         pending = null;
-        if (inFlight || closed) return;
+        if (inFlight || isClosed()) return;
         setBusy(false);
         showStatus(t("banDialog.retryExpired"));
       },
@@ -263,7 +258,7 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
   async function send(): Promise<void> {
     if (inFlight) return;
     const request = pending ?? readForm();
-    status.style.display = "none";
+    hideStatus();
     setBusy(true);
     let result: BanMemberResponse;
     try {
@@ -274,7 +269,7 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
       if (err instanceof TransportError && request.deleteMessageSeconds > 0) {
         holdForRetry(request);
       }
-      if (closed) {
+      if (isClosed()) {
         notify(errorText(err, shellText("members.banFailed")), "error");
         return;
       }
@@ -284,6 +279,7 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
       confirm.focus();
       return;
     }
+    banConfirmed = true;
     options.onBanned?.();
 
     if (request.deleteMessageSeconds > 0) {
@@ -298,7 +294,7 @@ export function openBanDialog(options: BanDialogOptions): ModalInstance {
       deletedSoFar += purge.deleted;
       if (!purge.complete) {
         holdForRetry(request);
-        if (closed) {
+        if (isClosed()) {
           notify(stoppedText(), "warning");
           return;
         }

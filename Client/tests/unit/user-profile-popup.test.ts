@@ -7,6 +7,7 @@ import {
 } from "../../src/features/profiles/userProfilePopup";
 import { createNoteBinding } from "../../src/features/profiles/userNotes";
 import { useMountContainer } from "../helpers/mountContainer";
+import { pickAvatarColor } from "../../src/features/profiles/avatar";
 
 function makeUser(overrides?: Partial<UserProfileData>): UserProfileData {
   return {
@@ -102,6 +103,12 @@ describe("UserProfilePopup", () => {
     // Avatar initial for "bob" should be "B"
     const avatar = container.querySelector(".upp-avatar span");
     expect(avatar?.textContent).toBe("B");
+    // On the same colour as everywhere else in the app.
+    const probe = document.createElement("div");
+    probe.style.background = pickAvatarColor("bob");
+    expect(container.querySelector<HTMLElement>(".upp-avatar")!.style.background).toBe(
+      probe.style.background,
+    );
 
     // Message and Call buttons render when handlers are wired
     const msgBtn = container.querySelector('[data-testid="upp-message-btn"]');

@@ -73,7 +73,7 @@ afterEach(() => {
 describe("DmPrivacy section", () => {
   it("renders both switches from the GET", async () => {
     const section = await loaded({ allow_member_dms: true, message_requests: false });
-    expect(section.querySelector("h3")?.textContent).toBe("Direct messages");
+    expect(section.querySelector("h2")?.textContent).toBe("Direct messages");
     expect(allowSw(section).getAttribute("role")).toBe("switch");
     expect(checked(allowSw(section))).toBe("true");
     expect(checked(reqSw(section))).toBe("false");
@@ -236,15 +236,15 @@ const sameServer: DmPrivacy = { allow_member_dms: false, message_requests: true 
 describe("DmPrivacy markup", () => {
   it("labels the section by its heading and gives each section its own ids", async () => {
     const first = await loaded();
-    const heading = first.querySelector<HTMLElement>("h3")!;
-    expect(first.className).toBe("dm-privacy");
+    const heading = first.querySelector<HTMLElement>("h2")!;
+    expect(first.className).toBe("settings-section dm-privacy");
     expect(first.getAttribute("data-testid")).toBe("dm-privacy");
     expect(heading.id).toMatch(/^dm-privacy-\d+$/);
     expect(first.getAttribute("aria-labelledby")).toBe(heading.id);
-    expect(heading.className).toBe("safety-heading");
+    expect(heading.className).toBe("settings-section-label");
     expect(heading.getAttribute("tabindex")).toBe("-1");
     const second = mount();
-    const secondHeading = second.querySelector<HTMLElement>("h3")!;
+    const secondHeading = second.querySelector<HTMLElement>("h2")!;
     expect(secondHeading.id).not.toBe(heading.id);
     expect(num(secondHeading)).toBeGreaterThan(num(heading));
     expect(num(heading)).toBeGreaterThan(0);
@@ -348,7 +348,7 @@ describe("DmPrivacy loading state", () => {
     retryOf(section).click();
     gets[1]!.resolve(both);
     await flush();
-    expect(document.activeElement).toBe(section.querySelector("h3"));
+    expect(document.activeElement).toBe(section.querySelector("h2"));
   });
 
   it("leaves focus alone when Retry did not have it", async () => {
@@ -359,7 +359,7 @@ describe("DmPrivacy loading state", () => {
     retryOf(section).click();
     gets[1]!.resolve(both);
     await flush();
-    expect(document.activeElement).not.toBe(section.querySelector("h3"));
+    expect(document.activeElement).not.toBe(section.querySelector("h2"));
   });
 
   it("makes no request for a tab that is already closed", () => {

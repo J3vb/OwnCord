@@ -10,7 +10,7 @@ import { isInstrumented, withoutSandboxHeader } from "../helpers/instrumented";
 const srcDir = path.resolve(__dirname, "../../src");
 
 const lineCaps: Record<string, number> = {
-  "lib/dispatcher.ts": 341,
+  "lib/dispatcher.ts": 329,
   "main.ts": 150,
   "pages/MainPage.ts": 482,
 };

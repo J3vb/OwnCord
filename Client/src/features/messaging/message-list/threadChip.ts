@@ -18,21 +18,9 @@ import { threadAgoLabel } from "../../threads/threadAgo";
 
 export { threadAgoLabel };
 
-function shape(tag: "rect" | "path", attrs: Record<string, string>): SVGElement {
-  const el = document.createElementNS("http://www.w3.org/2000/svg", tag);
-  for (const [name, value] of Object.entries(attrs)) el.setAttribute(name, value);
-  return el;
-}
-
-/** The archive box (Lucide). Kept here, in the lazy chunk, not in the startup icon table. */
+/** The archive box. */
 export function createArchiveIcon(size: number): SVGSVGElement {
-  const svg = createIcon("x", size);
-  svg.replaceChildren(
-    shape("rect", { width: "20", height: "5", x: "2", y: "3", rx: "1" }),
-    shape("path", { d: "M4 8v11a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8" }),
-    shape("path", { d: "M10 12h4" }),
-  );
-  return svg;
+  return createIcon("archive", size);
 }
 
 /** A thread shows its exact count up to this many, then "50+". */

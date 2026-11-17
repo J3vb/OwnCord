@@ -5,12 +5,22 @@
 
 import { createElement } from "@lib/dom";
 import { applyStatusIndicator } from "@lib/ui/statusIndicator";
-import { avatarAnimationMode, isRenderableAvatar, setAvatarSource } from "../profiles/avatar";
 import {
-  fetchImageAsObjectUrl,
+  avatarAnimationMode,
+  isRenderableAvatar,
+  pickAvatarColor,
+  setAvatarSource,
+} from "../profiles/avatar";
+import {
+  isAnimatedThumb,
   recoverEvictedImage,
   resolveServerUrl,
 } from "../messaging/content/attachments";
+import {
+  avatarFetchUrl,
+  fetchAvatarObjectUrl,
+  playOriginalOnEngage,
+} from "../profiles/avatarSource";
 import type { DmConversation, DmParticipant } from "./dmConversation";
 
 /**
@@ -27,15 +37,16 @@ function paintAvatar(el: HTMLElement, avatar: string | null, label: string): voi
   el.appendChild(letter);
   if (!isRenderableAvatar(avatar)) return;
   const resolved = resolveServerUrl(avatar);
-  void fetchImageAsObjectUrl(resolved).then(async (objectUrl) => {
+  void fetchAvatarObjectUrl(resolved, 128).then(async (objectUrl) => {
     if (objectUrl === null || !el.isConnected) return;
     const img = createElement("img", { alt: label });
-    recoverEvictedImage(img, { url: resolved });
+    recoverEvictedImage(img, { url: avatarFetchUrl(resolved, 128) });
     img.style.width = "100%";
     img.style.height = "100%";
     img.style.borderRadius = "50%";
     const current = (): boolean => el.isConnected;
-    if (!(await setAvatarSource(img, objectUrl, () => avatarAnimationMode(el), current))) return;
+    const mode = (): ReturnType<typeof avatarAnimationMode> => avatarAnimationMode(el);
+    if (!(await setAvatarSource(img, objectUrl, mode, current, undefined, resolved))) return;
     letter.remove();
     el.insertBefore(img, el.firstChild);
   });
@@ -79,7 +90,7 @@ export function buildGroupAvatarStack(
   drawFaces();
   if (!isRenderableAvatar(icon)) return stack;
   const resolved = resolveServerUrl(icon);
-  void fetchImageAsObjectUrl(resolved).then((objectUrl) => {
+  void fetchAvatarObjectUrl(resolved, 128).then((objectUrl) => {
     if (objectUrl === null) return;
     const img = createElement("img", {
       src: objectUrl,
@@ -87,7 +98,12 @@ export function buildGroupAvatarStack(
       class: "dm-avatar-icon-img",
       "data-testid": `${testId}-icon`,
     });
-    recoverEvictedImage(img, { url: resolved });
+    recoverEvictedImage(img, { url: avatarFetchUrl(resolved, 128) });
+    // The preview of an animated icon is its still; the icon plays on hover.
+    if (isAnimatedThumb(objectUrl)) {
+      const shown = (): boolean => img.parentNode === stack;
+      playOriginalOnEngage(img, objectUrl, resolved, { hover: stack }, shown);
+    }
     img.addEventListener(
       "error",
       () => {
@@ -110,7 +126,9 @@ export function buildGroupAvatarStack(
  * presented as a fact about the conversation.
  */
 export function buildAvatar(convo: DmConversation): HTMLDivElement {
-  const avatarBg = convo.avatarColor ?? "#5865F2";
+  // A 1:1 DM letter matches that user's colour everywhere else.
+  const avatarBg =
+    convo.avatarColor ?? (convo.isGroup === true ? "#5865F2" : pickAvatarColor(convo.username));
 
   if (convo.isGroup === true) {
     return buildGroupAvatarStack(

@@ -4,7 +4,7 @@
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { createIcon, type IconName } from "@lib/icons";
+import { createIcon, swapIcon } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { authStore } from "@stores/auth.store";
@@ -25,12 +25,14 @@ import {
 import { parseExpiry } from "../presence/statusDefs";
 import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
 import { applyStatusIndicator, showsPhone } from "@lib/ui/statusIndicator";
-import { avatarAnimationMode, isRenderableAvatar, setAvatarSource } from "../profiles/avatar";
 import {
-  fetchImageAsObjectUrl,
-  recoverEvictedImage,
-  resolveServerUrl,
-} from "../messaging/content/attachments";
+  avatarAnimationMode,
+  isRenderableAvatar,
+  pickAvatarColor,
+  setAvatarSource,
+} from "../profiles/avatar";
+import { recoverEvictedImage, resolveServerUrl } from "../messaging/content/attachments";
+import { avatarFetchUrl, fetchAvatarObjectUrl } from "../profiles/avatarSource";
 import type { WsClient } from "@lib/ws";
 import type { PresenceSender } from "@lib/presence/presence";
 import { shellText } from "../../i18n/shell";
@@ -93,11 +95,6 @@ const STATUS_TEXT = {
   offline: "status.offline",
 } as const satisfies Readonly<Record<UserStatus, string>>;
 
-function swapIcon(btn: HTMLButtonElement, name: IconName): void {
-  btn.querySelector("svg")?.remove();
-  btn.appendChild(createIcon(name, 18));
-}
-
 /** Paint the mic and headphone buttons from the voice store. A moderator's
  *  mute or deafen is not ours to lift (the server refuses it), so its button
  *  is disabled and says why. In a call joined listen-only there is no mic to
@@ -135,6 +132,7 @@ function voiceControlsKey(s: VoiceState): string {
     s.listenOnly,
     s.pttGated === true,
     s.inAfkChannel === true,
+    s.phoneCallHold === true,
   ].join("|");
 }
 
@@ -178,6 +176,10 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
   }): void {
     if (avatarEl === null) return;
     if (avatarTextEl !== null) setText(avatarTextEl, avatarInitial(subject));
+    // The letter's colour is the one every other surface gives this user; a
+    // new identity with no picture repaints it even when the URL is unchanged.
+    const letterBackground = pickAvatarColor(subject.username);
+    if (avatarImgEl === null) avatarEl.style.background = letterBackground;
 
     const url = isRenderableAvatar(subject.avatar) ? resolveServerUrl(subject.avatar) : null;
     if (url === renderedAvatarUrl) return;
@@ -189,19 +191,20 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     }
     if (url === null) {
       if (avatarTextEl !== null) avatarTextEl.style.display = "";
-      avatarEl.style.background = "var(--accent)";
+      avatarEl.style.background = letterBackground;
       return;
     }
-    void fetchImageAsObjectUrl(url).then(async (objectUrl) => {
+    void fetchAvatarObjectUrl(url, 128).then(async (objectUrl) => {
       // The URL may have changed again (or the bar been torn down) while the
       // bytes were in flight.
       const current = (): boolean => avatarEl !== null && renderedAvatarUrl === url;
       if (objectUrl === null || !current()) return;
       const img = createElement("img", { class: "avatar-img", alt: subject.username });
-      recoverEvictedImage(img, { url });
+      recoverEvictedImage(img, { url: avatarFetchUrl(url, 128) });
       const el = avatarEl;
       if (el === null) return;
-      if (!(await setAvatarSource(img, objectUrl, () => avatarAnimationMode(el), current))) return;
+      const mode = (): ReturnType<typeof avatarAnimationMode> => avatarAnimationMode(el);
+      if (!(await setAvatarSource(img, objectUrl, mode, current, undefined, url))) return;
       avatarImgEl = img;
       if (avatarTextEl !== null) avatarTextEl.style.display = "none";
       el.style.background = "transparent";
@@ -240,7 +243,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
 
     avatarEl = createElement("div", {
       class: "ub-avatar",
-      style: "background: var(--accent); position: relative;",
+      style: "position: relative;",
     });
     avatarTextEl = createElement("span", {});
     avatarEl.appendChild(avatarTextEl);

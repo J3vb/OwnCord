@@ -58,12 +58,13 @@ var nsfwDispatchResolveRaceHook func(channelID int64)
 // decision is visible. Every server-to-client type in message_types.go MUST have an entry
 // (TestNSFW_EveryServerFrameKindIsClassified).
 var contentBearingKinds = map[string]bool{
-	MsgTypeChatMessage:     true,
-	MsgTypeChatEdited:      true,
-	MsgTypeReactionUpdate:  true,
-	MsgTypePollUpdate:      true, // names a message and carries its tallies, as reaction_update does
-	MsgTypePluginBroadcast: true, // plugin-authored content posted into a channel
-	MsgTypeThreadChanged:   true, // a thread's name, discloses what the parent's unacknowledged members may not read
+	MsgTypeChatMessage:         true,
+	MsgTypeChatEdited:          true,
+	MsgTypeReactionUpdate:      true,
+	MsgTypePollUpdate:          true, // names a message and carries its tallies, as reaction_update does
+	MsgTypeMessageLinkPreviews: true, // a linked page's title and description, which discloses what the message links to
+	MsgTypePluginBroadcast:     true, // plugin-authored content posted into a channel
+	MsgTypeThreadChanged:       true, // a thread's name, discloses what the parent's unacknowledged members may not read
 
 	MsgTypeAuthOK:            false,
 	MsgTypeAuthError:         false,

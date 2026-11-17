@@ -85,6 +85,7 @@ func (f *catPermFixture) auditHas(t *testing.T, action string) bool {
 }
 
 func TestCategoryOverride_WritesTemplateAndEverySyncedChannel(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	res, err := f.svc.PutCategoryRoleOverride(context.Background(), 7, f.mod, f.cat.ID, f.low.ID, permissions.ReadMessages, permissions.SendMessages)
 	mustDo(t, "PutCategoryRoleOverride", err)
@@ -110,6 +111,7 @@ func TestCategoryOverride_WritesTemplateAndEverySyncedChannel(t *testing.T) {
 }
 
 func TestCategoryOverride_LeavesUnsyncedChannelsAlone(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	// A direct edit unsyncs b and gives it its own row.
@@ -129,6 +131,7 @@ func TestCategoryOverride_LeavesUnsyncedChannelsAlone(t *testing.T) {
 // Edge case 1: the bits are fine on the category row, but the write would
 // clear a deny the actor's role lacks on a synced channel. Refused as a whole.
 func TestCategoryOverride_RefusedWhenASyncedChannelCarriesABitTheActorLacks(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	// Channel a (synced) carries a MANAGE_SERVER deny that the category row
@@ -161,6 +164,7 @@ func TestCategoryOverride_RefusedWhenASyncedChannelCarriesABitTheActorLacks(t *t
 }
 
 func TestCategoryOverride_EscalationOverTheCategoryRowItself(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	if _, err := f.svc.PutCategoryRoleOverride(ctx, 7, f.admin, f.cat.ID, f.low.ID, 0, permissions.ManageServer); err != nil {
@@ -185,6 +189,7 @@ func TestCategoryOverride_EscalationOverTheCategoryRowItself(t *testing.T) {
 }
 
 func TestCategoryOverride_ClearRemovesTemplateAndSyncedRows(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	if _, err := f.svc.PutCategoryRoleOverride(ctx, 7, f.mod, f.cat.ID, f.low.ID, permissions.ReadMessages, 0); err != nil {
@@ -206,6 +211,7 @@ func TestCategoryOverride_ClearRemovesTemplateAndSyncedRows(t *testing.T) {
 }
 
 func TestCategoryOverride_HierarchyGuards(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	peer := &db.Role{ID: 23, Name: "cat-peer", Position: f.mod.Position, Permissions: permissions.ReadMessages}
@@ -259,6 +265,7 @@ func TestCategoryOverride_HierarchyGuards(t *testing.T) {
 // Invalidation is the union of affected users, and a write reports every
 // touched channel so each one gets its visibility refreshed.
 func TestCategoryOverride_InvalidationCoversRoleHolders(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	for _, id := range []int64{41, 42} {
 		seedUser(t, f.database, &db.User{ID: id})
@@ -288,6 +295,7 @@ func (failingHolders) ListUserIDsByRole(context.Context, int64) ([]int64, error)
 }
 
 func TestCategoryOverride_InvalidationFailsSafeToFullFlush(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	svc := NewChannelService(failingHolders{f.database}, NewPermissionService(f.database, nil))
 	res, err := svc.PutCategoryRoleOverride(context.Background(), 7, f.mod, f.cat.ID, f.low.ID, permissions.ReadMessages, 0)
@@ -298,6 +306,7 @@ func TestCategoryOverride_InvalidationFailsSafeToFullFlush(t *testing.T) {
 }
 
 func TestCategoryOverride_StoreWithoutCategoriesAnswersInternal(t *testing.T) {
+	t.Parallel()
 	svc := &ChannelService{channelOverrides: &channelOverrides{}}
 	if _, err := svc.PutCategoryRoleOverride(context.Background(), 1, &db.Role{}, 1, 1, 0, 0); !errors.Is(err, ErrInternal) {
 		t.Errorf("err = %v, want ErrInternal", err)
@@ -314,6 +323,7 @@ func TestCategoryOverride_StoreWithoutCategoriesAnswersInternal(t *testing.T) {
 }
 
 func TestCategoryPermissions_ListsEveryRoleAndOnlyOverriddenUsers(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	seedUser(t, f.database, &db.User{ID: 31, Username: "has-row"})
@@ -344,6 +354,7 @@ func TestCategoryPermissions_ListsEveryRoleAndOnlyOverriddenUsers(t *testing.T) 
 // WP 5.1a pattern for WP 6.5d: the service, not the admin handler, drops the
 // cache and refreshes every touched channel's audience, after the commit.
 func TestCategoryOverride_ServiceNotifiesOncePerTouchedChannelAfterCommit(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	seedUser(t, f.database, &db.User{ID: 31, Username: "member"})

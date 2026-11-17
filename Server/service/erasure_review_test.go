@@ -30,6 +30,7 @@ func countAudit(t *testing.T, database *db.DB, where string, args ...any) int {
 // enqueues after the erasure is written unlinked too; a refused erasure
 // leaves everything as it was (B4-10).
 func TestErasureService_QueuedAuditEntriesAreUnlinked(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -102,6 +103,7 @@ func TestErasureService_QueuedAuditEntriesAreUnlinked(t *testing.T) {
 // first replay recovers the floor from the markers' own tokens, not from
 // the counter (Codex's review of #1523).
 func TestErasureService_ReplayMarkersRecoversMissingFloors(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -182,6 +184,7 @@ func restoreBackupOver(t *testing.T, database *db.DB, path, backup string) *db.D
 // the only one. The replay must still erase them: the guard is a
 // live-operation rule the erasure passed when it ran (B4-10).
 func TestErasureService_ReplayErasesTheLastAdminOfAnOlderBackup(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
 	database := openFileDB(t, dbPath)
 	ctx := context.Background()
@@ -231,6 +234,7 @@ func TestErasureService_ReplayErasesTheLastAdminOfAnOlderBackup(t *testing.T) {
 // transaction never ran is applied too — the request behind it was
 // authorised — and one whose account is gone is confirmed.
 func TestErasureService_PendingMarkerSurvivesACrashAndARestore(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
 	database := openFileDB(t, dbPath)
 	ctx := context.Background()
@@ -314,6 +318,7 @@ func mustMarkers(t *testing.T, m *db.MarkerStore) []db.DeletionMarker {
 // marker file keeps the counter as a floor and the replay raises the
 // database to it first (B4-10).
 func TestErasureService_ReplayMarkersRaisesTheSequenceFloors(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -373,6 +378,7 @@ func TestErasureService_ReplayMarkersRaisesTheSequenceFloors(t *testing.T) {
 // until it has been recorded as complete, not until a row exists, and its
 // result is merged with the row (Codex's second review of #1523).
 func TestErasureService_ReplayMarkersProbesPastAnInsufficientFloor(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -423,6 +429,7 @@ func TestErasureService_ReplayMarkersProbesPastAnInsufficientFloor(t *testing.T)
 // start-up fails rather than persisting one that only looks safe (Codex's
 // second review of #1523).
 func TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	markers := newTestMarkers(t)
@@ -498,6 +505,7 @@ func TestErasureService_ReplayMarkersRefusesAnUnresolvableFloor(t *testing.T) {
 // the gate from it, keeping the unauthenticated setup endpoint shut (Codex's
 // fifth review of #1523, landing here after that PR merged).
 func TestErasureService_AccountMarkersCloseSetupAcrossAPreSetupRestore(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
 	database := openFileDB(t, dbPath)
 	ctx := context.Background()

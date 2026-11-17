@@ -15,6 +15,7 @@ import (
 // (screenshare) must still count against enabling their camera.
 
 func TestVoice_EnableCameraIfUnderLimit_ReEnableIdempotentAtCap(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "cam-reen-u1")
 	chanID := seedVoiceChannel(t, database, "cam-reen-ch")
@@ -34,6 +35,7 @@ func TestVoice_EnableCameraIfUnderLimit_ReEnableIdempotentAtCap(t *testing.T) {
 }
 
 func TestVoice_EnableCameraIfUnderLimit_OtherUserStillRefusedAtCap(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "cam-cap-u1")
 	u2 := seedVoiceUser(t, database, "cam-cap-u2")
@@ -52,6 +54,7 @@ func TestVoice_EnableCameraIfUnderLimit_OtherUserStillRefusedAtCap(t *testing.T)
 }
 
 func TestVoice_EnableCameraIfUnderLimit_OwnScreenshareStillCounts(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "cam-ss-u1")
 	chanID := seedVoiceChannel(t, database, "cam-ss-ch")
@@ -69,6 +72,7 @@ func TestVoice_EnableCameraIfUnderLimit_OwnScreenshareStillCounts(t *testing.T) 
 }
 
 func TestVoice_EnableScreenshareIfUnderLimit_ReEnableIdempotentAtCap(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "ss-reen-u1")
 	chanID := seedVoiceChannel(t, database, "ss-reen-ch")

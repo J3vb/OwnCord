@@ -7,7 +7,7 @@
 # toolchain cross-compiles both targets natively via GOARCH below.
 # The tag is for humans; the digest is what actually builds. Dependabot's
 # `docker` block moves both together, so the tag and the digest cannot drift.
-FROM --platform=$BUILDPLATFORM golang:1.27-bookworm@sha256:dc0963f32053e4bc451d24d87e3892d42d01021b61f093e98eb95c0352bb84b0 AS builder
+FROM --platform=$BUILDPLATFORM golang:1.27-bookworm@sha256:4fa7c968ba93f1635670522dbb01a2c78150443e1385746924566079f36570ea AS builder
 
 ARG VERSION=dev
 # Supplied by BuildKit per target platform ("amd64", "arm64"). Left empty by a
@@ -40,11 +40,20 @@ RUN set -eu; \
     rm "/tmp/${f}"
 
 WORKDIR /src
+# BuildKit cache mounts keep the module and build caches between builds on the
+# same builder, so the amd64 and arm64 legs of one run share compiled packages.
+# They never land in an image layer.
 COPY go.mod go.sum ./
-RUN go mod download
+RUN --mount=type=cache,target=/go/pkg/mod \
+    go mod download
 
+# -trimpath matches release.yml's build, so the image binary carries no
+# builder paths and matches the release binary.
 COPY . .
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+RUN --mount=type=cache,target=/go/pkg/mod \
+    --mount=type=cache,target=/root/.cache/go-build \
+    CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
+    -trimpath \
     -o /chatserver \
     -ldflags "-s -w -X main.version=${VERSION}" \
     .

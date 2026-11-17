@@ -8,6 +8,7 @@ import "testing"
 // recognized as read-only must fall to the writer (correct, if slower), so
 // the dangerous direction is a write classified as a read.
 func TestIsReadOnlySQL(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		sql  string
 		want bool

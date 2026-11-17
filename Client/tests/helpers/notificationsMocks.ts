@@ -1,5 +1,6 @@
 import { vi } from "vitest";
 import { defaults } from "./voiceSessionMock";
+import { soundSpec } from "../../src/lib/media/soundTables";
 
 // vi.hoisted ensures testPrefs is available when vi.mock factory runs
 export const { testPrefs } = {
@@ -23,6 +24,7 @@ export const mockOscillator = {
   connect: vi.fn(),
   frequency: {
     setValueAtTime: vi.fn(),
+    exponentialRampToValueAtTime: vi.fn(),
   },
   start: vi.fn(),
   stop: vi.fn(),
@@ -32,9 +34,15 @@ export const mockGain = {
   connect: vi.fn(),
   gain: {
     setValueAtTime: vi.fn(),
+    linearRampToValueAtTime: vi.fn(),
     exponentialRampToValueAtTime: vi.fn(),
   },
 };
+
+/** How many oscillators (one per note) the message and the mention chime
+ *  start in the default style. */
+export const MESSAGE_NOTES = soundSpec("modern", "message").length;
+export const MENTION_NOTES = soundSpec("modern", "mention").length;
 
 export class MockAudioContext {
   readonly currentTime = 0;

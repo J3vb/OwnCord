@@ -125,10 +125,27 @@ type videoBitrateCapApplier interface {
 	ApplyVideoBitrateCap(savedKbps int)
 }
 
+// settingsCacheExpirer is the hub capability that drops its cached copy of the settings auth_ok and ready
+// carry, so the next sign-in reads a saved value (pinned by hub_wiring_test.go).
+type settingsCacheExpirer interface {
+	ExpireSettingsCache()
+}
+
+// expireHubSettingsCache tells the hub its cached settings are stale. Call it after the write commits, or a
+// sign-in in between could cache the old values afresh.
+func expireHubSettingsCache(hub HubBroadcaster) {
+	if e, ok := hub.(settingsCacheExpirer); ok {
+		e.ExpireSettingsCache()
+	}
+}
+
 // applyLiveSettings hands the hub the saved settings it follows live: game activity off must clear shown
-// games and a new video cap must reach live streams, not wait for the next connect. all is Patch's result
-// (nil on an early failure); the stored value wins over the requested one.
+// games and a new video cap must reach live streams, not wait for the next connect. Every save also expires
+// the hub's settings cache, whatever keys it touched, so a new server name, motd or upload list reaches the
+// next sign-in; saves are rare and the refresh is a few small reads. all is Patch's result (nil on an early
+// failure); the stored value wins over the requested one.
 func applyLiveSettings(hub HubBroadcaster, updates, all map[string]string) {
+	expireHubSettingsCache(hub)
 	if value, changing := updates[service.GameActivityEnabledKey]; changing {
 		if a, ok := hub.(gameActivityPolicyApplier); ok {
 			if stored, read := all[service.GameActivityEnabledKey]; read {

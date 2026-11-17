@@ -20,6 +20,7 @@ import type { WsClient } from "@lib/ws";
 import { clearHost, hostAndroidApp } from "../helpers/androidHost";
 import { resetAuthState, seedOnlineMember } from "../helpers/storeSeeds";
 import { usePhone } from "../helpers/phoneMedia";
+import { pickAvatarColor } from "../../src/features/profiles/avatar";
 
 function setUser(custom: string | null = null): void {
   authStore.setState(() => ({
@@ -94,6 +95,10 @@ describe("SelfProfileCard from the user bar", () => {
     expect(btn.getAttribute("aria-expanded")).toBe("true");
     expect(q("[data-testid='spc-name']")?.textContent).toBe("Alice A");
     expect(q("[data-testid='spc-username']")?.textContent).toBe("alice");
+    // Your letter avatar has the colour everyone else sees for you.
+    const probe = document.createElement("div");
+    probe.style.background = pickAvatarColor("alice");
+    expect(q(".spc-avatar")?.style.background).toBe(probe.style.background);
 
     btn.click();
     expect(card()).toBeNull();
@@ -287,7 +292,7 @@ describe("SelfProfileCard from the user bar", () => {
     expect(card()).toBeNull();
   });
 
-  describe("Copy User ID (Developer Mode only, like the member menu)", () => {
+  describe("Copy User ID (Developer mode only, like the member menu)", () => {
     let writeText: ReturnType<typeof vi.fn>;
     beforeEach(() => {
       writeText = vi.fn().mockResolvedValue(undefined);
@@ -295,12 +300,12 @@ describe("SelfProfileCard from the user bar", () => {
     });
     afterEach(() => savePref("developerMode", false));
 
-    it("is absent with Developer Mode off", () => {
+    it("is absent with Developer mode off", () => {
       trigger().click();
       expect(q("[data-testid='spc-copy-id']")).toBeNull();
     });
 
-    it("copies the id with Developer Mode on", () => {
+    it("copies the id with Developer mode on", () => {
       savePref("developerMode", true);
       trigger().click();
       q<HTMLButtonElement>("[data-testid='spc-copy-id']")!.click();

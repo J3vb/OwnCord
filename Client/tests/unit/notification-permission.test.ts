@@ -147,13 +147,13 @@ describe("NotificationsTab — system notification permission", () => {
     expect(allow.hidden).toBe(true);
   });
 
-  it("dims Desktop Notifications with a reason while blocked, and restores it once allowed", async () => {
+  it("dims Desktop notifications with a reason while blocked, and restores it once allowed", async () => {
     mockPermissionGranted.mockResolvedValue(false);
     mockRequestPermission.mockResolvedValue(true);
     const el = row();
     const desktopRow = host
       .container()
-      .querySelector('.toggle[aria-label="Desktop Notifications"]')!
+      .querySelector('.toggle[aria-label="Desktop notifications"]')!
       .closest<HTMLElement>(".setting-row")!;
     await vi.waitFor(() => expect(desktopRow.classList.contains("blocked")).toBe(true));
     const reason = desktopRow.querySelector<HTMLElement>(".setting-blocked-reason")!;

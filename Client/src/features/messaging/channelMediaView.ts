@@ -19,6 +19,7 @@ import {
   resolveServerUrl,
   thumbnailUrl,
 } from "./content/attachments";
+import { formatDuration } from "@lib/text/duration";
 
 /** "YYYY-MM" of a timestamp in the viewer's local calendar. */
 export function localMonthKey(timestamp: string): string {
@@ -41,11 +42,6 @@ function fileIcon(item: ChannelMediaItem): IconName {
   if (isAudioMime(att.mime)) return "music";
   if (isImageMime(att.mime)) return "image";
   return "file-text";
-}
-
-function formatDuration(ms: number): string {
-  const s = Math.max(0, Math.round(ms / 1000));
-  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
 /** The usage line's text: "You've used X of Y", or "X used" with no limit. */

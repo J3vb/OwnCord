@@ -135,6 +135,30 @@ function planWithinGroup(
   return reslot(new Map(drag.channels.map((c) => [c.id, c])), reorderedIds, slots, null);
 }
 
+/** The reorders for swapping `group[index]` with its neighbour `delta` places
+ *  away, in the display order `group` is already in: the same slot assignment
+ *  a drop within the group makes. Empty when there is no such neighbour. */
+export function planNeighbourSwap(
+  group: readonly Channel[],
+  index: number,
+  delta: number,
+): ChannelReorderData[] {
+  const self = group[index];
+  const other = group[index + delta];
+  if (self === undefined || other === undefined) {
+    return [];
+  }
+  const orderedIds = group.map((c) => c.id);
+  orderedIds[index] = other.id;
+  orderedIds[index + delta] = self.id;
+  const slots = slotsOf(group.map((c) => c.position));
+  const reorders = reslot(new Map(group.map((c) => [c.id, c])), orderedIds, slots, null);
+  // The moved channel leads, as the swap is reported from its side.
+  return reorders.toSorted(
+    (a, b) => Number(b.channelId === self.id) - Number(a.channelId === self.id),
+  );
+}
+
 /** Where the dragged channel goes among the destination's other channels:
  *  at the hovered row's place when it is of its kind, else at the end of its kind. */
 function insertIndexIn(others: readonly Channel[], current: Channel, target: DropTarget): number {

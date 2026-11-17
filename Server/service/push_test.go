@@ -36,6 +36,7 @@ func seedPushRow(t *testing.T, database *db.DB, userID int64, endpoint, keyID st
 // TestPushSweep_UsesTheConfiguredWindow proves the staleness half: a row
 // last seen before now-TTL is swept, one still inside the window survives.
 func TestPushSweep_UsesTheConfiguredWindow(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1})
 	svc := NewPushService(database)
@@ -65,6 +66,7 @@ func TestPushSweep_UsesTheConfiguredWindow(t *testing.T) {
 // immediately, and Sweep then collects them, even though they are not
 // stale by time.
 func TestPushSweep_RotationInvalidatesAndRecollects(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1})
 	svc := NewPushService(database)
@@ -103,6 +105,7 @@ func TestPushSweep_RotationInvalidatesAndRecollects(t *testing.T) {
 // Sweep still removes stale rows by time and leaves fresh ones, regardless
 // of what vapid_key_id they carry.
 func TestPushSweep_NoKeyInstalledSweepsByTimeOnly(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1})
 	svc := NewPushService(database)
@@ -127,6 +130,7 @@ func TestPushSweep_NoKeyInstalledSweepsByTimeOnly(t *testing.T) {
 // that is not a point on P-256 must be refused at subscribe time, not accepted
 // and then fail every dispatch.
 func TestSubscribe_RejectsOffCurveP256dh(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1})
 	svc := NewPushService(database)

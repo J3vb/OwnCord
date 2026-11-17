@@ -14,6 +14,7 @@ import (
 // its own ACL, so found=false must never look like deleted=true.
 
 func TestIsMessageDeleted_ReportsTheFlagAndTheRow(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -53,6 +54,7 @@ func TestIsMessageDeleted_ReportsTheFlagAndTheRow(t *testing.T) {
 }
 
 func TestIsMessageDeleted_SurfacesAQueryFailure(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 

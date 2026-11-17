@@ -93,7 +93,7 @@ If the log shows the problem, you can add the last 200 lines yourself. Say
 that you did: those lines contain usernames and addresses.
 
 **Problems in the app** (desktop, Android or the browser client) have their own
-bundle: **Settings → Diagnostics & logs → Export Support Bundle**. It is saved
+bundle: **Settings → Diagnostics & logs → Export support bundle**. It is saved
 on the device (on Android, through Save or Share), never uploaded. It holds the
 app's logs, a short timeline of what the camera, calls and server connection
 did in the last 30 minutes, and how the app's last run ended (crash, killed,

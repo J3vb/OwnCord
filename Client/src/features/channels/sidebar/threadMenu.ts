@@ -6,6 +6,7 @@
  */
 
 import { createMenuItem, openMenuOnKeyboard, openMenuShell } from "@lib/ui/contextMenu";
+import type { IconName } from "@lib/icons";
 import { shellText } from "../../../i18n/shell";
 
 export interface ThreadMenuActions {
@@ -30,13 +31,16 @@ export function attachThreadContextMenu(
       signal: lifetimeSignal,
       dismiss: "any-click",
       build: (menu, closeMenu) => {
-        const add = (label: string, testId: string, run: (() => void) | null): void => {
+        const add = (
+          label: string,
+          testId: string,
+          icon: IconName,
+          run: (() => void) | null,
+        ): void => {
           const item = createMenuItem(
             label,
             run === null ? "context-menu-item disabled" : "context-menu-item",
-            {
-              testId,
-            },
+            { testId, icon },
           );
           if (run === null) {
             item.setAttribute("aria-disabled", "true");
@@ -55,9 +59,15 @@ export function attachThreadContextMenu(
         add(
           shellText("channel.markRead"),
           "ctx-thread-mark-read",
+          "check-check",
           actions.hasUnread() ? actions.onMarkRead : null,
         );
-        add(shellText("channel.threadUnfollow"), "ctx-thread-unfollow", actions.onUnfollow);
+        add(
+          shellText("channel.threadUnfollow"),
+          "ctx-thread-unfollow",
+          "bell-off",
+          actions.onUnfollow,
+        );
       },
     });
   }

@@ -171,6 +171,11 @@ pub(super) fn screen_audio_publish_options() -> TrackPublishOptions {
     }
 }
 
+/// The track name of the music share. It goes out as `ScreenshareAudio`
+/// (so the server needs no change), and a listener tells it from a screen
+/// share's sound by this name.
+pub const MUSIC_TRACK_NAME: &str = "music";
+
 /// The source the share audio feeds: 48 kHz stereo, unbuffered (the capture
 /// thread paces it).
 pub fn screen_audio_source() -> NativeAudioSource {

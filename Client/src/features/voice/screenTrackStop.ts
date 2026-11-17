@@ -13,6 +13,8 @@ import {
   type ScreenTrackState,
   type VideoTrackDeps,
 } from "./videoTrackState";
+import { voiceStore } from "@stores/voice.store";
+import { isMusicPublication } from "@lib/voice/musicTrack";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
 const log = createLogger("screenShare");
@@ -77,6 +79,26 @@ export function stopManualScreenTracks(state: ScreenTrackState, room: VoiceRoom 
   }
 }
 
+/** End the share's own publications in the room. `setScreenShareEnabled(false)`
+ *  also unpublishes the first ScreenShareAudio track, which may be a music
+ *  share's, so with music running the share's tracks go one by one. */
+async function unpublishShare(room: VoiceRoom): Promise<void> {
+  const local = room.localParticipant;
+  if (voiceStore.getState().localMusic !== true) {
+    await local.setScreenShareEnabled(false);
+    return;
+  }
+  const pubs = [...local.trackPublications.values()];
+  const tracks = pubs
+    .filter(
+      (pub) =>
+        pub.source === "screen_share" ||
+        (pub.source === "screen_share_audio" && !isMusicPublication(pub)),
+    )
+    .flatMap((pub) => (pub.track === undefined ? [] : [pub.track.mediaStreamTrack]));
+  await Promise.all(tracks.map((track) => local.unpublishTrack(track, true)));
+}
+
 export async function disableScreenshare(
   state: ScreenTrackState,
   deps: VideoTrackDeps,
@@ -89,7 +111,7 @@ export async function disableScreenshare(
   const ws = deps.getWs();
   try {
     stopManualScreenTracks(state, room);
-    if (room !== null) await room.localParticipant.setScreenShareEnabled(false);
+    if (room !== null) await unpublishShare(room);
   } catch (err) {
     log.warn("Failed to disable screenshare track (non-fatal)", err);
   } finally {

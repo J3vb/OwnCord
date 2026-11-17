@@ -1,5 +1,5 @@
 // The browser notifier: the Web Notification API and, for the unread
-// count, the Badging API with the tab title as the fallback. There is no
+// count, the Badging API plus the tab title, which a plain tab shows. There is no
 // window to flash from a page, so `flashTaskbar` and `requestAttention` do
 // nothing. Used only in a secure context (index.ts): the API needs one.
 import type { Notifier, NotifierShowOptions, NotificationTarget } from "../contracts/notifications";
@@ -81,16 +81,15 @@ function renderTitle(count: number): void {
   document.title = writtenTitle;
 }
 
-/** True when the Badging API took the count. */
-async function badge(count: number): Promise<boolean> {
+/** Offer the count to the Badging API. A tab that is not an installed app
+ *  accepts the call and shows nothing, so the title carries the count anyway. */
+async function badge(count: number): Promise<void> {
   const nav: Partial<Pick<Navigator, "setAppBadge" | "clearAppBadge">> = navigator;
   try {
     if (count === 0 && nav.clearAppBadge !== undefined) await nav.clearAppBadge();
     else if (nav.setAppBadge !== undefined) await nav.setAppBadge(count);
-    else return false;
-    return true;
   } catch {
-    return false;
+    // The title below still shows the count.
   }
 }
 
@@ -145,7 +144,7 @@ export const notifier: Notifier = {
   async requestAttention(): Promise<void> {},
   async setUnreadBadge(count: number): Promise<void> {
     const shown = Number.isFinite(count) ? Math.max(0, Math.floor(count)) : 0;
-    if (await badge(shown)) renderTitle(0);
-    else renderTitle(shown);
+    renderTitle(shown);
+    await badge(shown);
   },
 };

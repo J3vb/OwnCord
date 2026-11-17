@@ -19,6 +19,7 @@ import (
 // against the installed public key with crypto/ecdsa, and checking every
 // claim (RFC 8292).
 func TestPushVAPID_JWTVerifiesAndClaims(t *testing.T) {
+	t.Parallel()
 	svc := NewPushService(nil)
 	priv := genTestVAPIDKey(t)
 	svc.SetVAPIDKey(priv)
@@ -103,6 +104,7 @@ func TestPushVAPID_JWTVerifiesAndClaims(t *testing.T) {
 // TestPushVAPID_NoKeyIsNotConfigured proves the fail-closed path: no push
 // happens under a key that was never installed.
 func TestPushVAPID_NoKeyIsNotConfigured(t *testing.T) {
+	t.Parallel()
 	svc := NewPushService(nil)
 	if _, err := svc.vapidAuthorization("https://push.example.net/x"); err == nil {
 		t.Fatal("vapidAuthorization succeeded with no VAPID key installed")
@@ -112,6 +114,7 @@ func TestPushVAPID_NoKeyIsNotConfigured(t *testing.T) {
 // TestPushVAPID_EmptyContactOmitsSub proves push.contact's documented
 // default: empty means the sub claim is absent, not "mailto:".
 func TestPushVAPID_EmptyContactOmitsSub(t *testing.T) {
+	t.Parallel()
 	svc := NewPushService(nil)
 	svc.SetVAPIDKey(genTestVAPIDKey(t))
 
@@ -131,6 +134,7 @@ func TestPushVAPID_EmptyContactOmitsSub(t *testing.T) {
 // service comparing "aud" byte-for-byte against its own origin string
 // matches regardless of how the endpoint happened to be written.
 func TestPushVAPID_AudIsRFC6454Origin(t *testing.T) {
+	t.Parallel()
 	svc := NewPushService(nil)
 	svc.SetVAPIDKey(genTestVAPIDKey(t))
 
@@ -156,6 +160,7 @@ func TestPushVAPID_AudIsRFC6454Origin(t *testing.T) {
 // re-parsing regardless of how it was spelled (a leading zero is still the
 // same port number).
 func TestWebOrigin_TableCases(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		in   string

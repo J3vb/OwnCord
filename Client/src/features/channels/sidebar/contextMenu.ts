@@ -140,8 +140,12 @@ function appendMuteItems(
   // timed one needs no sweep for the gates to be right.
   const mute = getChannelMute(channel.id);
   if (mute !== null) {
-    const row = addItem(shellText("channel.unmute"), "context-menu-item", "ctx-mute-channel", () =>
-      unmuteChannel(channel.id),
+    const row = addItem(
+      shellText("channel.unmute"),
+      "context-menu-item",
+      "ctx-mute-channel",
+      () => unmuteChannel(channel.id),
+      "bell",
     );
     const until = mutedUntilLabel(mute.until);
     if (until !== null) {
@@ -155,6 +159,7 @@ function appendMuteItems(
       "context-menu-item",
       {
         testId: "ctx-mute-channel",
+        icon: "bell-off",
         activates: true,
         onActivate: () => {
           closeMenu();
@@ -186,7 +191,7 @@ function appendMuteItems(
   const { trigger, flyout } = createSubmenuTrigger(
     shellText("channel.notifySettings"),
     "context-menu-item",
-    { testId: "ctx-notify-settings" },
+    { testId: "ctx-notify-settings", icon: "bell" },
     lifetimeSignal,
   );
   const addLevelRow = (label: string, level: NotificationLevel | null, testId: string): void => {
@@ -219,8 +224,12 @@ function appendMuteItems(
 /** Open Chat and Mark as Read, the entries that lead the menu. */
 function appendReadItems(addItem: AddMenuItem, channel: Channel, show: ChannelMenuShow): void {
   if (show.openChat) {
-    addItem(shellText("channel.openChat"), "context-menu-item", "ctx-open-chat", () =>
-      navigateToChannel(channel.id),
+    addItem(
+      shellText("channel.openChat"),
+      "context-menu-item",
+      "ctx-open-chat",
+      () => navigateToChannel(channel.id),
+      "message-square",
     );
   }
 
@@ -233,6 +242,7 @@ function appendReadItems(addItem: AddMenuItem, channel: Channel, show: ChannelMe
       unread ? "context-menu-item" : "context-menu-item disabled",
       "ctx-mark-read",
       unread ? () => markChannelRead(channel.id) : null,
+      "check-check",
     );
   }
 }
@@ -245,31 +255,50 @@ function appendShareItems(
   h: ChannelMenuHandlers,
 ): void {
   if (show.copyLink) {
-    addItem(shellText("channel.copyLink"), "context-menu-item", "ctx-copy-channel-link", () =>
-      copyWithToast(
-        formatChannelLink(channel.id, getChannelMutesHost() ?? ""),
-        "toast.channelLinkCopied",
-        "toast.channelLinkCopyFailed",
-      ),
+    addItem(
+      shellText("channel.copyLink"),
+      "context-menu-item",
+      "ctx-copy-channel-link",
+      () =>
+        copyWithToast(
+          formatChannelLink(channel.id, getChannelMutesHost() ?? ""),
+          "toast.channelLinkCopied",
+          "toast.channelLinkCopyFailed",
+        ),
+      "link",
     );
   }
 
   const { onInvite, channels, onReorder } = h;
   if (show.invite && onInvite !== undefined) {
-    addItem(shellText("channel.invite"), "context-menu-item", "ctx-invite-people", () =>
-      onInvite(channel),
+    addItem(
+      shellText("channel.invite"),
+      "context-menu-item",
+      "ctx-invite-people",
+      () => onInvite(channel),
+      "user-plus",
     );
   }
 
   if (show.move && channels !== undefined && onReorder !== undefined) {
     const { up, down } = channelMoves(channel, channels, onReorder);
-    addItem(shellText("channel.moveUp"), "context-menu-item", "ctx-move-up", up);
-    addItem(shellText("channel.moveDown"), "context-menu-item", "ctx-move-down", down);
+    addItem(shellText("channel.moveUp"), "context-menu-item", "ctx-move-up", up, "arrow-up");
+    addItem(
+      shellText("channel.moveDown"),
+      "context-menu-item",
+      "ctx-move-down",
+      down,
+      "arrow-down",
+    );
   }
 
   if (isDeveloperMode()) {
-    addItem(shellText("channel.copyId"), "context-menu-item", "ctx-copy-channel-id", () =>
-      copyWithToast(String(channel.id), "toast.channelIdCopied", "toast.channelIdCopyFailed"),
+    addItem(
+      shellText("channel.copyId"),
+      "context-menu-item",
+      "ctx-copy-channel-id",
+      () => copyWithToast(String(channel.id), "toast.channelIdCopied", "toast.channelIdCopyFailed"),
+      "copy",
     );
   }
 }
@@ -295,8 +324,12 @@ function appendManageItems(
 
   const { onEdit, onDelete, onPurge } = h;
   if (show.edit && onEdit !== undefined) {
-    addItem(shellText("channel.edit"), "context-menu-item", "ctx-edit-channel", () =>
-      onEdit(channel),
+    addItem(
+      shellText("channel.edit"),
+      "context-menu-item",
+      "ctx-edit-channel",
+      () => onEdit(channel),
+      "pencil",
     );
   }
 
@@ -304,8 +337,12 @@ function appendManageItems(
     if (show.edit) {
       menu.appendChild(createElement("div", { class: "context-menu-sep" }));
     }
-    addItem(shellText("channel.delete"), "context-menu-item danger", "ctx-delete-channel", () =>
-      onDelete(channel),
+    addItem(
+      shellText("channel.delete"),
+      "context-menu-item danger",
+      "ctx-delete-channel",
+      () => onDelete(channel),
+      "trash-2",
     );
   }
 

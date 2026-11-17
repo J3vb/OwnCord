@@ -152,10 +152,34 @@
       "reason": "Lookup built from the bundled unicode catalog"
     },
     {
+      "file": "features/push/store.ts",
+      "binding": "pushStore",
+      "category": "reset-elsewhere",
+      "reason": "Phone push setting of the signed-in server; pushSubscription.ts sets it back to its initial state under the push:session reset, with the attempt it belongs to"
+    },
+    {
       "file": "lib/ui/animatedStill.ts",
       "binding": "stills",
       "category": "reset-elsewhere",
       "reason": "Keyed by image-cache blob: URLs; clearAttachmentCaches clears it with them under the attachments:caches session reset"
+    },
+    {
+      "file": "lib/ui/animatedStill.ts",
+      "binding": "followers",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by bound <img> elements; an entry goes with its image, and a removed image is dropped on the next motion-setting change"
+    },
+    {
+      "file": "lib/ui/animatedStill.ts",
+      "binding": "registry",
+      "category": "dom-owned",
+      "reason": "Weak references to bound <img> elements; dead or detached ones are pruned on the next motion-setting change and the observer disconnects when none are left"
+    },
+    {
+      "file": "lib/ui/animatedStill.ts",
+      "binding": "hoverBindings",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by hover-row elements; an entry goes with its row, and a removed image's listeners are released at the next bind to that row or its next hover"
     },
     {
       "file": "features/messaging/emojiStill.ts",
@@ -350,7 +374,7 @@
       "reason": "Join diagnostics, exempt in the 5.2 design note"
     },
     {
-      "file": "pages/connect-page/RecoverOverlay.ts",
+      "file": "features/connection/RecoverOverlay.ts",
       "binding": "overlays",
       "category": "dom-owned",
       "reason": "WeakMap keyed by the live recover context"
@@ -378,6 +402,12 @@
       "binding": "ringing",
       "category": "transient",
       "reason": "The open ringing-call notification per channel; removed when the ring ends (clearCall) or the user clicks it"
+    },
+    {
+      "file": "platform/desktop/androidNotifications.ts",
+      "binding": "alertGap",
+      "category": "transient",
+      "reason": "The timer that runs for a little over a second after the Android app's last alert, so a ring is not sent inside Android's one alert a second; it ends by itself, and Android counts an app's alerts, whichever server they are for"
     },
     {
       "file": "platform/desktop/androidNotifications.ts",
@@ -548,6 +578,18 @@
       "reason": "Rows whose hover bar is built; keyed by the row element and dropped with it"
     },
     {
+      "file": "features/voice/mobileRoutes.ts",
+      "binding": "mobileRouteStore",
+      "category": "app-lifetime",
+      "reason": "The phone's own audio routes and phone-call pause, as the device reports them; nothing per-server, and the end of a call clears the pick and the pause"
+    },
+    {
+      "file": "features/voice/videoOnScreen.ts",
+      "binding": "drawing",
+      "category": "dom-owned",
+      "reason": "How many mounted video grids draw a live picture; each grid takes its own report back when its last picture goes or it is destroyed, so a session reset has nothing to clear"
+    },
+    {
       "file": "features/messaging/content/emojiImage.ts",
       "binding": "packStarts",
       "category": "pure-cache",
@@ -576,6 +618,30 @@
       "binding": "drawing",
       "category": "transient",
       "reason": "Tone sheets being drawn, each removed when its draw settles"
+    },
+    {
+      "file": "features/messaging/message-list/rowRefresh.ts",
+      "binding": "scopes",
+      "category": "dom-owned",
+      "reason": "WeakMap keyed by live message row elements; a scope is destroyed with its row's owner, and the entry goes with the row"
+    },
+    {
+      "file": "stores/voicePttLive.ts",
+      "binding": "pttPollingListeners",
+      "category": "app-lifetime",
+      "reason": "Listeners of the push-to-talk poller's live flag, which runs for the whole app and is not per server; moved out of voice.store.ts unchanged."
+    },
+    {
+      "file": "features/voice/musicControl.ts",
+      "binding": "watchers",
+      "category": "app-lifetime",
+      "reason": "The music support probe asks this machine, not a server: its watchers are the mounted call controls (each removes itself when its component is destroyed) and the retry timer stops with the last one."
+    },
+    {
+      "file": "features/voice/musicControl.ts",
+      "binding": "retryTimer",
+      "category": "app-lifetime",
+      "reason": "The music support probe asks this machine, not a server: its watchers are the mounted call controls (each removes itself when its component is destroyed) and the retry timer stops with the last one."
     }
   ]
 }

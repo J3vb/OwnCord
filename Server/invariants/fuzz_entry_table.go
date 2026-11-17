@@ -57,9 +57,13 @@ var FuzzEntryPoints = map[string]FuzzEntry{
 	"ws.parseRoomChannelID":         {Source: "LiveKit webhook body", Targets: []string{"ws.FuzzParseRoomChannelID"}, Manual: true},
 
 	"api.imageDimensions":        {Source: "emoji and sticker uploads", Targets: []string{"api.FuzzImageDimensions"}},
+	"service.ValidateServerIcon": {Source: "server icon upload", Targets: []string{"service.FuzzValidateServerIcon"}},
 	"api.webpDimensions":         {Source: "emoji and sticker uploads", Targets: []string{"api.FuzzImageDimensions"}, Manual: true},
 	"api.makeThumbnail":          {Source: "uploaded images", Targets: []string{"api.FuzzMakeThumbnail"}},
 	"api.thumbOrientation":       {Source: "uploaded images", Targets: []string{"api.FuzzMakeThumbnail"}},
+	"imgthumb.Fit":               {Source: "images fetched for link previews", Targets: []string{"imgthumb.FuzzFit"}},
+	"imgthumb.Orientation":       {Source: "uploaded images", Targets: []string{"api.FuzzMakeThumbnail"}},
+	"imgthumb.Make":              {Source: "uploaded images", Targets: []string{"api.FuzzMakeThumbnail"}},
 	"api.validateHEIC":           {Source: "uploaded HEIC images", Targets: []string{"api.FuzzValidateHEIC"}, Manual: true},
 	"api.validateAvatarURL":      {Source: "profile update body", Targets: []string{"api.FuzzValidateAvatarURL"}, Manual: true},
 	"api.validateDisplayName":    {Source: "profile update body", Targets: []string{"api.FuzzValidateDisplayName"}, Manual: true},
@@ -99,13 +103,10 @@ var FuzzEntryPoints = map[string]FuzzEntry{
 // only shrinks: fuzzGapCeiling pins its size, and closing a gap moves the row
 // to FuzzEntryPoints and lowers the ceiling by one.
 var FuzzGaps = map[string]FuzzGap{
-	"admin.decodeJSON":                  {Source: "admin REST bodies"},
-	"admin.decodeOptionalJSON":          {Source: "admin REST bodies"},
-	"admin.decodeStrictJSON":            {Source: "admin REST bodies"},
+	"httperr.DecodeJSON":                {Source: "REST and admin bodies"},
+	"httperr.DecodeOptionalJSON":        {Source: "REST and admin bodies"},
+	"httperr.DecodeStrictJSON":          {Source: "REST and admin bodies"},
 	"admin.handlePutAFKChannel":         {Source: "admin REST body field"},
-	"api.decodeJSON":                    {Source: "REST bodies"},
-	"api.decodeOptionalJSON":            {Source: "REST bodies"},
-	"api.decodeStrictJSON":              {Source: "REST bodies"},
 	"api.handleModerationNickname":      {Source: "REST body field"},
 	"api.decodeGIFNext":                 {Source: "GIF provider response"},
 	"api.fetchGIFs":                     {Source: "GIF provider response"},
@@ -132,7 +133,7 @@ var FuzzGaps = map[string]FuzzGap{
 }
 
 // fuzzGapCeiling is len(FuzzGaps). It only goes down.
-const fuzzGapCeiling = 27
+const fuzzGapCeiling = 24
 
 // FuzzTrustedDecodes decode bytes this server wrote itself (its database, its
 // own frames and files) or files the operator owns. Each value says why the

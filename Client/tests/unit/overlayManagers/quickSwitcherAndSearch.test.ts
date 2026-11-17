@@ -26,6 +26,10 @@ vi.mock("@stores/messages.store", () => mocks.messagesStoreMock());
 vi.mock("@stores/auth.store", () => mocks.authStoreMock());
 vi.mock("@lib/permissions", () => mocks.permissionsMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
+const mockRequestOpenThread = vi.hoisted(() => vi.fn());
+vi.mock("../../../src/features/threads/threadNavigation", () => ({
+  requestOpenThread: mockRequestOpenThread,
+}));
 
 const {
   mockLogError,
@@ -499,6 +503,20 @@ describe("createSearchOverlayController", () => {
     expect(mockJump).toHaveBeenCalledWith(3, 42);
     // The jumper owns the channel switch too, so the around-window fetch it
     // may need is sequenced after the switch instead of racing it.
+    expect(mockSetActiveChannel).not.toHaveBeenCalled();
+  });
+
+  it("onSelectResult opens a thread hit in the thread panel instead of jumping", async () => {
+    const api = makeMockApi();
+    const mockJump = vi.fn();
+    await openSearch(api, { onJumpToMessage: mockJump });
+
+    const opts = firstCallOpts<SelectResultOpts>(createSearchOverlay);
+
+    opts.onSelectResult({ channel_id: 77, message_id: 42, thread_parent_id: 5 });
+
+    expect(mockRequestOpenThread).toHaveBeenCalledWith(77, 5);
+    expect(mockJump).not.toHaveBeenCalled();
     expect(mockSetActiveChannel).not.toHaveBeenCalled();
   });
 

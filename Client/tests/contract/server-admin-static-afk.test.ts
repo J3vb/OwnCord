@@ -210,6 +210,7 @@ describe("Server/admin/static — AFK card", () => {
     expect(patchBody(calls)).toEqual({ server_upload_mbps: "100" });
   });
 
+  // Five admin page boots in one test: past the 2 s default on a busy runner.
   it("a stored upload value the panel cannot read shows empty, no hint, and is not rewritten", async () => {
     for (const stored of ["fast", "1.5", "0"]) {
       const calls: FetchCall[] = [];
@@ -233,7 +234,7 @@ describe("Server/admin/static — AFK card", () => {
     expect(hintText(ok.doc)).toBe(
       "About 20 people can watch a stream at this cap (with no cap: 20)",
     );
-  });
+  }, 10_000);
 
   it("the hint's no-cap rate is the Source screen share rate the client publishes", () => {
     const js = readFileSync(path.join(repoRoot, "Server/admin/static/js/server.js"), "utf8");

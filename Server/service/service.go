@@ -68,7 +68,7 @@ type Services struct {
 	GIFFavorites *GIFFavoriteService
 	UserNotes    *UserNoteService
 	Privacy      *PrivacyService
-	// PushDispatch is Web Push dispatch, built only when push.enabled and push.dispatch_enabled are both true;
+	// PushDispatch is Web Push dispatch, built only when push.enabled is true;
 	// on Services so the metrics route can read its counters.
 	PushDispatch *PushDispatcher
 	Attention    *AttentionService

@@ -17,7 +17,7 @@ When a webcam freezes for a few seconds or a call drops, free-text log lines
 do not say what the camera, tracks and connections did, in order. The event log is a short, structured timeline of
 those facts. It goes into the existing support bundle
 ([Desktop client support bundle](diagnostics.md#desktop-client-support-bundle)),
-saved through the same **Export Support Bundle** button. There is no other way
+saved through the same **Export support bundle** button. There is no other way
 out: nothing is uploaded, and there is no separate report.
 
 ## How an event looks
@@ -109,7 +109,7 @@ it.
 
 ## Support bundle
 
-The support bundle (Settings → Diagnostics & logs → Export Support Bundle) is
+The support bundle (Settings → Diagnostics & logs → Export support bundle) is
 the only way the event log and the native crash and exit lines leave the
 device: the user saves the zip, nothing is uploaded. Built by
 `Client/src/lib/supportBundle.ts`, format 2:
@@ -221,7 +221,11 @@ a link or message text.
 | `[crash] uncaught exception:`                           | An exception nothing caught, just before Android ends the app                                                                                                | `kind=jvm`, `code` (exception class), `cause` (root cause class), `thread`, `module` (top app frame)                                       |
 | `[webview] render process gone:`                        | The web view's page process crashed or Android killed it                                                                                                     | `process=renderer`, `reason` (`crashed` / `killed`), `priority`                                                                            |
 | `[call] call service …`                                 | The background call service starts, is refused or stops                                                                                                      | `mic`, `camera`, or the refusal's exception class                                                                                          |
+| `[call] screen …`                                       | A call starts or stops showing a camera or a stream, so the screen is kept on or may sleep again                                                             | none                                                                                                                                       |
+| `[call] notification button:`                           | A button of a call notification was pressed (Mute, Unmute or Leave, Accept or Decline, or a tap on a ringing call)                                           | the button (`mute`, `unmute`, `leave`, `accept`, `decline`, `open`)                                                                        |
+| `[call] incoming call shown, …`                         | The notification of a ringing call went up, `ringing` with the phone's ringtone or `silent`                                                                  | none                                                                                                                                       |
 | `[app] moved to the background` / `[app] back in front` | The app leaves the screen or comes back                                                                                                                      | none                                                                                                                                       |
+| `[idle] out of view for`                                | The app has been out of view for the idle delay and wakes its page to check the status (again one delay later)                                               | whole minutes out of view                                                                                                                  |
 
 The newest reported exit's time is remembered, so an exit is never reported
 twice across two starts.

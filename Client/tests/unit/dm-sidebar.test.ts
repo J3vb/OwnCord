@@ -14,6 +14,7 @@ vi.mock("../../src/features/messaging/content/attachments", () =>
 );
 
 import { createDmSidebar } from "../../src/features/direct-messages/DmSidebar";
+import { pickAvatarColor } from "../../src/features/profiles/avatar";
 import type {
   DmConversation,
   DmSidebar,
@@ -516,12 +517,14 @@ describe("DmSidebar", () => {
     sidebar.destroy?.();
   });
 
-  it("uses default avatar color when avatarColor is not provided", () => {
-    const sidebar = mountSidebar([makeConvo({ avatar: null, avatarColor: undefined })]);
+  it("uses the user's own avatar colour when avatarColor is not provided", () => {
+    const convo = makeConvo({ avatar: null, avatarColor: undefined });
+    const sidebar = mountSidebar([convo]);
 
     const avatar = container.querySelector(".dm-avatar") as HTMLDivElement;
-    // Default background is #5865F2
-    expect(avatar.style.background).toBe("rgb(88, 101, 242)");
+    const probe = document.createElement("div");
+    probe.style.background = pickAvatarColor(convo.username);
+    expect(avatar.style.background).toBe(probe.style.background);
 
     sidebar.destroy?.();
   });

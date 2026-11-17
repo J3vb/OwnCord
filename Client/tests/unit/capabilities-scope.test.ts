@@ -97,11 +97,11 @@ describe("Tauri default capability — HTTP scope", () => {
     expect(find("core:window:allow-set-fullscreen")).toBe("core:window:allow-set-fullscreen");
   });
 
-  it("grants core:window:allow-request-user-attention (the Flash Taskbar notification setting needs it)", () => {
+  it("grants core:window:allow-request-user-attention (the Flash taskbar notification setting needs it)", () => {
     // core:window:default's implicit permission set is getters only — no
     // request-user-attention — so without this explicit grant, every
     // win.requestUserAttention() call is ACL-rejected and the default-on
-    // "Flash Taskbar" setting silently does nothing.
+    // "Flash taskbar" setting silently does nothing.
     expect(find("core:window:allow-request-user-attention")).toBe(
       "core:window:allow-request-user-attention",
     );
@@ -164,9 +164,10 @@ describe("Tauri default capability — HTTP scope", () => {
 // The Android build compiles without the desktop-only plugins, and tauri-build
 // refuses a capability that names a permission whose plugin is not compiled
 // in. Their grants therefore live in desktop.json, limited to the desktop
-// platforms, and never in the capability every platform loads.
+// platforms, and never in the capability every platform loads. The deep-link
+// plugin runs everywhere, but registering a scheme at runtime is desktop-only.
 describe("Tauri capabilities — desktop-only plugins", () => {
-  const DESKTOP_ONLY = ["window-state:", "autostart:", "deep-link:"];
+  const DESKTOP_ONLY = ["window-state:", "autostart:", "deep-link:allow-register"];
   const isDesktopOnly = (p: Permission): boolean => {
     const id = typeof p === "string" ? p : p.identifier;
     return DESKTOP_ONLY.some((prefix) => id.startsWith(prefix));
@@ -182,5 +183,10 @@ describe("Tauri capabilities — desktop-only plugins", () => {
     const grants = desktopCapabilityJson.permissions as readonly Permission[];
     expect(grants.length).toBeGreaterThan(0);
     expect(grants.every(isDesktopOnly)).toBe(true);
+  });
+
+  it("the default capability lets every platform read the link the app was opened with", () => {
+    expect(permissions).toContain("deep-link:default");
+    expect(desktopCapabilityJson.permissions).not.toContain("deep-link:default");
   });
 });

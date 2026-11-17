@@ -55,6 +55,7 @@ func (m *matchRecorder) count() int {
 }
 
 func TestNewCRSWAF_LoadsCoreRuleSet(t *testing.T) {
+	t.Parallel()
 	for _, block := range []bool{false, true} {
 		if _, err := newCRSWAF(2, block, func(types.MatchedRule) {}); err != nil {
 			t.Fatalf("newCRSWAF(block=%v): %v", block, err)
@@ -63,6 +64,7 @@ func TestNewCRSWAF_LoadsCoreRuleSet(t *testing.T) {
 }
 
 func TestNormalizeCRSMode(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"off":    CRSModeOff,
 		"detect": CRSModeDetect,
@@ -82,6 +84,7 @@ func TestNormalizeCRSMode(t *testing.T) {
 // the CRS (rule ids 941xxx) but must NOT be blocked — the request reaches the
 // downstream handler untouched.
 func TestWAFMiddleware_CRSDetectMode_DetectsXSSProbeWithoutBlocking(t *testing.T) {
+	t.Parallel()
 	rec := &matchRecorder{}
 	middleware := newWAFMiddleware(2, CRSModeDetect, rec.record)
 
@@ -107,6 +110,7 @@ func TestWAFMiddleware_CRSDetectMode_DetectsXSSProbeWithoutBlocking(t *testing.T
 // (930100) is phase 2 and the inline engine only runs phase 2 when a body is
 // present, so a bodyless GET is not blocked by it either — pinned behavior.
 func TestWAFMiddleware_CRSDetectMode_DetectsPathTraversalProbe(t *testing.T) {
+	t.Parallel()
 	rec := &matchRecorder{}
 	middleware := newWAFMiddleware(2, CRSModeDetect, rec.record)
 
@@ -187,6 +191,7 @@ func TestWAFMiddleware_CRSDetectMode_CustomCallbackStillPerRule(t *testing.T) {
 // detect mode and remain readable downstream (chat traffic is exactly what
 // the detect-mode default protects from CRS false positives).
 func TestWAFMiddleware_CRSDetectMode_AllowsBenignSQLishChatMessage(t *testing.T) {
+	t.Parallel()
 	const requestBody = `{"content":"you can just select the option from the users menu where it says settings"}`
 	rec := &matchRecorder{}
 	middleware := newWAFMiddleware(2, CRSModeDetect, rec.record)
@@ -215,6 +220,7 @@ func TestWAFMiddleware_CRSDetectMode_AllowsBenignSQLishChatMessage(t *testing.T)
 // Block mode: the CRS anomaly-scoring evaluation must interrupt a clear
 // attack probe.
 func TestWAFMiddleware_CRSBlockMode_BlocksXSSProbe(t *testing.T) {
+	t.Parallel()
 	middleware := NewWAFMiddlewareCRS(2, CRSModeBlock)
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("downstream handler should not be called for blocked CRS request")
@@ -233,6 +239,7 @@ func TestWAFMiddleware_CRSBlockMode_BlocksXSSProbe(t *testing.T) {
 
 // Block mode lets an ordinary benign JSON request through.
 func TestWAFMiddleware_CRSBlockMode_AllowsBenignJSONRequest(t *testing.T) {
+	t.Parallel()
 	const requestBody = `{"status":"hello there, having a great day"}`
 	middleware := NewWAFMiddlewareCRS(2, CRSModeBlock)
 
@@ -260,6 +267,7 @@ func TestWAFMiddleware_CRSBlockMode_AllowsBenignJSONRequest(t *testing.T) {
 // If this test ever starts failing because the request is no longer blocked,
 // a CRS update fixed the false positive — reconsider the default then.
 func TestWAFMiddleware_CRSBlockMode_FalsePositivesOnSQLishChatProse(t *testing.T) {
+	t.Parallel()
 	const requestBody = `{"content":"you can just select the option from the users menu where it says settings"}`
 	middleware := NewWAFMiddlewareCRS(2, CRSModeBlock)
 	handler := middleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -279,6 +287,7 @@ func TestWAFMiddleware_CRSBlockMode_FalsePositivesOnSQLishChatProse(t *testing.T
 // Off mode: the CRS layer is not evaluated at all (no matches recorded), and
 // requests the inline rules allow still pass.
 func TestWAFMiddleware_CRSOffMode_SkipsCRSEntirely(t *testing.T) {
+	t.Parallel()
 	rec := &matchRecorder{}
 	middleware := newWAFMiddleware(2, CRSModeOff, rec.record)
 
@@ -302,6 +311,7 @@ func TestWAFMiddleware_CRSOffMode_SkipsCRSEntirely(t *testing.T) {
 // The inline engine keeps blocking regardless of CRS mode (its behavior is
 // pinned by waf_test.go; this pins it per-mode).
 func TestWAFMiddleware_InlineRulesStillBlockInEveryCRSMode(t *testing.T) {
+	t.Parallel()
 	for _, mode := range []string{CRSModeOff, CRSModeDetect, CRSModeBlock} {
 		t.Run(mode, func(t *testing.T) {
 			middleware := NewWAFMiddlewareCRS(2, mode)
@@ -324,6 +334,7 @@ func TestWAFMiddleware_InlineRulesStillBlockInEveryCRSMode(t *testing.T) {
 // turn requestBodyAccess off for /api/v1/uploads, and the middleware must not
 // swap the body for an (empty) buffered reader.
 func TestWAFMiddleware_UploadBodyNotBufferedOrEmptied(t *testing.T) {
+	t.Parallel()
 	const requestBody = "binary-ish upload payload \x00\x01\x02"
 	for _, mode := range []string{CRSModeOff, CRSModeDetect, CRSModeBlock} {
 		t.Run(mode, func(t *testing.T) {
@@ -376,6 +387,7 @@ func TestWAFMiddleware_CRSLogsOmitTheQuery(t *testing.T) {
 }
 
 func TestLogURIPath(t *testing.T) {
+	t.Parallel()
 	for in, want := range map[string]string{
 		"/api/v1/files/a?link=zz": "/api/v1/files/a",
 		"/plain":                  "/plain",

@@ -49,6 +49,7 @@ func visibleIDs(t *testing.T, svc *ChannelService, userID int64) map[int64]bool 
 // Two members of the same role must be able to disagree about a channel: the
 // per-user layer is the last one in the resolution order.
 func TestListVisibleChannels_PerUserOverrideSplitsRoleMates(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newOverrideFixture(t)
 
 	// alice is individually granted READ on the role-denied channel.
@@ -69,6 +70,7 @@ func TestListVisibleChannels_PerUserOverrideSplitsRoleMates(t *testing.T) {
 // The cached PermissionService must answer the full order too — it is the path
 // every REST/WS permission check actually takes.
 func TestPermissionService_AppliesUserOverrideLayer(t *testing.T) {
+	t.Parallel()
 	_, permSvc, database := newOverrideFixture(t)
 	ctx := context.Background()
 
@@ -92,6 +94,7 @@ func TestPermissionService_AppliesUserOverrideLayer(t *testing.T) {
 // stale snapshot once the owning user is invalidated — this is the contract the
 // admin handler relies on when it calls InvalidateUser before the hub fan-out.
 func TestPermissionService_InvalidateUserPicksUpNewOverride(t *testing.T) {
+	t.Parallel()
 	_, permSvc, database := newOverrideFixture(t)
 	ctx := context.Background()
 

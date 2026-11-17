@@ -3,8 +3,8 @@
 //
 // Three code paths write the `--font-size` custom property:
 //   - applyStoredAppearance() (lib/prefs/appearance.ts) at startup
-//   - the Appearance-tab Font Size slider (features/settings/AppearanceTab.ts)
-//   - the Accessibility-tab "Large Font" toggle, which since OC-0319 goes
+//   - the Appearance-tab Font size slider (features/settings/AppearanceTab.ts)
+//   - the Accessibility-tab "Large font" toggle, which since OC-0319 goes
 //     through the same applyFontSize() writer rather than a `.large-font` CSS
 //     rule (an inline style outranks a class rule, so that rule never fired)
 // and base.css:22 reads it back as `font-size: var(--font-size, 14px)`. This
@@ -32,8 +32,8 @@ describe("body font-size consumes the --font-size custom property", () => {
     expect(declaration, "expected a font-size declaration on body").not.toBeNull();
     expect(
       declaration![0],
-      "body's font-size must read var(--font-size, ...) -- otherwise the Font Size " +
-        "slider and the Large Font accessibility toggle write --font-size and nothing " +
+      "body's font-size must read var(--font-size, ...) -- otherwise the Font size " +
+        "slider and the Large font accessibility toggle write --font-size and nothing " +
         "renders differently",
     ).toMatch(/var\(--font-size\b/);
   });

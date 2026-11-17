@@ -29,6 +29,13 @@ export interface Notifier {
    * nothing and a settings surface must not present it as the system's state.
    */
   readonly readsOsPermission: boolean;
+  /**
+   * Set where the host's own notification of a ringing call rings by itself
+   * (the Android app: the phone's ringtone, for as long as it is up). The
+   * app's chime then stays quiet for a ring `showCall` took, and rings after
+   * all for one it rejected.
+   */
+  readonly ringsCalls?: boolean;
   permissionGranted(): Promise<boolean>;
   requestPermission(): Promise<boolean>;
   show(title: string, body: string, options?: NotifierShowOptions): Promise<void>;
@@ -44,12 +51,18 @@ export interface Notifier {
    * names when activated. Same delivery as `showMessage`, so the click reaches
    * `onMessageActivated`, with no `messageId`. `ringing` marks the incoming
    * ring's notification, which `clearCall` withdraws when the ring ends.
+   * Showing it again for a call that still rings (it was rung again) starts
+   * its time over. `quiet` asks a host that rings by itself (`ringsCalls`) to
+   * show this ring without its sound; on such a host the ringing call's
+   * notification has buttons, and those and its tap come back through
+   * `CallService.onAction`, not `onMessageActivated`.
    */
   showCall(
     title: string,
     body: string,
     target: { host: string; channelId: number },
     ringing?: boolean,
+    quiet?: boolean,
   ): Promise<void>;
   /**
    * Withdraw the ringing call notification for `channelId` from the

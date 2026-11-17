@@ -34,7 +34,7 @@ export function addServer(): void {
   clearAuth("server_switch");
 }
 
-/** The saved server profiles; an unreadable store gives none. */
+/** The saved server profiles; rejects when the store cannot be read, so a failed read is not taken for "no servers". */
 export async function loadSavedServers(): Promise<readonly ServerProfile[]> {
   try {
     const manager = createProfileManager(createTauriBackend());
@@ -42,6 +42,6 @@ export async function loadSavedServers(): Promise<readonly ServerProfile[]> {
     return manager.getAll();
   } catch (err) {
     log.warn("Failed to load saved servers", err);
-    return [];
+    throw err;
   }
 }

@@ -3,7 +3,9 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/auth"
@@ -89,6 +91,7 @@ type authCoreStore interface {
 	CreateUserWithSession(ctx context.Context, username, passwordHash string, roleID int, sessionTokenHash, device, ip string) (int64, error)
 	CreatePendingUser(ctx context.Context, username, passwordHash string, roleID, maxPending int) (int64, error)
 	CountPendingUsers(ctx context.Context) (int64, error)
+	UpgradeUserPasswordHash(ctx context.Context, userID int64, oldHash, newHash string) (bool, error)
 	UpdateUserCustomStatus(ctx context.Context, userID int64, customStatus *string) error
 	DeleteSession(ctx context.Context, tokenHash string) error
 	GetInvite(ctx context.Context, code string) (*db.Invite, error)
@@ -151,6 +154,20 @@ func (s *AuthService) UseErasure(e *ErasureService) {
 // UseWelcome makes Register greet each new member through w; nil greets nobody.
 func (s *AuthService) UseWelcome(w *WelcomeService) {
 	s.welcome = w
+}
+
+// AppealContact returns the owner-set contact line for a banned member, or "" when none is set. It is for
+// a caller that has just refused a password-verified sign-in with ErrBanned; nothing else may show it.
+// A missing row is not an error; any other store failure is returned for the caller to drop the line.
+func (s *AuthService) AppealContact(ctx context.Context) (string, error) {
+	contact, err := s.st.GetSetting(ctx, AppealContactKey)
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return "", nil
+		}
+		return "", fmt.Errorf("read %s: %w", AppealContactKey, err)
+	}
+	return strings.TrimSpace(contact), nil
 }
 
 // Login runs the lockout gates and constant-time password check, then issues a session or, for an
@@ -256,15 +273,23 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	if !successVouched && !s.limiter.Allow(userFailKey, loginUserFailureThreshold+1, loginUserFailureWindow) {
 		return nil, ErrLockedOut
 	}
-	// Always run the check, with an empty hash for an unknown user: CheckPassword then does a
-	// dummy bcrypt, keeping response time constant. A `user == nil || ...` short-circuit
+	// Always run the check, with an empty hash for an unknown user: VerifyPassword then does the
+	// same work as a wrong password, keeping response time constant. A `user == nil || ...` short-circuit
 	// would reintroduce the timing side-channel.
 	storedHash := ""
 	if user != nil {
 		storedHash = user.PasswordHash
 	}
-	matched := auth.CheckPassword(storedHash, in.Password)
+	matched, needsRehash := auth.VerifyPassword(storedHash, in.Password)
+	upgradedHash := ""
+	if matched && needsRehash {
+		// Still inside the admitted slot: the new hash is the same deliberate cost.
+		upgradedHash = newUpgradedHash(user.ID, in.Password)
+	}
 	release()
+	if upgradedHash != "" {
+		s.storeUpgradedHash(ctx, user, upgradedHash)
+	}
 	if !matched {
 		// The attempt was reserved up-front; Check is read-only, so only the lockouts are decided here.
 		if !s.limiter.Check(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) {
@@ -281,6 +306,36 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	s.limiter.Reset(ctx, userFailKey)
 	s.recordLoginVouch(ctx, successKey)
 	return user, nil
+}
+
+// newUpgradedHash is the argon2id hash that replaces an older one after a correct password,
+// or "" when none can be made. A password past 72 bytes only matched a bcrypt hash because
+// bcrypt ignores the rest; it keeps that hash, which still signs in.
+func newUpgradedHash(userID int64, password string) string {
+	if len(password) > auth.MaxPasswordBytes {
+		return ""
+	}
+	newHash, err := auth.HashPassword(password)
+	if err != nil {
+		slog.Warn("login: password hash upgrade failed", "err", err, "user_id", userID)
+		return ""
+	}
+	return newHash
+}
+
+// storeUpgradedHash writes newHash only while the stored hash is still the one just checked,
+// so a password changed meanwhile is never overwritten. Any failure leaves the old hash, which
+// still signs in; the sign-in itself never fails on it.
+func (s *AuthService) storeUpgradedHash(ctx context.Context, user *db.User, newHash string) {
+	upgraded, err := s.st.UpgradeUserPasswordHash(context.WithoutCancel(ctx), user.ID, user.PasswordHash, newHash)
+	if err != nil {
+		slog.Warn("login: storing upgraded password hash failed", "err", err, "user_id", user.ID)
+		return
+	}
+	if upgraded {
+		user.PasswordHash = newHash
+		slog.Info("login: password hash upgraded", "user_id", user.ID)
+	}
 }
 
 // Logout revokes p.Session and clears the custom status. p.Session must be non-nil: the
@@ -329,14 +384,17 @@ func (s *AuthService) DeleteAccount(ctx context.Context, p Principal, password, 
 	}
 
 	failKey := auth.Key("delete_fail", user.ID)
+	refund, ok := ReservePasswordAttempt(s.limiter, failKey, deleteAccountFailureThreshold, deleteAccountFailureWindow)
+	if !ok {
+		return ErrTooManyAttempts
+	}
 	matched, admitted := s.limiter.Admission().CheckPassword(user.PasswordHash, password)
 	if !admitted {
+		refund()
 		return ErrAuthBusy
 	}
 	if !matched {
-		if !s.limiter.Allow(failKey, deleteAccountFailureThreshold, deleteAccountFailureWindow) {
-			s.limiter.Lockout(ctx, lockKey, deleteAccountLockoutDuration)
-		}
+		SettleFailedAttempt(ctx, s.limiter, failKey, lockKey, deleteAccountFailureThreshold, deleteAccountFailureWindow, deleteAccountLockoutDuration)
 		return ErrIncorrectPassword
 	}
 	s.limiter.Reset(ctx, failKey)

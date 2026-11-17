@@ -1,6 +1,6 @@
 /**
  * Scaffolding the accessibility specs share: a signed-in boot under chosen
- * appearance preferences, the four-theme by High Contrast contrast matrix,
+ * appearance preferences, the four-theme by High contrast contrast matrix,
  * and the pointer-target, reduced-motion and 940x500 reflow checks.
  */
 import { expect, type Locator, type Page, type TestInfo } from "@playwright/test";
@@ -14,7 +14,7 @@ import { type AppearancePrefs, contrastMeter, setAppearance } from "./accessibil
 
 export const THEMES = ["dark", "neon-glow", "midnight", "light"] as const;
 
-/** Every theme, High Contrast and a custom accent. */
+/** Every theme, High contrast and a custom accent. */
 export const APPEARANCE_MATRIX: AppearancePrefs[] = [
   { theme: "dark" },
   { theme: "midnight" },
@@ -43,7 +43,7 @@ export async function bootSignedIn(
   await navigateToMainPageReady(page);
 }
 
-/** One case per theme and High Contrast setting, for the spec to register with its own `test`. */
+/** One case per theme and High contrast setting, for the spec to register with its own `test`. */
 export function contrastMatrix(options: {
   title: string;
   attachName: (theme: string, highContrast: boolean) => string;
@@ -57,7 +57,7 @@ export function contrastMatrix(options: {
   for (const theme of THEMES) {
     for (const highContrast of [false, true]) {
       cases.push({
-        title: `${theme}${highContrast ? " + High Contrast" : ""}: ${options.title}`,
+        title: `${theme}${highContrast ? " + High contrast" : ""}: ${options.title}`,
         run: async ({ page }: { page: Page }, testInfo: TestInfo): Promise<void> => {
           await options.boot(page, { theme, highContrast, accent: null });
           const meter = contrastMeter(page);

@@ -19,10 +19,9 @@
   container-type: inline-size;
 }
 
-/* The call view's own controls (view toggles, pop-out, show chat) sit bottom
-   right, beside the control bar, as Discord's do, so they never cover a
-   tile's name or its own top-right nav. Show chat stays reachable when the
-   focus layout has scrolled the focused tile's nav off. */
+/* The call view's View button (its menu holds the view toggles, pop-out and
+   show chat) sits bottom right, beside the control bar, so it never covers a
+   tile's name or its own top-right nav. */
 .video-grid__views {
   position: absolute;
   right: 12px;
@@ -31,32 +30,22 @@
   display: flex;
   gap: 4px;
 }
-.video-grid__exit,
-.video-grid__view {
+.video-grid__view-menu {
   display: inline-flex;
   align-items: center;
-  justify-content: center;
-  width: 32px;
+  gap: 6px;
   height: 32px;
-  padding: 0;
-  border: 0;
+  padding: 0 10px;
+  border: 1px solid var(--border-control);
   border-radius: var(--radius-sm);
-  background: var(--scrim);
-  color: var(--on-fill);
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
   cursor: pointer;
 }
-
-.video-grid__exit:hover,
-.video-grid__view:hover {
-  background: var(--scrim-hover);
-}
-
-.video-grid__exit[hidden],
-.video-grid__view[hidden] {
-  display: none;
-}
-.video-grid__view[aria-pressed="false"] {
-  opacity: 0.55;
+.video-grid__view-menu:hover,
+.video-grid__view-menu[aria-expanded="true"] {
+  background: var(--bg-tertiary);
 }
 /* Room below the tiles for the call view's control bar.
    Too narrow for both in one row (VIEWS_ABOVE_PX in gridShared.ts), the
@@ -88,12 +77,44 @@
     transition: none;
   }
 }
-/* With the tiles out of the flow, the exit control keeps its corner. */
-.video-grid--packed > .video-grid__exit {
-  position: absolute;
-  top: 8px;
-  left: 8px;
-  z-index: 5;
+/* No camera or screen share on show: one compact card per person, side by
+   side and centred, wrapping onto more rows. The box scrolls on its own, so
+   the control bar and the View button stay put and the last row stays above
+   the bar (the grid's bottom padding is the bar's room). */
+.video-grid__cards {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-content: safe center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  padding: 4px;
+  overflow-y: auto;
+  container-type: inline-size;
+}
+.video-grid__cards > .video-cell--avatar {
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: 12px;
+  width: clamp(140px, 30cqi, 220px);
+  aspect-ratio: 10 / 9;
+  padding: 12px;
+  border: 1px solid var(--border);
+}
+.video-grid__cards .dcp-avatar--lg {
+  width: min(88px, 60%);
+}
+.video-grid__cards .video-username {
+  position: static;
+  max-width: 100%;
+  overflow: hidden;
+  padding: 0;
+  background: none;
+  color: var(--text-normal);
+  text-shadow: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .video-grid .video-cell.video-cell--no-room {
   display: none;
@@ -203,6 +224,13 @@ video[hidden] + .video-surface {
 .video-panning,
 .video-panning .video-cell-select {
   cursor: grabbing;
+}
+/* Pinch, pan and double tap on a touch screen (bindVideoZoom): the fingers are
+   the tile's, not the browser's. A swipe at 1x still opens the drawer
+   (lib/ui/swipe.ts). A person's card has no picture to zoom, and the
+   participant strip and the cards view scroll under the finger. */
+.video-cell:not(.video-cell--avatar) {
+  touch-action: none;
 }
 
 /* A camera fills its grid tile, cropped at the edges as Discord does. Focused
@@ -665,6 +693,28 @@ video[hidden] + .video-surface {
   width: 24px;
   margin-left: -6px;
 }
+/* A phone call holds the call (the Android app): said above the controls,
+   where the hold-to-talk button is otherwise. */
+.video-fs-paused {
+  order: -2;
+  flex: 1 0 100%;
+  padding: 8px 14px;
+  border-radius: var(--radius-pill);
+  background: var(--yellow);
+  color: var(--on-warning);
+  font-size: var(--font-size-md);
+  font-weight: 600;
+  text-align: center;
+}
+.video-fs-paused[hidden] {
+  display: none;
+}
+.video-fs-calls--paused {
+  flex-wrap: wrap;
+  justify-content: center;
+  width: max-content;
+  max-width: calc(100% - 16px);
+}
 /* The quality chip shows on the stream you are watching. */
 .video-quality {
   flex-shrink: 0;
@@ -786,9 +836,13 @@ video[hidden] + .video-surface {
 @media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
   /* Thumb-sized round controls in one row: mic, deafen, camera, flip, view
      options, chat, leave. The camera menu is the desktop's choice of device;
-     flip is the phone's. The gap keeps all seven inside a 360 px screen. */
+     flip is the phone's. The gap keeps all seven inside a 360 px screen. The
+     bar is as wide as its controls, up to the screen: left to shrink to fit
+     (it starts at the middle) a bar that wraps would take half the screen and
+     stack its controls. */
   .video-fs-calls {
     bottom: max(12px, env(safe-area-inset-bottom));
+    width: max-content;
     max-width: calc(100% - 16px);
     gap: 4px;
   }
@@ -808,18 +862,30 @@ video[hidden] + .video-surface {
   .video-fs-btn--views {
     display: inline-flex;
   }
+  /* The Android app's sound route button is an eighth control once the camera
+     is on (flip shows), more than a 360 px screen holds at full size. The row
+     then spans the screen and its controls start from 36 px and grow together
+     into the room there is, up to their own size, so they keep one row. */
+  .video-fs-calls:has(> .route-btn:not([hidden])) {
+    width: calc(100% - 16px);
+    justify-content: center;
+    align-items: center;
+  }
+  .video-fs-calls:has(> .route-btn:not([hidden])) > .video-fs-btn {
+    flex: 1 1 36px;
+    max-width: 44px;
+    height: auto;
+    aspect-ratio: 1;
+  }
+  .video-fs-calls:has(> .route-btn:not([hidden])) > .video-fs-btn--leave {
+    flex: 1.28 1 46px;
+    max-width: 56px;
+    aspect-ratio: 14 / 11;
+  }
   /* Room above the control row for the hold-to-talk button (see
      CALL_BAR_SPACE_PHONE). */
   .video-grid--call {
     padding-bottom: 112px;
-  }
-  .video-grid__exit,
-  .video-grid__view {
-    width: 44px;
-    height: 44px;
-  }
-  .video-grid--call .video-grid__exit {
-    display: none;
   }
   .video-tile-btn {
     min-width: 44px;

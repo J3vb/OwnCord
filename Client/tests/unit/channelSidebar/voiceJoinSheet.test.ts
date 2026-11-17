@@ -48,6 +48,12 @@ describe("ChannelSidebar join sheet", () => {
     for (let i = 0; i < 3; i++) await Promise.resolve();
   }
 
+  async function tapParticipant(): Promise<void> {
+    (container.querySelector('.voice-user-item[data-voice-uid="30"]') as HTMLElement).click();
+    await vi.dynamicImportSettled();
+    for (let i = 0; i < 3; i++) await Promise.resolve();
+  }
+
   beforeEach(() => {
     resetStores();
     container = document.createElement("div");
@@ -221,6 +227,49 @@ describe("ChannelSidebar join sheet", () => {
       await tapVoiceChannel();
       sidebar.destroy?.();
       expect(sheet()).toBeNull();
+    });
+
+    describe("a participant with a stream", () => {
+      let onWatchStream: Mock<(tileId: number) => void>;
+
+      beforeEach(() => {
+        sidebar.destroy?.();
+        onWatchStream = vi.fn<(tileId: number) => void>();
+        sidebar = createChannelSidebar({ onVoiceJoin, onOpenCall, onWatchStream });
+        addVoiceUser(VOICE, 30, "alice", { camera: true });
+        sidebar.mount(container);
+      });
+
+      it("asks first: the tap opens the sheet and Join then joins and watches", async () => {
+        await tapParticipant();
+        expect(sheet()).not.toBeNull();
+        expect(onVoiceJoin).not.toHaveBeenCalled();
+
+        onVoiceJoin.mockImplementation((id) =>
+          voiceStore.setState((prev) => ({ ...prev, currentChannelId: id })),
+        );
+        joinBtn().click();
+        expect(onVoiceJoin).toHaveBeenCalledExactlyOnceWith(VOICE);
+        expect(onWatchStream).toHaveBeenCalledWith(30);
+      });
+
+      it("joins without a watch when the stream ended while the sheet was open", async () => {
+        await tapParticipant();
+        addVoiceUser(VOICE, 30, "alice", { camera: false });
+        onVoiceJoin.mockImplementation((id) =>
+          voiceStore.setState((prev) => ({ ...prev, currentChannelId: id })),
+        );
+        joinBtn().click();
+        expect(onVoiceJoin).toHaveBeenCalledExactlyOnceWith(VOICE);
+        expect(onWatchStream).not.toHaveBeenCalled();
+      });
+
+      it("does nothing while a timeout is on", async () => {
+        setActiveTimeout(new Date(Date.now() + 3_600_000).toISOString());
+        await tapParticipant();
+        expect(sheet()).toBeNull();
+        expect(onVoiceJoin).not.toHaveBeenCalled();
+      });
     });
   });
 

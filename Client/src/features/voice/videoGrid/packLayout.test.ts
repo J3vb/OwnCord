@@ -201,21 +201,26 @@ describe("packTiles", () => {
     expect(packTiles(2560, 1440, tiles)).toEqual(packTiles(2560, 1440, tiles));
   });
 
-  it("packs 25 tiles in a few milliseconds", () => {
-    const sizes: TileSize[] = ["large", "medium", "small"];
-    const tiles = Array.from({ length: 25 }, (_, i) =>
-      tile(i, 1 + (i % 5) * 0.4, sizes[i % 3] ?? "small"),
-    );
-    packTiles(3440, 1440, tiles);
-    // Best of several batches, so a busy CI machine does not fail it.
-    let best = Infinity;
-    for (let batch = 0; batch < 5; batch++) {
-      const start = performance.now();
-      for (let i = 0; i < 10; i++) packTiles(3440, 1440, tiles);
-      best = Math.min(best, (performance.now() - start) / 10);
-    }
-    expect(best).toBeLessThan(5);
-  });
+  // The nightly test-depth run times rewritten code, which says nothing about
+  // the real speed.
+  it.skipIf(process.env.OC_MUTATION_RUN !== undefined)(
+    "packs 25 tiles in a few milliseconds",
+    () => {
+      const sizes: TileSize[] = ["large", "medium", "small"];
+      const tiles = Array.from({ length: 25 }, (_, i) =>
+        tile(i, 1 + (i % 5) * 0.4, sizes[i % 3] ?? "small"),
+      );
+      packTiles(3440, 1440, tiles);
+      // Best of several batches, so a busy CI machine does not fail it.
+      let best = Infinity;
+      for (let batch = 0; batch < 5; batch++) {
+        const start = performance.now();
+        for (let i = 0; i < 10; i++) packTiles(3440, 1440, tiles);
+        best = Math.min(best, (performance.now() - start) / 10);
+      }
+      expect(best).toBeLessThan(5);
+    },
+  );
 });
 
 describe("packTiles properties", () => {

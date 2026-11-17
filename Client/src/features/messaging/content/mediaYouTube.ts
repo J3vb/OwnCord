@@ -8,11 +8,12 @@ import { createIcon } from "@lib/icons";
 import { fetchExternalImage, previewExternal, recoverEvictedImage } from "./attachments";
 import { clearImageSizes } from "./imageSizes";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
-import { admitDerived } from "../../content-consent/external";
+import { admitDerived, externalAllowed, requestExternalItem } from "../../content-consent/external";
 import { externalConsentText } from "../../../i18n/externalConsent";
 import { contentText } from "../../../i18n/content";
 import { dataSaverActive } from "./dataSaver";
 import { renderDeferredMedia } from "./deferredMedia";
+import { loadCardThumbnail } from "./serverPreviews";
 
 /** Bumped on every cache clear so a title that resolves late is dropped. */
 let mediaCacheGeneration = 0;
@@ -83,15 +84,24 @@ void registerSessionReset("media:caches", clearMediaCaches, { phase: "cache" });
 /** Strict pattern for YouTube video IDs (alphanumeric, hyphens, underscores). */
 const YOUTUBE_ID_RE = /^[\w-]{1,20}$/;
 
-/** Render a YouTube embed player with title header. */
+/** What the server's card holds for a video: its title and the thumbnail it
+ *  stored. With it the embed fetches nothing from YouTube or the broker. */
+export interface ServerVideoCard {
+  readonly title: string | null;
+  readonly thumbUrl: string | null;
+}
+
+/** Render a YouTube embed player with title header. With `server`, the title
+ *  and still come from the server's stored card instead of the local fetch. */
 export function renderYouTubeEmbed(
   videoId: string,
   originalUrl: string,
   tapped = false,
+  server?: ServerVideoCard,
 ): HTMLDivElement {
   if (!tapped && dataSaverActive()) {
     const deferred = renderDeferredMedia(originalUrl, () =>
-      renderYouTubeEmbed(videoId, originalUrl, true),
+      renderYouTubeEmbed(videoId, originalUrl, true, server),
     );
     const link = createElement(
       "a",
@@ -127,7 +137,9 @@ export function renderYouTubeEmbed(
   });
 
   const cached = ytTitleCache.get(videoId);
-  if (cached !== undefined) {
+  if (server !== undefined) {
+    setText(titleLink, server.title ?? contentText("youtube.title.fallback"));
+  } else if (cached !== undefined) {
     setText(titleLink, cached);
   } else {
     setText(titleLink, contentText("youtube.title.loading"));
@@ -157,17 +169,27 @@ export function renderYouTubeEmbed(
 
   // Thumbnail container with play button overlay
   const thumbWrap = createElement("div", { class: "msg-embed-yt-player" });
-  const thumbUrl = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
   const thumb = createElement("img", {
     class: "msg-embed-thumb",
     alt: contentText("youtube.thumbAlt"),
     loading: "lazy",
   });
-  admitDerived(`url:${originalUrl}`, `url:${thumbUrl}`);
-  recoverEvictedImage(thumb, { url: thumbUrl });
-  void fetchExternalImage({ url: thumbUrl }).then((src) => {
-    if (src !== null) thumb.src = src;
-  });
+  if (server !== undefined) {
+    // The server's stored still: memory, then the durable image cache, then the server.
+    if (server.thumbUrl !== null) {
+      recoverEvictedImage(thumb, { url: server.thumbUrl });
+      void loadCardThumbnail(server.thumbUrl).then((src) => {
+        if (src !== null) thumb.src = src;
+      });
+    }
+  } else {
+    const thumbUrl = `https://img.youtube.com/vi/${videoId}/mqdefault.jpg`;
+    admitDerived(`url:${originalUrl}`, `url:${thumbUrl}`);
+    recoverEvictedImage(thumb, { url: thumbUrl });
+    void fetchExternalImage({ url: thumbUrl }).then((src) => {
+      if (src !== null) thumb.src = src;
+    });
+  }
 
   // Playback is a separate deliberate act: the frame talks to YouTube
   // itself, outside the broker's byte-fetch boundary, and the note says so.
@@ -188,26 +210,44 @@ export function renderYouTubeEmbed(
   appendChildren(thumbWrap, thumb, playBtn);
   wrap.appendChild(thumbWrap);
 
-  // On click (or Enter/Space on the play button), replace with the player
-  thumbWrap.addEventListener(
-    "click",
-    () => {
-      const iframe = document.createElement("iframe");
-      iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
-      iframe.setAttribute("allowfullscreen", "");
-      iframe.setAttribute("allow", "autoplay; encrypted-media");
-      iframe.setAttribute(
-        "sandbox",
-        "allow-scripts allow-same-origin allow-presentation allow-popups",
-      );
-      iframe.className = "msg-embed-iframe";
-      iframe.title = externalConsentText("youtube.frame");
-      const hadFocus = thumbWrap.contains(document.activeElement);
-      thumbWrap.replaceChildren(iframe);
-      if (hadFocus) iframe.focus();
-    },
-    { once: true },
-  );
+  const startPlayer = (): void => {
+    const iframe = document.createElement("iframe");
+    iframe.src = `https://www.youtube.com/embed/${videoId}?autoplay=1`;
+    iframe.setAttribute("allowfullscreen", "");
+    iframe.setAttribute("allow", "autoplay; encrypted-media");
+    iframe.setAttribute(
+      "sandbox",
+      "allow-scripts allow-same-origin allow-presentation allow-popups",
+    );
+    iframe.className = "msg-embed-iframe";
+    iframe.title = externalConsentText("youtube.frame");
+    const hadFocus = thumbWrap.contains(document.activeElement);
+    thumbWrap.replaceChildren(iframe);
+    if (hadFocus) iframe.focus();
+  };
+
+  // On click (or Enter/Space on the play button), replace with the player.
+  // Playing contacts YouTube, so on a server whose card drew the title and still
+  // (nothing was fetched yet) it asks for the same external-content consent the
+  // local fetch asks for: direct on "auto", a prompt when there is no choice or "ask".
+  let started = false;
+  let asking = false;
+  thumbWrap.addEventListener("click", () => {
+    if (started || asking) return;
+    const key = `url:${originalUrl}`;
+    if (server === undefined || externalAllowed(key)) {
+      started = true;
+      startPlayer();
+      return;
+    }
+    asking = true;
+    void requestExternalItem(key).then((ok) => {
+      asking = false;
+      if (!ok || started) return;
+      started = true;
+      startPlayer();
+    });
+  });
 
   return wrap;
 }

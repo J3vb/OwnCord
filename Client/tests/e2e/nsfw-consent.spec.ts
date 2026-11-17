@@ -6,8 +6,8 @@
  * shell, recording every first-party content request and every native
  * external-content broker invocation (`window.__invokeLog`) so "nothing loads
  * before consent" is observed rather than inferred. The Q1 checks (names,
- * keyboard, focus, contrast in every theme and High Contrast, reduced motion,
- * reflow at the 940×500 minimum window with 20 px Large Font and 200 % scale)
+ * keyboard, focus, contrast in every theme and High contrast, reduced motion,
+ * reflow at the 940×500 minimum window with 20 px Large font and 200 % scale)
  * run on the gate itself. Native NVDA/Orca recordings are owner-run and not
  * claimed here.
  */
@@ -240,8 +240,8 @@ test.describe("NSFW consent gate — accessibility", () => {
   });
 
   for (const [label, scale] of [
-    ["20px Large Font", 1],
-    ["20px Large Font at 200% scale", 2],
+    ["20px Large font", 1],
+    ["20px Large font at 200% scale", 2],
   ] as const) {
     test.describe(label, () => {
       test.use({ viewport: { width: 940, height: 500 }, deviceScaleFactor: scale });

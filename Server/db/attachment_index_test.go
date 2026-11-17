@@ -57,6 +57,7 @@ func planHas(plan []string, want string) bool {
 // by name, and each removal asks whether a row still names a file: on a big
 // server a scan per lookup cost seconds per tick.
 func TestStoredNameLookups_PlanUsesStoredAsIndex(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	names := []any{"a.png", "b.png", "c.png"}
 	args := append(append(append([]any{}, names...), names...), names...)
@@ -76,6 +77,7 @@ func TestStoredNameLookups_PlanUsesStoredAsIndex(t *testing.T) {
 // The orphan sweep runs on the writer every tick: each half must seek its
 // rows by message_id instead of reading every attachment.
 func TestOrphanSweep_PlansSeekByMessage(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	const file = "queries/sqlite/attachments.sql"
 	for name, want := range map[string][]string{
@@ -98,6 +100,7 @@ func TestOrphanSweep_PlansSeekByMessage(t *testing.T) {
 // The admin and own upload lists page newest first; the sort must come from
 // idx_attachments_uploaded_at instead of sorting every row.
 func TestUploadListNewestFirst_PlanUsesUploadedAtIndex(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	plan := queryPlan(t, database, `SELECT a.id FROM attachments a
 		LEFT JOIN messages m ON m.id = a.message_id

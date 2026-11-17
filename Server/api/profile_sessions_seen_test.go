@@ -28,6 +28,7 @@ func (s *seenCountingStore) MarkSessionsSeen(ctx context.Context, userID, except
 // one other than the caller's own: a listing with nothing new stays a pure
 // read and never takes the writer.
 func TestListSessions_WritesOnlyWhenAnotherLoginIsUnseen(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	store := &seenCountingStore{DB: database}
 	limiter := auth.NewRateLimiter()

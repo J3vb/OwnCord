@@ -34,6 +34,10 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 	svc := service.New(database, limiter)
 	// Before NewHub: its first settings-cache fill reads the file-type lists auth_ok carries.
 	svc.Uploads.SetStorageLimits(storageLimits(cfg))
+	svc.Settings.SetServerIconDir(cfg.Server.DataDir)
+	if in.LinkPreviews != nil {
+		svc.Messages.SetLinkPreviews(in.LinkPreviews)
+	}
 
 	lk, proc, voiceEnabled := buildVoice(cfg)
 
@@ -110,7 +114,7 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 		Hub: hub, Limiter: limiter, Services: svc, VoiceEnabled: voiceEnabled, MetricsWindows: windows,
 		SystemStats:  sysstats.NewSampler(),
 		LiveKitStats: liveKitStats(cfg, hub, voiceEnabled),
-		Auth:         authSvc, Storage: in.Storage,
+		Auth:         authSvc, Storage: in.Storage, LinkPreviews: in.LinkPreviews,
 		Updater: updater.NewUpdater(in.Version, cfg.GitHub.Token, cfg.GitHub.Owner, cfg.GitHub.Repo),
 	}, nil
 }
@@ -197,9 +201,10 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 			return settings.Setting(ctx, "backup_schedule")
 		},
 		LastBackup: func() (time.Time, error) {
-			return admin.NewestBackup(admin.ResolveBackupDir(cfg.Backup.Dir))
+			return admin.NewestBackup(admin.ResolveBackupDir(cfg.Backup.Dir), cfg.Database.Path)
 		},
 		Certificate: admin.ServedCertificate,
+		People:      service.PeopleSource(database),
 		VoiceHealth: func(ctx context.Context) service.VoiceHealth {
 			// A managed companion reports the supervisor's own state, which
 			// probes nothing; otherwise probe the external client's health

@@ -13,6 +13,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/api"
@@ -59,6 +60,7 @@ func setupRouterWithServices(t *testing.T, configure func(*service.Services, *db
 }
 
 func TestHealthEndpointReturns200(t *testing.T) {
+	t.Parallel()
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -68,6 +70,7 @@ func TestHealthEndpointReturns200(t *testing.T) {
 }
 
 func TestHealthEndpointReturnsJSON(t *testing.T) {
+	t.Parallel()
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -82,6 +85,7 @@ func TestHealthEndpointReturnsJSON(t *testing.T) {
 }
 
 func TestHealthEndpointStatusOK(t *testing.T) {
+	t.Parallel()
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -95,6 +99,7 @@ func TestHealthEndpointStatusOK(t *testing.T) {
 }
 
 func TestHealthEndpointOmitsVersion(t *testing.T) {
+	t.Parallel()
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -109,6 +114,7 @@ func TestHealthEndpointOmitsVersion(t *testing.T) {
 }
 
 func TestAPIV1InfoEndpoint(t *testing.T) {
+	t.Parallel()
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
@@ -118,6 +124,7 @@ func TestAPIV1InfoEndpoint(t *testing.T) {
 }
 
 func TestAPIV1InfoReturnsServerName(t *testing.T) {
+	t.Parallel()
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
@@ -133,6 +140,7 @@ func TestAPIV1InfoReturnsServerName(t *testing.T) {
 // ARCH-024: the admin page edits the server_name setting, so the public
 // endpoints must report it rather than config.yaml's server.name.
 func TestAPIV1InfoAndServerInfoReportEditedServerName(t *testing.T) {
+	t.Parallel()
 	router := setupRouterWithServices(t, func(_ *service.Services, database *db.DB) {
 		if err := database.SetSetting(t.Context(), "server_name", "Renamed In Admin"); err != nil {
 			t.Fatal(err)
@@ -151,6 +159,7 @@ func TestAPIV1InfoAndServerInfoReportEditedServerName(t *testing.T) {
 }
 
 func TestAPIV1InfoFallsBackToConfigNameWhenSettingBlank(t *testing.T) {
+	t.Parallel()
 	router := setupRouterWithServices(t, func(_ *service.Services, database *db.DB) {
 		if err := database.SetSetting(t.Context(), "server_name", "  "); err != nil {
 			t.Fatal(err)
@@ -162,6 +171,7 @@ func TestAPIV1InfoFallsBackToConfigNameWhenSettingBlank(t *testing.T) {
 }
 
 func TestAPIV1InfoOmitsVersion(t *testing.T) {
+	t.Parallel()
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/info", nil)
@@ -191,6 +201,7 @@ func serverInfoBody(t *testing.T, router http.Handler) map[string]any {
 // TestAPIV1ServerInfoReturnsNameEpochAndBrowserFlag is B6-7's outcome: one
 // public endpoint answers "what is this server, and is the browser client on".
 func TestAPIV1ServerInfoReturnsNameEpochAndBrowserFlag(t *testing.T) {
+	t.Parallel()
 	body := serverInfoBody(t, setupRouter(t))
 
 	if body["name"] != "Test Server" {
@@ -215,6 +226,7 @@ func TestAPIV1ServerInfoReturnsNameEpochAndBrowserFlag(t *testing.T) {
 // transfer bound from this field, so it must be present and match the lifetime
 // the upload route enforces (the 100 MiB default body cap at 64 KiB/s).
 func TestAPIV1ServerInfoReportsUploadTransferLifetime(t *testing.T) {
+	t.Parallel()
 	body := serverInfoBody(t, setupRouter(t))
 	upload, ok := body["upload"].(map[string]any)
 	if !ok {
@@ -237,6 +249,7 @@ func assertServerInfoRetention(t *testing.T, body map[string]any, days int) {
 }
 
 func TestAPIV1ServerInfoRegistrationModes(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		value string
 		want  string
@@ -262,6 +275,7 @@ func TestAPIV1ServerInfoRegistrationModes(t *testing.T) {
 }
 
 func TestAPIV1ServerInfoRetentionWindow(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		value string
 		want  int
@@ -330,46 +344,53 @@ func setupServerInfoStore(t *testing.T, store *serverInfoStore) http.Handler {
 }
 
 func TestAPIV1ServerInfoMissingRegistrationMode(t *testing.T) {
+	t.Parallel()
 	router := setupServerInfoStore(t, &serverInfoStore{missingMode: true})
 	if got := serverInfoBody(t, router)["registration_mode"]; got != "invite" {
 		t.Errorf("registration_mode = %v, want invite for a missing setting", got)
 	}
 }
 
+// The router and its background work start outside the bubble; only the requests run inside it, so
+// the cache TTL runs on the bubble's fake clock and the expiry wait costs no wall time.
 func TestAPIV1ServerInfoCachesSettings(t *testing.T) {
+	t.Parallel()
 	store := &serverInfoStore{}
 	router := setupServerInfoStore(t, store)
-	first := serverInfoBody(t, router)
-	if err := store.SetSetting(t.Context(), "registration_mode", "open"); err != nil {
-		t.Fatal(err)
-	}
-	if err := store.SetSetting(t.Context(), db.RetentionDaysKey, "30"); err != nil {
-		t.Fatal(err)
-	}
-	second := serverInfoBody(t, router)
-	if second["registration_mode"] != first["registration_mode"] {
-		t.Fatal("response changed within the five-second cache TTL")
-	}
-	assertServerInfoRetention(t, second, 0)
-	if got := store.registrationReads.Load(); got != 1 {
-		t.Errorf("registration reads = %d, want 1 for two requests", got)
-	}
-	if got := store.retentionReads.Load(); got != 1 {
-		t.Errorf("retention reads = %d, want 1 for two requests", got)
-	}
+	synctest.Test(t, func(t *testing.T) {
+		first := serverInfoBody(t, router)
+		if err := store.SetSetting(t.Context(), "registration_mode", "open"); err != nil {
+			t.Fatal(err)
+		}
+		if err := store.SetSetting(t.Context(), db.RetentionDaysKey, "30"); err != nil {
+			t.Fatal(err)
+		}
+		second := serverInfoBody(t, router)
+		if second["registration_mode"] != first["registration_mode"] {
+			t.Fatal("response changed within the five-second cache TTL")
+		}
+		assertServerInfoRetention(t, second, 0)
+		if got := store.registrationReads.Load(); got != 1 {
+			t.Errorf("registration reads = %d, want 1 for two requests", got)
+		}
+		if got := store.retentionReads.Load(); got != 1 {
+			t.Errorf("retention reads = %d, want 1 for two requests", got)
+		}
 
-	time.Sleep(5 * time.Second)
-	third := serverInfoBody(t, router)
-	if third["registration_mode"] != "open" {
-		t.Errorf("registration_mode = %v after expiry, want open", third["registration_mode"])
-	}
-	assertServerInfoRetention(t, third, 30)
-	if store.registrationReads.Load() != 2 || store.retentionReads.Load() != 2 {
-		t.Fatal("expired cache must refresh both settings exactly once")
-	}
+		time.Sleep(5 * time.Second)
+		third := serverInfoBody(t, router)
+		if third["registration_mode"] != "open" {
+			t.Errorf("registration_mode = %v after expiry, want open", third["registration_mode"])
+		}
+		assertServerInfoRetention(t, third, 30)
+		if store.registrationReads.Load() != 2 || store.retentionReads.Load() != 2 {
+			t.Fatal("expired cache must refresh both settings exactly once")
+		}
+	})
 }
 
 func TestAPIV1ServerInfoConcurrentRequestsShareCache(t *testing.T) {
+	t.Parallel()
 	store := &serverInfoStore{}
 	router := setupServerInfoStore(t, store)
 	start := make(chan struct{})
@@ -393,6 +414,7 @@ func TestAPIV1ServerInfoConcurrentRequestsShareCache(t *testing.T) {
 }
 
 func TestAPIV1ServerInfoReadErrors(t *testing.T) {
+	t.Parallel()
 	for _, field := range []string{"registration", "retention"} {
 		t.Run(field, func(t *testing.T) {
 			store := &serverInfoStore{}
@@ -426,6 +448,7 @@ func TestAPIV1ServerInfoReadErrors(t *testing.T) {
 // is generated from protocol/schema.json, so a literal would keep reporting the
 // old number after the next epoch bump and silently lie to every client.
 func TestAPIV1ServerInfoEpochTracksTheGeneratedConstant(t *testing.T) {
+	t.Parallel()
 	body := serverInfoBody(t, setupRouter(t))
 
 	epoch, ok := body["protocol_epoch"].(float64)
@@ -443,6 +466,7 @@ func TestAPIV1ServerInfoEpochTracksTheGeneratedConstant(t *testing.T) {
 // handler: a new public route nobody thought to lock is how the invariant
 // erodes. Version stays on the admin-gated diagnostics endpoint.
 func TestAPIV1ServerInfoOmitsVersion(t *testing.T) {
+	t.Parallel()
 	body := serverInfoBody(t, setupRouter(t))
 
 	for _, field := range []string{"version", "build", "commit", "go_version"} {
@@ -458,6 +482,7 @@ func TestAPIV1ServerInfoOmitsVersion(t *testing.T) {
 // derived response from a 5 s cache (the healthCacheTTL precedent) rather than
 // re-reading the config per request.
 func TestAPIV1ServerInfoIsCached(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	// cfg is ours, so mutating it between calls proves whether the handler
 	// re-derives the response or serves the cached one.
@@ -482,6 +507,7 @@ func TestAPIV1ServerInfoIsCached(t *testing.T) {
 }
 
 func TestUnknownRouteReturns404(t *testing.T) {
+	t.Parallel()
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/nonexistent", nil)
@@ -491,6 +517,7 @@ func TestUnknownRouteReturns404(t *testing.T) {
 }
 
 func TestRequestIDMiddleware(t *testing.T) {
+	t.Parallel()
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -504,6 +531,7 @@ func TestRequestIDMiddleware(t *testing.T) {
 }
 
 func TestHealthMethodNotAllowed(t *testing.T) {
+	t.Parallel()
 	router := setupRouter(t)
 
 	req := httptest.NewRequest(http.MethodPost, "/health", nil)
@@ -692,6 +720,7 @@ func TestWarnOnServerConfig_AdminPeerAddress(t *testing.T) {
 // unauthenticated routes: a burst of upgrade requests from one address is
 // eventually refused with 429 before any socket is opened.
 func TestWSUpgradeRoute_RateLimitedPerIP(t *testing.T) {
+	t.Parallel()
 	router := setupRouter(t)
 	for i := range 500 {
 		rec := httptest.NewRecorder()

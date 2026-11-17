@@ -11,6 +11,7 @@ import (
 // ─── GetRoleByID tests ────────────────────────────────────────────────────────
 
 func TestGetRoleByID_Found(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 4) // Member — inserted by migration
@@ -27,6 +28,7 @@ func TestGetRoleByID_Found(t *testing.T) {
 }
 
 func TestGetRoleByID_NotFound(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 9999)
@@ -37,6 +39,7 @@ func TestGetRoleByID_NotFound(t *testing.T) {
 }
 
 func TestGetRoleByID_OwnerHasAllPermissions(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 1) // Owner
@@ -51,6 +54,7 @@ func TestGetRoleByID_OwnerHasAllPermissions(t *testing.T) {
 }
 
 func TestGetRoleByID_IsDefaultField(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	owner, _ := database.GetRoleByID(context.Background(), 1)
@@ -68,6 +72,7 @@ func TestGetRoleByID_IsDefaultField(t *testing.T) {
 // ─── ListRoles tests ──────────────────────────────────────────────────────────
 
 func TestListRoles_ReturnsFourDefaultRoles(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	roles, err := database.ListRoles(context.Background())
@@ -78,6 +83,7 @@ func TestListRoles_ReturnsFourDefaultRoles(t *testing.T) {
 }
 
 func TestListRoles_OrderedByPositionDesc(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	roles, err := database.ListRoles(context.Background())
@@ -94,9 +100,10 @@ func TestListRoles_OrderedByPositionDesc(t *testing.T) {
 // ─── ListInvites tests ────────────────────────────────────────────────────────
 
 func TestListInvites_Empty(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
-	invites, err := database.ListInvites(context.Background())
+	invites, err := listAllInvites(t, database)
 	mustDo(t, "ListInvites empty", err)
 	if len(invites) != 0 {
 		t.Errorf("ListInvites empty = %d items, want 0", len(invites))
@@ -104,6 +111,7 @@ func TestListInvites_Empty(t *testing.T) {
 }
 
 func TestListInvites_Multiple(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "listowner", "hash", 4)
 
@@ -111,7 +119,7 @@ func TestListInvites_Multiple(t *testing.T) {
 	_, _ = database.CreateInvite(context.Background(), uid, 5, nil)
 	_, _ = database.CreateInvite(context.Background(), uid, 0, nil)
 
-	invites, err := database.ListInvites(context.Background())
+	invites, err := listAllInvites(t, database)
 	mustDo(t, "ListInvites multiple", err)
 	if len(invites) != 3 {
 		t.Errorf("ListInvites count = %d, want 3", len(invites))
@@ -119,6 +127,7 @@ func TestListInvites_Multiple(t *testing.T) {
 }
 
 func TestListInvites_IncludesRevokedInvites(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "revokelistowner", "hash", 4)
 
@@ -126,7 +135,7 @@ func TestListInvites_IncludesRevokedInvites(t *testing.T) {
 	_ = database.RevokeInvite(context.Background(), code)
 	_, _ = database.CreateInvite(context.Background(), uid, 0, nil) // active
 
-	invites, err := database.ListInvites(context.Background())
+	invites, err := listAllInvites(t, database)
 	mustDo(t, "ListInvites with revoked", err)
 	if len(invites) != 2 {
 		t.Errorf("ListInvites count = %d, want 2", len(invites))
@@ -146,6 +155,7 @@ func TestListInvites_IncludesRevokedInvites(t *testing.T) {
 // Invite.Expired names the expiry for the registration refusal log; it must
 // agree with the redemption query, which fails on an unparseable stamp.
 func TestInvite_Expired(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	past := "2026-09-29T11:00:00Z"
 	future := "2026-09-29T13:00:00Z"
@@ -169,4 +179,18 @@ func TestInvite_Expired(t *testing.T) {
 			}
 		})
 	}
+}
+
+// listAllInvites returns every invite, live ones first, the way the list endpoint orders them.
+func listAllInvites(t *testing.T, d *db.DB) ([]*db.Invite, error) {
+	t.Helper()
+	live, err := d.ListInvites(context.Background(), false, 0, 1000)
+	if err != nil {
+		return nil, err
+	}
+	dead, err := d.ListInvites(context.Background(), true, 0, 1000)
+	if err != nil {
+		return nil, err
+	}
+	return append(live, dead...), nil
 }

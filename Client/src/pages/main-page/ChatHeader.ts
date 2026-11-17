@@ -62,8 +62,8 @@ export interface ChatHeaderRefs {
 
 export interface ChatHeaderOptions {
   readonly onTogglePins: () => void;
-  /** Open or close the channel's thread list, anchored to the button. */
-  readonly onToggleThreads?: (anchor: HTMLButtonElement) => void;
+  /** Open or close the channel's thread list. */
+  readonly onToggleThreads?: () => void;
   /** Open or close the channel's media gallery. */
   readonly onToggleMedia?: () => void;
   /** Open search; `typed` is the character that opened it from the header box. */
@@ -247,21 +247,21 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     class: "pin-btn threads-btn",
     title: messagingText("header.threads"),
     "aria-label": messagingText("header.threads"),
-    "aria-haspopup": "dialog",
-    "aria-expanded": "false",
+    "aria-pressed": "false",
     "data-testid": "threads-btn",
   });
   threadsBtn.appendChild(createIcon("message-square", 18));
   threadsBtn.hidden = true;
   if (opts.onToggleThreads !== undefined) {
     const toggle = opts.onToggleThreads;
-    threadsBtn.addEventListener("click", () => toggle(threadsBtn));
+    threadsBtn.addEventListener("click", () => toggle());
   }
   const mediaBtn = createElement("button", {
     type: "button",
     class: "pin-btn media-btn",
     title: messagingText("header.media"),
     "aria-label": messagingText("header.media"),
+    "aria-pressed": "false",
     "data-testid": "media-btn",
   });
   mediaBtn.appendChild(createIcon("image", 18));
@@ -275,6 +275,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     class: "pin-btn pins-btn",
     title: messagingText("header.pins"),
     "aria-label": messagingText("header.pins"),
+    "aria-pressed": "false",
     "data-testid": "pin-btn",
   });
   pinBtn.appendChild(createIcon("pin", 18));
@@ -292,6 +293,8 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     "aria-haspopup": "dialog",
     "data-testid": "search-input",
   });
+  const searchField = createElement("span", { class: "search-field" });
+  appendChildren(searchField, createIcon("search", 14), searchInput);
   // On a phone the box gives way to an icon; CSS shows one or the other.
   const searchBtn = createElement("button", {
     type: "button",
@@ -320,7 +323,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   const overflow = createChatHeaderOverflow([profileBtn, membersBtn, pinBtn, mediaBtn]);
   appendChildren(
     tools,
-    searchInput,
+    searchField,
     searchBtn,
     callBtn,
     videoCallBtn,
@@ -394,7 +397,6 @@ export function setChatHeaderLock(refs: ChatHeaderRefs, locked: boolean): void {
 export function setChatHeaderThreads(refs: ChatHeaderRefs, visible: boolean): void {
   if (refs.threadsBtn === undefined) return;
   refs.threadsBtn.hidden = !visible;
-  if (!visible) refs.threadsBtn.setAttribute("aria-expanded", "false");
 }
 
 /** Show the Media button for a text channel on a server with the gallery. */

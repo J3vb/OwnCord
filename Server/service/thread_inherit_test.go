@@ -22,6 +22,7 @@ func seedThread(t *testing.T, database *db.DB, id, parentID int64) {
 // The override fixture's role reads #open (10) and is denied #locked (11).
 // A thread's verdict must be its parent's for every override layer.
 func TestThreadPermissionsAreParents(t *testing.T) {
+	t.Parallel()
 	_, permSvc, database := newOverrideFixture(t)
 	ctx := context.Background()
 	seedThread(t, database, 20, 11)
@@ -65,6 +66,7 @@ func TestThreadPermissionsAreParents(t *testing.T) {
 // its parent's answer, not the role's base bits: the cached override map has
 // no entry for it, and nothing invalidates the cache when a thread is born.
 func TestThreadCreatedAfterCacheFillIsParents(t *testing.T) {
+	t.Parallel()
 	_, permSvc, database := newOverrideFixture(t)
 	ctx := context.Background()
 	if !permSvc.HasChannelPerm(ctx, 1, 10, permissions.ReadMessages) {
@@ -85,6 +87,7 @@ func (channelLookupFailStore) GetChannel(context.Context, int64) (*db.Channel, e
 }
 
 func TestThreadAuthorityLookupFailsClosed(t *testing.T) {
+	t.Parallel()
 	_, _, database := newOverrideFixture(t)
 	ctx := context.Background()
 	seedThread(t, database, 21, 10)
@@ -106,6 +109,7 @@ func TestThreadAuthorityLookupFailsClosed(t *testing.T) {
 
 // A locked thread refuses posts and reactions from members, not moderators.
 func TestLockedThreadRefusesMembers(t *testing.T) {
+	t.Parallel()
 	_, permSvc, database := newOverrideFixture(t)
 	ctx := context.Background()
 	seedThread(t, database, 21, 10)
@@ -136,6 +140,7 @@ func TestLockedThreadRefusesMembers(t *testing.T) {
 // The admin channel surface, the NSFW acknowledgement and the retention
 // policy all refuse a thread id: each belongs to the parent.
 func TestThreadRefusedOnParentOnlySurfaces(t *testing.T) {
+	t.Parallel()
 	channels, permSvc, database := newOverrideFixture(t)
 	ctx := context.Background()
 	seedThread(t, database, 21, 10)
@@ -164,6 +169,7 @@ func TestThreadRefusedOnParentOnlySurfaces(t *testing.T) {
 // which focus nothing, admit it through the parent
 // (TestMoveReadPointer_ThreadAdmittedThroughParent).
 func TestThreadNotFocusable(t *testing.T) {
+	t.Parallel()
 	channels, _, database := newOverrideFixture(t)
 	ctx := context.Background()
 	seedThread(t, database, 21, 10)

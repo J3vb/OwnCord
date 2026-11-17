@@ -31,6 +31,7 @@ func mustHex(t *testing.T, s string) []byte {
 // same plaintext, and byte-for-byte the same 144-octet output (86-octet
 // aes128gcm header + 58-octet ciphertext).
 func TestPushCrypto_RFC8291KnownAnswer(t *testing.T) {
+	t.Parallel()
 	asPriv := mustHex(t, "c9f58f89813e9f8e872e71f42aa64e1757c9254dcc62b72ddc010bb4043ea11c")
 	uaPub := mustHex(t, "042571b2becdfde360551aaf1ed0f4cd366c11cebe555f89bcb7b186a53339173168ece2ebe018597bd30479b86e3c8f8eced577ca59187e9246990db682008b0e")
 	authSecret := mustHex(t, "05305932a1c7eabe13b6cec9fda48882")
@@ -58,6 +59,7 @@ func TestPushCrypto_RFC8291KnownAnswer(t *testing.T) {
 // either would reuse the derived AES-GCM key and nonce, breaking
 // confidentiality for both messages.
 func TestPushCrypto_SaltAndEphemeralKeyAreFresh(t *testing.T) {
+	t.Parallel()
 	receiver, err := ecdh.P256().GenerateKey(rand.Reader)
 	mustDo(t, "generating receiver key", err)
 	receiverPub := receiver.PublicKey().Bytes()

@@ -433,6 +433,7 @@ func eraseEveryInventoryClassIsZero(t *testing.T) {
 // that deletes the reports row on erasure — which would make every OTHER
 // assertion in this file pass — fails exactly this one.
 func TestReport_SubjectErasureKeepsTheOutcomeRow(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "reporter-only")
@@ -480,6 +481,7 @@ func TestReport_SubjectErasureKeepsTheOutcomeRow(t *testing.T) {
 // assigned moderator stay, each unlinked only by its own erasure. The channel
 // is not a principal and has no erasure path; its id simply stays.
 func TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "reporter-kept")
@@ -563,6 +565,7 @@ func TestReport_SubjectErasureKeepsExactlyTheOutcomeColumns(t *testing.T) {
 // columns are unlinked. Decision 7 is about the subject's content; the
 // reporter's own report is not that content.
 func TestReport_ReporterErasureKeepsTheReport(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "reporter-erases")
@@ -602,6 +605,7 @@ func TestReport_ReporterErasureKeepsTheReport(t *testing.T) {
 // assignment. Their erasure unlinks both, and touches neither the reporter
 // nor the subject columns.
 func TestReport_ModeratorErasureUnlinksNotesAndAssignment(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "reporter-mod-case")
@@ -639,6 +643,7 @@ func TestReport_ModeratorErasureUnlinksNotesAndAssignment(t *testing.T) {
 }
 
 func TestEraseAccount_JobIsListedUntilCompleted(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
@@ -682,6 +687,7 @@ func TestEraseAccount_JobIsListedUntilCompleted(t *testing.T) {
 // (data-lifecycle O1 A2) — rolls everything back: the account, its rows and
 // its files' journal are exactly as before, and the erasure is retryable.
 func TestEraseAccount_FailingStatementRollsBackEverything(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
@@ -729,6 +735,7 @@ func TestEraseAccount_FailingStatementRollsBackEverything(t *testing.T) {
 // last admin-class account, so the sole survivor here is a Member on a
 // server whose admin roles hold nobody — the guard skips that case.)
 func TestEraseAccount_SoleAccountAssetsAreDeleted(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "lonely")
@@ -753,6 +760,7 @@ func TestEraseAccount_SoleAccountAssetsAreDeleted(t *testing.T) {
 }
 
 func TestEraseAccount_LockoutSuffixIsExact(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "ab")
@@ -782,6 +790,7 @@ func TestEraseAccount_LockoutSuffixIsExact(t *testing.T) {
 }
 
 func TestReferencedStoredFiles(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "ref")
@@ -815,6 +824,7 @@ func TestReferencedStoredFiles(t *testing.T) {
 // which no production path writes, must not match, or the checklist would
 // pass on a shape the store never holds.
 func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	const uid, other = 42, 43
@@ -839,6 +849,9 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 		// A role rename's batch names every member it lists.
 		{fmt.Sprintf(`{"seq":14,"type":"member_update_batch","payload":{"members":[{"user_id":%d,"role":"r"},{"user_id":%d,"role":"r","role_ids":[3]}]}}`, other, uid), true},
 		{fmt.Sprintf(`{"seq":15,"type":"member_update_batch","payload":{"members":[{"user_id":%d,"role":"r"}]}}`, other), false},
+		// A thread frame names its owner.
+		{fmt.Sprintf(`{"seq":16,"type":"thread_changed","payload":{"thread":{"id":5,"owner_id":%d}}}`, uid), true},
+		{fmt.Sprintf(`{"seq":17,"type":"thread_changed","payload":{"thread":{"id":6,"owner_id":%d}}}`, other), false},
 	}
 	for i, r := range rows {
 		if _, err := database.ExecContext(ctx, `INSERT INTO events (seq, event_type, payload, channel_id) VALUES (?, 'x', ?, 0)`, i+1, r.payload); err != nil {
@@ -847,17 +860,17 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 	}
 	var before int
 	mustDo(t, "count", database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events WHERE `+db.EventNamesUserPredicate, uid).Scan(&before))
-	if before != 8 {
-		t.Errorf("predicate matched %d rows, want 8", before)
+	if before != 9 {
+		t.Errorf("predicate matched %d rows, want 9", before)
 	}
 	n, err := database.DeleteEventsForUser(ctx, uid)
 	mustDo(t, "DeleteEventsForUser", err)
-	if n != 8 {
-		t.Errorf("deleted %d rows, want 8", n)
+	if n != 9 {
+		t.Errorf("deleted %d rows, want 9", n)
 	}
 	var left int
-	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 7 {
-		t.Errorf("rows left = %d (%v), want the 7 naming nobody or someone else", left, err)
+	if err := database.QueryRowContext(ctx, `SELECT COUNT(*) FROM events`).Scan(&left); err != nil || left != 8 {
+		t.Errorf("rows left = %d (%v), want the 8 naming nobody or someone else", left, err)
 	}
 }
 
@@ -865,6 +878,7 @@ func TestDeleteEventsForUser_MatchesEveryEnvelopeShape(t *testing.T) {
 // time and order, lose the id and the free text, and carry the marker's
 // token — while rows about other people keep everything.
 func TestEraseAccount_UnlinksAuditHistory(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
@@ -938,6 +952,7 @@ func TestEraseAccount_UnlinksAuditHistory(t *testing.T) {
 // when both are erased, whichever goes first (migration 041; Codex's review
 // of #1520 found the draft's single column kept only the last).
 func TestEraseAccount_TwoErasedPrincipalsKeepBothTokens(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	owner := seedUser(t, database, "principals-owner")
@@ -990,6 +1005,7 @@ func TestEraseAccount_TwoErasedPrincipalsKeepBothTokens(t *testing.T) {
 // Migration 040: a job is listed until its replay purge is recorded, even
 // once its files are gone; rows from before the column count as purged.
 func TestErasureJob_ListedUntilReplayPurged(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)

@@ -30,6 +30,7 @@ func newTestMessageService(t *testing.T) (*MessageService, *db.DB) {
 }
 
 func TestSendMessage_Valid(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 
 	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
@@ -54,6 +55,7 @@ func TestSendMessage_Valid(t *testing.T) {
 // gate delegates to CanPost, so a blocked user is refused from posting into
 // a DM — the old broadcast gate's DM branch skipped the block check entirely.
 func TestCanPost_DMBlockEnforced(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedAliceBobDM(t, database, permissions.SendMessages|permissions.ReadMessages)
 	svc := newMessageServiceOn(database)
@@ -74,6 +76,7 @@ func TestCanPost_DMBlockEnforced(t *testing.T) {
 // TestCanPost_ChannelPermissionRequired: regular channels still require
 // READ|SEND via the cached checker.
 func TestCanPost_ChannelPermissionRequired(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.ReadMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
@@ -90,6 +93,7 @@ func TestCanPost_ChannelPermissionRequired(t *testing.T) {
 // postable only by users with MANAGE_MESSAGES, even when they hold
 // READ|SEND. A plain member is refused; a moderator with MANAGE_MESSAGES posts.
 func TestCanPost_AnnouncementRequiresManageMessages(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.ReadMessages|permissions.SendMessages)
 	seedRole(t, database, &db.Role{
@@ -118,6 +122,7 @@ func TestCanPost_AnnouncementRequiresManageMessages(t *testing.T) {
 // nonexistent attachment is skipped (never linked) while the message still
 // sends — no check-then-link race, and retries cannot hard-fail.
 func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedAliceAndMallory(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AttachFiles)
 	svc := newMessageServiceOn(database)
@@ -159,6 +164,7 @@ func TestSendMessage_AttachmentOwnershipAtomic(t *testing.T) {
 }
 
 func TestSendMessage_EmptyContentAllAttachmentsSkipped(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedAliceAndMallory(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AttachFiles)
 	svc := newMessageServiceOn(database)
@@ -189,6 +195,7 @@ func TestSendMessage_EmptyContentAllAttachmentsSkipped(t *testing.T) {
 }
 
 func TestSendMessage_EmptyContent(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 
 	_, err := svc.SendMessage(context.Background(), SendMessageParams{
@@ -207,6 +214,7 @@ func TestSendMessage_EmptyContent(t *testing.T) {
 }
 
 func TestSendMessage_ExceedsMaxLength(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 
 	// maxMessageLen is 4000 runes; create content that exceeds it.
@@ -228,6 +236,7 @@ func TestSendMessage_ExceedsMaxLength(t *testing.T) {
 }
 
 func TestSendMessage_ChannelNotFound(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 
 	_, err := svc.SendMessage(context.Background(), SendMessageParams{
@@ -245,6 +254,7 @@ func TestSendMessage_ChannelNotFound(t *testing.T) {
 }
 
 func TestSendMessage_InvalidChannelID(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 
 	_, err := svc.SendMessage(context.Background(), SendMessageParams{
@@ -262,6 +272,7 @@ func TestSendMessage_InvalidChannelID(t *testing.T) {
 }
 
 func TestSendMessage_NoPermission(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	// Role with ReadMessages only (no SendMessages).
 	seedMemberRole(t, database, permissions.ReadMessages)
@@ -286,6 +297,7 @@ func TestSendMessage_NoPermission(t *testing.T) {
 }
 
 func TestEditMessage_OwnerCanEdit(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 
 	// Send a message first.
@@ -307,6 +319,7 @@ func TestEditMessage_OwnerCanEdit(t *testing.T) {
 }
 
 func TestEditMessage_NonOwnerFails(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	// Add a second user.
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
@@ -331,6 +344,7 @@ func TestEditMessage_NonOwnerFails(t *testing.T) {
 }
 
 func TestEditMessage_EmptyContentFails(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 
 	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
@@ -358,6 +372,7 @@ func TestEditMessage_EmptyContentFails(t *testing.T) {
 // MANAGE_MESSAGES — so a demoted moderator must not be able to rewrite the
 // broadcast they posted while privileged.
 func TestEditMessage_DeniedReadCannotEdit(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedAliceAndModBob(t, database, permissions.SendMessages|permissions.ReadMessages, permissions.SendMessages|permissions.ReadMessages|permissions.ManageMessages)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "staff-private", Type: "text"})
@@ -408,6 +423,7 @@ func TestEditMessage_DeniedReadCannotEdit(t *testing.T) {
 }
 
 func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 
 	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
@@ -428,6 +444,7 @@ func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
 }
 
 func TestDeleteMessage_NonOwnerWithoutModFails(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
 	seedUserRole(t, database, 2, permissions.MemberRoleID)
@@ -451,6 +468,7 @@ func TestDeleteMessage_NonOwnerWithoutModFails(t *testing.T) {
 }
 
 func TestDeleteMessage_ModCanDeleteOthersMessage(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	// Mod role has ManageMessages + SendMessages + ReadMessages.
 	modPerms := permissions.SendMessages | permissions.ReadMessages | permissions.ManageMessages
@@ -482,6 +500,7 @@ func TestDeleteMessage_ModCanDeleteOthersMessage(t *testing.T) {
 // from a private channel could soft-delete every message in it by enumerating
 // message IDs. Mirrors api/channel_authz_test.go's denyReadMessages helper.
 func TestDeleteMessage_DeniedReadCannotDelete(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedAliceAndModBob(t, database, permissions.SendMessages|permissions.ReadMessages, permissions.SendMessages|permissions.ReadMessages|permissions.ManageMessages)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "staff-private", Type: "text"})
@@ -516,6 +535,7 @@ func TestDeleteMessage_DeniedReadCannotDelete(t *testing.T) {
 }
 
 func TestDeleteMessage_InvalidMessageID(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 
 	_, err := svc.DeleteMessage(context.Background(), 1, 0)
@@ -528,6 +548,7 @@ func TestDeleteMessage_InvalidMessageID(t *testing.T) {
 }
 
 func TestSendMessage_HTMLSanitized(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 
 	result := mustSendMessage(context.Background(), t, svc, SendMessageParams{
@@ -551,6 +572,7 @@ func TestSendMessage_HTMLSanitized(t *testing.T) {
 // too — otherwise a locked-out moderator can mutate the pin list the real
 // members see, and use the success/not-found split as a message-ID oracle.
 func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedAliceAndModBob(t, database, permissions.SendMessages|permissions.ReadMessages, permissions.SendMessages|permissions.ReadMessages|permissions.ManageMessages)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "staff-private", Type: "text"})
@@ -593,6 +615,7 @@ func TestSetMessagePinned_DeniedReadCannotPin(t *testing.T) {
 // editing an already-sent message fans chat_edited out to both participants, so
 // arbitrary new text still arrived, and reactions and pins did the same.
 func TestDMBlock_EnforcedOnEveryInteractionSink(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedAliceBobDM(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 
@@ -646,6 +669,7 @@ func TestDMBlock_EnforcedOnEveryInteractionSink(t *testing.T) {
 // writeServiceError does not recognize. Unwrapped, that misclassifies a
 // perfectly ordinary not-found as a 500 INTERNAL_ERROR.
 func TestSetMessagePinned_DeletedMessageReturnsNotFound(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.ManageMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
@@ -715,11 +739,13 @@ func requireDeletedByAuthor(t *testing.T, svc *MessageService, database *db.DB, 
 
 // C29: an author needs READ_MESSAGES only to delete their own message.
 func TestDeleteMessage_AuthorWithoutSendCanDelete(t *testing.T) {
+	t.Parallel()
 	svc, database, msgID := newReadOnlyAuthorFixture(t)
 	requireDeletedByAuthor(t, svc, database, 5, msgID)
 }
 
 func TestDeleteMessage_AuthorUserDenySendCanDelete(t *testing.T) {
+	t.Parallel()
 	svc, database, msgID := newReadOnlyAuthorFixture(t)
 	seedUserRole(t, database, 5, permissions.MemberRoleID)
 	seedChannelUserOverride(t, database, 5, 10, 0, permissions.SendMessages)
@@ -729,6 +755,7 @@ func TestDeleteMessage_AuthorUserDenySendCanDelete(t *testing.T) {
 // Today's behaviour, now pinned: HasChannelPerm does not read the timeout
 // mirror, so a timed-out author can still remove their own message.
 func TestDeleteMessage_AuthorTimedOutCanDelete(t *testing.T) {
+	t.Parallel()
 	svc, database, msgID := newReadOnlyAuthorFixture(t)
 	seedUserRole(t, database, 5, permissions.MemberRoleID)
 	if _, _, err := database.TimeoutUser(context.Background(), 5, 6, nil, "cool off", time.Now().Add(time.Hour)); err != nil {

@@ -94,6 +94,8 @@ export class NativeRemotePublication {
   readonly trackSid: string;
   readonly kind: string;
   readonly source: string;
+  /** The track's name; a music share's is "music". Empty from an older host. */
+  readonly trackName: string;
   isSubscribed = true;
   /** Video: whether the SFU sends it, and at which layer. A fresh
    *  subscription comes at the top one. */
@@ -115,6 +117,7 @@ export class NativeRemotePublication {
     this.trackSid = info.sid;
     this.kind = info.kind;
     this.source = info.source;
+    this.trackName = info.name ?? "";
     this.isMuted = info.muted;
     this.trackInfo = { encryption: info.encrypted ? 1 : 0 };
   }

@@ -267,10 +267,12 @@ func TestHandleChatEdit_InvalidMessageID(t *testing.T) {
 func TestHandleChatEdit_EmptyContent(t *testing.T) {
 	hub, database := newCoverageHub(t)
 	user := seedCoverageOwner(t, database, "edit-empty")
-	c, send := connectClient(t, hub, user, 0, 16)
+	chID := seedTestChannel(t, database, "edit-empty-chan")
+	msgID := seedMessage(t, database, chID, user.ID, "original")
+	c, send := connectClient(t, hub, user, chID, 16)
 
 	raw := envelope("chat_edit", map[string]any{
-		"message_id": 1,
+		"message_id": msgID,
 		"content":    "",
 	})
 	hub.HandleMessageForTest(c, raw)

@@ -145,12 +145,13 @@ async function openDm(page: Page, index = 0): Promise<void> {
 
 /**
  * A stop is only provable across an interval: sample a full chime period (the
- * repeat is 2000ms) and require silence. The wait is the observation window,
- * not a substitute for a condition — callers first prove the chime was running.
+ * default style repeats every 2800ms) and require silence. The wait is the
+ * observation window, not a substitute for a condition — callers first prove
+ * the chime was running.
  */
 async function expectChimeSilent(page: Page): Promise<void> {
   const stopped = await chimeCount(page);
-  await page.waitForTimeout(2_500);
+  await page.waitForTimeout(3_300);
   expect(await chimeCount(page)).toBe(stopped);
 }
 

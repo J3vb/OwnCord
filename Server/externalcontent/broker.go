@@ -33,6 +33,13 @@ type Error struct {
 
 func (e *Error) Error() string { return "externalcontent: " + string(e.Failure) }
 
+// IsTransient reports whether err says nothing about the destination: no fetch slot came free.
+// Such a failure is not worth remembering.
+func IsTransient(err error) bool {
+	e, ok := errors.AsType[*Error](err)
+	return ok && e.transient
+}
+
 func fail(f Failure) error { return &Error{Failure: f} }
 
 // FailureOf is the Failure an error stands for; anything else is Unavailable.

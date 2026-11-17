@@ -34,6 +34,7 @@ func heldRoleIDs(t *testing.T, database *db.DB, userID int64) []int64 {
 // UpdateUserRole means "replace every role with this one" and keeps
 // users.role_id equal to the top held role.
 func TestUpdateUserRole_ReplacesEveryRoleAndMirrors(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := mustCreateUser(t, database, "multi", "hash", int(permissions.MemberRoleID))
@@ -60,6 +61,7 @@ func TestUpdateUserRole_ReplacesEveryRoleAndMirrors(t *testing.T) {
 // Deleting a role keeps the other roles of its members and hands the fallback
 // only to members left with none; the mirror is re-synced for every holder.
 func TestDeleteRoleReassigning_KeepsOtherRolesAndMirrors(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -95,6 +97,7 @@ func TestDeleteRoleReassigning_KeepsOtherRolesAndMirrors(t *testing.T) {
 // GetMemberGrants resolves each held role with its own override and OR's the
 // masks; a single-role member carries no layers.
 func TestGetMemberGrants_TwoRolesCarryLayersOnlyWhereARoleHasAnOverride(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	private, _ := database.CreateChannel(ctx, "private", "text", "", "", 0)
@@ -152,6 +155,7 @@ func TestGetMemberGrants_TwoRolesCarryLayersOnlyWhereARoleHasAnOverride(t *testi
 // A last-admin guard must see an Administrator role that is not the member's
 // top role.
 func TestLastAdminGuard_AdminInLowerRole(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	// A high-ranked role with no administrator bit; the Admin role (80) sits
@@ -174,6 +178,7 @@ func TestLastAdminGuard_AdminInLowerRole(t *testing.T) {
 // Eligible moderators and the decider's own authority read the OR of every
 // held mask, so a bit granted by a role below the top still authorises.
 func TestDeciderAuthority_ORsHeldMasks(t *testing.T) {
+	t.Parallel()
 	database, ownerID, modID, memberID, member2ID := newAppealQueriesTestDB(t)
 	ctx := context.Background()
 
@@ -203,6 +208,7 @@ func TestDeciderAuthority_ORsHeldMasks(t *testing.T) {
 
 // Rank is the position of the TOP held role, for every actor-outranks check.
 func TestRolePosition_UsesTopRole(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	actor, _ := database.CreateUser(ctx, "actor", "hash", int(permissions.MemberRoleID))
@@ -224,6 +230,7 @@ func TestRolePosition_UsesTopRole(t *testing.T) {
 // A member with no user_roles row at all is still judged by users.role_id, so
 // the last-admin guard cannot be skipped by a drifted database.
 func TestLastAdminGuard_ZeroRoleRowsFallsBackToMirror(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := mustCreateUser(t, database, "rowless-admin", "hash", int(permissions.AdminRoleID))
@@ -239,6 +246,7 @@ func TestLastAdminGuard_ZeroRoleRowsFallsBackToMirror(t *testing.T) {
 // ListMentionTargetsByRoles joins user_roles: a member is listed once and
 // counted for any role they hold, with every held role reported.
 func TestListMentionTargetsByRoles_TwoRoleHolderListedOnce(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "two", "hash", int(permissions.MemberRoleID))
@@ -263,6 +271,7 @@ func TestListMentionTargetsByRoles_TwoRoleHolderListedOnce(t *testing.T) {
 
 // ListUserIDsByRole (behind RoleService.AffectedUserIDs) reads user_roles.
 func TestListUserIDsByRole_ReadsEveryHolder(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "holder", "hash", int(permissions.MemberRoleID))
@@ -280,6 +289,7 @@ func TestListUserIDsByRole_ReadsEveryHolder(t *testing.T) {
 // Effective carries the top role's identity with the OR of every held mask,
 // and its colour is a copy, so editing it never reaches the cached Top.
 func TestMemberRoles_EffectiveTopIdentityORMask(t *testing.T) {
+	t.Parallel()
 	color := "#ff0000"
 	m := &db.MemberRoles{
 		Top:   db.Role{ID: 3, Name: "Moderator", Position: 80, Permissions: 0b0011, Color: &color},
@@ -308,6 +318,7 @@ func TestMemberRoles_EffectiveTopIdentityORMask(t *testing.T) {
 // Every role writer fails cleanly, changing nothing, when its context is gone
 // before the transaction starts.
 func TestRoleWriters_CancelledContextChangesNothing(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	uid := mustCreateUser(t, database, "cancelled", "hash", int(permissions.MemberRoleID))
 	ctx, cancel := context.WithCancel(context.Background())

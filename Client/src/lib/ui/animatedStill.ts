@@ -177,11 +177,94 @@ export function clearAnimatedStills(): void {
  *  focused, or always. Neither plays under reduced motion. */
 export type AnimationMode = { readonly hover: HTMLElement } | "always";
 
+interface MotionFollower {
+  readonly settle: () => void;
+  seenConnected: boolean;
+}
+
+// One observer on <html> serves every bound image. The registry holds images
+// weakly and the follower hangs off the image, so a discarded row is collected
+// with its image and costs nothing afterwards.
+const followers = new WeakMap<HTMLImageElement, MotionFollower>();
+const registry = new Set<WeakRef<HTMLImageElement>>();
+let motionObserver: MutationObserver | null = null;
+let pruneAt = 64;
+
+/** Re-run each live image's settle; forget the dead and the removed. */
+function onMotionChange(): void {
+  for (const ref of registry) {
+    const img = ref.deref();
+    const follower = img === undefined ? undefined : followers.get(img);
+    if (img === undefined || follower === undefined) {
+      registry.delete(ref);
+      continue;
+    }
+    if (img.isConnected) follower.seenConnected = true;
+    else if (follower.seenConnected) {
+      followers.delete(img);
+      registry.delete(ref);
+      continue;
+    }
+    follower.settle();
+  }
+  if (registry.size === 0) {
+    motionObserver?.disconnect();
+    motionObserver = null;
+  }
+}
+
+function followMotion(img: HTMLImageElement, settle: () => void): void {
+  // The image may be bound before it is mounted, so only an image that was
+  // connected and then left the document counts as gone.
+  followers.set(img, { settle, seenConnected: img.isConnected });
+  registry.add(new WeakRef(img));
+  if (registry.size > pruneAt) {
+    for (const ref of registry) {
+      const live = ref.deref();
+      const follower = live === undefined ? undefined : followers.get(live);
+      if (live === undefined || follower === undefined) registry.delete(ref);
+      else if (live.isConnected) follower.seenConnected = true;
+      else if (follower.seenConnected) {
+        followers.delete(live);
+        registry.delete(ref);
+      }
+    }
+    pruneAt = Math.max(64, registry.size * 2);
+  }
+  if (motionObserver === null) {
+    motionObserver = new MutationObserver(onMotionChange);
+    motionObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
+}
+
+interface HoverBinding {
+  readonly img: HTMLImageElement;
+  readonly release: () => void;
+  /** Seen in the document: only such an image counts as removed once it is not. */
+  seen: boolean;
+}
+
+// A row that stays mounted while its avatar is replaced would otherwise keep
+// every earlier image's hover listeners until the next hover.
+const hoverBindings = new WeakMap<Element, Set<HoverBinding>>();
+
+function releaseDetachedHovers(target: Element): void {
+  const bound = hoverBindings.get(target);
+  if (bound === undefined) return;
+  for (const binding of bound) {
+    if (binding.img.isConnected) binding.seen = true;
+    else if (binding.seen) binding.release();
+  }
+}
+
 /**
  * Show `still` on `img` and play `animatedUrl` as `mode` says, following the
  * reduced-motion setting live. Listeners on a hover row that outlives the
- * image, and the motion observer, drop themselves the first time they find
- * the image detached.
+ * image drop themselves the first time they find the image detached; the
+ * shared motion observer forgets a removed image on its next change.
  */
 export function bindAnimatedImage(
   img: HTMLImageElement,
@@ -217,35 +300,29 @@ export function bindAnimatedImage(
   };
   settle();
 
-  // The image may be bound before it is mounted, so only an image that was
-  // connected and then left the document counts as gone.
-  let seenConnected = img.isConnected;
-  const gone = (): boolean => {
-    if (img.isConnected) {
-      seenConnected = true;
-      return false;
-    }
-    return seenConnected;
-  };
-  const motion = new MutationObserver(() => {
-    if (gone()) {
-      motion.disconnect();
-      return;
-    }
-    settle();
-  });
-  motion.observe(document.documentElement, { attributes: true, attributeFilter: ["class"] });
+  followMotion(img, settle);
 
   if (target === null) return;
+  releaseDetachedHovers(target);
   const handlers: Array<[string, () => void]> = [];
+  const release = (): void => {
+    for (const [t, h] of handlers) target.removeEventListener(t, h);
+    hoverBindings.get(target)?.delete(binding);
+  };
+  const binding: HoverBinding = { img, release, seen: img.isConnected };
+  let bound = hoverBindings.get(target);
+  if (bound === undefined) {
+    bound = new Set();
+    hoverBindings.set(target, bound);
+  }
+  bound.add(binding);
   const on = (type: string, fn: () => void): void => {
     const handler = (): void => {
       if (img.isConnected) {
         fn();
         return;
       }
-      for (const [t, h] of handlers) target.removeEventListener(t, h);
-      motion.disconnect();
+      release();
     };
     handlers.push([type, handler]);
     target.addEventListener(type, handler);

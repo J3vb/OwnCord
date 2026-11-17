@@ -35,8 +35,11 @@ export type { MediaDetector } from "./mediaDetector";
 export type { WindowPrefs } from "./windowPrefs";
 export type { GpuAdapter } from "./gpuAdapter";
 export type { AppAudio } from "./appAudio";
+export type { MusicAudio } from "./musicAudio";
 export type { CallService } from "./callService";
 export type { MeteredNetwork } from "./meteredNetwork";
+export type { MobileAudio } from "./mobileAudio";
+export type { PushRegistration } from "./pushRegistration";
 export type { ServerScope } from "./serverScope";
 
 import type { HttpClient } from "./http";
@@ -69,8 +72,11 @@ import type { MediaDetector } from "./mediaDetector";
 import type { WindowPrefs } from "./windowPrefs";
 import type { GpuAdapter } from "./gpuAdapter";
 import type { AppAudio } from "./appAudio";
+import type { MusicAudio } from "./musicAudio";
 import type { CallService } from "./callService";
 import type { MeteredNetwork } from "./meteredNetwork";
+import type { MobileAudio } from "./mobileAudio";
+import type { PushRegistration } from "./pushRegistration";
 import type { ServerScope } from "./serverScope";
 import type { ShareSheet } from "./shareSheet";
 
@@ -107,8 +113,11 @@ export interface Platform {
   readonly windowPrefs: WindowPrefs;
   readonly gpuAdapter: GpuAdapter;
   readonly appAudio: AppAudio;
+  readonly musicAudio: MusicAudio;
   readonly callService: CallService;
   readonly meteredNetwork: MeteredNetwork;
+  readonly mobileAudio: MobileAudio;
+  readonly pushRegistration: PushRegistration;
   readonly serverScope: ServerScope;
   readonly shareSheet: ShareSheet;
 }

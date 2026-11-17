@@ -8,6 +8,7 @@ import { desktop } from "../../platform/desktop";
 import { staysAttached, watchGlobalKeys } from "./globalKeysWatch";
 import type { GlobalKeysStatus } from "../../platform/contracts/globalShortcuts";
 import { settingsText as t } from "../../i18n/settings";
+import { buildSettingsSection } from "./settingsSection";
 
 /** What the portal section shares with the rest of the Keybinds tab. */
 export interface GlobalKeysPortalContext {
@@ -16,7 +17,10 @@ export interface GlobalKeysPortalContext {
   readonly commKbd: Partial<Record<GlobalShortcutAction, HTMLElement>>;
   readonly comboText: (action: GlobalShortcutAction) => string;
   readonly globalHint: HTMLElement;
+  /** The polling Global shortcuts section: its hint, then its rows. */
   readonly globalSection: HTMLElement;
+  /** The polling rows' card, shown once the host says global keys can fire. */
+  readonly globalRows: HTMLElement;
   readonly portalPriority: HTMLElement;
 }
 
@@ -32,16 +36,18 @@ export function appendGlobalKeysPortal(
     comboText,
     globalHint,
     globalSection,
+    globalRows,
     portalPriority,
   }: GlobalKeysPortalContext,
 ): void {
   // Portal backend: the desktop owns the keys. One button opens its dialog
   // while mute or deafen is unbound; the Communication rows show the triggers
   // it reports; a second button (version 2+) opens its own shortcut settings.
-  const portalSection = createElement("div", {
-    style: "display: none;",
-    "data-testid": "keybinds-portal",
+  const { el: portalSection, card: portalCard } = buildSettingsSection({
+    label: t("keybinds.globalSection"),
+    attrs: { "data-testid": "keybinds-portal" },
   });
+  portalSection.style.display = "none";
   const portalSetUp = createElement(
     "button",
     { class: "ac-btn", "data-testid": "keybinds-portal-setup" },
@@ -81,7 +87,7 @@ export function appendGlobalKeysPortal(
     t("keybinds.portalUnnamed"),
   );
   appendChildren(
-    portalSection,
+    portalCard,
     createElement(
       "div",
       {
@@ -105,16 +111,6 @@ export function appendGlobalKeysPortal(
     noteKind = text === null ? "none" : kind;
     portalNote.style.display = text === null ? "none" : "";
     setText(portalNote, text ?? "");
-  };
-  let portalHeading = false;
-  // The heading is built on first use: a polling or unsupported desktop has no empty section.
-  const ensurePortalHeading = (): void => {
-    if (portalHeading) return;
-    portalHeading = true;
-    portalSection.prepend(
-      createElement("div", { class: "settings-separator" }),
-      createElement("div", { class: "keybind-section-header" }, t("keybinds.globalSection")),
-    );
   };
   const paintPortalKeys = (status: GlobalKeysStatus): void => {
     const { mute, deafen } = status.triggers;
@@ -145,7 +141,6 @@ export function appendGlobalKeysPortal(
     portalWhere.style.display = anyBound && !status.canConfigure ? "" : "none";
   };
   const renderPortal = (status: GlobalKeysStatus): void => {
-    ensurePortalHeading();
     portalSection.style.display = "";
     portalPriority.hidden = false;
     paintPortalKeys(status);
@@ -204,6 +199,7 @@ export function appendGlobalKeysPortal(
     if (status.backend === "portal") {
       inPortalMode = true;
       globalHint.style.display = "none";
+      globalSection.style.display = "none";
       renderPortal(status);
       return;
     }
@@ -216,6 +212,7 @@ export function appendGlobalKeysPortal(
       if (commKbd.mute !== undefined) setText(commKbd.mute, comboText("mute"));
       if (commKbd.deafen !== undefined) setText(commKbd.deafen, comboText("deafen"));
       globalHint.style.display = "";
+      globalSection.style.display = "";
       polled = false;
     }
     if (polled) return;
@@ -226,7 +223,7 @@ export function appendGlobalKeysPortal(
       .then((supported) => {
         if (signal.aborted) return;
         if (supported) {
-          globalSection.style.display = "";
+          globalRows.style.display = "";
           return;
         }
         setText(globalHint, t("keybinds.globalHintUnsupported"));

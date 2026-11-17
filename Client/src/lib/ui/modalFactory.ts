@@ -19,6 +19,7 @@ import { applyDialogSemantics, focusDialog, trapFocus } from "./a11y";
 import { connectText } from "../../i18n/connect";
 import { attachLimitHint } from "../text/nameLimits";
 import { showToast } from "./toast";
+import { displayedDialogs } from "./dialogOpen";
 
 export interface ModalOptions {
   /** The content element to place inside the modal container. */
@@ -147,6 +148,17 @@ export function createModal(
     }
   }
 
+  // Only the dialog on top answers Escape: another may have opened over this one.
+  function onTop(): boolean {
+    if (!overlay.isConnected) return true;
+    return !displayedDialogs().some(
+      (el) =>
+        el !== overlay &&
+        !overlay.contains(el) &&
+        (overlay.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0,
+    );
+  }
+
   if (closeOnBackdrop) {
     closeOnBackdropClick(overlay, handleClose, disposable.signal);
   }
@@ -156,7 +168,7 @@ export function createModal(
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
-        if (e.key !== "Escape" || isImeCommit(e)) return;
+        if (e.key !== "Escape" || isImeCommit(e) || !onTop()) return;
         if (onEscape !== undefined) onEscape();
         else handleClose();
       },

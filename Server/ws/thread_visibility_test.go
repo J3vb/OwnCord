@@ -132,6 +132,31 @@ func TestRevokeHeldThread_ReleasesOnlyTheLostParentsThread(t *testing.T) {
 	}
 }
 
+// A visibility walk that runs out of time releases a held thread under the walked channel along
+// with the channel itself, and keeps one under another channel.
+func TestMarkVisibilityWalkTimedOut_ReleasesTheHeldThreadUnderTheChannel(t *testing.T) {
+	f := newThreadWSFixture(t)
+	ctx := context.Background()
+	c, _ := f.connect(t, "timedout")
+	f.hub.applyThreadFocus(c, f.thread)
+	if c.getThreadID() != f.thread {
+		t.Fatal("setup: focus refused")
+	}
+
+	f.hub.markVisibilityWalkTimedOut(ctx, f.parent+1000, []*Client{c})
+	if c.getThreadID() != f.thread {
+		t.Fatal("a timed-out walk of another channel released the thread")
+	}
+
+	f.hub.markVisibilityWalkTimedOut(ctx, f.parent, []*Client{c})
+	if got := c.getThreadID(); got != 0 {
+		t.Errorf("slot = %d after a timed-out walk of its parent, want 0", got)
+	}
+	if hasTopic(f.hub, c, ChannelTopic(f.thread)) {
+		t.Error("the socket still holds the thread's topic")
+	}
+}
+
 func TestRoleThreadVerdict_InheritsTheParents(t *testing.T) {
 	f := newThreadWSFixture(t)
 	ctx := context.Background()

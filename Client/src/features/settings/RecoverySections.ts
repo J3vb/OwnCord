@@ -206,6 +206,9 @@ function buildRevealSlot(signal: AbortSignal): {
   show(reveal: ShownOnce): void;
 } {
   const element = createElement("div", {});
+  // `data-secret-showing` is read by the Account tab, which asks before a close
+  // would wipe the secret.
+  const wrapper = createElement("div", {});
   let current: ShownOnce | null = null;
   const done = createElement(
     "button",
@@ -218,10 +221,10 @@ function buildRevealSlot(signal: AbortSignal): {
     current = null;
     element.replaceChildren();
     done.style.display = "none";
+    delete wrapper.dataset["secretShowing"];
   };
   done.addEventListener("click", dismiss, { signal });
   signal.addEventListener("abort", dismiss, { once: true });
-  const wrapper = createElement("div", {});
   appendChildren(wrapper, element, done);
   return {
     element: wrapper,
@@ -230,6 +233,7 @@ function buildRevealSlot(signal: AbortSignal): {
       current = reveal;
       element.appendChild(reveal.element);
       done.style.display = "";
+      wrapper.dataset["secretShowing"] = "true";
     },
   };
 }

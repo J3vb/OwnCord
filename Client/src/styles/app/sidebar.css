@@ -515,6 +515,11 @@
 .voice-user-item .vu-status {
   color: var(--text-muted);
 }
+/* Mute music is on for a sharer: their note is dimmed and struck through. */
+.voice-user-item .vu-music--muted {
+  opacity: 0.5;
+  text-decoration: line-through;
+}
 /* A self-mute is grey; a moderator's mute stays red (.vu-server-muted). */
 .voice-user-item .vu-muted {
   color: var(--text-muted);

@@ -660,6 +660,9 @@ export function buildTauriMockScript(opts: {
     preview?: Record<string, Record<string, unknown> | string>;
     image?: Record<string, number[] | string>;
   };
+  /** The apps the music share picker lists (the Windows and the Linux host
+   *  answer the same shape). Without it the list is empty. */
+  musicApps?: Array<{ id: string; name: string; icon?: string; playing?: boolean }>;
 }): string {
   const readyPayload = buildReadyPayload(opts.readyOverrides);
   // A profile read is GET /auth/me; /users/me only supports PATCH. Keep the
@@ -702,6 +705,22 @@ export function buildTauriMockScript(opts: {
     // assert side effects with no DOM footprint (pin writes, restart calls).
     window.__invokeLog = [];
 
+    // The Android app's call audio (the plugin behind mobile_audio_*): the
+    // phone's routes and its pause for a phone call. With nothing set the phone
+    // reports no route control. A spec sets the state with
+    // window.__mobileAudioPush(state), which also sends it as the plugin's
+    // "state" event; every state is numbered, as the host numbers them.
+    let __mobileAudio = { supported: false, routes: [], active: "speaker", manual: null, interrupted: false, lost: 0 };
+    let __mobileAudioSeq = 0;
+    let __mobileAudioChannel = null;
+    let __mobileAudioIndex = 0;
+    const __mobileAudioState = () => ({ ...__mobileAudio, seq: ++__mobileAudioSeq });
+    window.__mobileAudioPush = (state) => {
+      __mobileAudio = { ...__mobileAudio, ...state };
+      const cb = __mobileAudioChannel === null ? undefined : window["__tcb_" + __mobileAudioChannel];
+      if (cb) cb({ message: __mobileAudioState(), index: __mobileAudioIndex++ });
+    };
+
     // -----------------------------------------------------------------------
     // HTTP mock state
     // -----------------------------------------------------------------------
@@ -718,7 +737,7 @@ export function buildTauriMockScript(opts: {
       for (const route of HTTP_ROUTES) {
         if (url.includes(route.pattern) && (!route.method || route.method === method)) return route;
       }
-      // Default: nobody blocked, so the Privacy & Safety tab loads without its
+      // Default: nobody blocked, so the Privacy & safety tab loads without its
       // load-failure alert. A spec's own /blocks route wins (matched above).
       if (method === "GET" && url.split("?")[0].endsWith("/api/v1/blocks")) {
         return { status: 200, body: { blocked_user_ids: [] } };
@@ -1014,6 +1033,9 @@ export function buildTauriMockScript(opts: {
         // Auto-idle's OS idle poll (DP-33): null is "the OS cannot say", so the
         // mocked app keeps the in-window idle timer it had before the poll.
         if (cmd === "system_idle_ms") return null;
+        // The Android app's idle plugin: it takes the delay and sends no event.
+        if (["system_idle_follow", "plugin:owncord-idle|register_listener",
+             "plugin:owncord-idle|remove_listener"].includes(cmd)) return null;
         // The OS region: unknown, so dates follow the browser language.
         if (cmd === "system_region_locale") return null;
         // The game scan (WP 8.3): no game is running in the mocked app.
@@ -1024,20 +1046,52 @@ export function buildTauriMockScript(opts: {
         if (cmd === "list_running_programs") return [];
         // The taskbar/tray unread badge (DP-27); calls stay in __invokeLog.
         if (cmd === "set_unread_badge") return null;
-        // The Android call service; calls stay in __invokeLog.
-        if (cmd === "set_call_service") return null;
+        // The Android call service, its notifications' buttons (none is
+        // pressed here) and the ringing call's notification; calls stay in
+        // __invokeLog.
+        if (["set_call_service", "show_call_ring", "clear_call_ring",
+             "plugin:owncord-call-service|register_listener",
+             "plugin:owncord-call-service|remove_listener"].includes(cmd)) return null;
         if (cmd === "is_metered") return { metered: false };
+        // The Android app's push (UnifiedPush): no push app is installed in
+        // the mocked app, so Settings offers to get one; calls stay in __invokeLog.
+        if (cmd === "push_status") return { distributors: [], current: null };
+        if (cmd === "push_register") throw "push register: NO_DISTRIBUTOR";
+        if (["push_choose", "push_unregister", "plugin:owncord-push|register_listener",
+             "plugin:owncord-push|remove_listener"].includes(cmd)) return null;
         if (["plugin:owncord-metered-network|register_listener",
              "plugin:owncord-metered-network|remove_listener"].includes(cmd)) return null;
+        // The Android app's call audio (see __mobileAudio above). A picked route
+        // becomes the one in use; the one the phone would pick itself (a headset
+        // when there is one, else the speaker) and an empty pick count as no
+        // pick, and a call's start and its end forget the pick, as on the host.
+        if (cmd === "plugin:owncord-mobile-audio|register_listener") {
+          __mobileAudioChannel = args?.handler?.id ?? null;
+          __mobileAudioIndex = 0;
+          return null;
+        }
+        if (cmd === "plugin:owncord-mobile-audio|remove_listener") return null;
+        if (cmd === "mobile_audio_set_route" || cmd === "mobile_audio_set_session") {
+          const kinds = __mobileAudio.routes.map((r) => r.kind);
+          const auto = ["wired", "bluetooth"].find((k) => kinds.includes(k)) ?? "speaker";
+          const picked = cmd === "mobile_audio_set_route" && kinds.includes(args?.kind);
+          const kind = picked ? args.kind : auto;
+          __mobileAudio = { ...__mobileAudio, active: kind, manual: kind === auto ? null : kind };
+        }
+        if (["mobile_audio_state", "mobile_audio_set_session", "mobile_audio_set_route"].includes(cmd))
+          return __mobileAudioState();
         if (cmd === "ptt_polling_supported") return false;
         // Windows per-app share audio (6.7): no WASAPI host, no picker switch.
-        if (cmd === "app_audio_available") return false;
+        if (cmd === "app_audio_available") return ${opts.musicApps !== undefined};
+        // Music share host: no apps to list, nothing to capture.
+        if (cmd === "list_audio_apps") return ${JSON.stringify(opts.musicApps ?? [])};
+        if (cmd === "stop_music_audio") return null;
         if (cmd === "voice_shortcuts_supported") return false;
         // Global keys backend (LP-9b): matches the two probes above, nothing delivers a key.
         if (cmd === "global_keys_status")
           return { backend: "none", portalVersion: 0, triggers: { ptt: null, mute: null, deafen: null }, canConfigure: false };
         if (cmd === "check_client_update") return { available: false, version: null, body: null };
-        // Close to Tray / Start Minimized (WP 2B-3): the host's defaults.
+        // Close to tray / Start minimized (WP 2B-3): the host's defaults.
         if (cmd === "get_window_prefs") return { minimizeToTray: true, startMinimized: false };
         if (cmd === "set_window_pref" || cmd === "show_next_launch") return null;
         // Graphics card for video: no cards, so the row stays hidden.
@@ -1045,6 +1099,10 @@ export function buildTauriMockScript(opts: {
           return { cards: [], saved: "auto", active: null, notFound: false, resetAfterCrash: false };
         if (cmd === "set_gpu_adapter") return null;
         if (cmd === "native_voice_set_video_bitrate") return;
+        // Music share (Linux host): nothing plays in the mocked app.
+        if (cmd === "native_voice_list_audio_apps") return ${JSON.stringify(opts.musicApps ?? [])};
+        if (cmd === "native_voice_start_music") return "TR_music";
+        if (cmd === "native_voice_stop_music" || cmd === "native_voice_set_music_volume") return;
         // ---- External-content broker (B7-16) ----
         // No external network here: refuse the way the native broker does,
         // with a bare failure-class string. Teardown also names a fresh
@@ -1262,6 +1320,18 @@ export const mockTauriFullSessionWithVoice = mock({
   simulateWsFlow: true,
   wsHandlers: voiceWsHandlers(),
   readyOverrides: READY_VOICE,
+});
+
+/** A voice session whose host lists one playing app to share as music. */
+export const mockTauriFullSessionWithMusic = mock({
+  httpRoutes: [ROUTE_HEALTH, ROUTE_LOGIN, ROUTE_MESSAGES],
+  simulateWsFlow: true,
+  wsHandlers: voiceWsHandlers(),
+  readyOverrides: READY_VOICE,
+  musicApps: [
+    { id: "p1", name: "Test Player", playing: true },
+    { id: "p2", name: "Idle Player", playing: false },
+  ],
 });
 
 export const mockTauriFullSessionWithVoiceFailure = mock({

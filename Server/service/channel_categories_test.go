@@ -10,6 +10,7 @@ import (
 )
 
 func TestCategoryService_NameContract(t *testing.T) {
+	t.Parallel()
 	svc, _ := newChannelAdminService(t)
 	ctx := context.Background()
 
@@ -31,6 +32,7 @@ func TestCategoryService_NameContract(t *testing.T) {
 }
 
 func TestCategoryService_ChangesNameTheChannelsThatMoved(t *testing.T) {
+	t.Parallel()
 	svc, database := newChannelAdminService(t)
 	ctx := context.Background()
 	a, _ := svc.CreateCategory(ctx, 1, "A")
@@ -81,6 +83,7 @@ func TestCategoryService_ChangesNameTheChannelsThatMoved(t *testing.T) {
 }
 
 func TestCategoryService_StaleReorderWritesNothing(t *testing.T) {
+	t.Parallel()
 	svc, _ := newChannelAdminService(t)
 	ctx := context.Background()
 	a, _ := svc.CreateCategory(ctx, 1, "A")
@@ -101,6 +104,7 @@ func TestCategoryService_StaleReorderWritesNothing(t *testing.T) {
 }
 
 func TestCategoryService_ChannelNamesAreUniquePerTypeAndCategoryID(t *testing.T) {
+	t.Parallel()
 	svc, _ := newChannelAdminService(t)
 	ctx := context.Background()
 	a, _ := svc.CreateCategory(ctx, 1, "A")
@@ -130,6 +134,7 @@ func TestCategoryService_ChannelNamesAreUniquePerTypeAndCategoryID(t *testing.T)
 }
 
 func TestCategoryService_LegacyNameThatMatchesNothingCreatesTheCategory(t *testing.T) {
+	t.Parallel()
 	svc, _ := newChannelAdminService(t)
 	ctx := context.Background()
 	ch, _, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "x", Category: "  Fresh  "}, nil)
@@ -156,6 +161,7 @@ func TestCategoryService_LegacyNameThatMatchesNothingCreatesTheCategory(t *testi
 // none. If that category was deleted after the handler read the row, the
 // update must land uncategorized, not fail.
 func TestCategoryService_CarriedCategoryThatVanishedFallsBackToUncategorized(t *testing.T) {
+	t.Parallel()
 	svc, _ := newChannelAdminService(t)
 	ctx := context.Background()
 	cat, err := svc.CreateCategory(ctx, 1, "Doomed")
@@ -197,6 +203,7 @@ func TestCategoryService_CarriedCategoryThatVanishedFallsBackToUncategorized(t *
 }
 
 func TestCategoryService_LegacyCreateReturnsTheListAndAudits(t *testing.T) {
+	t.Parallel()
 	svc, database := newChannelAdminService(t)
 	ctx := context.Background()
 	_, cats, err := svc.AdminCreateChannel(ctx, 1, AdminChannelCreate{Name: "x", Category: "Fresh"}, nil)

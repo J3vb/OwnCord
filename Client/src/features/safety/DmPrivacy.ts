@@ -15,6 +15,7 @@
  */
 
 import type { ApiClient, DmPrivacy } from "@lib/api";
+import { buildSettingsSection } from "../settings/settingsSection";
 import { createElement, setText } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import { createInlineError } from "@lib/ui/inlineError";
@@ -29,16 +30,15 @@ let sectionSeq = 0;
 export function buildDmPrivacySection(signal: AbortSignal, api: DmPrivacyApi): HTMLElement {
   const seq = ++sectionSeq;
   const titleId = `dm-privacy-${seq}`;
-  const section = createElement("section", {
-    class: "dm-privacy",
-    "aria-labelledby": titleId,
-    "data-testid": "dm-privacy",
+  const {
+    el: section,
+    heading,
+    card,
+  } = buildSettingsSection({
+    label: t("dmPrivacy.title"),
+    headingAttrs: { id: titleId, tabindex: "-1" },
+    attrs: { class: "dm-privacy", "aria-labelledby": titleId, "data-testid": "dm-privacy" },
   });
-  const heading = createElement(
-    "h3",
-    { class: "safety-heading", id: titleId, tabindex: "-1" },
-    t("dmPrivacy.title"),
-  );
   const desc = createElement("p", { class: "setting-desc" }, t("dmPrivacy.desc"));
   // Both live regions exist before their text changes, so each change is read.
   const status = createElement("div", { class: "my-reports-status", role: "status" });
@@ -49,7 +49,7 @@ export function buildDmPrivacySection(signal: AbortSignal, api: DmPrivacyApi): H
     testId: "dm-privacy-error",
   });
   const rowsEl = createElement("div", { class: "dm-privacy-rows" });
-  section.append(heading, desc, status, failure.el, rowsEl);
+  card.append(desc, status, failure.el, rowsEl);
 
   /** The last values the server confirmed (GET or a PUT reply). */
   let confirmed: DmPrivacy | null = null;

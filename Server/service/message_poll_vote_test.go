@@ -80,6 +80,7 @@ func countFor(u *PollUpdate, answer int64) int64 {
 }
 
 func TestVotePoll_ReplaceSetAndRemove(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	poll := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
 
@@ -113,6 +114,7 @@ func TestVotePoll_ReplaceSetAndRemove(t *testing.T) {
 }
 
 func TestVotePoll_MultiVersusSingle(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	single := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
 	if _, err := f.vote(fwdCarol, single.MessageID, 1, 2); !errors.Is(err, ErrBadRequest) || errors.Is(err, ErrPollEnded) {
@@ -140,6 +142,7 @@ func TestVotePoll_MultiVersusSingle(t *testing.T) {
 }
 
 func TestVotePoll_EndedAndExpiredAreRefused(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	poll := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
 	f.expire(t, poll.MessageID)
@@ -161,6 +164,7 @@ func TestVotePoll_EndedAndExpiredAreRefused(t *testing.T) {
 }
 
 func TestVotePoll_DeletedAndUnknownAreNotFound(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	poll := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
 	if _, err := f.svc.DeleteMessage(context.Background(), fwdBob, poll.MessageID); err != nil {
@@ -183,6 +187,7 @@ func TestVotePoll_DeletedAndUnknownAreNotFound(t *testing.T) {
 }
 
 func TestVotePoll_UnreadableIsNotFound(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	locked := f.rawPoll(t, fwdLockedChan, fwdAlice, false)
 	if _, err := f.vote(fwdBob, locked, 1); !errors.Is(err, ErrNotFound) {
@@ -211,6 +216,7 @@ func TestVotePoll_UnreadableIsNotFound(t *testing.T) {
 }
 
 func TestVotePoll_AnnouncementMemberCanVote(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	seedChannel(t, f.database, &db.Channel{ID: fwdNews, Name: "news", Type: "announcement"})
 	id := f.rawPoll(t, fwdNews, fwdAlice, false)
@@ -221,6 +227,7 @@ func TestVotePoll_AnnouncementMemberCanVote(t *testing.T) {
 }
 
 func TestVotePoll_NoAddReactions(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	seedChannelOverride(t, f.database, permissions.MemberRoleID, fwdDstChan, 0, permissions.AddReactions)
 	f.perms.InvalidateAll()
@@ -234,6 +241,7 @@ func TestVotePoll_NoAddReactions(t *testing.T) {
 }
 
 func TestVotePoll_ArchivedBlockedAndTimedOut(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newForwardFixture(t, nil)
 	archived := f.rawPoll(t, fwdArchived, fwdAlice, false)
@@ -261,6 +269,7 @@ func TestVotePoll_ArchivedBlockedAndTimedOut(t *testing.T) {
 }
 
 func TestVotePoll_DMUpdateCarriesTheAudience(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	dm := f.rawPoll(t, fwdDM, fwdCarol, false)
 	r, err := f.vote(fwdBob, dm, 1)
@@ -275,6 +284,7 @@ func TestVotePoll_DMUpdateCarriesTheAudience(t *testing.T) {
 }
 
 func TestVotePoll_AndEndShareOneLimiter(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, auth.NewRateLimiter())
 	poll := f.rawPoll(t, fwdDstChan, fwdAlice, false)
 	for i := range pollVoteLimit {
@@ -294,6 +304,7 @@ func TestVotePoll_AndEndShareOneLimiter(t *testing.T) {
 }
 
 func TestEndPoll_AuthorModeratorStranger(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	f.moderator(t)
 
@@ -335,6 +346,7 @@ func TestEndPoll_AuthorModeratorStranger(t *testing.T) {
 }
 
 func TestEndPoll_TimedOutAuthorMayEnd(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newForwardFixture(t, nil)
 	poll := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
@@ -349,6 +361,7 @@ func TestEndPoll_TimedOutAuthorMayEnd(t *testing.T) {
 }
 
 func TestEndPoll_DMNeedsTheAuthor(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	dm := f.rawPoll(t, fwdDM, fwdBob, false)
 	if _, err := f.end(fwdCarol, dm); !errors.Is(err, ErrForbidden) {
@@ -371,6 +384,7 @@ func TestEndPoll_DMNeedsTheAuthor(t *testing.T) {
 }
 
 func TestEndPoll_CountsIncludeEarlierVotes(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	poll := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
 	for _, u := range []int64{fwdAlice, fwdCarol} {
@@ -385,6 +399,7 @@ func TestEndPoll_CountsIncludeEarlierVotes(t *testing.T) {
 }
 
 func TestExpirePoll(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	ctx := context.Background()
 	poll := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
@@ -425,6 +440,7 @@ func TestExpirePoll(t *testing.T) {
 }
 
 func TestCreatePoll_WakesTheExpirer(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	var mu sync.Mutex
 	wakes := 0
@@ -443,6 +459,7 @@ func TestCreatePoll_WakesTheExpirer(t *testing.T) {
 }
 
 func TestVotePoll_ErasingVoterIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	poll := f.rawPoll(t, fwdDstChan, fwdAlice, false)
 	if _, err := f.database.ExecContext(context.Background(), `INSERT INTO erasure_jobs (user_id, state) VALUES (?, 'queued')`, fwdBob); err != nil {

@@ -352,7 +352,9 @@ export function createInputAttachments(st: InputState, api: InputApi) {
   ): Promise<void> {
     const upload = st.options.onUploadFile;
     if (upload === undefined) return;
-    await followUpload(pending, startUpload(upload, file, before));
+    const handle = startUpload(upload, file, before);
+    if (pending.draftText !== undefined) handle.draftText = pending.draftText;
+    await followUpload(pending, handle);
   }
 
   /** Show `handle` on `pending`'s chip until it settles. */

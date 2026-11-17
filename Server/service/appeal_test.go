@@ -95,6 +95,7 @@ func (f *fakeAppealNotifier) NotifyAppealStatus(userID int64, publicID, state st
 // ever touching decision 8's submission quota, must never allocate a lock
 // entry at all.
 func TestAppealLocker_UnknownIDNeverCreatesAnEntry(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -116,6 +117,7 @@ func TestAppealLocker_UnknownIDNeverCreatesAnEntry(t *testing.T) {
 // only other real holder) is done — reference-counted eviction, not an
 // unbounded map, and never an LRU that could evict a lock still in use.
 func TestAppealLocker_EvictsAfterRealTransitionsFinish(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -169,6 +171,7 @@ func (noPrecheckStore) FindAppealForAction(context.Context, int64) (int64, error
 // hook tests exercise a hand-supplied callback, which says nothing about
 // what the service itself wires at the call site.
 func TestAppeal_ServiceWiresANonNilAuthorityCallbackIntoDecideAppealTx(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -185,6 +188,7 @@ func TestAppeal_ServiceWiresANonNilAuthorityCallbackIntoDecideAppealTx(t *testin
 // ── Submission ───────────────────────────────────────────────────────────
 
 func TestAppeal_OnlyTheTargetMaySubmit(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -201,6 +205,7 @@ func TestAppeal_OnlyTheTargetMaySubmit(t *testing.T) {
 // A moderator's own channel purge writes a removal row targeting
 // themself. It is not a sanction, so it cannot be appealed.
 func TestAppeal_SelfTargetedPurgeRowIsNotAppealable(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -252,6 +257,7 @@ func (s *vanishingActionStore) GetModerationAction(ctx context.Context, id int64
 // either way, matching TestAppeal_OnlyTheTargetMaySubmit's identical
 // refusal for "not mine".
 func TestAppeal_VanishedActionMapsToTheSameNotFoundShapeAsUnknown(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -275,6 +281,7 @@ func TestAppeal_VanishedActionMapsToTheSameNotFoundShapeAsUnknown(t *testing.T) 
 }
 
 func TestAppeal_OnePerActionEver(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("second submit", func(t *testing.T) {
@@ -378,6 +385,7 @@ func TestAppeal_OnePerActionEver(t *testing.T) {
 }
 
 func TestAppeal_RateLimit(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -399,6 +407,7 @@ func TestAppeal_RateLimit(t *testing.T) {
 }
 
 func TestAppeal_KickIsNotAppealable(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -415,6 +424,7 @@ func TestAppeal_KickIsNotAppealable(t *testing.T) {
 // features share one *auth.RateLimiter instance but must never share a key
 // prefix (auth.Key("appeal", ...) vs auth.Key("report", ...)).
 func TestAppeal_RateLimitKeyIndependentOfReports(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -433,6 +443,7 @@ func TestAppeal_RateLimitKeyIndependentOfReports(t *testing.T) {
 // holds no MODERATE_MEMBERS bit of their own must still count as a second
 // eligible moderator, refusing the acting moderator's sole-moderator escape.
 func TestAppeal_AdministratorCountsAsEligibleModerator(t *testing.T) {
+	t.Parallel()
 	f := newSoleModeratorAppealFixture(t)
 	ctx := context.Background()
 	seedRole(t, f.database, &db.Role{ID: 3, Name: "owner", Permissions: permissions.Administrator, Position: 100})
@@ -451,6 +462,7 @@ func TestAppeal_AdministratorCountsAsEligibleModerator(t *testing.T) {
 // ── State machine ────────────────────────────────────────────────────────
 
 func TestAppeal_StateMachine(t *testing.T) {
+	t.Parallel()
 	newOpen := func(t *testing.T, f *appealFixture) string {
 		t.Helper()
 		actionID, err := f.mod.Warn(context.Background(), fixtureMod, fixtureMember, "x", nil)
@@ -527,6 +539,7 @@ func TestAppeal_StateMachine(t *testing.T) {
 }
 
 func TestAppeal_WithdrawIsAppellantOnly(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -544,6 +557,7 @@ func TestAppeal_WithdrawIsAppellantOnly(t *testing.T) {
 // ── The deciding-moderator rule ──────────────────────────────────────────
 
 func TestAppeal_ActingModeratorMayNotDecideWhereAnotherExists(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -565,6 +579,7 @@ func TestAppeal_ActingModeratorMayNotDecideWhereAnotherExists(t *testing.T) {
 // is no honest "forced to judge your own case" argument for the appellant
 // the way there is for the acting moderator on a one-admin install).
 func TestAppeal_AppellantMayNotDecideOrAssignOwnAppealEvenAsModerator(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -592,6 +607,7 @@ func TestAppeal_AppellantMayNotDecideOrAssignOwnAppealEvenAsModerator(t *testing
 // appealed action may not assign it to themself either, where another
 // eligible reviewer exists.
 func TestAppeal_ActingModeratorMayNotAssignWhereAnotherExists(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -605,6 +621,7 @@ func TestAppeal_ActingModeratorMayNotAssignWhereAnotherExists(t *testing.T) {
 }
 
 func TestAppeal_SoleModeratorMayDecideAndAuditSaysSo(t *testing.T) {
+	t.Parallel()
 	f := newSoleModeratorAppealFixture(t)
 	ctx := context.Background()
 
@@ -622,6 +639,7 @@ func TestAppeal_SoleModeratorMayDecideAndAuditSaysSo(t *testing.T) {
 }
 
 func TestAppeal_UpholdChangesNothing(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -639,6 +657,7 @@ func TestAppeal_UpholdChangesNothing(t *testing.T) {
 // ── The queue ────────────────────────────────────────────────────────────
 
 func TestAppeal_QueueRequiresTheBit(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -655,6 +674,7 @@ func TestAppeal_QueueRequiresTheBit(t *testing.T) {
 // around, their OWN appeal through the surface built for reviewing OTHER
 // people's — even though the row would otherwise match the requested state.
 func TestAppeal_QueueExcludesTheCallersOwnAppeal(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -692,6 +712,7 @@ func TestAppeal_QueueExcludesTheCallersOwnAppeal(t *testing.T) {
 // detail view, which would otherwise show them who is assigned, who
 // decided, and the acting moderator's identity.
 func TestAppeal_GetRefusesTheCallersOwnAppeal(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -711,6 +732,7 @@ func TestAppeal_GetRefusesTheCallersOwnAppeal(t *testing.T) {
 // ── Concurrency ──────────────────────────────────────────────────────────
 
 func TestAppeal_ConcurrentDecideOneWins(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -750,6 +772,7 @@ func TestAppeal_ConcurrentDecideOneWins(t *testing.T) {
 // audit history's token (a real deployment always passes one) rather than
 // merely proving the zero-value default happens to also be zero.
 func TestAppeal_DecidingModeratorErasureUnlinks(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -808,6 +831,7 @@ func (s *assignAfterInsertStore) InsertAppeal(ctx context.Context, publicID stri
 // held across Submit's insert, so a moderator who assigns the fresh row
 // immediately cannot broadcast "assigned" before Submit's "open".
 func TestSubmit_OpenBroadcastPrecedesConcurrentAssign(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -858,6 +882,7 @@ func decideWithStore(t *testing.T, st *failingDecideStore) error {
 
 // A database error while deciding is a server error, not "already decided".
 func TestAppeal_DecideDatabaseErrorIsInternal(t *testing.T) {
+	t.Parallel()
 	err := decideWithStore(t, &failingDecideStore{result: db.AppealWriteConflict, err: errors.New("disk I/O error")})
 	if !errors.Is(err, ErrInternal) || errors.Is(err, ErrConflict) {
 		t.Fatalf("Decide with a failing transaction: want ErrInternal and not ErrConflict, got %v", err)
@@ -866,6 +891,7 @@ func TestAppeal_DecideDatabaseErrorIsInternal(t *testing.T) {
 
 // A failed reversal still reports its own conflict, with the transaction error attached.
 func TestAppeal_DecideReversalFailureStaysAConflict(t *testing.T) {
+	t.Parallel()
 	err := decideWithStore(t, &failingDecideStore{result: db.AppealWriteReversalFailed, err: errors.New("reversal broke")})
 	if !errors.Is(err, ErrReversalFailed) {
 		t.Fatalf("Decide with a failed reversal: want ErrReversalFailed, got %v", err)

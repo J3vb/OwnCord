@@ -71,17 +71,18 @@ func handleThreadUpdateV2(ctx context.Context, cmd Command, info ClientInfo, dep
 		return threadsUnavailable()
 	}
 	c := cmd.(ThreadUpdateCmd)
-	t, err := d.ThreadSvc.Update(ctx, service.UpdateThreadParams{
+	t, changed, err := d.ThreadSvc.UpdateChanged(ctx, service.UpdateThreadParams{
 		UserID: info.UserID, ThreadID: c.ThreadID, Name: c.Name, Archived: c.Archived, Locked: c.Locked,
 		AutoArchiveMinutes: c.AutoArchiveMinutes, TagIDs: c.TagIDs,
 	})
 	if err != nil {
 		return threadErrorToResult(err)
 	}
-	return Result{
-		Reply:  buildThreadUpdateOK(info.ReqID, t.ID),
-		Events: []Event{threadNoteEvt{threadID: t.ID}},
+	res := Result{Reply: buildThreadUpdateOK(info.ReqID, t.ID)}
+	if changed {
+		res.Events = []Event{threadNoteEvt{threadID: t.ID}}
 	}
+	return res
 }
 
 // handleThreadDeleteV2: thread_deleted is sequenced on the parent; the note makes

@@ -1,11 +1,9 @@
-/**
- * PinnedMessages component — Discord-style pinned messages panel
- * with avatars, hover actions, and entry animation.
- */
+/** The pinned messages list, with avatars and hover actions, in the channel side panel. */
 
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { createSidePanelFrame } from "@lib/ui/sidePanelFrame";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { parseTimestamp } from "@lib/text/formatting";
 import { messagingText } from "../../i18n/messaging";
@@ -155,6 +153,7 @@ function renderEmptyState(): HTMLDivElement {
 export function createPinnedMessages(options: PinnedMessagesOptions): PinnedMessagesPanel {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
+  let body: HTMLDivElement | null = null;
   let list: HTMLDivElement | null = null;
   let emptyEl: HTMLDivElement | null = null;
   let countEl: HTMLSpanElement | null = null;
@@ -163,14 +162,14 @@ export function createPinnedMessages(options: PinnedMessagesOptions): PinnedMess
 
   /** Rebuild the list (or swap in the empty state) and the count from `pins`. */
   function renderBody(): void {
-    if (root === null || list === null || countEl === null) return;
+    if (body === null || list === null || countEl === null) return;
     countEl.textContent = String(pins.length);
     if (pins.length === 0) {
       list.remove();
       list.textContent = "";
       if (emptyEl === null) {
         emptyEl = renderEmptyState();
-        root.appendChild(emptyEl);
+        body.appendChild(emptyEl);
       }
       return;
     }
@@ -183,39 +182,24 @@ export function createPinnedMessages(options: PinnedMessagesOptions): PinnedMess
     for (const msg of pins) {
       list.appendChild(renderPinnedItem(msg, canUnpin));
     }
-    if (list.parentElement === null) root.appendChild(list);
+    if (list.parentElement === null) body.appendChild(list);
   }
 
   function mount(container: Element): void {
-    // A side panel, not a modal: complementary landmark (no aria-modal, no
-    // focus trap), matching DmProfileSidebar.
-    root = createElement("div", {
-      class: "pinned-panel",
-      role: "complementary",
-      "aria-label": messagingText("pins.label"),
+    const frame = createSidePanelFrame({
+      className: "pinned-panel",
+      label: messagingText("pins.label"),
+      title: messagingText("pins.title"),
+      icon: "pin",
+      closeLabel: messagingText("pins.close"),
+      testId: "pinned-panel",
+      onClose: () => options.onClose(),
+      signal: disposable.signal,
     });
-
-    // Header
-    const header = createElement("div", { class: "pinned-panel__header" });
-    const title = createElement("h3", {});
-    title.textContent = "";
-    title.appendChild(createIcon("pin", 16));
-    title.appendChild(document.createTextNode(messagingText("pins.title")));
-
+    root = frame.root;
+    body = frame.body;
     countEl = createElement("span", { class: "pinned-panel__count" });
-
-    const closeBtn = createElement("button", {
-      class: "pinned-panel__close",
-      "aria-label": messagingText("pins.close"),
-    });
-    closeBtn.appendChild(createIcon("x", 16));
-    closeBtn.addEventListener("click", () => options.onClose(), { signal: disposable.signal });
-
-    const titleGroup = createElement("div", {
-      class: "pinned-panel__title-group",
-    });
-    appendChildren(titleGroup, title, countEl);
-    appendChildren(header, titleGroup, closeBtn);
+    frame.title.appendChild(countEl);
 
     // Body — list or empty state. One delegated listener serves every card, so
     // re-rendering the list never stacks listeners.
@@ -233,7 +217,6 @@ export function createPinnedMessages(options: PinnedMessagesOptions): PinnedMess
       },
       { signal: disposable.signal },
     );
-    root.appendChild(header);
     renderBody();
 
     container.appendChild(root);
@@ -245,6 +228,7 @@ export function createPinnedMessages(options: PinnedMessagesOptions): PinnedMess
       root.remove();
       root = null;
     }
+    body = null;
     list = null;
     emptyEl = null;
     countEl = null;

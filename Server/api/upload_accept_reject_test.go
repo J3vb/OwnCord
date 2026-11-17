@@ -15,6 +15,7 @@ import (
 // ─── MountUploadRoutes ──────────────────────────────────────────────────────
 
 func TestUpload_RoutesAreMounted(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -42,6 +43,7 @@ func TestUpload_RoutesAreMounted(t *testing.T) {
 // ─── handleUpload ───────────────────────────────────────────────────────────
 
 func TestUpload_Success_TextFile(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -80,6 +82,7 @@ func TestUpload_Success_TextFile(t *testing.T) {
 }
 
 func TestUpload_Success_PNGImage(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -110,6 +113,7 @@ func TestUpload_Success_PNGImage(t *testing.T) {
 }
 
 func TestUpload_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -119,6 +123,7 @@ func TestUpload_Unauthenticated(t *testing.T) {
 }
 
 func TestUpload_InvalidToken(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -128,6 +133,7 @@ func TestUpload_InvalidToken(t *testing.T) {
 }
 
 func TestUpload_MissingFileField(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -144,6 +150,7 @@ func TestUpload_MissingFileField(t *testing.T) {
 }
 
 func TestUpload_InvalidMultipartForm(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -159,6 +166,7 @@ func TestUpload_InvalidMultipartForm(t *testing.T) {
 }
 
 func TestUpload_BlockedFileType_Executable(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -178,6 +186,7 @@ func TestUpload_BlockedFileType_Executable(t *testing.T) {
 }
 
 func TestUpload_BlockedFileType_ShellScript(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -191,6 +200,7 @@ func TestUpload_BlockedFileType_ShellScript(t *testing.T) {
 }
 
 func TestUpload_BlockedFileType_ELF(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -204,6 +214,7 @@ func TestUpload_BlockedFileType_ELF(t *testing.T) {
 }
 
 func TestUpload_RateLimitedAfterBurst(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	limiter := auth.NewRateLimiter()
@@ -230,6 +241,7 @@ func TestUpload_RateLimitedAfterBurst(t *testing.T) {
 }
 
 func TestUpload_OversizedFileRejected(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	dir := t.TempDir()
 	store, err := storage.New(dir, 1)

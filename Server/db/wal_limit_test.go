@@ -22,6 +22,7 @@ func openWALTestDB(t *testing.T) *DB {
 
 // Every pooled connection, writer and readers, carries the 64 MiB WAL cap.
 func TestFilePragmas_CapTheWALOnEveryConnection(t *testing.T) {
+	t.Parallel()
 	d := openWALTestDB(t)
 	ctx := context.Background()
 	var limit int64
@@ -44,6 +45,7 @@ func TestFilePragmas_CapTheWALOnEveryConnection(t *testing.T) {
 // the file back to the limit. The limit is lowered on the one writer
 // connection so the test writes a few MiB rather than 64.
 func TestOptimizeTick_LetsTheWALShrinkToTheLimit(t *testing.T) {
+	t.Parallel()
 	d := openWALTestDB(t)
 	ctx := context.Background()
 	const limit = 256 << 10
@@ -96,6 +98,7 @@ func TestOptimizeTick_LetsTheWALShrinkToTheLimit(t *testing.T) {
 
 // CheckpointWAL is a no-op on an in-memory database and after Close.
 func TestCheckpointWAL_NoOpInMemoryAndAfterClose(t *testing.T) {
+	t.Parallel()
 	mem, err := Open(":memory:")
 	if err != nil {
 		t.Fatal(err)

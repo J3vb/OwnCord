@@ -232,6 +232,36 @@ describe("a panel open across a reconnect", () => {
     expect(getThread(91)).toBeUndefined();
   });
 
+  it("keeps the thread when the refetch fails with a 404 that is not NOT_FOUND", async () => {
+    const getMessages = vi.fn(async () => {
+      throw new ApiClientError(404, "", "x");
+    });
+    wire(getMessages);
+    ws.simulateMessage("thread_changed", { thread: makeThread() });
+    setFocusedThread(91);
+    ws.simulateMessage("auth_ok", AUTH_OK);
+    await vi.waitFor(() => expect(getMessages).toHaveBeenCalledTimes(1));
+    await flush();
+    expectConsole("warn", /Thread history refetch after reconnect failed/);
+    expect(getThread(91)).toBeDefined();
+    expect(threadsStore.getState().focusedThreadId).toBe(91);
+  });
+
+  it("keeps the thread when the refetch fails with a server error", async () => {
+    const getMessages = vi.fn(async () => {
+      throw new ApiClientError(503, "SERVICE_UNAVAILABLE", "x");
+    });
+    wire(getMessages);
+    ws.simulateMessage("thread_changed", { thread: makeThread() });
+    setFocusedThread(91);
+    ws.simulateMessage("auth_ok", AUTH_OK);
+    await vi.waitFor(() => expect(getMessages).toHaveBeenCalledTimes(1));
+    await flush();
+    expectConsole("warn", /Thread history refetch after reconnect failed/);
+    expect(getThread(91)).toBeDefined();
+    expect(threadsStore.getState().focusedThreadId).toBe(91);
+  });
+
   it("closes the panel but keeps the thread when the reconnect finds it unreadable", async () => {
     const getMessages = vi.fn(async () => {
       throw new ApiClientError(403, "FORBIDDEN", "no");

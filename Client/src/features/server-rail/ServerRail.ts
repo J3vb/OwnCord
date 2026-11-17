@@ -17,28 +17,33 @@ import {
   reconcile,
   renameFolder,
   saveLayout,
-  serverInitials,
   toggleCollapsed,
   type ItemRef,
   type RailItem,
   type RailLayout,
 } from "@lib/prefs/serverRailLayout";
 import { setSidebarMode, uiStore } from "@stores/ui.store";
+import { authStore } from "@stores/auth.store";
 import { dmStore, type DmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
+import { loadServerIcons, pruneServerIcons, SERVER_ICON_CHANGED } from "./serverIcons";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
 import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../../i18n/serverRail";
+import type { CountSource } from "../navigation/destinations";
 import {
-  FALLBACK_COLOR,
   atDmMode,
   defaultFolderId,
+  describeServer,
   dmItem,
+  homeLabel,
   railIcon,
   roundButton,
   sameItem,
+  serverAvatar,
   zoneOf,
+  type ServerLook,
 } from "./serverRailParts";
 import { applyDrop, folderMenu, serverMenu, type RailMutations } from "./serverRailMenus";
 import { openServerRailJoinModal } from "./ServerRailJoinModal";
@@ -48,8 +53,6 @@ import { openServerSwitchConfirm } from "./switchConfirmDialog";
 export interface ServerRailOptions {
   /** `api.getConfig().host`: the server this session is connected to. */
   readonly currentHost: string;
-  /** The connected server's display name (may be empty before it is known). */
-  readonly currentName: string;
   readonly loadServers: () => Promise<readonly ServerProfile[]>;
   readonly switchServer: (host: string) => void;
   readonly addServer: () => void;
@@ -60,6 +63,8 @@ export interface ServerRailOptions {
   readonly onShowServer?: () => void;
   /** Open a DM from its icon under Home. */
   readonly onOpenDm?: (dm: DmChannel) => void;
+  /** Message requests waiting for this account; they badge Home too. */
+  readonly pendingRequests?: CountSource;
 }
 
 export function createServerRail(options: ServerRailOptions): MountableComponent {
@@ -68,6 +73,11 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
   const newFolderId = options.newFolderId ?? defaultFolderId;
 
   let profiles: readonly ServerProfile[] = [];
+  // True once the saved servers were read. Until then the list is a guess, and
+  // saving a layout pruned to it would forget every folder and the order.
+  let serversKnown = false;
+  let loading = false;
+  let pendingLayout: RailLayout | null = null;
   let layout: RailLayout = loadLayout();
   // Set by the first switch/add click; the session is torn down right after,
   // so any later click on the same rail is a stale double-click.
@@ -100,17 +110,18 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     return reconcile(layout, allHosts());
   }
 
-  function describe(host: string): { name: string; color: string } {
-    const profile = profiles.find((p) => p.host === host);
-    if (profile !== undefined) {
-      return { name: profile.name !== "" ? profile.name : host, color: profile.color };
-    }
-    const name =
-      host === options.currentHost && options.currentName !== "" ? options.currentName : host;
-    return { name, color: FALLBACK_COLOR };
+  function describe(host: string): ServerLook {
+    return describeServer(host, profiles, options.currentHost);
   }
 
   function commit(next: RailLayout): void {
+    if (!serversKnown) {
+      // Saving now could drop folders of servers the failed read did not list:
+      // keep the change until the list is in.
+      pendingLayout = next;
+      loadProfiles();
+      return;
+    }
     layout = next;
     saveLayout(layout);
     render();
@@ -260,12 +271,11 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
 
   // --- Rendering ----------------------------------------------------------
 
+  let icons: ReturnType<typeof loadServerIcons> = new Map();
+
   function avatar(host: string, mini: boolean): HTMLElement {
     const { name, color } = describe(host);
-    const el = createElement("span", { class: mini ? "server-rail-mini" : "server-rail-avatar" });
-    el.style.background = color;
-    setText(el, serverInitials(name));
-    return el;
+    return serverAvatar(name, color, mini, icons.get(host)?.dataUrl);
   }
 
   function serverItem(host: string, inFolder: boolean): HTMLElement {
@@ -340,6 +350,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
 
   function render(): void {
     if (list === null) return;
+    icons = loadServerIcons();
     clearChildren(list);
     for (const item of reconciled()) {
       list.appendChild(item.kind === "server" ? serverItem(item.host, false) : folderItem(item));
@@ -377,23 +388,23 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     const dmList = createElement("div", { class: "server-rail-dms" });
     renderDms = (): void => {
       const channels = dmStore.getState().channels;
-      const total = totalDmUnread(channels);
+      const unread = totalDmUnread(channels);
+      const requests = options.pendingRequests?.get() ?? 0;
+      // One badge for everything behind Home; the name tells the two apart.
+      const total = unread + requests;
       homeBadge.hidden = total === 0;
       setText(homeBadge, formatBadgeCount(total));
-      homeBtn?.setAttribute(
-        "aria-label",
-        total === 0 ? serverRailText("home") : serverRailText("homeUnread", { count: total }),
-      );
+      homeBtn?.setAttribute("aria-label", homeLabel(unread, requests));
       clearChildren(dmList);
       // The DM whose call you are in stays first under Home until the call
       // ends, so the call is one click away from any server view.
       const callId = voiceStore.getState().currentChannelId;
       const callDm = callId === null ? undefined : channels.find((c) => c.channelId === callId);
       if (callDm !== undefined) dmList.appendChild(dmItem(callDm, true, options.onOpenDm));
-      const unread = channels
+      const unreadDms = channels
         .filter((c) => c !== callDm && dmUnreadCount(c) > 0)
         .toSorted((a, b) => b.lastMessageAt.localeCompare(a.lastMessageAt));
-      for (const dm of unread) dmList.appendChild(dmItem(dm, false, options.onOpenDm));
+      for (const dm of unreadDms) dmList.appendChild(dmItem(dm, false, options.onOpenDm));
     };
     top.appendChild(homeWrap);
     top.appendChild(dmList);
@@ -426,6 +437,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
     container.appendChild(nav);
 
     disposable.onStoreChange(uiStore, (s) => s.sidebarMode, render);
+    disposable.onStoreChange(authStore, (s) => s.serverName, render);
     disposable.onStoreChange(
       dmStore,
       (s) => s.channels,
@@ -437,19 +449,37 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       () => renderDms?.(),
     );
     window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDms?.(), { signal });
+    window.addEventListener(SERVER_ICON_CHANGED, render, { signal });
+    const unsubRequests = options.pendingRequests?.subscribe(() => renderDms?.());
+    if (unsubRequests !== undefined) disposable.addCleanup(unsubRequests);
     render();
     renderDms?.();
 
+    loadProfiles();
+  }
+
+  function loadProfiles(): void {
+    if (loading || signal.aborted) return;
+    loading = true;
     void options
       .loadServers()
       .then((loaded) => {
+        loading = false;
         if (signal.aborted) return;
         profiles = loaded;
-        render();
+        serversKnown = true;
+        // The saved list is known, so a removed server's cached icon can go.
+        pruneServerIcons([options.currentHost, ...loaded.map((p) => p.host)]);
+        const pending = pendingLayout;
+        pendingLayout = null;
+        if (pending !== null) commit(pending);
+        else render();
         return;
       })
       .catch(() => {
-        // loadServers resolves to [] on failure; the current server still shows.
+        // The current server still shows; the saved layout stays as it was
+        // and the next layout change tries the read again.
+        loading = false;
       });
   }
 

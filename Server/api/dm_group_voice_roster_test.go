@@ -46,6 +46,7 @@ func newRosterMembersFixture(t *testing.T, inCall ...int64) (*membersFixture, *r
 }
 
 func TestAddMembers_AddedUserGetsVoiceRosterAfterOpen(t *testing.T) {
+	t.Parallel()
 	f, rec := newRosterMembersFixture(t, 1, 3) // alice and carol are in the call
 	if rr := f.add(t, 1, 4); rr.Code != http.StatusOK {
 		t.Fatalf("add: %d %s", rr.Code, rr.Body.String())
@@ -71,6 +72,7 @@ func TestAddMembers_AddedUserGetsVoiceRosterAfterOpen(t *testing.T) {
 }
 
 func TestAddMembers_NoVoiceRosterWhenNobodyInCall(t *testing.T) {
+	t.Parallel()
 	f, rec := newRosterMembersFixture(t)
 	if rr := f.add(t, 1, 4); rr.Code != http.StatusOK {
 		t.Fatalf("add: %d %s", rr.Code, rr.Body.String())
@@ -81,6 +83,7 @@ func TestAddMembers_NoVoiceRosterWhenNobodyInCall(t *testing.T) {
 }
 
 func TestAddMembers_BroadcasterWithoutRosterCapabilityStillAdds(t *testing.T) {
+	t.Parallel()
 	f := newMembersFixture(t) // plain recordingBroadcaster: no SendDMVoiceRoster
 	if rr := f.add(t, 1, 4); rr.Code != http.StatusOK {
 		t.Fatalf("add: %d %s", rr.Code, rr.Body.String())

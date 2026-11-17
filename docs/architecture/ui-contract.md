@@ -189,7 +189,7 @@ tokens, no keys.
 
 ## Motion
 
-Motion is reduced when the in-app **Reduce Motion** toggle is on, or when
+Motion is reduced when the in-app **Reduce motion** toggle is on, or when
 **Sync with OS** is on and the OS asks for it. Sync with OS defaults to on.
 Either source can reduce motion, and neither can force it back on over the
 other. `syncOsMotionListener()` in `lib/ui/osMotion.ts` derives the
@@ -235,10 +235,10 @@ zoomed user actually has, after zooming.
 Screens that pass at 200 %: the connect page (B9-18), the shell's message
 surface, history and composer (B9-3, 18, 19, 21, 22), the search overlay, the
 report dialog (B9-10), and every settings tab the connect page's Settings gear
-(`button.settings-gear`) opens — Appearance, Notifications, Text & Images,
+(`button.settings-gear`) opens — Appearance, Notifications, Text & images,
 Accessibility, Voice & Audio, Keybinds, Advanced and Diagnostics & logs (B9-20,
 23). The Diagnostics & logs tab's log controls row and each log message wrap
-(`LogsTab.ts`), so its filter and level selects, its Copy All, Clear Logs and
+(`LogsTab.ts`), so its filter and level selects, its Copy all, Clear logs and
 Refresh buttons, and any log line holding an unbroken URL, token or hash no
 longer push `.settings-content` into a sideways scroll at 640 CSS px.
 

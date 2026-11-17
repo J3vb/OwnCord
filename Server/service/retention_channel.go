@@ -8,9 +8,9 @@ import (
 // retentionChannel refuses a channel no retention policy can be set on: a missing one, a DM, and a thread
 // (swept under its parent's policy).
 func (s *RetentionService) retentionChannel(ctx context.Context, channelID int64) error {
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, s.st, channelID)
+	if err != nil {
+		return err
 	}
 	if ch.Type == "dm" {
 		return fmt.Errorf("%w: %w", ErrBadRequest, ErrRetentionDMChannel)

@@ -238,6 +238,22 @@ describe("voice recorder", () => {
     expect(stream.allStopped).toBe(true);
   });
 
+  it("reports a failed stop at the five-minute limit through onLimitFailed", async () => {
+    const onLimit = vi.fn();
+    const onLimitFailed = vi.fn();
+    const rec = createVoiceRecorder({ env: env(), onLimit, onLimitFailed });
+    await rec.start();
+    const mr = FakeMediaRecorder.instances[0]!;
+    mr.stop = (): void => {
+      mr.state = "inactive";
+    };
+    clock = MAX_DURATION_MS + 5_000;
+    await vi.advanceTimersByTimeAsync(MAX_DURATION_MS + STOP_TIMEOUT_MS);
+    expect(onLimitFailed).toHaveBeenCalledTimes(1);
+    expect(onLimit).not.toHaveBeenCalled();
+    expect(rec.state).toBe("done");
+  });
+
   it("captures PCM as a 16 kHz WAV when MediaRecorder is missing", async () => {
     const rec = createVoiceRecorder({ env: env({ MediaRecorder: undefined }) });
     await rec.start();

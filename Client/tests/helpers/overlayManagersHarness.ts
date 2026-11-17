@@ -32,6 +32,7 @@ export function makeMockApi(overrides: Record<string, unknown> = {}) {
     getInvites: vi.fn().mockResolvedValue([makeInviteResponse()]),
     createInvite: vi.fn().mockResolvedValue(makeInviteResponse({ code: "new123" })),
     revokeInvite: vi.fn().mockResolvedValue(undefined),
+    revokeInviteByCode: vi.fn().mockResolvedValue(undefined),
     getPins: vi.fn().mockResolvedValue({
       messages: [
         { id: 1, user: { username: "Alice" }, content: "Pinned msg", created_at: "2024-01-01" },
@@ -53,9 +54,13 @@ export function firstCallOpts<T>(factory: unknown): T {
 export type JumpToMessageOpts = { onJumpToMessage: (msgId: number) => void };
 export type SelectChannelOpts = { onSelectChannel: (channelId: number) => void };
 export type SelectResultOpts = {
-  onSelectResult: (result: { channel_id: number; message_id: number }) => void;
+  onSelectResult: (result: {
+    channel_id: number;
+    message_id: number;
+    thread_parent_id?: number;
+  }) => void;
 };
-export type RevokeInviteOpts = { onRevokeInvite: (code: string) => Promise<void> };
+export type RevokeInviteOpts = { onRevokeInvite: (id: number, code: string) => Promise<void> };
 export type UnpinOpts = { onUnpin: (msgId: number) => void };
 export type SearchQueryOpts = {
   onSearch: (query: string, chId: number | undefined, signal?: AbortSignal) => Promise<unknown[]>;

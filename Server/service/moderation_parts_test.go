@@ -6,6 +6,7 @@ import "testing"
 // paths assert an optional capability on the core's store at run time, and a
 // part handed a narrower wrapper would quietly lose it.
 func TestModerationServicePartsShareStore(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	mods := NewModerationService(database, nil)
 	for name, st := range map[string]any{
@@ -24,6 +25,7 @@ func TestModerationServicePartsShareStore(t *testing.T) {
 // The history part holds no hook of its own, so service.New must wire it on
 // the same store as the core.
 func TestServicesWireModerationHistoryPart(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svcs := New(database, nil)
 	if svcs.Moderation.moderationHistory == nil {

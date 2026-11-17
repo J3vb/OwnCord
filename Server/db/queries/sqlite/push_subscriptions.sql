@@ -8,9 +8,12 @@
 -- which is how a client keeps a subscription alive without a dispatch
 -- failure to prompt it (B5-11 dispatch is off by default -- see migration
 -- 045).
-INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, device_name, vapid_key_id)
-VALUES (?, ?, ?, ?, ?, ?)
+-- session_id is the session that subscribed (NULL for an API token): the
+-- row is deleted with it (migration 093), and a re-subscribe moves it.
+INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, device_name, vapid_key_id, session_id)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(user_id, endpoint) DO UPDATE SET
+    session_id   = excluded.session_id,
     p256dh       = excluded.p256dh,
     auth         = excluded.auth,
     device_name  = excluded.device_name,

@@ -12,6 +12,7 @@ import (
 // ─── JoinVoiceChannelIfCapacity ─────────────────────────────────────────────
 
 func TestVoice_JoinVoiceChannelIfCapacity_UnderLimit(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "cap-u1")
 	chanID := seedVoiceChannel(t, database, "cap-ch")
@@ -29,6 +30,7 @@ func TestVoice_JoinVoiceChannelIfCapacity_UnderLimit(t *testing.T) {
 }
 
 func TestVoice_JoinVoiceChannelIfCapacity_AtLimit(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "cap-full1")
 	u2 := seedVoiceUser(t, database, "cap-full2")
@@ -50,6 +52,7 @@ func TestVoice_JoinVoiceChannelIfCapacity_AtLimit(t *testing.T) {
 }
 
 func TestVoice_JoinVoiceChannelIfCapacity_ReplacesOwnState(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "cap-replace")
 	ch1 := seedVoiceChannel(t, database, "cap-ch1")
@@ -73,6 +76,7 @@ func TestVoice_JoinVoiceChannelIfCapacity_ReplacesOwnState(t *testing.T) {
 // requester's own existing row from the count, mirroring the OC-0081 fix
 // already applied to EnableCameraIfUnderLimit / EnableScreenshareIfUnderLimit.
 func TestVoice_JoinVoiceChannelIfCapacity_RejoinSameChannelAtLimit(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "cap-rejoin-u1")
 	u2 := seedVoiceUser(t, database, "cap-rejoin-u2")
@@ -97,6 +101,7 @@ func TestVoice_JoinVoiceChannelIfCapacity_RejoinSameChannelAtLimit(t *testing.T)
 // ─── GetAllVoiceStates ──────────────────────────────────────────────────────
 
 func TestVoice_GetAllVoiceStates_Empty(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 
 	states, err := database.GetAllVoiceStates(context.Background())
@@ -107,6 +112,7 @@ func TestVoice_GetAllVoiceStates_Empty(t *testing.T) {
 }
 
 func TestVoice_GetAllVoiceStates_MultipleChannels(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "all-vs-u1")
 	u2 := seedVoiceUser(t, database, "all-vs-u2")
@@ -128,6 +134,7 @@ func TestVoice_GetAllVoiceStates_MultipleChannels(t *testing.T) {
 // ─── CountActiveCameras ─────────────────────────────────────────────────────
 
 func TestVoice_CountActiveCameras_Zero(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	chanID := seedVoiceChannel(t, database, "cam-count-empty")
 
@@ -139,6 +146,7 @@ func TestVoice_CountActiveCameras_Zero(t *testing.T) {
 }
 
 func TestVoice_CountActiveCameras_SomeCameras(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "cam-cnt-u1")
 	u2 := seedVoiceUser(t, database, "cam-cnt-u2")
@@ -163,6 +171,7 @@ func TestVoice_CountActiveCameras_SomeCameras(t *testing.T) {
 // ─── EnableCameraIfUnderLimit ───────────────────────────────────────────────
 
 func TestVoice_EnableCameraIfUnderLimit_Success(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "cam-limit-ok")
 	chanID := seedVoiceChannel(t, database, "cam-limit-ch")
@@ -182,6 +191,7 @@ func TestVoice_EnableCameraIfUnderLimit_Success(t *testing.T) {
 }
 
 func TestVoice_EnableCameraIfUnderLimit_AtLimit(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "cam-lim-u1")
 	u2 := seedVoiceUser(t, database, "cam-lim-u2")
@@ -207,6 +217,7 @@ func TestVoice_EnableCameraIfUnderLimit_AtLimit(t *testing.T) {
 // ─── SearchMessagesInChannels ───────────────────────────────────────────────
 
 func TestSearchMessagesInChannels_FindsInAllowedChannels(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "srch-multi")
 	ch1 := seedChannel(t, database, "srch-ch1")
@@ -231,6 +242,7 @@ func TestSearchMessagesInChannels_FindsInAllowedChannels(t *testing.T) {
 }
 
 func TestSearchMessagesInChannels_EmptyQuery(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	results, err := database.SearchMessagesInChannels(context.Background(), "", []int64{1}, db.SearchPage{Limit: 10})
@@ -241,6 +253,7 @@ func TestSearchMessagesInChannels_EmptyQuery(t *testing.T) {
 }
 
 func TestSearchMessagesInChannels_EmptyChannelIDs(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	results, err := database.SearchMessagesInChannels(context.Background(), "test", nil, db.SearchPage{Limit: 10})
@@ -251,6 +264,7 @@ func TestSearchMessagesInChannels_EmptyChannelIDs(t *testing.T) {
 }
 
 func TestSearchMessagesInChannels_LimitRespected(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "srch-lim")
 	ch1 := seedChannel(t, database, "srch-lim-ch")
@@ -267,6 +281,7 @@ func TestSearchMessagesInChannels_LimitRespected(t *testing.T) {
 }
 
 func TestSearchMessagesInChannels_ZeroLimit(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	results, err := database.SearchMessagesInChannels(context.Background(), "test", []int64{1}, db.SearchPage{Limit: 0})
@@ -279,6 +294,7 @@ func TestSearchMessagesInChannels_ZeroLimit(t *testing.T) {
 // ─── GetPinnedMessages ──────────────────────────────────────────────────────
 
 func TestGetPinnedMessages_Empty(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "pin-empty-u")
 	chID := seedChannel(t, database, "pin-empty")
@@ -291,6 +307,7 @@ func TestGetPinnedMessages_Empty(t *testing.T) {
 }
 
 func TestGetPinnedMessages_ReturnsPinnedOnly(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "pin-user")
 	chID := seedChannel(t, database, "pin-ch")
@@ -317,6 +334,7 @@ func TestGetPinnedMessages_ReturnsPinnedOnly(t *testing.T) {
 // ─── SetMessagePinned ───────────────────────────────────────────────────────
 
 func TestSetMessagePinned_Pin(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "setpin-u")
 	chID := seedChannel(t, database, "setpin-ch")
@@ -334,6 +352,7 @@ func TestSetMessagePinned_Pin(t *testing.T) {
 }
 
 func TestSetMessagePinned_Unpin(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "unpin-u")
 	chID := seedChannel(t, database, "unpin-ch")
@@ -353,6 +372,7 @@ func TestSetMessagePinned_Unpin(t *testing.T) {
 }
 
 func TestSetMessagePinned_NotFound(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	_, err := database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: 99999, Pinned: true, UserID: 1})
@@ -362,6 +382,7 @@ func TestSetMessagePinned_NotFound(t *testing.T) {
 }
 
 func TestSetMessagePinned_DeletedMessage(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "pin-del-u")
 	chID := seedChannel(t, database, "pin-del-ch")
@@ -378,6 +399,7 @@ func TestSetMessagePinned_DeletedMessage(t *testing.T) {
 // ─── CreateAttachment ───────────────────────────────────────────────────────
 
 func TestCreateAttachment_Success(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "att-uploader")
 
@@ -401,6 +423,7 @@ func TestCreateAttachment_Success(t *testing.T) {
 }
 
 func TestCreateAttachment_WithDimensions(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "att-dim-uploader")
 	chID := seedChannel(t, database, "att-dim-chan")
@@ -436,6 +459,7 @@ func TestCreateAttachment_WithDimensions(t *testing.T) {
 // ─── DeleteOrphanedAttachments ──────────────────────────────────────────────
 
 func TestDeleteOrphanedAttachments_RemovesOrphans(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "orphan-uploader")
 
@@ -460,6 +484,7 @@ func TestDeleteOrphanedAttachments_RemovesOrphans(t *testing.T) {
 }
 
 func TestDeleteOrphanedAttachments_KeepsLinked(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "orphan-linked-u")
 	chID := seedChannel(t, database, "orphan-linked-ch")
@@ -480,6 +505,7 @@ func TestDeleteOrphanedAttachments_KeepsLinked(t *testing.T) {
 // users.avatar points at it by URL and that reference is what authorizes serving
 // it (migration 027). The orphan sweep must therefore not treat it as garbage.
 func TestDeleteOrphanedAttachments_KeepsLiveAvatars(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "avatar-owner")
 
@@ -502,6 +528,7 @@ func TestDeleteOrphanedAttachments_KeepsLiveAvatars(t *testing.T) {
 // as 'YYYY-MM-DD HH:MM:SS', so a cutoff in any other shape compares bytewise
 // against it and silently collapses the grace window.
 func TestDeleteOrphanedAttachments_GracePeriodHoldsSameDay(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "grace-uploader")
 
@@ -516,6 +543,7 @@ func TestDeleteOrphanedAttachments_GracePeriodHoldsSameDay(t *testing.T) {
 }
 
 func TestDeleteOrphanedAttachments_CutoffRespected(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "cutoff-uploader")
 
@@ -532,6 +560,7 @@ func TestDeleteOrphanedAttachments_CutoffRespected(t *testing.T) {
 // ─── GetAllChannelPermissionsForRole ────────────────────────────────────────
 
 func TestGetAllChannelPermissionsForRole_Empty(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	result, err := database.GetAllChannelPermissionsForRole(context.Background(), 4)
@@ -542,6 +571,7 @@ func TestGetAllChannelPermissionsForRole_Empty(t *testing.T) {
 }
 
 func TestGetAllChannelPermissionsForRole_WithOverrides(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	ch1, _ := database.CreateChannel(context.Background(), "perm-ch1", "text", "", "", 0)
@@ -570,6 +600,7 @@ func TestGetAllChannelPermissionsForRole_WithOverrides(t *testing.T) {
 // ─── GetChannelTypes ────────────────────────────────────────────────────────
 
 func TestGetChannelTypes_Empty(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	result, err := database.GetChannelTypes(context.Background(), nil)
@@ -580,6 +611,7 @@ func TestGetChannelTypes_Empty(t *testing.T) {
 }
 
 func TestGetChannelTypes_ReturnsTypes(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	ch1, _ := database.CreateChannel(context.Background(), "type-text", "text", "", "", 0)
@@ -596,6 +628,7 @@ func TestGetChannelTypes_ReturnsTypes(t *testing.T) {
 }
 
 func TestGetChannelTypes_NonExistentIDs(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	result, err := database.GetChannelTypes(context.Background(), []int64{99999})
@@ -608,6 +641,7 @@ func TestGetChannelTypes_NonExistentIDs(t *testing.T) {
 // ─── CountUsersWithoutTOTP ──────────────────────────────────────────────────
 
 func TestCountUsersWithoutTOTP_AllWithout(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	_, _ = database.CreateUser(context.Background(), "totp-u1", "hash", 4)
 	_, _ = database.CreateUser(context.Background(), "totp-u2", "hash", 4)
@@ -620,6 +654,7 @@ func TestCountUsersWithoutTOTP_AllWithout(t *testing.T) {
 }
 
 func TestCountUsersWithoutTOTP_WithTOTPSetup(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	uid, _ := database.CreateUser(context.Background(), "totp-with", "hash", 4)
 	_, _ = database.CreateUser(context.Background(), "totp-without", "hash", 4)
@@ -637,6 +672,7 @@ func TestCountUsersWithoutTOTP_WithTOTPSetup(t *testing.T) {
 // ─── UpdateUserTOTPSecret ───────────────────────────────────────────────────
 
 func TestUpdateUserTOTPSecret_Set(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	uid, _ := database.CreateUser(context.Background(), "totp-set", "hash", 4)
 
@@ -650,6 +686,7 @@ func TestUpdateUserTOTPSecret_Set(t *testing.T) {
 }
 
 func TestUpdateUserTOTPSecret_Clear(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	uid, _ := database.CreateUser(context.Background(), "totp-clear", "hash", 4)
 
@@ -666,6 +703,7 @@ func TestUpdateUserTOTPSecret_Clear(t *testing.T) {
 // ─── CreateUserWithInvite ───────────────────────────────────────────────────
 
 func TestCreateUserWithInvite_Success(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	// Create a user who will create the invite.
 	creatorID, _ := database.CreateUser(context.Background(), "invite-creator", "hash", 2)
@@ -697,6 +735,7 @@ func TestCreateUserWithInvite_Success(t *testing.T) {
 }
 
 func TestCreateUserWithInvite_InvalidCode(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	_, err := database.CreateUserWithInvite(context.Background(), "baduser", "hash", 4, "nonexistent-code", "sess-bad", "test", "127.0.0.1")
@@ -706,6 +745,7 @@ func TestCreateUserWithInvite_InvalidCode(t *testing.T) {
 }
 
 func TestCreateUserWithInvite_RevokedInvite(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	creatorID, _ := database.CreateUser(context.Background(), "inv-revoke-creator", "hash", 2)
 
@@ -719,6 +759,7 @@ func TestCreateUserWithInvite_RevokedInvite(t *testing.T) {
 }
 
 func TestCreateUserWithInvite_ExpiredInvite(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	creatorID, _ := database.CreateUser(context.Background(), "inv-expire-creator", "hash", 2)
 
@@ -735,9 +776,10 @@ func TestCreateUserWithInvite_ExpiredInvite(t *testing.T) {
 // ─── ListInvites (db layer) ─────────────────────────────────────────────────
 
 func TestListInvites_DB_Empty(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
-	invites, err := database.ListInvites(context.Background())
+	invites, err := listAllInvites(t, database)
 	mustDo(t, "ListInvites", err)
 	if len(invites) != 0 {
 		t.Errorf("expected 0 invites, got %d", len(invites))
@@ -745,13 +787,14 @@ func TestListInvites_DB_Empty(t *testing.T) {
 }
 
 func TestListInvites_DB_ReturnsAll(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	creatorID, _ := database.CreateUser(context.Background(), "list-inv-creator", "hash", 2)
 
 	_, _ = database.CreateInvite(context.Background(), creatorID, 5, nil)
 	_, _ = database.CreateInvite(context.Background(), creatorID, 0, nil)
 
-	invites, err := database.ListInvites(context.Background())
+	invites, err := listAllInvites(t, database)
 	mustDo(t, "ListInvites", err)
 	if len(invites) != 2 {
 		t.Errorf("expected 2 invites, got %d", len(invites))
@@ -759,6 +802,7 @@ func TestListInvites_DB_ReturnsAll(t *testing.T) {
 }
 
 func TestUseInviteAtomic_NonExistent(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	err := database.UseInviteAtomic(context.Background(), "does-not-exist")
@@ -770,6 +814,7 @@ func TestUseInviteAtomic_NonExistent(t *testing.T) {
 // ─── SearchMessages edge cases ──────────────────────────────────────────────
 
 func TestSearchMessages_EmptyQuery(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	results, err := database.SearchMessages(context.Background(), "", nil, db.SearchPage{Limit: 10})
@@ -780,6 +825,7 @@ func TestSearchMessages_EmptyQuery(t *testing.T) {
 }
 
 func TestSearchMessages_ZeroLimit(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	results, err := database.SearchMessages(context.Background(), "test", nil, db.SearchPage{Limit: 0})
@@ -790,6 +836,7 @@ func TestSearchMessages_ZeroLimit(t *testing.T) {
 }
 
 func TestSearchMessages_SpecialCharsStripped(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "srch-special")
 	chID := seedChannel(t, database, "srch-special-ch")

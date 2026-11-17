@@ -43,6 +43,7 @@ func newAPIWriteBatch(t *testing.T) (*apiWriteSpy, *ConnWrites, *SessionService)
 // 1,000 requests with one API token inside a flush window cost one store call,
 // not 1,000 (ARCH-034's "at most one write per token per minute").
 func TestConnWrites_APITokenTouchesCoalescePerInterval(t *testing.T) {
+	t.Parallel()
 	spy, w, sessions := newAPIWriteBatch(t)
 	ctx := context.Background()
 
@@ -66,6 +67,7 @@ func TestConnWrites_APITokenTouchesCoalescePerInterval(t *testing.T) {
 // A discard is queued, written once per distinct hash on flush, and kept for
 // the next flush when the delete fails.
 func TestConnWrites_DiscardsFlushAndRequeueOnFailure(t *testing.T) {
+	t.Parallel()
 	spy, w, sessions := newAPIWriteBatch(t)
 	ctx := context.Background()
 

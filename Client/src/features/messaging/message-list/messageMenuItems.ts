@@ -106,6 +106,7 @@ const copyIdItem = (msg: Message, act: Actor | null): ContextMenuItem => {
   return {
     label: messageMenuText("copyId"),
     testId: "msg-menu-copy-id",
+    icon: "copy",
     onClick: act === null ? copy : act(copy),
   };
 };
@@ -120,6 +121,7 @@ function serverRowItems(msg: Message, opts: MessageListOptions, gates: MessageAc
     items.push({
       label: messageMenuText("delete"),
       testId: "msg-menu-delete",
+      icon: "trash-2",
       danger: true,
       ...lockProps(gates.delete.reason),
       onClick: (e: MouseEvent) => {
@@ -152,6 +154,7 @@ function linkItems(
     {
       label: imageMenuText("copyLink"),
       testId: "msg-menu-copy-link",
+      icon: "link",
       onClick: act(() => {
         copyThenToast(href, imageMenuText("linkCopied"), imageMenuText("linkCopyFailed"));
       }),
@@ -159,6 +162,7 @@ function linkItems(
     {
       label: imageMenuText("openLink"),
       testId: "msg-menu-open-link",
+      icon: "external-link",
       // Clicking the anchor itself, so the masked-link warning and the
       // external-link handler decide, as for a plain click. The row is looked
       // up now, not at open: virtual scrolling may have replaced it, and its
@@ -203,6 +207,7 @@ function reactionItems(
   items.push({
     label: messageMenuText("addReaction"),
     testId: "msg-menu-add-reaction",
+    icon: "smile",
     ...lockProps(addLock),
     onClick: act((m) => opts.onReactionClick(m.id, "")),
   });
@@ -218,12 +223,14 @@ function composeItems(ctx: MenuContext): MenuEntry[] {
     items.push({
       label: messageMenuText("edit"),
       testId: "msg-menu-edit",
+      icon: "pencil",
       onClick: act((m) => opts.onEditClick(m.id)),
     });
   }
   items.push({
     label: messagingText("action.reply"),
     testId: "msg-menu-reply",
+    icon: "reply",
     onClick: act((m) => opts.onReplyClick(m.id)),
   });
   const onForward = opts.onForwardClick;
@@ -231,6 +238,7 @@ function composeItems(ctx: MenuContext): MenuEntry[] {
     items.push({
       label: messageMenuText("forward"),
       testId: "msg-menu-forward",
+      icon: "forward",
       ...lockProps(gates.forward.reason),
       onClick: act((m) => {
         // The socket may have dropped since the menu opened.
@@ -243,6 +251,7 @@ function composeItems(ctx: MenuContext): MenuEntry[] {
     items.push({
       label: messageMenuText("createThread"),
       testId: "msg-menu-create-thread",
+      icon: "message-square",
       ...lockProps(gates.createThread.reason),
       onClick: act((m) => {
         // The socket may have dropped since the menu opened.
@@ -262,6 +271,7 @@ function textItems(ctx: MenuContext, row: HTMLElement | null, phone: boolean): M
     items.push({
       label: messageMenuText("copy"),
       testId: "msg-menu-copy",
+      icon: "copy",
       onClick: act(() => copyText(selected)),
     });
   }
@@ -270,6 +280,7 @@ function textItems(ctx: MenuContext, row: HTMLElement | null, phone: boolean): M
     items.push({
       label: messageMenuText("copyText"),
       testId: "msg-menu-copy-text",
+      icon: "copy",
       onClick: act((m) => copyText(m.content)),
     });
   }
@@ -278,6 +289,7 @@ function textItems(ctx: MenuContext, row: HTMLElement | null, phone: boolean): M
     items.push({
       label: messageMenuText("share"),
       testId: "msg-menu-share",
+      icon: "share",
       onClick: act((m) => shareText(m.content)),
     });
   }
@@ -292,6 +304,7 @@ function placeItems(ctx: MenuContext, req: MessageMenuRequest): MenuEntry[] {
     items.push({
       label: msg.pinned ? messageMenuText("unpin") : messageMenuText("pin"),
       testId: "msg-menu-pin",
+      icon: msg.pinned ? "pin-off" : "pin",
       onClick: act((m) => {
         // Pinned or unpinned by someone else since the label was drawn: sending
         // now would do the opposite of what the row says.
@@ -305,12 +318,14 @@ function placeItems(ctx: MenuContext, req: MessageMenuRequest): MenuEntry[] {
     items.push({
       label: messageMenuText("markUnread"),
       testId: "msg-menu-mark-unread",
+      icon: "mail",
       onClick: act((m) => markUnread(m.id)),
     });
   }
   items.push({
     label: messagingText("action.copyLink"),
     testId: "msg-menu-copy-message-link",
+    icon: "link",
     onClick: act(() => copyMessageLink(msg)),
   });
   return items;
@@ -325,6 +340,7 @@ function dangerItems(ctx: MenuContext): MenuEntry[] {
     items.push({
       label: messageMenuText("delete"),
       testId: "msg-menu-delete",
+      icon: "trash-2",
       danger: true,
       ...lockProps(gates.delete.reason),
       onClick: act((m, e) => {
@@ -339,6 +355,7 @@ function dangerItems(ctx: MenuContext): MenuEntry[] {
     items.push({
       label: messageMenuText("report"),
       testId: "msg-menu-report",
+      icon: "flag",
       danger: true,
       onClick: act((m) => onReport(m.id)),
     });

@@ -107,6 +107,21 @@ test.describe("phone", () => {
     await expect(row.locator(".mic-btn")).toBeVisible();
   });
 
+  test("GIF and the smiley give way while there is text, and return once it is gone", async ({
+    page,
+  }) => {
+    const row = page.locator(".message-input-box");
+    const textarea = page.locator("[data-testid='msg-textarea']");
+    await textarea.fill("On my way");
+    await expect(row.locator(".gif-btn")).toBeHidden();
+    await expect(row.locator(".emoji-btn")).toBeHidden();
+    await expect(row.locator(".attach-btn")).toBeVisible();
+    await expect(row.locator(".send-btn")).toBeVisible();
+    await textarea.fill("");
+    await expect(row.locator(".gif-btn")).toBeVisible();
+    await expect(row.locator(".emoji-btn")).toBeVisible();
+  });
+
   test("a picked file with no text shows send instead of the mic", async ({ page }) => {
     const row = page.locator(".message-input-box");
     await page.locator("input[data-attach-source='files']").setInputFiles({

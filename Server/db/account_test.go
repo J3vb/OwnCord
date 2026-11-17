@@ -18,6 +18,7 @@ func eraseAccount(ctx context.Context, database *db.DB, userID int64) error {
 // ─── EraseAccount — last admin guard ────────────────────────────────────────
 
 func TestEraseAccount_LastOwnerBlocked(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	// Create a single owner (role_id=1). No other admins exist.
 	ownerID := seedUser(t, database, "owner")
@@ -30,6 +31,7 @@ func TestEraseAccount_LastOwnerBlocked(t *testing.T) {
 }
 
 func TestEraseAccount_LastAdminBlocked(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	adminID := seedUser(t, database, "admin")
 	setRole(t, database, adminID, 2) // Admin
@@ -41,6 +43,7 @@ func TestEraseAccount_LastAdminBlocked(t *testing.T) {
 }
 
 func TestEraseAccount_AllowedWhenOtherAdminExists(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	admin1 := seedUser(t, database, "admin1")
 	admin2 := seedUser(t, database, "admin2")
@@ -58,6 +61,7 @@ func TestEraseAccount_AllowedWhenOtherAdminExists(t *testing.T) {
 // functional per auth.IsEffectivelyBanned, so the raw `banned = 0` filter
 // must not make the guard blind to them.
 func TestEraseAccount_AllowedWhenOtherAdminHasLapsedTempBan(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	admin1 := seedUser(t, database, "admin1")
 	admin2 := seedUser(t, database, "admin2")
@@ -77,6 +81,7 @@ func TestEraseAccount_AllowedWhenOtherAdminHasLapsedTempBan(t *testing.T) {
 }
 
 func TestEraseAccount_AdminAllowedWhenOwnerExists(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ownerID := seedUser(t, database, "owner")
 	adminID := seedUser(t, database, "admin")
@@ -91,6 +96,7 @@ func TestEraseAccount_AdminAllowedWhenOwnerExists(t *testing.T) {
 // ─── EraseAccount — member deletion ─────────────────────────────────────────
 
 func TestEraseAccount_MemberSucceeds(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "alice") // default role_id=4
 
@@ -101,6 +107,7 @@ func TestEraseAccount_MemberSucceeds(t *testing.T) {
 // ─── EraseAccount — the row is gone ─────────────────────────────────────────
 
 func TestEraseAccount_RemovesTheUserRow(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "alice")
 	database.ExecContext(context.Background(), "UPDATE users SET avatar = 'pic.png', totp_secret = 'SECRET', display_name = 'A', about = 'bio', custom_status = 'busy', identity_public_key = 'key' WHERE id = ?", userID) //nolint:errcheck
@@ -124,6 +131,7 @@ func TestEraseAccount_RemovesTheUserRow(t *testing.T) {
 // ─── EraseAccount — related data cleanup ────────────────────────────────────
 
 func TestEraseAccount_DeletesSessions(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "eve")
 
@@ -143,6 +151,7 @@ func TestEraseAccount_DeletesSessions(t *testing.T) {
 }
 
 func TestEraseAccount_HardDeletesMessages(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "frank")
 	chID := seedChannel(t, database, "general")
@@ -180,6 +189,7 @@ func countFTS(t *testing.T, database *db.DB, term string) int {
 // message that no longer exists must be reversed here too, or it survives
 // forever on a channel with nothing unread.
 func TestEraseAccount_ReversesMentionCounts(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice-mention")
@@ -205,6 +215,7 @@ func TestEraseAccount_ReversesMentionCounts(t *testing.T) {
 // mention badges in the same channel; deleting alice's account must leave
 // carol's genuine, unrelated badge standing.
 func TestEraseAccount_MentionCounts_PreservesOthersContribution(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice-mention2")
@@ -230,6 +241,7 @@ func TestEraseAccount_MentionCounts_PreservesOthersContribution(t *testing.T) {
 }
 
 func TestEraseAccount_NonexistentUser(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	_, err := database.EraseAccount(context.Background(), 999999, "")
@@ -241,6 +253,7 @@ func TestEraseAccount_NonexistentUser(t *testing.T) {
 // ─── EraseAccount — canonical admin criterion, tokens, DM cleanup ───────────
 
 func TestEraseAccount_LastAdminGuard_SurvivesRoleRename(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	// The Owner can rename the seeded Admin role (id=2); the guard must key
 	// on the canonical role IDs, not the display name.
@@ -258,6 +271,7 @@ func TestEraseAccount_LastAdminGuard_SurvivesRoleRename(t *testing.T) {
 }
 
 func TestEraseAccount_DeletesAPITokenRows(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	uid := seedUser(t, database, "tokenuser")
 
@@ -281,6 +295,7 @@ func TestEraseAccount_DeletesAPITokenRows(t *testing.T) {
 }
 
 func TestEraseAccount_LastGroupDMParticipant_RemovesChannel(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userA := seedUser(t, database, "dmlast-a")
 	userB := seedUser(t, database, "dmlast-b")
@@ -318,6 +333,7 @@ func TestEraseAccount_LastGroupDMParticipant_RemovesChannel(t *testing.T) {
 // into. EraseAccount must instead close the DM out of the survivor's
 // sidebar, same as the survivor closing it themselves.
 func TestEraseAccount_OneOnOneDM_ClosesForSurvivor(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	alice := seedUser(t, database, "alice-dm")
 	bob := seedUser(t, database, "bob-dm")
@@ -356,6 +372,7 @@ func TestEraseAccount_OneOnOneDM_ClosesForSurvivor(t *testing.T) {
 // uploaded_at older than an hour) and silently destroy the survivor's files
 // an hour later. The EXISTS guard on the UPDATE is what prevents that.
 func TestEraseAccount_SurvivingDM_KeepsAttachmentsLinked(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice-att")
@@ -401,6 +418,7 @@ func TestEraseAccount_SurvivingDM_KeepsAttachmentsLinked(t *testing.T) {
 // in the same channel must be unlinked before the channel delete so the row
 // (and the sweep's ability to reclaim the file) survives.
 func TestEraseAccount_EmptiedDMChannel_PreservesOthersAttachmentsForReclaim(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	userA := seedUser(t, database, "dmatt-a")

@@ -7,6 +7,12 @@ WHERE id = ?;
 -- name: UpdateUserPassword :exec
 UPDATE users SET password = ? WHERE id = ?;
 
+-- name: UpgradeUserPasswordHash :execrows
+-- Swaps the hash only while it is still the one the caller checked, so a
+-- password changed in between is never overwritten.
+UPDATE users SET password = sqlc.arg(new_hash)
+WHERE id = sqlc.arg(id) AND password = sqlc.arg(old_hash);
+
 -- name: UpdateUserCustomStatus :exec
 -- Separate from UpdateUserProfile because a custom status arrives over the
 -- WebSocket presence path, not the REST profile PATCH, and must not be able to

@@ -251,6 +251,17 @@ func guardBackupDir(w http.ResponseWriter, g guardContext) bool {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "backup.dir must be an existing writable directory")
 		return false
 	}
+	dbFile := g.opts.RunningCfg.Database.Path
+	if g.has("database.path") {
+		dbFile = g.next.Database.Path
+	}
+	if dbFile == "" {
+		dbFile = defaultDatabaseFile()
+	}
+	if sameDirectory(dir, filepath.Dir(dbFile)) {
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "backup.dir must not be the folder that holds the database; choose a separate folder")
+		return false
+	}
 	if pathWithin(dir, g.next.Upload.StorageDir) || pathWithin(dir, g.next.Plugins.Directory) {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "backup.dir must not live inside the uploads or plugins directory")
 		return false

@@ -1,5 +1,5 @@
 // Desktop binding for the WindowPrefs contract: the two native calls behind
-// "Close to Tray" and "Start Minimized". A native failure must come back as a
+// "Close to tray" and "Start minimized". A native failure must come back as a
 // typed result, never as a rejection the settings tab has to catch.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as lm from "../../helpers/loggerMock";

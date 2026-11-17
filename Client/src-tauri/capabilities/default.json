@@ -15,6 +15,7 @@
     "core:window:allow-set-fullscreen",
     "core:webview:allow-set-webview-zoom",
     "notification:default",
+    "deep-link:default",
     {
       "identifier": "http:allow-fetch",
       "allow": [

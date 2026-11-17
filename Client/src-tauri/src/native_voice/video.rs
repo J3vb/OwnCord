@@ -183,6 +183,15 @@ impl Accept for TcpListener {
 /// persistent error (for example out of file descriptors) does not spin.
 const ACCEPT_RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(75);
 
+/// How long a connection has to finish its WebSocket handshake.
+const HANDSHAKE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(3);
+
+/// Connections served at once: one per remote camera or screen share (the
+/// server allows up to 99 video users, two tracks each) plus the two local
+/// previews, with room for tiles reconnecting. Anything past this is closed
+/// at once.
+const MAX_CONNECTIONS: usize = 256;
+
 /// Serves connections until the owner aborts the task. An accept error is
 /// logged and retried: ending here would drop the connection set and cut
 /// every preview for the rest of the call.
@@ -191,6 +200,10 @@ async fn accept_loop<A: Accept>(mut source: A, token: String, shared: Arc<Shared
     loop {
         tokio::select! {
             accepted = source.accept() => match accepted {
+                Ok(stream) if connections.len() >= MAX_CONNECTIONS => {
+                    log::debug!("[native_voice] frame socket full: connection closed");
+                    drop(stream);
+                }
                 Ok(stream) => {
                     connections.spawn(serve(stream, token.clone(), shared.clone()));
                 }
@@ -230,8 +243,9 @@ async fn serve(stream: tokio::net::TcpStream, token: String, shared: Arc<Shared>
         }
     };
     // The path carries the token: never log it.
-    let Ok(ws) = tokio_tungstenite::accept_hdr_async(stream, authorize).await else {
-        log::debug!("[native_voice] frame socket handshake refused");
+    let handshake = tokio_tungstenite::accept_hdr_async(stream, authorize);
+    let Ok(Ok(ws)) = tokio::time::timeout(HANDSHAKE_TIMEOUT, handshake).await else {
+        log::debug!("[native_voice] frame socket handshake refused or timed out");
         return;
     };
     let Some(route) = chosen else { return };
@@ -418,6 +432,57 @@ mod tests {
             "a connection after the failed accept is served"
         );
         assert!(!task.is_finished(), "the accept loop is still running");
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn a_connection_that_never_finishes_its_handshake_is_closed() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let task = tokio::spawn(accept_loop(
+            listener,
+            "ef".repeat(32),
+            Arc::new(Shared::default()),
+        ));
+        let mut silent = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut buf = [0u8; 1];
+        let read = tokio::time::timeout(
+            HANDSHAKE_TIMEOUT + std::time::Duration::from_secs(2),
+            tokio::io::AsyncReadExt::read(&mut silent, &mut buf),
+        )
+        .await;
+        assert!(
+            matches!(read, Ok(Ok(0)) | Ok(Err(_))),
+            "the server closed the silent connection: {read:?}"
+        );
+        task.abort();
+    }
+
+    #[tokio::test]
+    async fn connections_past_the_cap_are_closed_at_once() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let token = "ab".repeat(32);
+        let task = tokio::spawn(accept_loop(
+            listener,
+            token.clone(),
+            Arc::new(Shared::default()),
+        ));
+        let mut held = Vec::new();
+        for _ in 0..MAX_CONNECTIONS {
+            held.push(tokio::net::TcpStream::connect(addr).await.unwrap());
+        }
+        let mut extra = tokio::net::TcpStream::connect(addr).await.unwrap();
+        let mut buf = [0u8; 1];
+        let read = tokio::time::timeout(
+            std::time::Duration::from_secs(2),
+            tokio::io::AsyncReadExt::read(&mut extra, &mut buf),
+        )
+        .await;
+        assert!(
+            matches!(read, Ok(Ok(0)) | Ok(Err(_))),
+            "the connection past the cap is closed: {read:?}"
+        );
         task.abort();
     }
 

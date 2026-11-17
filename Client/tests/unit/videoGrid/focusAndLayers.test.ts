@@ -1,5 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { stubCapturingResizeObserver } from "../../helpers/resizeObserverStub";
 import * as mocks from "../../helpers/videoGridMocks";
 import {
   createVideoGrid,
@@ -13,7 +12,9 @@ import {
   fakeStreamWithTrack,
   fakePopup,
   makeTileConfig,
+  stubTileSizes,
   useVideoGridHarness,
+  type TileSizes,
 } from "../../helpers/videoGridHarness";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
@@ -388,9 +389,10 @@ describe("VideoGrid", () => {
 
   describe("video layers follow what each tile shows", () => {
     const SCREEN = 3 + 1_000_000;
-    /** Rendered tile sizes by data-user-id; an absent tile renders 0 × 0. */
-    let sizes: Map<string, { width: number; height: number }>;
-    let observers: Array<() => void>;
+    let sizes: TileSizes["sizes"];
+    let observers: TileSizes["observers"];
+    /** Resize tiles and let the sizes settle (views follow a resize after 150 ms). */
+    let resize: TileSizes["resize"];
     let hidden: boolean;
     let pubs: Map<string, ReturnType<typeof publication>>;
 
@@ -418,33 +420,19 @@ describe("VideoGrid", () => {
     /** The last enabled state asked of a publication. */
     const enabled = (uid: number, source = "camera") =>
       pub(uid, source).setEnabled.mock.lastCall?.[0] as boolean | undefined;
-    /** Resize tiles and let the sizes settle (views follow a resize after 150 ms). */
-    function resize(entries: Record<number, [number, number]>): void {
-      for (const [id, [width, height]] of Object.entries(entries)) sizes.set(id, { width, height });
-      for (const fire of observers) fire();
-      vi.advanceTimersByTime(150);
-    }
     const cellOf = (id: number) =>
       container.querySelector<HTMLElement>(`.video-cell[data-user-id='${id}']`)!;
 
     beforeEach(() => {
       grid.destroy?.();
       vi.useFakeTimers();
-      sizes = new Map();
-      observers = [];
+      ({ sizes, observers, resize } = stubTileSizes());
       hidden = false;
       pubs = new Map([
         ["2:camera", publication()],
         ["3:camera", publication()],
         ["3:screen_share", publication()],
       ]);
-      stubCapturingResizeObserver(observers);
-      vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(function (
-        this: HTMLElement,
-      ) {
-        const size = sizes.get(this.dataset["userId"] ?? "") ?? { width: 0, height: 0 };
-        return { ...size, top: 0, left: 0, right: size.width, bottom: size.height } as DOMRect;
-      });
       Object.defineProperty(document, "hidden", { configurable: true, get: () => hidden });
 
       const tracks = new RemoteTracks(room);

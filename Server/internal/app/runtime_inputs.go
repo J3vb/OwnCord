@@ -4,6 +4,7 @@ import (
 	"log/slog"
 
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
 )
@@ -19,6 +20,10 @@ type RuntimeInputs struct {
 	// maintenance loop. Nil is the degraded state: no upload/avatar/emoji routes, no orphan cleanup, erasures
 	// journal their files.
 	Storage *storage.Storage
+	// LinkPreviews is the one link preview store, shared with the image route, history and the
+	// maintenance loop. Nil is the degraded state: no previews are attached and the image route
+	// is not mounted.
+	LinkPreviews *linkpreview.Store
 }
 
 // OpenStorage opens the upload file store, logging a failure once and returning

@@ -43,6 +43,7 @@ func (a *App) stages() []stage {
 		{"poll-expiry", a.startPollExpiry},
 		{"thread-archiver", a.startThreadArchiver},
 		{"call-log", a.startCallLog},
+		{"link-previews", a.startLinkPreviews},
 		{"pprof", a.startPprof},
 		{"acme", a.startACME},
 		{"signals", a.startSignals},

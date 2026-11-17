@@ -230,9 +230,10 @@ func (q *Queries) SweepPushSubscriptions(ctx context.Context, arg SweepPushSubsc
 
 const upsertPushSubscription = `-- name: UpsertPushSubscription :one
 
-INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, device_name, vapid_key_id)
-VALUES (?, ?, ?, ?, ?, ?)
+INSERT INTO push_subscriptions (user_id, endpoint, p256dh, auth, device_name, vapid_key_id, session_id)
+VALUES (?, ?, ?, ?, ?, ?, ?)
 ON CONFLICT(user_id, endpoint) DO UPDATE SET
+    session_id   = excluded.session_id,
     p256dh       = excluded.p256dh,
     auth         = excluded.auth,
     device_name  = excluded.device_name,
@@ -248,6 +249,7 @@ type UpsertPushSubscriptionParams struct {
 	Auth       string `json:"auth"`
 	DeviceName string `json:"deviceName"`
 	VapidKeyID string `json:"vapidKeyId"`
+	SessionID  *int64 `json:"sessionId"`
 }
 
 // push_subscriptions is the Web Push subscription store (migration 045,
@@ -258,6 +260,8 @@ type UpsertPushSubscriptionParams struct {
 // which is how a client keeps a subscription alive without a dispatch
 // failure to prompt it (B5-11 dispatch is off by default -- see migration
 // 045).
+// session_id is the session that subscribed (NULL for an API token): the
+// row is deleted with it (migration 093), and a re-subscribe moves it.
 func (q *Queries) UpsertPushSubscription(ctx context.Context, arg UpsertPushSubscriptionParams) (int64, error) {
 	row := q.db.QueryRowContext(ctx, upsertPushSubscription,
 		arg.UserID,
@@ -266,6 +270,7 @@ func (q *Queries) UpsertPushSubscription(ctx context.Context, arg UpsertPushSubs
 		arg.Auth,
 		arg.DeviceName,
 		arg.VapidKeyID,
+		arg.SessionID,
 	)
 	var id int64
 	err := row.Scan(&id)

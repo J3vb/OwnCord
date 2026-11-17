@@ -516,10 +516,10 @@ describe("API Client", () => {
       expect(result.code).toBe("abc123");
     });
 
-    it("revokeInvite calls DELETE /invites/{code}", async () => {
+    it("revokeInvite calls DELETE /invites/id/{id}", async () => {
       mockFetch.mockResolvedValue(jsonResponse(undefined, 204));
-      await api.revokeInvite("abc123");
-      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/invites/abc123");
+      await api.revokeInvite(7);
+      expect(fetchCallUrl()).toBe("https://localhost:8443/api/v1/invites/id/7");
       expect(fetchCallOpts().method).toBe("DELETE");
     });
   });

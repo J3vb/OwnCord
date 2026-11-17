@@ -96,8 +96,22 @@ export interface VoiceState {
    *  corrupt the mute toggle's state. Always written by the store; optional
    *  only for the same fixture reason as localServerMuted. */
   readonly pttGated?: boolean;
+  /** A phone call holds the device's audio (the Android app): the call is
+   *  paused, with the microphone closed, until the phone call ends. Its own
+   *  flag, like pttGated: the pause never writes the user's mute or deafen, so
+   *  both are as they were when the call resumes, and the server is told
+   *  nothing. Written only by features/voice/mobileRoutes.ts; optional for the
+   *  fixture reason above. */
+  readonly phoneCallHold?: boolean;
   readonly localCamera: boolean;
   readonly localScreenshare: boolean;
+  /** You are sharing an app's sound as music. Written by the music share;
+   *  optional for the fixture reason above. */
+  readonly localMusic?: boolean;
+  /** Members of the current channel whose music share is published, you
+   *  included while you share. Read from the room's publications, not the
+   *  server, and cleared on leave. Optional for the fixture reason above. */
+  readonly musicSharers?: ReadonlySet<number>;
   /** Bumped when the live camera's capture is replaced without the camera
    *  going off (a device switch): the self tile redraws on the new track. */
   readonly localCameraRev?: number;
@@ -186,6 +200,7 @@ export function createVoiceState(): VoiceState {
     moderatorDeafened: false,
     mutedBeforeDeafen: false,
     pttGated: false,
+    phoneCallHold: false,
     localCamera: false,
     localScreenshare: false,
     joinedAt: null,
@@ -198,6 +213,8 @@ export function createVoiceState(): VoiceState {
     peerKeySlots: new Set(),
     peerBoundOffers: new Set(),
     peerWatching: new Map(),
+    localMusic: false,
+    musicSharers: new Set(),
     localGateSpeaking: null,
   };
 }

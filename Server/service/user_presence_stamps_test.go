@@ -16,6 +16,7 @@ import (
 // invisible status exists to kill.
 
 func TestUserService_StampConnectPreservesAChosenStatus(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := NewUserService(database)
 	ctx := context.Background()
@@ -55,6 +56,7 @@ func TestUserService_StampConnectPreservesAChosenStatus(t *testing.T) {
 // The pair, driven end to end: a chosen status has to survive the whole
 // disconnect/reconnect cycle, not just the connect half.
 func TestUserService_ChosenStatusSurvivesADisconnectCycle(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := NewUserService(database)
 	ctx := context.Background()
@@ -81,6 +83,7 @@ func TestUserService_ChosenStatusSurvivesADisconnectCycle(t *testing.T) {
 }
 
 func TestUserService_StampDisconnectClearsOnlineOnly(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := NewUserService(database)
 	ctx := context.Background()
@@ -99,6 +102,7 @@ func TestUserService_StampDisconnectClearsOnlineOnly(t *testing.T) {
 // would make auth_ok, the presence broadcast and the member list disagree for
 // the rest of the session (OC-0298).
 func TestUserService_PresenceStampsFailLoud(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := NewUserService(database)
 	ctx := context.Background()

@@ -38,6 +38,11 @@ function desktopOnly(...texts: string[]): string[] {
   return isAndroidApp() ? [] : texts;
 }
 
+/** Text that is on screen only in the Android app. */
+function androidOnly(...texts: string[]): string[] {
+  return isAndroidApp() ? texts : [];
+}
+
 /** The tabs the overlay can show; `SettingsOverlay`'s `TabName` is this union. */
 export type SearchableTab =
   | "Account"
@@ -75,13 +80,27 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     a("devices.sectionTitle"),
     a("devices.description"),
     a("security.title"),
+    a("delete.zoneTitle"),
     a("delete.sectionTitle"),
     a("delete.description"),
   ],
   Safety: () => [],
-  "My uploads": () => [s("uploads.intro"), s("uploads.sort.newest"), s("uploads.sort.largest")],
+  "My uploads": () => [
+    s("uploads.section.files"),
+    s("uploads.intro"),
+    s("uploads.sort.newest"),
+    s("uploads.sort.largest"),
+  ],
   Appearance: () => [
     s("appearance.theme"),
+    s("appearance.theme.dark"),
+    s("appearance.theme.neon-glow"),
+    s("appearance.theme.midnight"),
+    s("appearance.theme.light"),
+    platformText(s("appearance.theme.system"), s("appearance.theme.system.android")),
+    s("appearance.accentColor"),
+    s("appearance.section.textSize"),
+    s("appearance.section.layout"),
     s("appearance.fontSize"),
     ...desktopOnly(s("appearance.zoom")),
     s("appearance.compactMode"),
@@ -90,10 +109,11 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("appearance.dateFormat"),
     s("appearance.dateFormat.desc"),
     ...desktopOnly(s("appearance.memberLayout"), s("appearance.memberLayout.desc")),
-    s("appearance.accentColor"),
     s("appearance.accentNote"),
     s("appearance.customThemes"),
     platformText(s("appearance.customThemes.desc"), s("appearance.customThemes.desc.android")),
+    s("appearance.customThemes.background"),
+    s("appearance.customThemes.background.desc"),
   ],
   Accessibility: () => [
     s("accessibility.group.motion"),
@@ -171,6 +191,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
   ],
   "Text & Images": () => [
     ...(isAndroidApp() ? [s("images.dataSaver.label"), s("images.dataSaver.desc")] : []),
+    s("images.section.media"),
     s("images.linkPreview.label"),
     s("images.linkPreview.desc"),
     s("images.embeds.label"),
@@ -196,9 +217,13 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("images.chatBar.voice.desc"),
   ],
   Notifications: () => [
+    s("notifications.section.alerts"),
+    s("notifications.section.sounds"),
+    s("notifications.section.channels"),
     platformText(s("notifications.desktop.label"), s("notifications.desktop.label.android")),
     platformText(s("notifications.desktop.desc"), s("notifications.desktop.desc.android")),
     s("notifications.permission.label"),
+    ...androidOnly(s("notifications.push.label")),
     ...desktopOnly(s("notifications.flash.label"), s("notifications.flash.desc")),
     s("notifications.suppress.label"),
     s("notifications.suppress.desc"),
@@ -211,6 +236,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("notifications.voiceSounds.desc"),
     s("notifications.volume.label"),
     s("notifications.volume.desc"),
+    s("notifications.soundStyle.label"),
+    s("notifications.soundStyle.desc"),
     s("notifications.sound.message.label"),
     s("notifications.sound.message.desc"),
     s("notifications.sound.mention.label"),
@@ -225,6 +252,10 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("notifications.sound.muteDeafen.desc"),
     s("notifications.sound.stream.label"),
     s("notifications.sound.stream.desc"),
+    s("notifications.sound.connection.label"),
+    s("notifications.sound.connection.desc"),
+    s("notifications.sound.ptt.label"),
+    s("notifications.sound.ptt.desc"),
     s("notifications.level.label"),
     s("notifications.level.desc"),
     s("notifications.muted.title"),
@@ -235,6 +266,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
   // The Android app has no Keybinds tab.
   Keybinds: () =>
     desktopOnly(
+      s("keybinds.voiceInput"),
       s("keybinds.pushToTalk"),
       s("keybinds.pttReleaseDelay"),
       s("keybinds.globalSection"),
@@ -265,6 +297,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
       s("keybinds.action.underline"),
     ),
   Advanced: () => [
+    s("advanced.general"),
     s("advanced.developerMode.label"),
     s("advanced.developerMode.desc"),
     s("advanced.confirmServerSwitch.label"),
@@ -309,6 +342,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     platformText(s("logs.bundleNote"), s("logs.bundleNoteShare")),
     s("logs.eventLog"),
     s("logs.eventLogDesc"),
+    s("logs.technicalDetails"),
     s("logs.clientLogs"),
     s("logs.voiceDiagnostics"),
     s("logs.filter"),
@@ -322,6 +356,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     ),
   ],
   About: () => [
+    whatsNewText("about.appSection"),
+    whatsNewText("about.notesLabel"),
     s("updates.label"),
     s("updates.desc"),
     platformText(whatsNewText("about.desktop"), whatsNewText("about.android")),
@@ -372,11 +408,9 @@ export const HIT_CLASS = "settings-search-hit";
 const HIGHLIGHT_SELECTOR = [
   ".setting-label",
   ".setting-desc",
-  ".setting-group-title",
+  ".settings-section-label",
   ".settings-section-title",
-  ".keybind-section-header",
-  ".settings-card-head h3",
-  ".settings-pane > h3",
+  ".radio-card-label",
 ].join(", ");
 
 /** Remove every highlight under `root`, restoring the plain text nodes. */
@@ -391,12 +425,33 @@ export function clearHighlights(root: ParentNode): void {
   for (const parent of parents) parent.normalize();
 }
 
+/** Whether `el` is shown: neither it nor an ancestor up to `root` is hidden. */
+function isDisplayed(el: Element, root: ParentNode): boolean {
+  for (let node: Element | null = el; node !== null && node !== root; node = node.parentElement) {
+    if (node instanceof HTMLElement && node.hidden) return false;
+    if (getComputedStyle(node).display === "none") return false;
+  }
+  return true;
+}
+
+/** A `<mark>` around `text`. */
+function hitMark(text: string): HTMLElement {
+  const mark = document.createElement("mark");
+  mark.className = HIT_CLASS;
+  mark.textContent = text;
+  return mark;
+}
+
 /**
  * Wrap each occurrence of the normalized `query` in the label, description and
  * heading text under `root` in `<mark class="settings-search-hit">`, replacing
- * any earlier highlights, and return the first mark (null when none).
+ * any earlier highlights, and return the first displayed mark (null when none).
  * Only elements holding a single text node are marked: one with live child
- * elements is left alone rather than rebuilt under its owner.
+ * elements is left alone rather than rebuilt under its owner. Hidden elements
+ * are marked too, so a row the tab reveals later shows its hit, but the mark
+ * returned is one the pane can scroll to. A heading whose
+ * text changes after load keeps its indexed text in `data-search-label`; a
+ * match on that marks the whole heading.
  */
 export function highlightMatches(root: ParentNode, query: string): HTMLElement | null {
   clearHighlights(root);
@@ -405,24 +460,36 @@ export function highlightMatches(root: ParentNode, query: string): HTMLElement |
   for (const el of root.querySelectorAll<HTMLElement>(HIGHLIGHT_SELECTOR)) {
     const node = el.firstChild;
     if (el.childNodes.length !== 1 || node === null || node.nodeType !== Node.TEXT_NODE) continue;
-    const text = node.textContent ?? "";
-    const lower = text.toLowerCase();
-    let at = lower.indexOf(query);
-    if (at === -1) continue;
-    const frag = document.createDocumentFragment();
-    let from = 0;
-    while (at !== -1) {
-      if (at > from) frag.appendChild(document.createTextNode(text.slice(from, at)));
-      const mark = document.createElement("mark");
-      mark.className = HIT_CLASS;
-      mark.textContent = text.slice(at, at + query.length);
-      frag.appendChild(mark);
-      first ??= mark;
-      from = at + query.length;
-      at = lower.indexOf(query, from);
-    }
-    if (from < text.length) frag.appendChild(document.createTextNode(text.slice(from)));
-    el.replaceChild(frag, node);
+    const mark = markText(el, node, query);
+    if (mark !== null && first === null && isDisplayed(el, root)) first = mark;
   }
+  return first;
+}
+
+/** Mark `query` in `el`'s one text node (or the whole text, when only its
+ *  `data-search-label` matches); return the first mark, or null. */
+function markText(el: HTMLElement, node: ChildNode, query: string): HTMLElement | null {
+  const text = node.textContent ?? "";
+  const lower = text.toLowerCase();
+  let at = lower.indexOf(query);
+  if (at === -1) {
+    if (!(el.dataset["searchLabel"] ?? "").toLowerCase().includes(query)) return null;
+    const whole = hitMark(text);
+    el.replaceChild(whole, node);
+    return whole;
+  }
+  let first: HTMLElement | null = null;
+  const frag = document.createDocumentFragment();
+  let from = 0;
+  while (at !== -1) {
+    if (at > from) frag.appendChild(document.createTextNode(text.slice(from, at)));
+    const mark = hitMark(text.slice(at, at + query.length));
+    frag.appendChild(mark);
+    first ??= mark;
+    from = at + query.length;
+    at = lower.indexOf(query, from);
+  }
+  if (from < text.length) frag.appendChild(document.createTextNode(text.slice(from)));
+  el.replaceChild(frag, node);
   return first;
 }

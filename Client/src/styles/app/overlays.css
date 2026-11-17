@@ -140,6 +140,45 @@
 .context-menu-item:hover .context-menu-item__detail {
   color: inherit;
 }
+/* A row's leading icon: muted beside a normal label, the label's own colour
+   on hover and on a danger row. An empty one keeps the column for a row
+   without an icon. */
+.menu-item-icon {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 16px;
+  height: 16px;
+  color: var(--text-muted);
+}
+.menu-item-icon > svg {
+  width: 100%;
+  height: 100%;
+}
+.context-menu-item:hover > .menu-item-icon,
+.context-menu__item:hover > .menu-item-icon,
+.context-menu-item.danger > .menu-item-icon,
+.context-menu__item--danger > .menu-item-icon {
+  color: inherit;
+}
+.context-menu-item[aria-disabled="true"]:hover > .menu-item-icon,
+.context-menu-item.disabled:hover > .menu-item-icon {
+  color: var(--text-muted);
+}
+/* An icon beside a two-line row (Unmute, "Muted until 15:30"). */
+.context-menu-item:has(> .menu-item-icon):has(> .context-menu-item__detail) {
+  display: grid;
+  grid-template-columns: 16px 1fr;
+  column-gap: 8px;
+  align-items: center;
+}
+.context-menu-item:has(> .context-menu-item__detail) > .menu-item-icon {
+  grid-row: 1 / span 2;
+}
+.context-menu-item:has(> .menu-item-icon) > .context-menu-item__detail {
+  grid-column: 2;
+}
 /* A moderator-imposed mute reads differently from a self-mute. */
 .vu-muted.vu-server-muted {
   color: var(--red);
@@ -273,6 +312,43 @@ body .toast-container.toast-container--under-dialog {
   flex: 1;
   min-width: 0;
   overflow-wrap: anywhere;
+}
+.toast-icon {
+  flex-shrink: 0;
+  color: var(--accent);
+}
+.toast-title,
+.toast-detail {
+  display: block;
+}
+.toast-title {
+  font-weight: 600;
+}
+.toast-detail {
+  color: var(--text-muted);
+}
+/* Phones: the detail text takes the full width, its action goes below. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .toast--detailed {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+  }
+  .toast--detailed > .toast-close {
+    grid-area: 1 / 3;
+    min-width: 40px;
+    margin: -8px -12px 0 0;
+  }
+  .toast--detailed > .toast-action {
+    grid-area: 2 / 2;
+    justify-self: start;
+  }
+  .toast--detailed > button {
+    min-height: 40px;
+  }
+  .toast--detailed > .toast-count {
+    grid-area: 2 / 3;
+  }
 }
 .toast.show {
   opacity: 1;
@@ -417,11 +493,6 @@ body .toast-container.toast-container--under-dialog {
 }
 .moderation-notice-status.form-error {
   color: var(--text-danger);
-}
-.safety-heading {
-  margin: 16px 0 4px;
-  color: var(--header-primary);
-  font-size: var(--font-size-lg);
 }
 .safety-history {
   margin: 8px 0 0;
@@ -913,4 +984,193 @@ body .toast-container.toast-container--under-dialog {
 .tk-empty {
   font-size: var(--font-size-sm);
   color: var(--text-muted);
+}
+
+/* ── Radio cards (lib/ui/radioCards) ── */
+.radio-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-2);
+}
+.radio-card {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-lg);
+  background: var(--bg-input);
+  color: var(--text-normal);
+  text-align: left;
+  cursor: pointer;
+}
+.radio-card:hover {
+  border-color: var(--border-strong);
+}
+.radio-card[aria-checked="true"] {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 10%, var(--bg-input));
+}
+.radio-card-icon {
+  display: flex;
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+.radio-card[aria-checked="true"] .radio-card-icon {
+  color: var(--accent-text);
+}
+.radio-card-text {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.radio-card-label {
+  font-size: var(--font-size-md);
+  font-weight: 600;
+}
+.radio-card-desc {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted);
+}
+.radio-card-dot {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  border: 2px solid var(--text-muted);
+  border-radius: 50%;
+}
+.radio-card[aria-checked="true"] .radio-card-dot {
+  border-color: var(--accent);
+  background: radial-gradient(circle, var(--accent) 0 4px, transparent 5px);
+}
+.radio-cards-hint {
+  display: none;
+  /* Two lines, so a longer description does not change the dialog height. */
+  min-height: 2.8em;
+  margin-top: 6px;
+  line-height: 1.4;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+/* Narrow: names only in a 2x2 grid, the checked card's description below. */
+@media (max-width: 600px) {
+  .radio-card {
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 10px;
+  }
+  .radio-card-text {
+    order: 1;
+    flex-basis: 100%;
+  }
+  .radio-card-dot {
+    margin-left: auto;
+  }
+  .radio-card-desc {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+  .radio-cards-hint {
+    display: block;
+  }
+}
+
+/* Tile layout: a preview over each name, in a row that wraps. The checked
+   tile shows a ring and a check mark by its name, so colour is never the
+   only signal. */
+.radio-cards-tiles .radio-cards {
+  grid-template-columns: repeat(auto-fit, minmax(104px, 1fr));
+  gap: var(--space-3);
+}
+.radio-cards-tiles .radio-card {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+}
+.radio-cards-tiles .radio-card[aria-checked="true"] {
+  background: none;
+}
+.radio-card-preview {
+  display: block;
+  padding: 2px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-md);
+}
+.radio-cards-tiles .radio-card:hover .radio-card-preview {
+  border-color: var(--border-strong);
+}
+.radio-cards-tiles .radio-card[aria-checked="true"] .radio-card-preview {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.radio-cards-tiles .radio-card-text {
+  flex-direction: row;
+  align-items: center;
+  gap: 4px;
+  min-height: 24px;
+}
+.radio-cards-tiles .radio-card-label {
+  font-size: var(--font-size-sm);
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.radio-cards-tiles .radio-card[aria-checked="true"] .radio-card-label {
+  color: var(--accent-text);
+  font-weight: 600;
+}
+.radio-card-check {
+  display: none;
+  flex-shrink: 0;
+  color: var(--accent-text);
+}
+.radio-card[aria-checked="true"] .radio-card-check {
+  display: flex;
+}
+/* Two to a row on a phone, whatever width the names need. */
+@media (max-width: 600px) {
+  .radio-cards-tiles .radio-cards {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .radio-cards-tiles .radio-card {
+    flex-wrap: nowrap;
+    padding: 0;
+  }
+  .radio-cards-tiles .radio-card-text {
+    order: 0;
+    flex-basis: auto;
+  }
+}
+
+/* A text field led by an icon (the create-channel name's type icon). */
+.input-with-icon {
+  position: relative;
+}
+.input-with-icon .form-input {
+  padding-left: 38px;
+}
+.input-leading-icon {
+  position: absolute;
+  top: 50%;
+  left: 14px;
+  display: flex;
+  color: var(--text-muted);
+  transform: translateY(-50%);
+  pointer-events: none;
+}
+.form-label-optional {
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
 }

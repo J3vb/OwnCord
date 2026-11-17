@@ -60,6 +60,35 @@ describe("LiveKitSession", () => {
       expect(setListenOnly).not.toHaveBeenCalledWith(true);
     });
 
+    it("publishes no microphone while a phone call holds the call, and keeps the session up", async () => {
+      mockVoiceState.phoneCallHold = true;
+      await joinSession(session);
+
+      const enabled = mockRoom.localParticipant.setMicrophoneEnabled.mock.calls.map(([on]) => on);
+      expect(enabled).not.toContain(true);
+      expect(mockRoom.disconnect).not.toHaveBeenCalled();
+      // The microphone is there, only closed: not a listen-only join.
+      expect(setListenOnly).not.toHaveBeenCalledWith(true);
+    });
+
+    it("closes the microphone again when a phone call begins while it is being opened", async () => {
+      const opening = createDeferred<void>();
+      mockRoom.localParticipant.setMicrophoneEnabled.mockReturnValueOnce(opening.promise);
+      const joined = joinSession(session);
+      await vi.advanceTimersByTimeAsync(0);
+      // The join read the state before the phone rang, and is still opening.
+      mockVoiceState.phoneCallHold = true;
+      opening.resolve();
+      await joined;
+      await vi.advanceTimersByTimeAsync(0);
+
+      const enabled = mockRoom.localParticipant.setMicrophoneEnabled.mock.calls.map(([on]) => on);
+      expect(enabled).toEqual([true, false]);
+      // Closed, not failed: the call is not listen-only and the mute is the user's.
+      expect(setListenOnly).not.toHaveBeenCalledWith(true);
+      expect(setLocalMuted).not.toHaveBeenCalled();
+    });
+
     it("refuses to unmute in the AFK channel", async () => {
       mockVoiceState.inAfkChannel = true;
       mockVoiceState.localMuted = true;

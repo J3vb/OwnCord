@@ -230,7 +230,9 @@ func seedUserSession(t *testing.T, database *db.DB, username string, roleID int)
 // production router on it; the router is torn down with the test.
 func startRouter(t *testing.T, cfg *config.Config, database *db.DB) (http.Handler, api.Runtime) {
 	t.Helper()
-	rt, err := app.StartRuntime(cfg, database, nil, testRuntimeInputs(cfg))
+	in := testRuntimeInputs(cfg)
+	in.LinkPreviews = app.OpenLinkPreviews(slog.Default(), cfg, database)
+	rt, err := app.StartRuntime(cfg, database, nil, in)
 	if err != nil {
 		t.Fatalf("app.StartRuntime: %v", err)
 	}

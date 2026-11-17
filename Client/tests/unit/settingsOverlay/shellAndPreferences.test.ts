@@ -47,8 +47,8 @@ describe("SettingsOverlay", () => {
       "Account",
       "Appearance",
       "Accessibility",
-      "Voice & Video",
-      "Text & Images",
+      "Voice & video",
+      "Text & images",
       "Notifications",
       "Keybinds",
       "Advanced",
@@ -296,9 +296,9 @@ describe("SettingsOverlay", () => {
       overlay.mount(container);
       expect(navNames()).not.toContain("Keybinds");
       expect(navNames()).toHaveLength(9);
-      // Push to Talk there is the talk button, chosen under Voice & Video.
+      // Push to talk there is the talk button, chosen under Voice & Video.
       searchFor("push to talk");
-      expect(visibleNav()).toEqual(["Voice & Video"]);
+      expect(visibleNav()).toEqual(["Voice & video"]);
       searchFor("shortcut");
       expect(visibleNav()).not.toContain("Keybinds");
       overlay.destroy?.();
@@ -368,7 +368,10 @@ describe("SettingsOverlay", () => {
       pending.resolve(result);
       await vi.waitFor(() => expect(container.textContent).toMatch(/KIT-SECRET|CODE-ONE/));
 
+      // Once shown, the secret is the one copy: closing asks first.
       document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(defaultOptions.onClose).not.toHaveBeenCalled();
+      byId("unsaved-discard").click();
       expect(defaultOptions.onClose).toHaveBeenCalled();
       overlay.destroy?.();
     });
@@ -417,14 +420,14 @@ describe("SettingsOverlay", () => {
 
     getTab(container, 1).click();
 
-    const themeOptions = container.querySelectorAll(".theme-opt");
-    // Four palettes plus Sync with computer.
+    const themeOptions = container.querySelectorAll(".theme-tiles [role='radio']");
+    // Four palettes plus Match my computer.
     expect(themeOptions.length).toBe(5);
 
     const midnight = themeOptions[2] as HTMLElement;
     midnight.click();
 
-    expect(midnight.classList.contains("active")).toBe(true);
+    expect(midnight.getAttribute("aria-checked")).toBe("true");
     expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#1a1a2e");
     // Theme persists only via themes.ts (owncord:theme:active), not via savePref
     expect(localStorage.getItem("owncord:theme:active")).toBe("midnight");
@@ -486,9 +489,9 @@ describe("SettingsOverlay", () => {
     getTab(container, 5).click();
 
     // Desktop, flash, @everyone, the unread badge, message sounds, the call sound (D2) and the
-    // voice UI sounds (DP-40), plus the seven per-sound switches (WP M-8).
+    // voice UI sounds (DP-40), plus the nine per-sound switches (WP M-8).
     const toggles = container.querySelectorAll(".toggle");
-    expect(toggles.length).toBe(14);
+    expect(toggles.length).toBe(16);
 
     overlay.destroy?.();
   });
@@ -567,7 +570,7 @@ describe("SettingsOverlay", () => {
     getTab(container, 3).click();
 
     const echoToggle = container.querySelector(
-      ".toggle[aria-label='Echo Cancellation']",
+      ".toggle[aria-label='Echo cancellation']",
     ) as HTMLElement;
 
     // Default is on

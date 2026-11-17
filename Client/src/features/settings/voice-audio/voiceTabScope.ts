@@ -42,6 +42,8 @@ export interface VoiceTabScope {
   card: (title: string) => HTMLElement;
   inputModeCard: HTMLElement;
   micCard: HTMLElement;
+  /** The microphone section's head row, beside its heading. */
+  micHead: HTMLElement;
   speakersCard: HTMLElement;
   cameraCard: HTMLElement;
   processingCard: HTMLElement;

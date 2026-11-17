@@ -1,10 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import {
-  sessionDeviceLabel,
-  sessionNoticeMessage,
-  startSessionNotice,
-  MIN_POLL_INTERVAL_MS,
-} from "../../src/lib/net/sessionNotice";
+import { startSessionNotice, MIN_POLL_INTERVAL_MS } from "../../src/lib/net/sessionNotice";
 import type { SessionInfo } from "../../src/lib/api";
 import { expectConsole } from "../helpers/console";
 
@@ -143,23 +138,5 @@ describe("startSessionNotice", () => {
 
       expect(fetchSessions).toHaveBeenCalledTimes(1);
     });
-  });
-});
-
-describe("session labels", () => {
-  it("names both desktop User-Agents as the desktop app", () => {
-    expect(sessionDeviceLabel("OwnCord-Client/1.4.0")).toBe("OwnCord desktop");
-    expect(sessionDeviceLabel("tauri-plugin-http/2.6.0")).toBe("OwnCord desktop");
-    expect(sessionDeviceLabel("")).toBe("Unknown device");
-    expect(sessionDeviceLabel("curl/8.0")).toBe("curl/8.0");
-  });
-
-  it("names which sign-in and where to review it, not a 'new' one", () => {
-    const msg = sessionNoticeMessage([session({ id: 2, ip: "198.51.100.2" }), session({ id: 1 })]);
-    expect(msg).toContain("not reviewed");
-    expect(msg).toContain("OwnCord desktop from 198.51.100.2");
-    expect(msg).toContain("and 1 more");
-    expect(msg).toContain("Settings > Account");
-    expect(msg).not.toMatch(/\bnew\b/i);
   });
 });

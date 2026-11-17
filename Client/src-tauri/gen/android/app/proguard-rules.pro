@@ -19,3 +19,7 @@
 # If you keep the line number information, uncomment this to
 # hide the original source file name.
 #-renamesourcefileattribute SourceFile
+# UnifiedPush's Web Push decryption uses Tink, which names annotation-only
+# classes that are not shipped at run time.
+-dontwarn com.google.errorprone.annotations.**
+-dontwarn javax.annotation.**

@@ -42,16 +42,17 @@ pub(super) fn set_run_file(path: &std::path::Path) {
     crate::crash_log::set_run_file(path);
 }
 
-/// Watch the webview's web process: log its end and its responsiveness.
+/// Watch the webview's web process: log its end and its responsiveness. When
+/// it ends, end the call and the page's server connection, then reload.
 pub(super) fn watch_webview<R: Runtime>(window: &tauri::WebviewWindow<R>) {
-    let result = window.with_webview(|webview| {
+    let main = window.clone();
+    let result = window.with_webview(move |webview| {
         use webkit2gtk::WebViewExt;
         let view = webview.inner();
-        view.connect_web_process_terminated(|_, reason| {
-            log::error!(
-                "[exit] webview process ended: {reason:?}; the window goes blank until reloaded"
-            );
+        view.connect_web_process_terminated(move |_, reason| {
+            log::error!("[exit] webview process ended: {reason:?}; ending the call and reloading");
             log::logger().flush();
+            tauri::async_runtime::spawn(recover_dead_page(main.clone()));
         });
         view.connect_is_web_process_responsive_notify(|view| {
             if view.is_web_process_responsive() {
@@ -66,6 +67,49 @@ pub(super) fn watch_webview<R: Runtime>(window: &tauri::WebviewWindow<R>) {
     if let Err(e) = result {
         log::warn!("[exit] webview not watched: {e}");
     }
+}
+
+/// How many reloads after a page-process end a minute may see: a page that
+/// ends again on every load stays blank instead of looping.
+const RELOADS_PER_MINUTE: usize = 3;
+
+/// The page process ended. Nothing can mute or leave the call any more, so
+/// end it and drop the page's server connection first, then give the user a
+/// working window back. The reload waits for both: the new page's own
+/// connect must not be the one torn down.
+async fn recover_dead_page<R: Runtime>(main: tauri::WebviewWindow<R>) {
+    let app = tauri::Manager::app_handle(&main).clone();
+    // Pop-outs share the dead web process: they would stay open and blank.
+    crate::popout::close_all(&app);
+    // The server connection does not wait for the SFU to answer the close.
+    tokio::join!(
+        crate::native_voice::page_gone::end_for_dead_page(&app),
+        crate::ws_proxy::drop_for_dead_page(&app),
+    );
+    let now = std::time::Instant::now();
+    let allowed = {
+        static RELOADS: std::sync::Mutex<Vec<std::time::Instant>> =
+            std::sync::Mutex::new(Vec::new());
+        may_reload(&mut crate::sync::lock(&RELOADS), now)
+    };
+    if !allowed {
+        log::error!("[exit] the page process keeps ending; not reloading again this minute");
+        return;
+    }
+    if let Err(e) = main.reload() {
+        log::warn!("[exit] page reload failed: {e}");
+    }
+}
+
+/// Whether one more reload fits in the last minute's budget; records it if so.
+fn may_reload(history: &mut Vec<std::time::Instant>, now: std::time::Instant) -> bool {
+    let minute = std::time::Duration::from_secs(60);
+    history.retain(|t| now.saturating_duration_since(*t) < minute);
+    if history.len() >= RELOADS_PER_MINUTE {
+        return false;
+    }
+    history.push(now);
+    true
 }
 
 /// Whether `pid` is a running process (not a thread of one) with this
@@ -161,6 +205,25 @@ pub(super) fn log_session() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_page_that_keeps_ending_stops_reloading_for_the_rest_of_the_minute() {
+        let start = std::time::Instant::now();
+        let at = |s: u64| start + std::time::Duration::from_secs(s);
+        let mut history = Vec::new();
+        assert!(may_reload(&mut history, at(0)));
+        assert!(may_reload(&mut history, at(5)));
+        assert!(may_reload(&mut history, at(10)));
+        assert!(
+            !may_reload(&mut history, at(15)),
+            "a fourth end in a minute"
+        );
+        assert!(!may_reload(&mut history, at(59)));
+        assert!(
+            may_reload(&mut history, at(61)),
+            "the first reload aged out"
+        );
+    }
 
     #[test]
     fn memory_is_read_from_proc_status() {

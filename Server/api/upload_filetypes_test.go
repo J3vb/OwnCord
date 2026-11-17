@@ -40,6 +40,7 @@ func assertBlocked(t *testing.T, h *quotaHarness, filename string, content []byt
 }
 
 func TestUpload_BlockedExtensionRefused(t *testing.T) {
+	t.Parallel()
 	h := fileTypeHarness(t, storage.FileTypePolicy{Blocked: storage.DefaultBlockedExtensions})
 	assertBlocked(t, h, "cleanup.BAT", []byte("@echo off\r\n"), ".bat")
 	assertBlocked(t, h, "report.pdf.ps1", []byte("Get-ChildItem\n"), ".ps1")
@@ -55,6 +56,7 @@ func TestUpload_BlockedExtensionRefused(t *testing.T) {
 }
 
 func TestUpload_AllowOnlyMode(t *testing.T) {
+	t.Parallel()
 	h := fileTypeHarness(t, storage.FileTypePolicy{Allowed: []string{"txt", "exe"}})
 	assertBlocked(t, h, "photo.png", []byte("not really a png"), ".png")
 	assertBlocked(t, h, "README", []byte("hello"), "no file extension")
@@ -66,12 +68,14 @@ func TestUpload_AllowOnlyMode(t *testing.T) {
 // An owner who allows an extension never unlocks the content blocks: a PE
 // executable is refused whatever it is called.
 func TestUpload_MagicBlocksApplyToAnAllowedExtension(t *testing.T) {
+	t.Parallel()
 	h := fileTypeHarness(t, storage.FileTypePolicy{Allowed: []string{"exe", "txt"}})
 	assertBlocked(t, h, "tool.exe", []byte("MZ\x90\x00\x03\x00\x00\x00"), "PE executable")
 	assertBlocked(t, h, "notes.txt", []byte("#!/bin/sh\necho hi\n"), "shell script")
 }
 
 func TestUpload_SavedPolicyReplacesConfig(t *testing.T) {
+	t.Parallel()
 	h := fileTypeHarness(t, storage.FileTypePolicy{Blocked: storage.DefaultBlockedExtensions})
 	if _, err := service.NewSettingsService(h.database).Patch(context.Background(), h.userID, map[string]string{
 		service.UploadBlockedExtensionsKey: "txt",
@@ -87,6 +91,7 @@ func TestUpload_SavedPolicyReplacesConfig(t *testing.T) {
 // The first auth_ok after start-up carries config.yaml's lists: the hub fills
 // its settings cache while StartRuntime builds it, before NewRouter runs.
 func TestNewRouter_FirstAuthOKCarriesConfigFileTypes(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	cfg := &config.Config{
 		Server: config.ServerConfig{Name: "Test Server", Port: 8443, DataDir: t.TempDir(), AllowedOrigins: []string{"*"}},

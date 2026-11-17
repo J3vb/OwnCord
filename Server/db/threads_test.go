@@ -47,6 +47,7 @@ func (f threadFixture) exec(t *testing.T, q string, args ...any) error {
 // TestThreadRowShapeTrigger proves the schema refuses every thread row that
 // could carry permission state of its own, or move to another parent.
 func TestThreadRowShapeTrigger(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	voice, err := f.db.CreateChannel(ctx, "voice", "voice", "", "", 1)
@@ -129,6 +130,7 @@ func TestThreadRowShapeTrigger(t *testing.T) {
 // TestThreadInheritsParentChannelState proves a thread row reads its parent's
 // NSFW, archive and slow mode, and that ListChannels stays parents-only.
 func TestThreadInheritsParentChannelState(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	mustDo(t, "exec", f.exec(t, `UPDATE channels SET nsfw = 1, archived = 1, slow_mode = 7 WHERE id = ?`, f.parent))
@@ -163,6 +165,7 @@ func TestThreadInheritsParentChannelState(t *testing.T) {
 // reads answer a thread id with the parent's rows, and that a thread never
 // shows up in the per-member batch map (whose callers resolve first).
 func TestThreadOverrideReadsResolveParent(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	const role = 4
@@ -188,6 +191,7 @@ func TestThreadOverrideReadsResolveParent(t *testing.T) {
 // thread id as its parent's, and the raw acknowledge refuses a thread id
 // (its own label is always 0), so no row is ever keyed by a thread.
 func TestThreadNSFWConsentIsParents(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	mustDo(t, "exec", f.exec(t, `UPDATE channels SET nsfw = 1 WHERE id = ?`, f.parent))
@@ -225,6 +229,7 @@ func TestThreadNSFWConsentIsParents(t *testing.T) {
 // TestThreadAttachmentTakesParentNSFW proves the attachment read gate sees a
 // thread attachment as labelled when the parent is.
 func TestThreadAttachmentTakesParentNSFW(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	msg, err := f.db.CreateMessage(ctx, f.thread, f.user, "pic", nil)
@@ -247,6 +252,7 @@ func TestThreadAttachmentTakesParentNSFW(t *testing.T) {
 // TestThreadRetentionFollowsParent proves a thread is swept under its
 // parent's window and cannot get one of its own.
 func TestThreadRetentionFollowsParent(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	mustDo(t, "SetChannelRetention", f.db.SetChannelRetention(ctx, f.parent, 30, f.user))
@@ -269,6 +275,7 @@ func TestThreadRetentionFollowsParent(t *testing.T) {
 // TestThreadGoesWithParent proves the cascade: deleting the parent removes
 // its threads, and deleting the starter message keeps the thread.
 func TestThreadGoesWithParent(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ctx := context.Background()
 	mustDo(t, "exec", f.exec(t, `DELETE FROM messages WHERE id = ?`, f.starter))

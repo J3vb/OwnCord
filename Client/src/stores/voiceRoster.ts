@@ -200,6 +200,8 @@ export function withLeftChannel(prev: VoiceState, currentUserId: number): VoiceS
     peerKeySlots: new Set<number>(),
     peerBoundOffers: new Set<number>(),
     peerWatching: new Map<number, readonly number[]>(),
+    localMusic: false,
+    musicSharers: new Set<number>(),
   };
   const channelId = prev.currentChannelId;
   const voiceUsers = withoutRings(prev.voiceUsers, channelId);

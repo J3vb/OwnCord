@@ -11,6 +11,7 @@ import (
 // own transaction and decides between staging and auto-accepting.
 
 func TestCreateMessageRequest_PrivacyDecidesInTransaction(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name         string
 		privacy      *db.UserPrivacy
@@ -67,6 +68,7 @@ func TestCreateMessageRequest_PrivacyDecidesInTransaction(t *testing.T) {
 // reports AutoAccepted (the recipient trusts the sender) but neither Created
 // nor Opened; a pending row stays pending and reports nothing to deliver.
 func TestCreateMessageRequest_ExistingRowPath(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sender, recipient, channelID, msgID := seedMessageRequestPair(t, database, "auto2-sender", "auto2-recipient")

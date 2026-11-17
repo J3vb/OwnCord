@@ -24,6 +24,7 @@ type RetentionStore interface {
 	DeleteChannelRetention(ctx context.Context, channelID int64) (bool, error)
 	RetentionWindows(ctx context.Context) ([]db.RetentionWindow, error)
 	CountRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (int64, error)
+	HasRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (bool, error)
 	SweepRetentionJournaled(ctx context.Context, runID, channelID int64, cutoff time.Time, limit int, countChannel bool) (int64, []int64, []string, error)
 	RetentionSwept(ctx context.Context, channelID int64) (sweep string, ok bool, err error)
 	RecordRetentionSwept(ctx context.Context, channelID int64, sweep string) error
@@ -216,9 +217,7 @@ func (s *RetentionService) Channels(ctx context.Context) ([]RetentionChannel, er
 	}
 	out := make([]RetentionChannel, 0, len(all))
 	for i := range all {
-		if all[i].Type != "dm" {
-			out = append(out, RetentionChannel{ID: all[i].ID, Name: all[i].Name})
-		}
+		out = append(out, RetentionChannel{ID: all[i].ID, Name: all[i].Name})
 	}
 	return out, nil
 }

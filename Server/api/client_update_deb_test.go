@@ -70,6 +70,7 @@ var preLP14aAssets = []string{
 }
 
 func TestClientUpdate_DebTargetWithoutOptInNoContentEvenWhenDebPublished(t *testing.T) {
+	t.Parallel()
 	srv := fakeGitHubRelease(t, "v2.0.0")
 	for _, path := range []string{
 		"/api/v1/client-update/linux-aarch64-deb/1.0.0",
@@ -84,6 +85,7 @@ func TestClientUpdate_DebTargetWithoutOptInNoContentEvenWhenDebPublished(t *test
 }
 
 func TestClientUpdate_DebOptInGetsDeb(t *testing.T) {
+	t.Parallel()
 	srv := fakeGitHubRelease(t, "v2.0.0")
 	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/linux-x86_64-deb/1.0.0?deb_install=pkexec")
 	requireStatus(t, rr, http.StatusOK)
@@ -97,6 +99,7 @@ func TestClientUpdate_DebOptInGetsDeb(t *testing.T) {
 }
 
 func TestClientUpdate_DebOptInArm64GetsArm64Deb(t *testing.T) {
+	t.Parallel()
 	srv := fakeGitHubRelease(t, "v2.0.0")
 	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/linux-aarch64-deb/1.0.0?deb_install=pkexec")
 	requireStatus(t, rr, http.StatusOK)
@@ -107,6 +110,7 @@ func TestClientUpdate_DebOptInArm64GetsArm64Deb(t *testing.T) {
 }
 
 func TestClientUpdate_DebOptInCurrentGets200WithLatest(t *testing.T) {
+	t.Parallel()
 	srv := fakeGitHubRelease(t, "v1.0.0")
 	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/linux-x86_64-deb/1.0.0?deb_install=pkexec")
 	requireStatus(t, rr, http.StatusOK)
@@ -121,12 +125,14 @@ func TestClientUpdate_DebOptInCurrentGets200WithLatest(t *testing.T) {
 }
 
 func TestClientUpdate_DebOptInNewerThanLatestGets200(t *testing.T) {
+	t.Parallel()
 	srv := fakeGitHubRelease(t, "v1.0.0")
 	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/linux-x86_64-deb/3.0.0?deb_install=pkexec")
 	requireStatus(t, rr, http.StatusOK)
 }
 
 func TestClientUpdate_DebOptInUnverifiableManifestNoContent(t *testing.T) {
+	t.Parallel()
 	// A manifest whose signature does not verify is withheld; the withhold
 	// still wins over the opted-in 200-when-current rule, current or not.
 	manifest := []byte(`{"version":"v1.0.0","asset":"chatserver.exe","sha256":"00","protocol_epoch":99}`)
@@ -141,6 +147,7 @@ func TestClientUpdate_DebOptInUnverifiableManifestNoContent(t *testing.T) {
 }
 
 func TestClientUpdate_DebOptInNoDebAssetNoContent(t *testing.T) {
+	t.Parallel()
 	// A release published before the .deb was signed has no deb assets.
 	srv := fakeReleaseWithAssets(t, "v1.0.0", preLP14aAssets, nil, nil)
 	for _, ver := range []string{"1.0.0", "0.9.0"} {
@@ -152,6 +159,7 @@ func TestClientUpdate_DebOptInNoDebAssetNoContent(t *testing.T) {
 }
 
 func TestClientUpdate_DebOptInSignatureMissingNoContent(t *testing.T) {
+	t.Parallel()
 	names := append([]string{"OwnCord_1.0.0_amd64.deb"}, preLP14aAssets...)
 	srv := fakeReleaseWithAssets(t, "v1.0.0", names, nil, nil)
 	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/linux-x86_64-deb/1.0.0?deb_install=pkexec")
@@ -159,6 +167,7 @@ func TestClientUpdate_DebOptInSignatureMissingNoContent(t *testing.T) {
 }
 
 func TestClientUpdate_OptInIgnoredForNonDebTargets(t *testing.T) {
+	t.Parallel()
 	srv := fakeGitHubRelease(t, "v1.0.0")
 	for _, target := range []string{"linux-x86_64-appimage", "windows-x86_64-nsis", "linux-x86_64-rpm"} {
 		plain := getClientUpdate(t, srv.URL, "/api/v1/client-update/"+target+"/1.0.0")
@@ -180,6 +189,7 @@ func TestClientUpdate_OptInIgnoredForNonDebTargets(t *testing.T) {
 // (debOptIn is unexported); each row is a deb target request that must or must
 // not be offered the package for a client one version behind.
 func TestDebOptIn(t *testing.T) {
+	t.Parallel()
 	srv := fakeGitHubRelease(t, "v2.0.0")
 	cases := []struct {
 		name   string

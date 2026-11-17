@@ -246,7 +246,7 @@ describe("AudioPipeline", () => {
     };
     afterEach(() => setPttPollingLive(false));
 
-    it("a live Push to Talk key runs no sensitivity gate; Voice Activity restarts it", async () => {
+    it("a live Push to talk key runs no sensitivity gate; Voice activity restarts it", async () => {
       prefs.set("voiceSensitivity", 30);
       prefs.set("inputMode", "ptt");
       prefs.set("pttVk", 0x41);
@@ -278,7 +278,7 @@ describe("AudioPipeline", () => {
       expect(worklet.port.postMessage).toHaveBeenCalledWith({ type: "stop" });
     });
 
-    it("keeps the sensitivity gate in Push to Talk mode until a key can gate the mic", () => {
+    it("keeps the sensitivity gate in Push to talk mode until a key can gate the mic", () => {
       prefs.set("voiceSensitivity", 70);
       prefs.set("inputMode", "ptt");
       const pipeline = new AudioPipeline(() => pttLive);
@@ -304,7 +304,7 @@ describe("AudioPipeline", () => {
         expect.any(Object),
       );
 
-      // The poller goes live: Push to Talk takes over.
+      // The poller goes live: Push to talk takes over.
       setPttPollingLive(true);
       pipeline.applyInputMode();
       expect(setVoiceGate).toHaveBeenLastCalledWith(0, expect.any(Function), expect.any(Object));
@@ -365,7 +365,7 @@ describe("AudioPipeline", () => {
       }
     });
 
-    it("runs no gate while a live Push to Talk key gates, automatic or not", async () => {
+    it("runs no gate while a live Push to talk key gates, automatic or not", async () => {
       prefs.set("autoInputSensitivity", true);
       prefs.set("inputMode", "ptt");
       prefs.set("pttVk", 0x41);

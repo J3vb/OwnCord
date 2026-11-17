@@ -5,7 +5,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const { playNotificationSound } = vi.hoisted(() => ({ playNotificationSound: vi.fn() }));
+const { previewSounds } = vi.hoisted(() => ({ previewSounds: vi.fn() }));
 
 vi.mock("../../src/platform/desktop", () => ({
   desktop: {
@@ -16,7 +16,7 @@ vi.mock("../../src/platform/desktop", () => ({
     },
   },
 }));
-vi.mock("../../src/lib/media/notificationSound", () => ({ playNotificationSound }));
+vi.mock("../../src/lib/media/soundPreview", () => ({ previewSounds }));
 
 import { useNotificationsTabHost } from "../helpers/notificationsTabHost";
 import { setChannelMutesHost } from "../../src/lib/prefs/channelMutes";
@@ -26,7 +26,7 @@ const { build } = host;
 
 beforeEach(() => {
   localStorage.clear();
-  playNotificationSound.mockClear();
+  previewSounds.mockClear();
   setChannelMutesHost(null);
 });
 
@@ -76,18 +76,69 @@ describe("App sounds volume slider", () => {
     expect(slider(second).getAttribute("aria-valuetext")).toBe("0%");
   });
 
-  it("plays one sample chime when the thumb is released, not while dragging", () => {
+  it("previews the message sound when the thumb is released, not while dragging", () => {
     const s = slider(build());
     s.dispatchEvent(new Event("input"));
-    expect(playNotificationSound).not.toHaveBeenCalled();
+    expect(previewSounds).not.toHaveBeenCalled();
 
     s.dispatchEvent(new Event("change"));
-    expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(previewSounds).toHaveBeenCalledTimes(1);
+    expect(previewSounds).toHaveBeenCalledWith(["message"], expect.any(AbortSignal));
   });
 
   it("falls back to 100% on a corrupt stored value", () => {
     localStorage.setItem("owncord:settings:appSoundsVolume", JSON.stringify("loud"));
     expect(slider(build()).value).toBe("100");
+  });
+});
+
+describe("Sound style", () => {
+  const choice = (tab: HTMLElement, style: string): HTMLButtonElement =>
+    tab.querySelector<HTMLButtonElement>(`[data-testid='sound-style-${style}']`)!;
+  const select = (tab: HTMLElement): HTMLSelectElement =>
+    tab.querySelector<HTMLSelectElement>("[data-testid='sound-style-select']")!;
+
+  it("sits right under the volume slider and starts on Modern", () => {
+    const tab = build();
+    const rows = [...tab.querySelectorAll<HTMLElement>(".setting-row")];
+    const volume = rows.findIndex((r) => r.contains(slider(tab)));
+    expect(rows[volume + 1]!.contains(choice(tab, "modern"))).toBe(true);
+    expect(rows[volume + 1]!.textContent).toContain("Sound style");
+    expect(rows[volume + 1]!.textContent).toContain(
+      "Classic brings back the plain tones OwnCord had before.",
+    );
+    expect(choice(tab, "modern").getAttribute("aria-checked")).toBe("true");
+    expect(choice(tab, "modern").textContent).toBe("Modern");
+    expect(choice(tab, "classic").textContent).toBe("Classic");
+    expect(select(tab).value).toBe("modern");
+  });
+
+  it("saves the pick and previews the message sound in it", () => {
+    const tab = build();
+    previewSounds.mockImplementation(() => {
+      // The sample plays after the save, so it sounds in the new style.
+      expect(stored("soundStyle")).toBe(JSON.stringify("classic"));
+    });
+    choice(tab, "classic").click();
+    previewSounds.mockImplementation(() => undefined);
+
+    expect(previewSounds).toHaveBeenCalledTimes(1);
+    expect(previewSounds).toHaveBeenCalledWith(["message"], expect.any(AbortSignal));
+    expect(choice(tab, "classic").getAttribute("aria-checked")).toBe("true");
+    expect(choice(build(), "classic").getAttribute("aria-checked")).toBe("true");
+  });
+
+  it("saves from the narrow-window select as well", () => {
+    const tab = build();
+    select(tab).value = "classic";
+    select(tab).dispatchEvent(new Event("change"));
+    expect(stored("soundStyle")).toBe(JSON.stringify("classic"));
+    expect(previewSounds).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Modern for a stored value it does not know", () => {
+    localStorage.setItem("owncord:settings:soundStyle", JSON.stringify("retro"));
+    expect(choice(build(), "modern").getAttribute("aria-checked")).toBe("true");
   });
 });
 
@@ -100,13 +151,27 @@ describe("per-sound switches", () => {
     ["Join and leave sounds", "soundJoinLeave"],
     ["Mute and deafen sounds", "soundMuteDeafen"],
     ["Stream sounds", "soundStream"],
+    ["Connection sounds", "soundConnection"],
   ];
 
-  it("offers one switch per sound, all on by default", () => {
+  it("offers one switch per sound, all on by default but push-to-talk", () => {
     const tab = build();
     for (const [label] of SOUND_SWITCHES) {
       expect(switchFor(tab, label).getAttribute("aria-checked")).toBe("true");
     }
+    expect(switchFor(tab, "Push-to-talk sounds").getAttribute("aria-checked")).toBe("false");
+    expect(tab.textContent).toContain("When your voice connection drops and when it is back");
+    expect(tab.textContent).toContain("A quiet tick when your talk key opens and closes your mic");
+    expect(tab.textContent).toContain(
+      "The soft tones you hear while your call rings, and when it is not answered",
+    );
+  });
+
+  it("turns the push-to-talk sound on, saving its own key", () => {
+    const tab = build();
+    switchFor(tab, "Push-to-talk sounds").click();
+    expect(stored("soundPtt")).toBe("true");
+    expect(switchFor(build(), "Push-to-talk sounds").getAttribute("aria-checked")).toBe("true");
   });
 
   it("turns each sound off on its own, saving only its own key", () => {
@@ -129,9 +194,9 @@ describe("per-sound switches", () => {
     localStorage.setItem("owncord:settings:callSounds", "false");
     const tab = build();
 
-    expect(switchFor(tab, "Incoming Call Sound").getAttribute("aria-checked")).toBe("false");
-    switchFor(tab, "Notification Sounds").click();
-    switchFor(tab, "Voice Sounds").click();
+    expect(switchFor(tab, "Incoming call sound").getAttribute("aria-checked")).toBe("false");
+    switchFor(tab, "Notification sounds").click();
+    switchFor(tab, "Voice sounds").click();
     expect(stored("notificationSounds")).toBe("false");
     expect(stored("voiceSounds")).toBe("false");
 
@@ -139,10 +204,12 @@ describe("per-sound switches", () => {
     const rows = [...tab.querySelectorAll<HTMLElement>(".setting-row")];
     const at = (label: string): number =>
       rows.findIndex((r) => r.querySelector(`[aria-label='${label}']`) !== null);
-    expect(at("Message sound")).toBe(at("Notification Sounds") + 1);
-    expect(at("Mention sound")).toBe(at("Notification Sounds") + 2);
-    expect(at("Ring sound")).toBe(at("Incoming Call Sound") + 1);
-    expect(at("Stream sounds")).toBe(at("Voice Sounds") + 3);
+    expect(at("Message sound")).toBe(at("Notification sounds") + 1);
+    expect(at("Mention sound")).toBe(at("Notification sounds") + 2);
+    expect(at("Ring sound")).toBe(at("Incoming call sound") + 1);
+    expect(at("Stream sounds")).toBe(at("Voice sounds") + 3);
+    expect(at("Connection sounds")).toBe(at("Voice sounds") + 4);
+    expect(at("Push-to-talk sounds")).toBe(at("Voice sounds") + 5);
     expect(rows[at("Ring sound")]!.classList.contains("nested")).toBe(true);
   });
 });

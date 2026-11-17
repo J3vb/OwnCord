@@ -67,11 +67,11 @@ describe("voice gate defects (vad-worklet.js + micProcessor.ts)", () => {
   }
   const speech = () => readAudioFixture("speech.wav");
   const scaled = (x: Float32Array, k: number) => x.map((v) => v * k);
-  /** micProcessor applies Input Volume ahead of the analyser the worklet reads,
+  /** micProcessor applies Input volume ahead of the analyser the worklet reads,
    *  so the worklet sees the mic times the slider. */
   const afterInputVolume = (mic: Float32Array, volume: number) => scaled(mic, volume);
 
-  it("F1: a quiet mic lifted by Input Volume 200 % still transmits at the default sensitivity", async () => {
+  it("F1: a quiet mic lifted by Input volume 200 % still transmits at the default sensitivity", async () => {
     // A quiet headset mic: the clip's -24.5 dBFS at half amplitude (-30.5 dBFS),
     // with the slider at 200 %. Without the volume ahead of the tap the worklet
     // sees -30.5 dBFS and the gate stays shut (the smoothing alone opens it
@@ -118,7 +118,7 @@ describe("voice gate defects (vad-worklet.js + micProcessor.ts)", () => {
     expect(closes).toEqual([]);
   });
 
-  it("F5: the Input Volume slider applies ahead of the detector's tap, so it can lift a quiet mic over the gate", async () => {
+  it("F5: the Input volume slider applies ahead of the detector's tap, so it can lift a quiet mic over the gate", async () => {
     installFakeAudio();
     const processor = createMicProcessor();
     await processor.init({ kind: Track.Kind.Audio, track: fakeMediaStreamTrack("mic") } as never);

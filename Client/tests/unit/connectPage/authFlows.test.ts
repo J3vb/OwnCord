@@ -426,7 +426,7 @@ describe("ConnectPage", () => {
     toggleLink.click(); // back to login
 
     const btnText = container.querySelector(".btn-text");
-    expect(btnText?.textContent).toBe("Login");
+    expect(btnText?.textContent).toBe("Sign in");
     expect(toggleLink.textContent).toContain("Need an account?");
 
     page.destroy?.();
@@ -549,7 +549,7 @@ describe("ConnectPage", () => {
 
     await vi.waitFor(() => {
       const btnText = container.querySelector(".btn-text")!;
-      expect(btnText.textContent).toContain("Logging in");
+      expect(btnText.textContent).toContain("Signing in");
     });
 
     resolveLogin();

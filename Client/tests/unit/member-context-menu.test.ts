@@ -111,7 +111,7 @@ describe("member context menu: Change Nickname", () => {
     signInAs(10, "Moderator");
     applyReadyCapabilities({ manage_nicknames: true });
     await openMenu(12);
-    expect(item()?.firstChild?.textContent).toBe("Change Nickname");
+    expect(item()?.textContent).toBe("Change Nickname");
     item()!.click();
     // The current nickname is handed to the dialog; the menu closes first.
     expect(onChangeNickname).toHaveBeenCalledWith(12, "dave", "Davey");

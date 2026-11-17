@@ -119,9 +119,22 @@
   background: var(--bg-tertiary);
   color: var(--text-muted);
   font-size: var(--font-size-xs);
-  padding: 0 8px;
+  padding: 0 8px 0 26px;
   border: 1px solid var(--border-control);
   transition: width 0.3s;
+}
+/* The leading icon sits over the box; clicks pass through to it. */
+.chat-header .search-field {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.chat-header .search-field > .icon {
+  position: absolute;
+  left: 8px;
+  color: var(--text-muted);
+  pointer-events: none;
 }
 .chat-header .search-input::placeholder {
   color: var(--text-muted);

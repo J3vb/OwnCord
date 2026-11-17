@@ -10,6 +10,7 @@ import (
 // client shows a tombstone, but the file stayed reachable by URL forever
 // with no way to reclaim it (v034).
 func TestServeFile_LinkedToDeletedMessage_NotFound(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)

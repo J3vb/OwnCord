@@ -69,7 +69,7 @@ describe("My reports", () => {
     const heading = document.getElementById(section.getAttribute("aria-labelledby")!);
     expect(heading?.textContent).toBe("My reports");
     // A section of the Safety tab, at the tab's heading level, not a new page.
-    expect(heading?.tagName).toBe("H3");
+    expect(heading?.tagName).toBe("H2");
     const status = section.querySelector("[role=status]")!;
     expect(status.textContent).toBe("Loading your reports…");
     expect(section.getAttribute("aria-busy")).toBe("true");
@@ -140,7 +140,7 @@ describe("My reports", () => {
     pending[1]!.resolve([row()]);
     await flush();
     expect(retry.hidden).toBe(true);
-    expect(document.activeElement).toBe(section.querySelector("h3"));
+    expect(document.activeElement).toBe(section.querySelector("h2"));
     expect(section.querySelectorAll("li")).toHaveLength(1);
   });
 
@@ -166,7 +166,7 @@ describe("My reports", () => {
     await vi.waitFor(() => expect(pane.querySelector("section.blocked-users")).not.toBeNull());
     await vi.waitFor(() => expect(pane.querySelector("section.my-reports")).not.toBeNull());
     expect(pane.firstElementChild?.matches("section.blocked-users")).toBe(true);
-    expect(pane.querySelector("section.blocked-users h3")?.textContent).toBe("Blocked users");
+    expect(pane.querySelector("section.blocked-users h2")?.textContent).toBe("Blocked users");
   });
 
   it("says so in the pane when the section fails to load", async () => {
@@ -220,19 +220,19 @@ describe("reportStateKey", () => {
 
 const retryOf = (s: HTMLElement): HTMLButtonElement => s.querySelector("button")!;
 const statusOf = (s: HTMLElement): HTMLElement => s.querySelector("[role=status]")!;
-const headingNum = (s: HTMLElement): number => Number(s.querySelector("h3")!.id.split("-").pop());
+const headingNum = (s: HTMLElement): number => Number(s.querySelector("h2")!.id.split("-").pop());
 const alertOf = (s: HTMLElement): HTMLElement => s.querySelector("[role=alert]")!;
 
 describe("My reports markup and states", () => {
   it("gives the section a unique, positive heading id and its styling classes", () => {
     const first = mount();
     const second = mount();
-    expect(first.querySelector("h3")!.id).toMatch(/^my-reports-\d+$/);
+    expect(first.querySelector("h2")!.id).toMatch(/^my-reports-\d+$/);
     expect(headingNum(second)).toBeGreaterThan(headingNum(first));
     expect(headingNum(first)).toBeGreaterThan(0);
-    expect(first.className).toBe("my-reports");
-    expect(first.querySelector("h3")!.className).toBe("safety-heading");
-    expect(first.querySelector("h3")!.getAttribute("tabindex")).toBe("-1");
+    expect(first.className).toBe("settings-section my-reports");
+    expect(first.querySelector("h2")!.className).toBe("settings-section-label");
+    expect(first.querySelector("h2")!.getAttribute("tabindex")).toBe("-1");
     expect(first.querySelector("p")!.className).toBe("setting-desc");
     expect(statusOf(first).className).toBe("my-reports-status");
     expect(alertOf(first).className).toBe("form-error");
@@ -297,7 +297,7 @@ describe("My reports markup and states", () => {
     retryOf(section).click();
     pending[1]!.resolve([row()]);
     await flush();
-    expect(document.activeElement).not.toBe(section.querySelector("h3"));
+    expect(document.activeElement).not.toBe(section.querySelector("h2"));
   });
 
   it("keeps focus on Try again when it fails again", async () => {

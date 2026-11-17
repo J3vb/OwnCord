@@ -18,6 +18,7 @@ import (
 // admin channel delete exercised here, the last leave from a group DM, and
 // account deletion emptying a 1:1 DM all reach the same cascade.
 func TestAdminDeleteChannel_UnlinksAttachmentsForReclaim(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 

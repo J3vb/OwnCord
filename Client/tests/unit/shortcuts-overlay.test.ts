@@ -40,7 +40,7 @@ describe("ShortcutsOverlay", () => {
     const dialog = overlay()!.querySelector<HTMLElement>("[role='dialog']")!;
     expect(dialog.getAttribute("aria-modal")).toBe("true");
     const heading = document.getElementById(dialog.getAttribute("aria-labelledby")!);
-    expect(heading?.textContent).toBe("Keyboard Shortcuts");
+    expect(heading?.textContent).toBe("Keyboard shortcuts");
     expect(dialogOpen()).toBe(true);
   });
 
@@ -68,8 +68,8 @@ describe("ShortcutsOverlay", () => {
         r.querySelector(".kbd")?.textContent,
       ]),
     );
-    expect(rows.get("Toggle Mute")).toBe("Ctrl + Shift + M");
-    expect(rows.get("Toggle Deafen")).toBe("Ctrl + Shift + D");
+    expect(rows.get("Toggle mute")).toBe("Ctrl + Shift + M");
+    expect(rows.get("Toggle deafen")).toBe("Ctrl + Shift + D");
     expect(overlay()!.querySelectorAll("input, select").length).toBe(0);
   });
 
@@ -86,28 +86,28 @@ describe("ShortcutsOverlay", () => {
     saveKeybind("emojiPicker", null);
     openShortcutsOverlay();
     const rows = labelled();
-    expect(rows.get("Search Messages")).toBe("Ctrl + J");
-    expect(rows.get("Emoji Picker")).toBe("Not set");
-    expect(rows.get("GIF Picker")).toBe("Ctrl + G");
+    expect(rows.get("Search messages")).toBe("Ctrl + J");
+    expect(rows.get("Emoji picker")).toBe("Not set");
+    expect(rows.get("GIF picker")).toBe("Ctrl + G");
   });
 
   it("lists screen share and disconnect only once they are bound", () => {
     openShortcutsOverlay();
-    expect(labelled().has("Toggle Screen Share")).toBe(false);
-    expect(labelled().has("Disconnect from Voice")).toBe(false);
+    expect(labelled().has("Toggle screen share")).toBe(false);
+    expect(labelled().has("Disconnect from voice")).toBe(false);
     closeShortcutsOverlay();
 
     saveKeybind("toggleScreenshare", { vk: 0x75, ctrl: false, shift: false, alt: false });
     openShortcutsOverlay();
-    expect(labelled().get("Toggle Screen Share")).toBe("F6");
-    expect(labelled().has("Disconnect from Voice")).toBe(false);
+    expect(labelled().get("Toggle screen share")).toBe("F6");
+    expect(labelled().has("Disconnect from voice")).toBe(false);
   });
 
   it("reads a rebound mute key when it opens", () => {
     saveGlobalShortcutVk("mute", 0x4b); // K
     openShortcutsOverlay();
     const muteRow = Array.from(overlay()!.querySelectorAll(".keybind-row")).find(
-      (r) => r.querySelector(".setting-label")?.textContent === "Toggle Mute",
+      (r) => r.querySelector(".setting-label")?.textContent === "Toggle mute",
     );
     expect(muteRow?.querySelector(".kbd")?.textContent).toBe("Ctrl + Shift + K");
   });

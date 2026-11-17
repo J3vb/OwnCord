@@ -2,8 +2,6 @@
 // (which proxies Klipy). Uses @lib/dom helpers exclusively. Never sets
 // innerHTML with user content.
 
-import { isPhoneLayout } from "@lib/ui/bottomSheet";
-import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, clearChildren } from "@lib/dom";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
@@ -22,6 +20,7 @@ import { gifFavoritesText } from "../../i18n/gifFavorites";
 import { RestErrorCode } from "@lib/protocolTypes";
 import type { GifPickerOptions } from "./gifPickerOptions";
 import { appendCells, setStarState, toggleCell } from "./gifPickerCells";
+import { wirePickerKeys } from "./pickerKeys";
 
 export type { GifPickerOptions };
 
@@ -446,22 +445,7 @@ export function createGifPicker(options: GifPickerOptions): {
     { signal },
   );
 
-  root.addEventListener(
-    "keydown",
-    (e) => {
-      if (e.key === "Escape" && !isImeCommit(e)) {
-        e.preventDefault();
-        options.onClose();
-      }
-    },
-    { signal },
-  );
-
-  // Focus search on mount
-  // On a phone the keyboard would cover half the sheet before anyone asked to search.
-  requestAnimationFrame(() => {
-    if (!isPhoneLayout()) searchInput.focus();
-  });
+  wirePickerKeys(root, searchInput, options.onClose, signal);
 
   // Load trending on init
   void loadGifs("");

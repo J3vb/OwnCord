@@ -2,8 +2,8 @@
 
 import type { ServerRailOptions } from "./ServerRail";
 import { createLogger } from "@lib/logger";
-import { authStore } from "@stores/auth.store";
 import { addServer, loadSavedServers, switchToServer } from "./switchServer";
+import { pendingRequestCount } from "../message-requests/store";
 import { confirmAndJoinInvite, currentServerName, parseInviteInput } from "./joinInvite";
 
 const log = createLogger("main-page");
@@ -26,12 +26,12 @@ export function mountServerRail(opts: ServerRailMount): void {
       if (opts.isTornDown()) return;
       const rail = createServerRail({
         currentHost: host,
-        currentName: authStore.getState().serverName ?? "",
         loadServers: loadSavedServers,
         switchServer: switchToServer,
         addServer,
         onOpenDm: opts.onOpenDm,
         onShowServer: opts.onShowServer,
+        pendingRequests: pendingRequestCount,
         joinInvite: (text) => {
           const invite = parseInviteInput(text);
           if (invite === null) return false;

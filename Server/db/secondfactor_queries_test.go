@@ -23,6 +23,7 @@ func secondFactorTestDB(t *testing.T) (*db.DB, int64) {
 }
 
 func TestPartialAuthPersistence_RoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, uid := secondFactorTestDB(t)
 	exp := time.Now().Add(10 * time.Minute).UTC().Truncate(time.Second)
@@ -56,6 +57,7 @@ func TestPartialAuthPersistence_RoundTrip(t *testing.T) {
 }
 
 func TestIncrementPartialAuthFailures(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, uid := secondFactorTestDB(t)
 	now := time.Now()
@@ -95,6 +97,7 @@ func TestIncrementPartialAuthFailures(t *testing.T) {
 }
 
 func TestPendingTOTPPersistence_RoundTrip(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, uid := secondFactorTestDB(t)
 	exp := time.Now().Add(10 * time.Minute).UTC().Truncate(time.Second)
@@ -115,6 +118,7 @@ func TestPendingTOTPPersistence_RoundTrip(t *testing.T) {
 }
 
 func TestUsedTOTPCodePersistence_FirstUseWins(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, uid := secondFactorTestDB(t)
 	exp := time.Now().Add(90 * time.Second)
@@ -135,6 +139,7 @@ func TestUsedTOTPCodePersistence_FirstUseWins(t *testing.T) {
 }
 
 func TestCleanupExpiredSecondFactorState_SweepsOnlyExpired(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, uid := secondFactorTestDB(t)
 	past := time.Now().Add(-time.Minute)
@@ -169,6 +174,7 @@ func TestCleanupExpiredSecondFactorState_SweepsOnlyExpired(t *testing.T) {
 }
 
 func TestRecoveryCodes_ReplaceListMarkCountDelete(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, uid := secondFactorTestDB(t)
 
@@ -217,6 +223,7 @@ func TestRecoveryCodes_ReplaceListMarkCountDelete(t *testing.T) {
 
 // EraseAccount purges the four second-factor tables with the rest.
 func TestEraseAccount_PurgesSecondFactorState(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, uid := secondFactorTestDB(t)
 	// A second account so uid is not the last admin-class account (it is a

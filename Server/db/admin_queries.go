@@ -126,7 +126,7 @@ func (d *DB) UpdateUserRole(ctx context.Context, userID, roleID int64) error {
 	if err != nil {
 		return fmt.Errorf("UpdateUserRole begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	q := d.q.WithTx(tx)
 	if err := q.ClearUserRoles(ctx, userID); err != nil {

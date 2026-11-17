@@ -26,6 +26,12 @@ import type { ApiClient } from "../../src/lib/api";
 import { withThreadsStore } from "../../src/stores/threadsLoader";
 import { acceptSharesFor, sendShareTo } from "../../src/features/share/shareInbox";
 import { setFocusedThread, threadsStore, upsertThread } from "../../src/stores/threads.store";
+import {
+  isRequestPending,
+  markRequestPending,
+  noteRingSent,
+  takeRingChannel,
+} from "../../src/features/direct-messages/pendingRequests";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -111,9 +117,12 @@ import {
 } from "../../src/features/message-requests/store";
 import type { MessageRequest } from "../../src/features/message-requests/api";
 import { loadRequests, requestsApi } from "../../src/features/message-requests/sync";
+import { pushSessionInstance } from "../../src/features/push/pushSubscription";
+import { pushStore, setPushSetting } from "../../src/features/push/store";
 import type { DispatchApi } from "../../src/features/connection/dispatchContext";
 import type { GifFavoritesApi } from "../../src/lib/media/gifProvider";
 import type { ReadyMember } from "../../src/lib/types";
+import { applyServerTime, serverNow } from "../../src/lib/net/serverClock";
 
 interface Probe {
   /** The registry name this probe covers. */
@@ -283,6 +292,14 @@ const PROBES: readonly Probe[] = [
     name: "dm:store",
     mutate: () => setDmChannels([dm]),
     isInitial: () => dmStore.getState().channels.length === 0,
+  },
+  {
+    name: "dm:pending-requests",
+    mutate: () => {
+      markRequestPending(77);
+      noteRingSent("ring-77", 77);
+    },
+    isInitial: () => !isRequestPending(77) && takeRingChannel("ring-77") === null,
   },
   {
     // Bumped, not reset to INITIAL (OC-0362): a late GET /emoji from the old
@@ -551,6 +568,16 @@ const PROBES: readonly Probe[] = [
     isInitial: () => requestsApi() === undefined,
   },
   {
+    // The push session is only set in the Android app; the setting it shows is
+    // the store Settings reads.
+    name: "push:session",
+    mutate: () => {
+      setPushSetting("on");
+      expect(pushStore.getState().setting).toBe("on");
+    },
+    isInitial: () => pushStore.getState().setting === "off" && pushSessionInstance() === null,
+  },
+  {
     name: "message-requests:store",
     mutate: () => {
       applySnapshot([], beginSnapshot());
@@ -573,6 +600,11 @@ const PROBES: readonly Probe[] = [
     name: "moderation:timeouts",
     mutate: () => setMemberTimeouts([{ user_id: 7, expires_at: "2099-01-01T00:00:00Z" }]),
     isInitial: () => memberTimeoutsStore.getState() === null,
+  },
+  {
+    name: "serverClock:offset",
+    mutate: () => applyServerTime(Date.now() - 3_600_000),
+    isInitial: () => Math.abs(serverNow() - Date.now()) < 1000,
   },
   {
     name: "messaging:forwardRequests",

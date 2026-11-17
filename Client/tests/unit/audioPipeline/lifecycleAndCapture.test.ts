@@ -356,7 +356,7 @@ describe("AudioPipeline lifecycle and settings", () => {
     });
   });
 
-  it("turns off both advanced paths when Noise Suppression is switched off mid-call", async () => {
+  it("turns off both advanced paths when Noise suppression is switched off mid-call", async () => {
     FakeAudioContext.workletsLoad = true;
     vi.stubGlobal(
       "fetch",
@@ -392,7 +392,7 @@ describe("AudioPipeline lifecycle and settings", () => {
   });
 
   describe("reapplyEnhancedNoiseSuppression errors", () => {
-    it("does not report a failure when Enhanced Noise Suppression is off", async () => {
+    it("does not report a failure when Enhanced noise suppression is off", async () => {
       const pipeline = new AudioPipeline();
       await pipeline.attach(micTrack());
       const onError = vi.fn();

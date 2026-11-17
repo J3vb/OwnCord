@@ -19,6 +19,8 @@ import { authStore } from "@stores/auth.store";
 import { channelsStore, type Channel } from "@stores/channels.store";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { createElement } from "@lib/dom";
+import { createIcon } from "@lib/icons";
 
 /** The picker's cap; the server takes one target per frame, so this only bounds the burst. */
 export const MAX_FORWARD_TARGETS = 5;
@@ -138,4 +140,17 @@ export function pruneSelection(
   const offered = new Set(targets.map((t) => t.id));
   const kept = selected.filter((id) => offered.has(id));
   return kept.length === selected.length ? selected : kept;
+}
+
+/** A target line's icon, name and (when it has one) category, as the forward and share pickers draw them. */
+export function targetRowParts(t: ForwardTarget): HTMLElement[] {
+  const icon = createElement("span", { class: "quick-switcher__icon" });
+  icon.appendChild(
+    createIcon(t.kind === "dm" ? "user" : t.kind === "announcement" ? "megaphone" : "hash", 14),
+  );
+  const parts = [icon, createElement("span", { class: "quick-switcher__name" }, t.name)];
+  if (t.category !== null) {
+    parts.push(createElement("span", { class: "quick-switcher__category" }, t.category));
+  }
+  return parts;
 }

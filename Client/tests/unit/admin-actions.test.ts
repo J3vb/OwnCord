@@ -4,6 +4,7 @@ import { setDeveloperMode } from "../helpers/message-actions-fixtures";
 import type { MemberContextMenuOptions } from "../../src/features/moderation/AdminActions";
 import type { VoiceModMenuOptions } from "../../src/features/channels/sidebar/volumeMenu";
 import { useMountContainer } from "../helpers/mountContainer";
+import { menuRowLabel } from "../helpers/menuRowLabel";
 
 const moderationNoops = () => ({
   onToggleBlock: vi.fn(async () => {}),
@@ -76,7 +77,8 @@ describe("AdminActions", () => {
             resolveChange = res;
           }),
       );
-      const { result } = makeMenu({ onChangeRole });
+      const onClosed = vi.fn();
+      const { result } = makeMenu({ onChangeRole, onClosed });
       const submenu = result.element.querySelector(".context-menu__submenu")!;
       const adminOption = Array.from(submenu.querySelectorAll(".context-menu__item")).find(
         (i) => i.textContent === "admin",
@@ -99,9 +101,8 @@ describe("AdminActions", () => {
         expect(adminOption.classList.contains("context-menu__item--pending")).toBe(false);
       });
 
-      // Settled: a new change may fire again.
-      modOption.click();
-      expect(onChangeRole).toHaveBeenCalledTimes(2);
+      // Settled: the menu closes rather than offering a stale choice.
+      await vi.waitFor(() => expect(onClosed).toHaveBeenCalledOnce());
       result.destroy();
     });
 
@@ -256,6 +257,27 @@ describe("AdminActions", () => {
       result.destroy();
     });
 
+    it("closes once a block or an unblock has settled", async () => {
+      for (const isBlocked of [false, true]) {
+        const onClosed = vi.fn();
+        const { result } = makeMenu({ showAdminActions: false, isBlocked, onClosed });
+        const blockItem = result.element.querySelector<HTMLElement>('[data-testid="block-toggle"]');
+        blockItem?.click();
+        if (!isBlocked) blockItem?.click();
+        await vi.waitFor(() => expect(onClosed).toHaveBeenCalledOnce());
+      }
+    });
+
+    it("closes once a role change has settled, so the ticked role is never stale", async () => {
+      const onClosed = vi.fn();
+      const { result } = makeMenu({ onClosed });
+      const adminOption = Array.from(
+        result.element.querySelectorAll<HTMLElement>(".context-menu__submenu .context-menu__item"),
+      ).find((i) => i.textContent === "admin")!;
+      adminOption.click();
+      await vi.waitFor(() => expect(onClosed).toHaveBeenCalledOnce());
+    });
+
     it("admin menu also includes the Block item", () => {
       const { result } = makeMenu();
       const blockItem = result.element.querySelector('[data-testid="block-toggle"]');
@@ -271,7 +293,7 @@ describe("AdminActions", () => {
       function topLevelLabels(el: HTMLElement): string[] {
         return Array.from(el.children)
           .filter((c) => c.classList.contains("context-menu__item"))
-          .map((c) => c.firstChild?.textContent ?? "");
+          .map((c) => menuRowLabel(c));
       }
 
       it("omits Change Role when canManageRoles is false", () => {
@@ -310,7 +332,7 @@ describe("AdminActions", () => {
     });
   });
 
-  describe("MemberContextMenu - Developer Mode Copy User ID", () => {
+  describe("MemberContextMenu - Developer mode Copy User ID", () => {
     let writeText: ReturnType<typeof vi.fn>;
     beforeEach(() => {
       writeText = vi.fn().mockResolvedValue(undefined);
@@ -389,12 +411,12 @@ describe("MemberContextMenu - full menu (3C-3)", () => {
   function labels(el: HTMLElement): string[] {
     return Array.from(el.children)
       .filter((c) => c.classList.contains("context-menu__item"))
-      .map((c) => c.firstChild?.textContent ?? "");
+      .map((c) => menuRowLabel(c));
   }
 
   function row(el: HTMLElement, label: string): HTMLElement {
     const found = Array.from(el.querySelectorAll<HTMLElement>(".context-menu__item")).find(
-      (i) => i.firstChild?.textContent === label,
+      (i) => menuRowLabel(i) === label,
     );
     if (found === undefined) throw new Error(`no menu row "${label}"`);
     return found;
@@ -628,6 +650,45 @@ describe("MemberContextMenu - full menu (3C-3)", () => {
     });
   });
 
+  describe("Warn", () => {
+    const warning = (over: Partial<MemberContextMenuOptions> = {}) => ({
+      showAdminActions: true,
+      canKick: false,
+      canBan: false,
+      canManageRoles: false,
+      canTimeout: false,
+      canWarn: true,
+      onWarn: vi.fn(),
+      ...over,
+    });
+
+    it("runs onWarn and closes the menu", () => {
+      const opts = warning();
+      const { element, destroy } = open(opts);
+      row(element, "Warn").click();
+      expect(opts.onWarn).toHaveBeenCalledTimes(1);
+      expect(container.querySelector(".context-menu")).toBeNull();
+      destroy();
+    });
+
+    it("sits above Timeout", () => {
+      const { element, destroy } = open(
+        warning({ canTimeout: true, onTimeout: vi.fn(async () => {}), timeoutState: "none" }),
+      );
+      expect(labels(element)).toEqual(["Warn", "Timeout", "Block"]);
+      destroy();
+    });
+
+    it("is absent without canWarn or without onWarn", () => {
+      const off = open(warning({ canWarn: false }));
+      expect(labels(off.element)).toEqual(["Block"]);
+      off.destroy();
+      const unwired = open(warning({ onWarn: undefined }));
+      expect(labels(unwired.element)).toEqual(["Block"]);
+      unwired.destroy();
+    });
+  });
+
   // (11)
   it("on yourself shows Profile and Mention only, never Message, Call, moderation or Block", () => {
     const { element, destroy } = open({
@@ -639,7 +700,7 @@ describe("MemberContextMenu - full menu (3C-3)", () => {
     destroy();
   });
 
-  it("on yourself adds Copy User ID in Developer Mode", () => {
+  it("on yourself adds Copy User ID in Developer mode", () => {
     setDeveloperMode(true);
     const { element, destroy } = open({
       isSelf: true,

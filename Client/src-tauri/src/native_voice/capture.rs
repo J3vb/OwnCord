@@ -458,6 +458,9 @@ pub struct Processor {
     seen: u64,
     /// Push-to-talk's gate: while set, every frame goes out as silence.
     gated: Arc<AtomicBool>,
+    /// A mute or leave on its way: silence too, set at once, before the
+    /// command reaches the session.
+    held: Arc<AtomicBool>,
     /// The input-sensitivity gate (the capture's shared one).
     voice: Arc<Mutex<VoiceGate>>,
     /// The input volume (the capture's shared one) and the gain the last
@@ -480,6 +483,7 @@ impl Processor {
             follow: None,
             seen: 0,
             gated: Arc::default(),
+            held: Arc::default(),
             voice: Arc::default(),
             gain: InputGain::default(),
             applied_gain: 1.0,
@@ -502,6 +506,12 @@ impl Processor {
     /// Follow push-to-talk gate `gated` (the capture's shared one).
     pub fn gated_by(mut self, gated: Arc<AtomicBool>) -> Self {
         self.gated = gated;
+        self
+    }
+
+    /// Follow the mute hold `held` (the capture's shared one).
+    fn held_by(mut self, held: Arc<AtomicBool>) -> Self {
+        self.held = held;
         self
     }
 
@@ -533,6 +543,7 @@ impl Processor {
             follow,
             seen,
             gated,
+            held,
             voice,
             gain,
             applied_gain,
@@ -589,7 +600,7 @@ impl Processor {
             } else {
                 lookahead.clear();
             }
-            if closed || gated.load(Ordering::Relaxed) {
+            if closed || gated.load(Ordering::Relaxed) || held.load(Ordering::Relaxed) {
                 frame.fill(0);
             }
             out(frame);
@@ -676,7 +687,55 @@ pub struct Capture {
 }
 
 /// The open input stream, shared with the watcher that replaces it.
-type Input = Arc<Mutex<Option<cpal::Stream>>>;
+type Input = Arc<Mutex<StreamSlot<cpal::Stream>>>;
+
+/// An input stream slot whose generation moves on every start, stop and
+/// device switch, so the watcher can tell that the stream it reopened is no
+/// longer the one it replaces.
+#[derive(Debug)]
+struct StreamSlot<S> {
+    stream: Option<S>,
+    generation: u64,
+}
+
+impl<S> Default for StreamSlot<S> {
+    fn default() -> Self {
+        Self {
+            stream: None,
+            generation: 0,
+        }
+    }
+}
+
+impl<S> StreamSlot<S> {
+    #[cfg(test)]
+    fn with(stream: Option<S>) -> Self {
+        Self {
+            stream,
+            generation: 0,
+        }
+    }
+
+    fn is_some(&self) -> bool {
+        self.stream.is_some()
+    }
+
+    fn get(&self) -> Option<&S> {
+        self.stream.as_ref()
+    }
+
+    /// Put `stream` in, as a new generation.
+    fn set(&mut self, stream: S) {
+        self.generation += 1;
+        self.stream = Some(stream);
+    }
+
+    /// Take the stream out, as a new generation.
+    fn take(&mut self) -> Option<S> {
+        self.generation += 1;
+        self.stream.take()
+    }
+}
 
 /// The resolved device, shared with the watcher that re-resolves it.
 type Resolved = Arc<Mutex<Option<(String, cpal::Device)>>>;
@@ -693,6 +752,8 @@ struct Feed {
     sink: Arc<Mutex<Option<Sink>>>,
     /// Push-to-talk's gate, followed by every stream opened from this feed.
     gated: Arc<AtomicBool>,
+    /// The mute hold, likewise.
+    held: Arc<AtomicBool>,
     /// The input-sensitivity gate, likewise.
     voice: Arc<Mutex<VoiceGate>>,
     /// The input volume, likewise.
@@ -711,6 +772,7 @@ impl Feed {
         Ok(Processor::new(apm, denoise)
             .following(self.processing.clone(), seen)
             .gated_by(self.gated.clone())
+            .held_by(self.held.clone())
             .with_voice_gate(self.voice.clone())
             .with_input_gain(self.gain.clone()))
     }
@@ -765,6 +827,14 @@ impl Controls {
 
     pub fn set_ptt_gated(&self, gated: bool) {
         self.feed.gated.store(gated, Ordering::Relaxed);
+    }
+
+    /// Send silence from now on (`true`) whatever the gates say, or stop
+    /// doing so. A mute or leave sets it the moment it is asked for, so the
+    /// microphone goes quiet before the command gets its turn at the session;
+    /// the unmute that follows clears it.
+    pub fn set_held(&self, held: bool) {
+        self.feed.held.store(held, Ordering::Relaxed);
     }
 
     pub fn streams(&self) -> usize {
@@ -827,6 +897,12 @@ impl Capture {
         self.controls().streams()
     }
 
+    /// Whether a mute or leave holds the microphone silent.
+    #[cfg(test)]
+    pub fn held(&self) -> bool {
+        self.feed.held.load(Ordering::Relaxed)
+    }
+
     /// Start capturing into `sink` (the first unmute publishes a track's
     /// source). A cached device that no longer opens (unplugged) is resolved
     /// again once.
@@ -838,7 +914,7 @@ impl Capture {
         let cached = lock(&self.resolved).as_ref().map(|(_, d)| d.clone());
         if let Some(device) = cached {
             if let Ok(stream) = self.open(&device) {
-                *lock(&self.stream) = Some(stream);
+                lock(&self.stream).set(stream);
                 self.ensure_watcher();
                 return Ok(());
             }
@@ -849,7 +925,8 @@ impl Capture {
         if fell_back {
             log::warn!("[native_voice] capture device {selected} not found; using the default");
         }
-        *lock(&self.stream) = Some(self.open(&resolved.1)?);
+        let opened = self.open(&resolved.1)?;
+        lock(&self.stream).set(opened);
         *lock(&self.resolved) = Some(resolved);
         self.ensure_watcher();
         Ok(())
@@ -863,7 +940,7 @@ impl Capture {
     }
 
     fn stream(&self) -> Option<()> {
-        lock(&self.stream).as_ref().map(|_| ())
+        lock(&self.stream).get().map(|_| ())
     }
 
     /// Select device `id` (empty: the default), switching a running stream
@@ -876,7 +953,8 @@ impl Capture {
         let (resolved, fell_back) = pick(id, input_devices(&shared_default_host(Role::Capture)))?;
         let moved = lock(&self.resolved).as_ref().map(|(r, _)| r) != Some(&resolved.0);
         if self.stream().is_some() && moved {
-            *lock(&self.stream) = Some(self.open(&resolved.1)?);
+            let opened = self.open(&resolved.1)?;
+            lock(&self.stream).set(opened);
         }
         *lock(&self.resolved) = Some(resolved);
         *lock(&self.selected) = if fell_back {
@@ -926,7 +1004,7 @@ impl Capture {
             let id = lock(&selected).clone();
             // Muted (no stream) means the user is not publishing; a pending
             // dead flag from just before the mute must not reopen the mic.
-            let muted = lock(&stream).is_none();
+            let muted = !lock(&stream).is_some();
             let Some(Ok((picked, _))) = host.reopen(|fresh| pick(&id, input_devices(fresh))) else {
                 log::warn!("[native_voice] reopening the capture stream: no device");
                 return muted;
@@ -960,18 +1038,34 @@ impl Capture {
 /// Record `picked` as the resolved device and, while a stream runs, move it
 /// there. The record follows the stream: a failed open leaves both on the old
 /// device, so the watcher's next tick retries, and a mute while the new one
-/// opened drops it (the next unmute opens `picked`).
+/// opened drops it (the next unmute opens `picked`). So does a start or a
+/// device switch while it opened: that stream feeds the current track, and
+/// the reopened one was bound to the sink of the stream it replaced; the
+/// record then stays with the running stream and the move reports an error,
+/// so the watcher's next tick tries again.
 fn move_stream<D, S>(
-    stream: &Mutex<Option<S>>,
+    stream: &Mutex<StreamSlot<S>>,
     resolved: &Mutex<Option<(String, D)>>,
     picked: (String, D),
     open: impl FnOnce(&D) -> Result<S, String>,
 ) -> Result<(), String> {
-    if lock(stream).is_some() {
+    let seen = {
+        let slot = lock(stream);
+        slot.is_some().then_some(slot.generation)
+    };
+    if let Some(seen) = seen {
         let reopened = open(&picked.1)?;
         let mut slot = lock(stream);
-        if slot.is_some() {
-            *slot = Some(reopened);
+        if slot.generation == seen {
+            slot.set(reopened);
+        } else {
+            let running = slot.is_some();
+            // Closed after the slot's lock is released.
+            drop(slot);
+            drop(reopened);
+            if running {
+                return Err("the stream was replaced while it reopened".to_string());
+            }
         }
     }
     *lock(resolved) = Some(picked);

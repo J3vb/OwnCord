@@ -20,6 +20,7 @@ import { livekitSession, log } from "../connection/dispatchContext";
 import type { DispatchWs, Payload } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
 import { WsErrorCode } from "@lib/protocolTypes";
+import { handleCallRefusal } from "../direct-messages/callRefusal";
 /**
  * The `error` chain's voice-join rollback. Acts only on the refusal of the
  * join in flight; never consumes the frame.
@@ -193,8 +194,10 @@ export function handleVoicePasswordRefusal(
   return true;
 }
 
-/** The voice capacity refusals of `error`. Returns true when the frame was one. */
+/** The voice capacity refusals of `error`, and a refused call_ring that ends
+ *  the caller's lone call. Returns true when the frame was one. */
 export function handleVoiceError(payload: Payload<"error">, id: string | undefined): boolean {
+  if (handleCallRefusal(payload, id)) return true;
   // Voice capacity refusals. The server owns the limits (voice_max_users /
   // voice_max_video) and refuses the join or the camera; the client never
   // pre-blocks the click, because its copy of the participant list can lag

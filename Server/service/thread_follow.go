@@ -68,7 +68,11 @@ func (s *ThreadService) SetFollow(ctx context.Context, userID, threadID int64, f
 	}
 	// The reply names the thread, disclosing its starter message, so an unacknowledged member of an NSFW parent
 	// cannot follow it yet.
-	if err := readContentDenial(permissions.CanReadContent(readSubject(ctx, s.st, s.perms, userID, ch))); err != nil {
+	rsub, err := readSubject(ctx, s.st, s.perms, userID, ch)
+	if err != nil {
+		return nil, err
+	}
+	if err := readContentDenial(permissions.CanReadContent(rsub)); err != nil {
 		return nil, err
 	}
 	// Past the gate the write is committed work: a hang-up must not leave the follow half applied.

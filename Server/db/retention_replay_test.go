@@ -31,6 +31,7 @@ func countEvents(t *testing.T, database *db.DB, where string, args ...any) int {
 // type whose payload.id happens to collide stays, as do frames about other
 // messages (B4-11, Codex's review of #1521).
 func TestDeleteEventsForMessages_MatchesTheMessageFamily(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	persistFrame(t, database, 1, 7, "chat_message", map[string]any{"id": 100, "channel_id": 7, "content": "old"})
@@ -69,6 +70,7 @@ func TestDeleteEventsForMessages_MatchesTheMessageFamily(t *testing.T) {
 // before the purge, cleared after it; a run with ids pending stays listed
 // for the resume even once finished with its files gone.
 func TestRetentionRuns_PurgeJournal(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	runID, err := database.StartRetentionRun(ctx)

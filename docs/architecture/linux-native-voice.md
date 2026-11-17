@@ -91,3 +91,31 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   device on a blocking thread without `inner`, then take `inner` again and
   commit only if the call is still the latest on a live session. Operations
   of one kind on one device run in the order the calls arrived.
+- A publish waits on the SFU while it holds `inner` (up to the SDK's 10 s
+  publish timeout, longer during a reconnect), so the commands that must act
+  at once do not take `inner`: push-to-talk, the voice gate, input gain and
+  the per-user volumes go through the live session's quick slot
+  (`native_voice/quick.rs`). A mute holds the microphone silent there the
+  moment it is asked for, before its own turn at `inner`; only the latest
+  unmute lifts the hold. The track mute and the capture stop (the system's
+  microphone indicator) still follow at the mute's turn. A deafen mutes the
+  track in the playout mixer at once, then unsubscribes at its turn. A leave
+  or a new connect holds the microphone and ends the session's pending SFU
+  waits (publishes, the microphone steps, share audio) through the same slot,
+  so it gets `inner` at once.
+
+## Share music
+
+The Linux room shares one app's sound as a second audio track named `music`
+(source `ScreenShareAudio`) beside the microphone, with no screen share
+needed. The client side lives in `features/voice/musicShare.ts` and reaches the
+host through `NativeRoom.startMusic`/`stopMusic` (`native_voice_start_music`,
+`native_voice_stop_music`); the app list is `native_voice_list_audio_apps`.
+The host's `musicShareEnded` event ends a share the host dropped on its own.
+
+- A listener tells music from a screen share's sound by the track name alone
+  (`lib/voice/musicTrack.ts`), in the native roster as on the web path.
+- Music has its own per-user volume and Mute music, folded into one gain
+  together with deafen and the output volume (`AudioElements.getMusicGain`);
+  the room pushes that gain to the playout mixer with
+  `native_voice_set_music_volume`, so the host needs no other state.

@@ -102,44 +102,9 @@ func (a *ThreadArchiver) Run(ctx context.Context) {
 	if a.st == nil {
 		return
 	}
-	timer := time.NewTimer(0)
-	defer timer.Stop()
-	for {
-		sleep, failed := a.nextSleep(ctx)
-		if !timer.Stop() {
-			select {
-			case <-timer.C:
-			default:
-			}
-		}
-		timer.Reset(sleep)
-		select {
-		case <-ctx.Done():
-			return
-		case <-a.wake:
-			continue
-		case <-timer.C:
-		}
-		if failed {
-			continue
-		}
-		if err := a.Sweep(ctx); err != nil {
-			if ctx.Err() != nil {
-				return
-			}
-			slog.Warn("thread archiver: sweep failed", "err", err)
-			a.sleepOrDone(ctx, a.retryAfter)
-		}
-	}
-}
-
-func (a *ThreadArchiver) sleepOrDone(ctx context.Context, d time.Duration) {
-	t := time.NewTimer(d)
-	defer t.Stop()
-	select {
-	case <-ctx.Done():
-	case <-t.C:
-	}
+	runDueLoop(ctx, a.wake, a.nextSleep, a.Sweep, a.retryAfter, func(err error) {
+		slog.Warn("thread archiver: sweep failed", "err", err)
+	})
 }
 
 // nextSleep reads the earliest due time and returns how long to sleep. failed is true after a read error,
@@ -155,6 +120,5 @@ func (a *ThreadArchiver) nextSleep(ctx context.Context) (sleep time.Duration, fa
 	if !ok {
 		return a.maxSleep, false
 	}
-	sleep = due.Add(a.slack).Sub(a.now())
-	return min(max(sleep, 0), a.maxSleep), false
+	return dueSleep(due, a.now(), a.slack, a.maxSleep), false
 }

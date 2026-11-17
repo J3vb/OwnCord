@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/videoModeControllerMocks";
-import { createVideoModeController } from "../../../src/pages/main-page/VideoModeController";
+import { createVideoModeController } from "../../../src/features/voice/VideoModeController";
 import { createVideoGrid } from "../../../src/features/voice/videoGrid/VideoGrid";
 import {
   makeSlots,

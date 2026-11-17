@@ -41,7 +41,7 @@ describe("buildComboCapture", () => {
   const ctrlJ = { key: "j", ctrlKey: true };
 
   it("shows the default combination and offers neither Reset nor a clash", () => {
-    const { button, reset, remove, alert } = mount("search", "Search Messages", "cap-search");
+    const { button, reset, remove, alert } = mount("search", "Search messages", "cap-search");
     expect(button.textContent).toBe("Ctrl + F");
     expect(reset.disabled).toBe(true); // already the default
     expect(remove.disabled).toBe(false);
@@ -50,13 +50,13 @@ describe("buildComboCapture", () => {
   });
 
   it("shows Not set for an action with no default", () => {
-    const { button, remove } = mount("disconnect", "Disconnect from Voice", "cap-dc");
+    const { button, remove } = mount("disconnect", "Disconnect from voice", "cap-dc");
     expect(button.textContent).toBe("Not set");
     expect(remove.disabled).toBe(true);
   });
 
   it("waits through a modifier-only keydown, then captures the key with its modifiers", () => {
-    const { button } = mount("search", "Search Messages", "cap-search");
+    const { button } = mount("search", "Search messages", "cap-search");
     button.click();
     expect(button.textContent).toBe("Press a supported key...");
     press("ControlLeft", { key: "Control", ctrlKey: true });
@@ -80,7 +80,7 @@ describe("buildComboCapture", () => {
   });
 
   it("captures a bare function key", () => {
-    const { button } = mount("toggleScreenshare", "Toggle Screen Share", "cap-ss");
+    const { button } = mount("toggleScreenshare", "Toggle screen share", "cap-ss");
     button.click();
     press("F6", { key: "F6" });
     expect(button.textContent).toBe("F6");
@@ -93,7 +93,7 @@ describe("buildComboCapture", () => {
   });
 
   it("cancels on Escape without leaving the Settings overlay", () => {
-    const { button } = mount("search", "Search Messages", "cap-search");
+    const { button } = mount("search", "Search messages", "cap-search");
     const reached = new AbortController();
     let bubbled = 0;
     window.addEventListener("keydown", () => bubbled++, { signal: reached.signal });
@@ -108,7 +108,7 @@ describe("buildComboCapture", () => {
   });
 
   it("finishes on Tab and lets focus move on", () => {
-    const { button } = mount("search", "Search Messages", "cap-search");
+    const { button } = mount("search", "Search messages", "cap-search");
     button.click();
     const e = press("Tab", { key: "Tab" });
     expect(e.defaultPrevented).toBe(false);
@@ -118,7 +118,7 @@ describe("buildComboCapture", () => {
   });
 
   it("refuses a combination with Meta", () => {
-    const { button, alert } = mount("search", "Search Messages", "cap-search");
+    const { button, alert } = mount("search", "Search messages", "cap-search");
     button.click();
     press("MetaLeft", { key: "Meta", metaKey: true }); // the Meta key alone just waits
     expect(alert.hidden).toBe(true);
@@ -130,7 +130,7 @@ describe("buildComboCapture", () => {
   });
 
   it("refuses Ctrl+Alt, which Windows reports for AltGr", () => {
-    const { button, alert } = mount("search", "Search Messages", "cap-search");
+    const { button, alert } = mount("search", "Search messages", "cap-search");
     button.click();
     press("KeyJ", { key: "j", ctrlKey: true, altKey: true });
     expect(alert.textContent).toBe("Your system or text editing keeps that combination.");
@@ -156,13 +156,13 @@ describe("buildComboCapture", () => {
         shiftKey: true,
       });
       expect(alert.hidden).toBe(false);
-      expect(alert.textContent).toBe("Already used by Toggle Camera.");
+      expect(alert.textContent).toBe("Already used by Toggle camera.");
       expect(button.textContent).toBe("Ctrl + F"); // unchanged
     });
 
-    it("names Toggle Mute for the Ctrl+Shift+key a mute binding owns", () => {
+    it("names Toggle mute for the Ctrl+Shift+key a mute binding owns", () => {
       const { alert } = attempt("search", "KeyM", { key: "M", ctrlKey: true, shiftKey: true });
-      expect(alert.textContent).toBe("Already used by Toggle Mute.");
+      expect(alert.textContent).toBe("Already used by Toggle mute.");
     });
 
     it("says a bare letter needs Ctrl or Alt", () => {
@@ -185,11 +185,11 @@ describe("buildComboCapture", () => {
     it("says the push-to-talk key is taken", () => {
       localStorage.setItem("owncord:settings:pttVk", "117"); // F6
       const { alert } = attempt("search", "F6", { key: "F6" });
-      expect(alert.textContent).toBe("That key is used by Push to Talk.");
+      expect(alert.textContent).toBe("That key is used by Push to talk.");
     });
 
     it("clears the alert when the next capture starts", () => {
-      const { button, alert } = mount("search", "Search Messages", "cap-search");
+      const { button, alert } = mount("search", "Search messages", "cap-search");
       button.click();
       press("KeyK", { key: "k", ctrlKey: true });
       expect(alert.hidden).toBe(false);
@@ -199,7 +199,7 @@ describe("buildComboCapture", () => {
   });
 
   it("Reset restores the default and is disabled once there", () => {
-    const { button, reset } = mount("search", "Search Messages", "cap-search");
+    const { button, reset } = mount("search", "Search messages", "cap-search");
     button.click();
     press("KeyJ", ctrlJ);
     expect(button.textContent).toBe("Ctrl + J");
@@ -216,8 +216,8 @@ describe("buildComboCapture", () => {
   });
 
   it("Reset is refused, with the clashing action named, when another binding took the default", () => {
-    const upload = mount("uploadFile", "Upload File", "cap-upload");
-    const emoji = mount("emojiPicker", "Emoji Picker", "cap-emoji");
+    const upload = mount("uploadFile", "Upload file", "cap-upload");
+    const emoji = mount("emojiPicker", "Emoji picker", "cap-emoji");
     upload.button.click();
     press("KeyJ", ctrlJ); // upload leaves Ctrl+Shift+U
     emoji.button.click();
@@ -225,12 +225,12 @@ describe("buildComboCapture", () => {
     expect(emoji.button.textContent).toBe("Ctrl + Shift + U");
     upload.reset.click();
     expect(upload.alert.hidden).toBe(false);
-    expect(upload.alert.textContent).toBe("Already used by Emoji Picker.");
+    expect(upload.alert.textContent).toBe("Already used by Emoji picker.");
     expect(upload.button.textContent).toBe("Ctrl + J");
   });
 
   it("Remove unbinds the action and Reset brings the default back", () => {
-    const { button, reset, remove } = mount("search", "Search Messages", "cap-search");
+    const { button, reset, remove } = mount("search", "Search messages", "cap-search");
     remove.click();
     expect(button.textContent).toBe("Not set");
     expect(remove.disabled).toBe(true);
@@ -244,7 +244,7 @@ describe("buildComboCapture", () => {
   });
 
   it("Reset and Remove end a capture in progress on their row", () => {
-    const { button, reset, remove } = mount("search", "Search Messages", "cap-search");
+    const { button, reset, remove } = mount("search", "Search messages", "cap-search");
     button.click();
     reset.disabled = false;
     reset.click();
@@ -261,8 +261,8 @@ describe("buildComboCapture", () => {
   });
 
   it("starting a second capture cancels the first", () => {
-    const a = mount("search", "Search Messages", "cap-a");
-    const b = mount("gifPicker", "GIF Picker", "cap-b");
+    const a = mount("search", "Search messages", "cap-a");
+    const b = mount("gifPicker", "GIF picker", "cap-b");
     a.button.click();
     b.button.click();
     expect(a.button.textContent).toBe("Ctrl + F");
@@ -273,7 +273,7 @@ describe("buildComboCapture", () => {
   });
 
   it("refresh redraws from the saved bindings and clears the alert", () => {
-    const { capture, button, alert } = mount("search", "Search Messages", "cap-search");
+    const { capture, button, alert } = mount("search", "Search messages", "cap-search");
     button.click();
     press("KeyK", { key: "k", ctrlKey: true });
     expect(alert.hidden).toBe(false);

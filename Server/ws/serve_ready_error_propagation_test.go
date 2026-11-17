@@ -94,3 +94,21 @@ func TestBuildReady_PropagatesNoticesError(t *testing.T) {
 		t.Fatal("buildReady must fail the handshake when ListUnacknowledgedWarnings errors, not silently ship notices: [] as if the user genuinely has none")
 	}
 }
+
+// TestBuildReady_PropagatesVoiceStatesError drops `voice_states`, which only
+// GetAllVoiceStates reads, and proves buildReady fails instead of telling the
+// client nobody is in voice.
+func TestBuildReady_PropagatesVoiceStatesError(t *testing.T) {
+	hub, database := newServeHub(t)
+	user := seedServeUser(t, database, "ready-err-voice")
+	role, err := database.GetRoleByID(context.Background(), user.RoleID)
+	if err != nil || role == nil {
+		t.Fatalf("GetRoleByID: %v", err)
+	}
+
+	mustExec(t, database, `DROP TABLE voice_states`)
+
+	if _, err := hub.BuildReadyWithRoleForTest(database, user.ID, role); err == nil {
+		t.Fatal("buildReady must fail the handshake when GetAllVoiceStates errors, not ship an empty voice roster")
+	}
+}

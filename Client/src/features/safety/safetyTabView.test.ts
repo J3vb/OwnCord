@@ -86,10 +86,11 @@ describe("Safety tab markup", () => {
     expect(list.className).toBe("safety-history");
     expect(list.getAttribute("aria-label")).toBe("Moderation history");
 
-    const heading = q(pane, "h3");
-    expect(heading.className).toBe("safety-heading");
-    expect(heading.getAttribute("tabindex")).toBe("-1");
-    expect(heading.textContent).toBe("Moderation history");
+    const [standingHeading, heading] = [...pane.querySelectorAll("h2")];
+    expect(standingHeading!.textContent).toBe("Account standing");
+    expect(heading!.className).toBe("settings-section-label");
+    expect(heading!.getAttribute("tabindex")).toBe("-1");
+    expect(heading!.textContent).toBe("Moderation history");
     ac.abort();
   });
 

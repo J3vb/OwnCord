@@ -104,7 +104,7 @@ func (d *DB) CreateThread(ctx context.Context, n NewThread) (info *ThreadInfo, c
 	if err != nil {
 		return nil, false, fmt.Errorf("CreateThread begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 	if err := refuseWhileErasing(ctx, tx, n.OwnerID); err != nil {
 		return nil, false, fmt.Errorf("CreateThread: %w", err)
@@ -225,7 +225,7 @@ func (d *DB) UpdateThread(ctx context.Context, id int64, patch ThreadPatch, byMo
 	if err != nil {
 		return nil, fmt.Errorf("UpdateThread begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 	cur, err := d.getThread(ctx, q, id)
 	if err != nil {

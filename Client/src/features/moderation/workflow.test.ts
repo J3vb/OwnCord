@@ -15,6 +15,7 @@ import type { FeatureViewContext } from "../navigation/destinations";
 import { renderModerationCenter } from "./Queue";
 import { noteQueueChange } from "./store";
 import { pinZone } from "../../../tests/helpers/tz-pin";
+import { reportDetail, reportRow } from "../../../tests/helpers/report-fixtures";
 
 const ME = 7;
 const OTHER = 8;
@@ -51,42 +52,13 @@ const api = {
 
 const flush = () => new Promise((r) => setTimeout(r, 0));
 
-function row(id: string, over: Partial<ModerationQueueRow> = {}): ModerationQueueRow {
-  return {
-    id,
-    reporter_name: "carol",
-    subject_name: "alice",
-    target_type: "message",
-    target_ref: "42",
-    reason: "spam",
-    state: "open",
-    assignee_id: 0,
-    outcome: "",
-    created_at: "2026-09-05 10:00:00",
-    updated_at: "2026-09-05 10:00:00",
-    ...over,
-  };
-}
+const row = reportRow;
 
-function detail(id: string, over: Partial<ModerationReportDetail> = {}): ModerationReportDetail {
-  return {
-    id,
-    reporter_id: 3,
-    subject_id: 4,
-    target_type: "message",
-    reason: "spam",
-    detail: "",
-    state: "open",
-    assignee_id: 0,
-    outcome: "",
-    created_at: "2026-09-05 10:00:00",
-    evidence: [],
-    notes: [],
+const detail = (id: string, over: Partial<ModerationReportDetail> = {}): ModerationReportDetail =>
+  reportDetail(id, {
     events: [{ actor_id: 0, action: "created", detail: "spam", created_at: "2026-09-05 10:00:00" }],
-    actions: [],
     ...over,
-  };
-}
+  });
 
 const mine = (id: string, over: Partial<ModerationReportDetail> = {}) =>
   detail(id, { state: "assigned", assignee_id: ME, ...over });

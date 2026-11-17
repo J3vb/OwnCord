@@ -28,7 +28,7 @@ var storeConsumersAllowed = map[string]bool{
 // each with its own st.
 var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[AppealService]():         11,
-	reflect.TypeFor[AuthService]():           13,
+	reflect.TypeFor[AuthService]():           14,
 	reflect.TypeFor[twoFactor]():             9,
 	reflect.TypeFor[accountRecovery]():       11,
 	reflect.TypeFor[BlockService]():          4,
@@ -40,10 +40,10 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[DMService]():             18,
 	reflect.TypeFor[groupManagement]():       11,
 	reflect.TypeFor[GIFFavoriteService]():    3,
-	reflect.TypeFor[InviteService]():         6,
+	reflect.TypeFor[InviteService]():         7,
 	reflect.TypeFor[MessageRequestService](): 7,
 	reflect.TypeFor[MessageService]():        20,
-	reflect.TypeFor[messageReads]():          17,
+	reflect.TypeFor[messageReads]():          18,
 	reflect.TypeFor[mentionState]():          18,
 	reflect.TypeFor[dmDelivery]():            8,
 	reflect.TypeFor[messagePins]():           10,
@@ -52,7 +52,7 @@ var serviceStoreBaselines = map[reflect.Type]int{
 	reflect.TypeFor[moderationHistory]():     4,
 	reflect.TypeFor[NSFWService]():           8,
 	reflect.TypeFor[PermissionService]():     4,
-	reflect.TypeFor[PushDispatcher]():        11,
+	reflect.TypeFor[PushDispatcher]():        14,
 	reflect.TypeFor[PushService]():           4,
 	reflect.TypeFor[ReportService]():         18,
 	reflect.TypeFor[RoleService]():           11,
@@ -201,6 +201,7 @@ func recvName(e ast.Expr) string {
 }
 
 func TestStoreConsumers(t *testing.T) {
+	t.Parallel()
 	sources := serviceSources(t)
 	got, err := findStoreConsumers(sources)
 	mustDo(t, "find consumers", err)
@@ -219,6 +220,7 @@ func TestStoreConsumers(t *testing.T) {
 }
 
 func TestServiceStoreSizes(t *testing.T) {
+	t.Parallel()
 	services := make([]reflect.Type, 0, len(serviceStoreBaselines))
 	for svc := range serviceStoreBaselines {
 		services = append(services, svc)
@@ -240,6 +242,7 @@ func TestServiceStoreSizes(t *testing.T) {
 }
 
 func TestFindStoreConsumers(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		src  string

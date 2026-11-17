@@ -909,6 +909,22 @@ describe("messages store", () => {
     });
   });
 
+  describe("late failure of a delivered send", () => {
+    it("leaves a confirmed row delivered", () => {
+      addOptimisticMessage({
+        correlationId: "late",
+        channelId: 1,
+        user: TEST_USER,
+        content: "hi",
+        replyTo: null,
+        timestamp: "2026-03-15T10:00:00Z",
+      });
+      confirmSend("late", 700, "2026-03-15T10:00:01Z");
+      markSendFailed("late", "UNCONFIRMED");
+      expect(getChannelMessages(1)[0]).toMatchObject({ status: "sent", errorCode: null });
+    });
+  });
+
   // 10. First-page history load state
   describe("history load state", () => {
     it("is idle (null) by default", () => {

@@ -357,9 +357,9 @@ type readAdmitStore interface {
 // mark_unread): the channel must exist and pass permissions.CanAdmitSession, so a socket
 // holding an id it can no longer see, or an archived channel, cannot resubscribe or move read state.
 func admitReadState(ctx context.Context, st readAdmitStore, perms *PermissionService, userID, channelID int64) (*db.Channel, error) {
-	ch, err := st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, st, channelID)
+	if err != nil {
+		return nil, err
 	}
 	if ch.IsThread() {
 		// A thread is never a socket's focused channel: it rides the second slot (thread_focus,

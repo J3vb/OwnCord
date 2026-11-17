@@ -76,6 +76,8 @@ export interface VoiceRecorderOptions {
   readonly onLevel?: (peak: number, elapsedMs: number) => void;
   /** The recording hit MAX_DURATION_MS and was stopped; `clip` is what it made. */
   readonly onLimit?: (clip: VoiceClip | null) => void;
+  /** Stopping at the limit failed; the recording is gone. */
+  readonly onLimitFailed?: () => void;
   /** The microphone went away mid-recording (unplugged); the recording was dropped. */
   readonly onDeviceLost?: () => void;
   readonly env?: RecorderEnv;
@@ -327,7 +329,10 @@ export function createVoiceRecorder(options: VoiceRecorderOptions = {}): VoiceRe
       owner.signal,
       () => {
         if (state !== "recording") return;
-        void stop().then((clip) => options.onLimit?.(clip));
+        stop().then(
+          (clip) => options.onLimit?.(clip),
+          () => options.onLimitFailed?.(),
+        );
       },
       MAX_DURATION_MS,
     );

@@ -47,6 +47,7 @@ func doAvatarUpload(t *testing.T, router http.Handler, token, filename string, c
 }
 
 func TestUploadAvatar_StoresAndSetsAvatarURL(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildAvatarRouter(database, store)
@@ -78,6 +79,7 @@ func TestUploadAvatar_StoresAndSetsAvatarURL(t *testing.T) {
 }
 
 func TestUploadAvatar_IsReadableByOtherUsersWhileInUse(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildAvatarRouter(database, store)
@@ -109,6 +111,7 @@ func TestUploadAvatar_IsReadableByOtherUsersWhileInUse(t *testing.T) {
 }
 
 func TestUploadAvatar_RejectsNonImageAndOversizedDimensions(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildAvatarRouter(database, store)
@@ -135,6 +138,7 @@ func TestUploadAvatar_RejectsNonImageAndOversizedDimensions(t *testing.T) {
 }
 
 func TestUploadAvatar_RequiresAuthAndAFile(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildAvatarRouter(database, store)
@@ -158,6 +162,7 @@ func TestUploadAvatar_RequiresAuthAndAFile(t *testing.T) {
 // read-only mount) must never hand the client the server's absolute
 // storage path. handleUploadAvatar currently forwards saveErr verbatim.
 func TestUploadAvatar_StorageErrorDoesNotLeakPath(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	dir := t.TempDir()
 	store, err := storage.New(dir, 10)
@@ -174,6 +179,7 @@ func TestUploadAvatar_StorageErrorDoesNotLeakPath(t *testing.T) {
 }
 
 func TestUploadAvatar_NotMountedWithoutStorage(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
@@ -188,6 +194,7 @@ func TestUploadAvatar_NotMountedWithoutStorage(t *testing.T) {
 // ─── PATCH /users/me: display name and about ─────────────────────────────────
 
 func TestUpdateProfile_SetsDisplayNameAndAbout(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "bio_user", 4)
@@ -227,6 +234,7 @@ func TestUpdateProfile_SetsDisplayNameAndAbout(t *testing.T) {
 }
 
 func TestUpdateProfile_RejectsBadDisplayName(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "dn_user", 4)
@@ -250,6 +258,7 @@ func TestUpdateProfile_RejectsBadDisplayName(t *testing.T) {
 }
 
 func TestUpdateProfile_BroadcastCarriesEveryProfileField(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
@@ -279,6 +288,7 @@ func TestUpdateProfile_BroadcastCarriesEveryProfileField(t *testing.T) {
 }
 
 func TestLogout_ClearsCustomStatus(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	token := profileCreateToken(t, database, "logout_status", 4)
@@ -313,6 +323,7 @@ func (s *userUpdateSpy) BroadcastUserUpdate(u ws.UserUpdate) {
 // UpdateProfile failing after the avatar row committed must not leave the row
 // or its quota charge behind.
 func TestUploadAvatar_ProfileUpdateFailureRemovesRowAndCharge(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildAvatarRouter(database, store)

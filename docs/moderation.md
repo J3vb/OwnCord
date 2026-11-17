@@ -107,7 +107,7 @@ Rules the server keeps for you:
 - **You cannot review your own report.** If you sent it, another moderator
   has to take it.
 - **The reporter sees only the status** (waiting, in review, closed and the
-  outcome) in **Settings › Privacy & Safety**. They never see who took it or
+  outcome) in **Settings › Privacy & safety**. They never see who took it or
   the internal notes.
 - **Age-restricted evidence stays hidden until you accept the warning.** If
   the report came from an age-restricted channel, the evidence only shows
@@ -210,7 +210,7 @@ Things to know:
 
 ## Appeals
 
-A member appeals from **Settings › Privacy & Safety**, where they see every
+A member appeals from **Settings › Privacy & safety**, where they see every
 warning, timeout, removal and ban made against them. They can appeal each one
 once, with an optional statement, and file at most 3 appeals a day. A force
 logout or a purge cannot be appealed: there is nothing to reverse.
@@ -258,7 +258,7 @@ Open and Approval allow 5 registrations per address per day. Approval holds at
 most 100 waiting applications.
 
 Each member can also protect themselves: **Block** in the member menu stops
-direct messages both ways, and **Settings › Privacy & Safety** controls who
+direct messages both ways, and **Settings › Privacy & safety** controls who
 can send them direct messages and message requests.
 
 ## Records and how long they are kept

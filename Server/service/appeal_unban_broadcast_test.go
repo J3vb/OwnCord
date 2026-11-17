@@ -24,6 +24,7 @@ func (r *recordingUnbanBroadcaster) BroadcastMemberUnban(userID int64) {
 // takes a full resync. Overturning an upheld ban must broadcast the unban,
 // exactly as the admin path does.
 func TestAppeal_OverturnBanRebroadcastsMemberUnban(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -53,6 +54,7 @@ func TestAppeal_OverturnBanRebroadcastsMemberUnban(t *testing.T) {
 // TestAppeal_UpholdBanDoesNotBroadcastUnban is the negative control: an
 // upheld ban changes no ban state, so no unban frame may fire.
 func TestAppeal_UpholdBanDoesNotBroadcastUnban(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -80,6 +82,7 @@ func TestAppeal_UpholdBanDoesNotBroadcastUnban(t *testing.T) {
 // ban, unban, re-ban, then overturn the FIRST ban's appeal must leave the
 // user banned (the re-ban governs), so no unban may broadcast.
 func TestAppeal_OverturnRebanDoesNotBroadcastUnban(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -112,6 +115,7 @@ func TestAppeal_OverturnRebanDoesNotBroadcastUnban(t *testing.T) {
 // TestAppeal_OverturnTimeoutDoesNotBroadcastUnban: a timeout carries no ban
 // state, so its overturn must not fire an unban frame.
 func TestAppeal_OverturnTimeoutDoesNotBroadcastUnban(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 

@@ -9,6 +9,7 @@ import {
 } from "@lib/voice/shareDiagnostics";
 import { getShareDiagnosticsEnabled, getShareMotionPolicy } from "@lib/voice/shareFlags";
 import { Disposable } from "@lib/disposable";
+import { isMusicPublication } from "@lib/voice/musicTrack";
 import { isLinuxDesktop } from "./native/platform";
 import { SessionRemote } from "./sessionRemote";
 import { withServerLimit } from "./videoCapFollow";
@@ -71,8 +72,14 @@ export abstract class SessionShare extends SessionRemote {
 
   /** Your screen share is publishing its audio too. */
   hasLocalScreenshareAudio(): boolean {
-    return (
-      this._room?.localParticipant.getTrackPublication(Track.Source.ScreenShareAudio) !== undefined
-    );
+    const local = this._room?.localParticipant;
+    const first = local?.getTrackPublication(Track.Source.ScreenShareAudio);
+    if (first === undefined) return false;
+    if (!isMusicPublication(first)) return true;
+    // The first is the music share: another may be a screen share's sound.
+    for (const pub of local?.trackPublications.values() ?? []) {
+      if (pub.source === Track.Source.ScreenShareAudio && !isMusicPublication(pub)) return true;
+    }
+    return false;
   }
 }

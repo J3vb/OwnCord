@@ -178,7 +178,7 @@ func (d *DB) ReplaceRecoveryCodes(ctx context.Context, userID int64, codeHashes 
 	if err != nil {
 		return fmt.Errorf("ReplaceRecoveryCodes begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	q := d.q.WithTx(tx)
 	if err := q.DeleteRecoveryCodes(ctx, userID); err != nil {

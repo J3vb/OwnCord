@@ -36,6 +36,7 @@ func (s *failLatestIDStore) MarkChannelReadAtLatest(ctx context.Context, userID,
 // never advanced, mention_count was never zeroed, nothing was logged, and
 // HandleChannelFocus still returned success.
 func TestHandleChannelFocus_WritesReadStateWhenLatestIDLookupFails(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)

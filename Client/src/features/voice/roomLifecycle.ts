@@ -281,8 +281,10 @@ export class RoomLifecycle {
       },
       (identity) => this._audioElements.getEffectiveVolume(parseUserId(identity)),
       (identity) => this._audioElements.getScreenshareGain(parseUserId(identity)),
+      (identity) => this._audioElements.getMusicGain(parseUserId(identity)),
     );
     this._audioElements.setScreenshareGainListener(() => nativeRoom.applyScreenshareVolumes());
+    this._audioElements.setMusicGainListener(() => nativeRoom.applyMusicVolumes());
     const newRoom: VoiceRoom = nativeRoom;
     this.wireRoomEvents(newRoom);
     return newRoom;
@@ -395,6 +397,7 @@ export class RoomLifecycle {
     // Full cleanup: also clears screenshare mute state on intentional leave.
     this._audioElements.cleanupAllAudioElementsFull();
     this._audioElements.setScreenshareGainListener(null);
+    this._audioElements.setMusicGainListener(null);
     const room = this._room;
     let disconnected: Promise<void> = Promise.resolve();
     if (room !== null) {

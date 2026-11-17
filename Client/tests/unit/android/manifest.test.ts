@@ -4,6 +4,7 @@ import { describe, expect, it } from "vitest";
 
 const MAIN = join(__dirname, "../../../src-tauri/gen/android/app/src/main");
 const manifest = readFileSync(join(MAIN, "AndroidManifest.xml"), "utf8");
+const gradle = readFileSync(join(MAIN, "../../build.gradle.kts"), "utf8");
 const extractionRules = readFileSync(join(MAIN, "res/xml/data_extraction_rules.xml"), "utf8");
 
 const permission = (name: string): RegExp =>
@@ -46,6 +47,21 @@ describe("the Android manifest", () => {
       expect(filter, action).toBeDefined();
       expect(filter).toContain('<category android:name="android.intent.category.DEFAULT" />');
       expect(filter).toContain('<data android:mimeType="*/*" />');
+    }
+  });
+
+  it("takes pushes from the user's own push app, never through Google", () => {
+    const service = /<service\s+android:name="\.OwnCordPushService"[\s\S]*?<\/service>/.exec(
+      manifest,
+    )?.[0];
+    expect(service).toBeDefined();
+    expect(service).toContain('android:exported="false"');
+    expect(service).toContain(
+      '<action android:name="org.unifiedpush.android.connector.PUSH_EVENT" />',
+    );
+    expect(gradle).toContain('implementation("org.unifiedpush.android:connector:');
+    for (const google of ["firebase", "play-services", "com.google.gms", "embedded_fcm"]) {
+      expect(gradle + manifest).not.toContain(google);
     }
   });
 });

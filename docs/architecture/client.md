@@ -120,8 +120,9 @@ connection is _rejected_ and shown to the user as a blocking trust prompt.
 Only the user's Accept stores the pin. (The old behaviour that pinned silently
 on first use was removed in the 2026-07-22 security fixes.)
 
-Content that other users link to takes a different path: the
-`external_content.rs` broker. It reaches only public addresses and never
+Link previews arrive from the server as stored cards and thumbnails (the same
+authenticated, cert-pinned path as attachments). Other content that users link
+to takes a different path: the `external_content.rs` broker. It reaches only public addresses and never
 carries the session token. On Linux, voice and video run in the Rust
 `native_voice/` module instead of the webview
 ([voice-e2ee.md](voice-e2ee.md)).

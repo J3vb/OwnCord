@@ -11,6 +11,7 @@ import (
 // Only a live voice channel may be the AFK channel. Every refusal leaves the
 // existing flag where it was.
 func TestSetAFKChannel_RefusesTextDMAndArchived(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, database := newChannelAdminService(t)
 	actor, _ := database.CreateUser(ctx, "afk-admin", "hash", 1)
@@ -50,6 +51,7 @@ func TestSetAFKChannel_RefusesTextDMAndArchived(t *testing.T) {
 // The swap returns both rows so the caller can broadcast them, audits once,
 // and a no-op request returns nothing to broadcast.
 func TestSetAFKChannel_ReturnsBothChannelsAndAudits(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, database := newChannelAdminService(t)
 	actor, _ := database.CreateUser(ctx, "afk-admin", "hash", 1)
@@ -76,6 +78,7 @@ func TestSetAFKChannel_ReturnsBothChannelsAndAudits(t *testing.T) {
 // Only the five choices the admin card offers are stored, canonically, and a
 // missing key leaves the default in force.
 func TestSettingsPatch_AFKTimeoutAllowedValues(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	uid, _ := database.CreateUser(ctx, "settings-owner", "hash", 1)

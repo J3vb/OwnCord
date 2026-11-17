@@ -871,7 +871,7 @@ func TestGetCachedSettings_CacheMiss_RefreshesFromDB(t *testing.T) {
 	mustExec(t, database, "UPDATE settings SET value='Refreshed Server' WHERE key='server_name'")
 
 	// Force the cache to appear stale.
-	hub.ExpireSettingsCacheForTest()
+	hub.ExpireSettingsCache()
 
 	// Next call must re-read from the DB and return the updated value.
 	name, _ := hub.GetCachedSettingsForTest()
@@ -884,7 +884,7 @@ func TestGetCachedSettings_CacheMiss_DoubleCheck(t *testing.T) {
 	// Expire the cache and call twice rapidly to exercise the double-check
 	// (write-lock re-check) branch inside getCachedSettings.
 	hub, _ := newServeHub(t)
-	hub.ExpireSettingsCacheForTest()
+	hub.ExpireSettingsCache()
 
 	name1, _ := hub.GetCachedSettingsForTest()
 	// Second call should hit the cache (now warm).

@@ -440,6 +440,34 @@ describe("createChannelController", () => {
       }),
     );
 
+    it(
+      "keeps the real refusal reason when the delivery timer fires later",
+      fakeTimersTest(() => {
+        const { opts } = mountController();
+        vi.mocked(opts.ws.send).mockReturnValue("cid-slow");
+        capturedMessageInputOpts.onSend("hello", null, [], []);
+        mockGetChannelMessages.mockReturnValue([
+          { id: 0, correlationId: "cid-slow", status: "failed" },
+        ]);
+        vi.advanceTimersByTime(20_000);
+        expect(mockMarkSendFailed).not.toHaveBeenCalledWith("cid-slow", "UNCONFIRMED");
+      }),
+    );
+
+    it(
+      "still marks a send that is pending after 20 seconds as unconfirmed",
+      fakeTimersTest(() => {
+        const { opts } = mountController();
+        vi.mocked(opts.ws.send).mockReturnValue("cid-pending");
+        capturedMessageInputOpts.onSend("hello", null, [], []);
+        mockGetChannelMessages.mockReturnValue([
+          { id: 0, correlationId: "cid-pending", status: "pending" },
+        ]);
+        vi.advanceTimersByTime(20_000);
+        expect(mockMarkSendFailed).toHaveBeenCalledWith("cid-pending", "UNCONFIRMED");
+      }),
+    );
+
     it("onSend sends chat_send via ws", () => {
       const { opts } = mountController();
 

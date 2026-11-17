@@ -24,7 +24,7 @@ func (d *DB) UpdateUserProfileAndIdentityKey(ctx context.Context, userID int64, 
 	if err != nil {
 		return fmt.Errorf("UpdateUserProfileAndIdentityKey begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	if err := updateUserProfile(ctx, q, userID, username, avatar, displayName, about, bannerID, bannerColor); err != nil {
@@ -175,6 +175,20 @@ func (d *DB) UpdateUserPassword(ctx context.Context, userID int64, newPasswordHa
 	return nil
 }
 
+// UpgradeUserPasswordHash replaces the user's password hash with newHash only while it
+// still equals oldHash; upgraded is false when it had changed or the user is gone.
+func (d *DB) UpgradeUserPasswordHash(ctx context.Context, userID int64, oldHash, newHash string) (upgraded bool, err error) {
+	n, err := d.q.UpgradeUserPasswordHash(ctx, dbgen.UpgradeUserPasswordHashParams{
+		NewHash: newHash,
+		ID:      userID,
+		OldHash: oldHash,
+	})
+	if err != nil {
+		return false, fmt.Errorf("UpgradeUserPasswordHash: %w", err)
+	}
+	return n == 1, nil
+}
+
 // ListUserSessions returns all sessions for the user, newest first.
 func (d *DB) ListUserSessions(ctx context.Context, userID int64) ([]Session, error) {
 	rows, err := d.q.ListUserSessions(ctx, userID)
@@ -227,7 +241,7 @@ func (d *DB) SignOutEverywhere(ctx context.Context, userID int64) (sessions, tok
 	if err != nil {
 		return 0, 0, fmt.Errorf("SignOutEverywhere begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	tokRes, err := q.RevokeUserAPITokens(ctx, userID)

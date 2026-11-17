@@ -133,6 +133,7 @@ func (f *callLogFixture) info(t *testing.T, msgID int64) *db.CallInfo {
 }
 
 func TestCallLog_FirstJoinCreatesRowAuthoredByFirstJoiner(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clBob, clDM)
 	f.clock.advance(3 * time.Second)
@@ -170,6 +171,7 @@ func TestCallLog_FirstJoinCreatesRowAuthoredByFirstJoiner(t *testing.T) {
 }
 
 func TestCallLog_SimultaneousJoinsOneRow(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM)
 	f.join(t, clBob, clDM)
@@ -192,6 +194,7 @@ func TestCallLog_SimultaneousJoinsOneRow(t *testing.T) {
 }
 
 func TestCallLog_NotesFromManyGoroutinesShareOneEntry(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	var wg sync.WaitGroup
 	for i := range 20 {
@@ -214,6 +217,7 @@ func TestCallLog_NotesFromManyGoroutinesShareOneEntry(t *testing.T) {
 }
 
 func TestCallLog_NotesDoNothingWhenWorkerNotRunning(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.svc.running = false
 	f.svc.NoteJoin(clDM, clAlice, clT0)
@@ -227,6 +231,7 @@ func TestCallLog_NotesDoNothingWhenWorkerNotRunning(t *testing.T) {
 }
 
 func TestCallLog_EndsAfterGraceAtLastLeave(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM)
 	f.join(t, clBob, clDM)
@@ -274,6 +279,7 @@ func TestCallLog_EndsAfterGraceAtLastLeave(t *testing.T) {
 }
 
 func TestCallLog_RejoinWithinGraceSameRowNoFrames(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM)
 	f.pass(t)
@@ -305,6 +311,7 @@ func TestCallLog_RejoinWithinGraceSameRowNoFrames(t *testing.T) {
 }
 
 func TestCallLog_ShortJoinerIsParticipant(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM)
 	f.join(t, clBob, clDM)
@@ -322,6 +329,7 @@ func TestCallLog_ShortJoinerIsParticipant(t *testing.T) {
 }
 
 func TestCallLog_GuildVoiceIgnored(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 60, Name: "lounge", Type: "voice"})
 	f.join(t, clAlice, 60)
@@ -338,6 +346,7 @@ func TestCallLog_GuildVoiceIgnored(t *testing.T) {
 }
 
 func TestCallLog_OneToOneUntrustedWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	if _, err := f.database.ExecContext(context.Background(), `DELETE FROM trusted_senders WHERE recipient_id = ? AND sender_id = ?`, clBob, clAlice); err != nil {
 		t.Fatal(err)
@@ -381,6 +390,7 @@ func (s *flakyTargetsStore) GetDMDeliveryTargets(ctx context.Context, ch, u int6
 // A failed trust read writes no row and keeps the notes; once the read works
 // again the call is logged while the room is still occupied.
 func TestCallLog_TrustLookupErrorWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	st := &flakyTargetsStore{Store: f.database}
 	st.fail.Store(true)
@@ -407,6 +417,7 @@ func TestCallLog_TrustLookupErrorWritesNothing(t *testing.T) {
 }
 
 func TestCallLog_GroupDMHasNoTrustGate(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	ctx := context.Background()
 	seedUser(t, f.database, &db.User{ID: clCarol, Username: "carol"})
@@ -428,6 +439,7 @@ func TestCallLog_GroupDMHasNoTrustGate(t *testing.T) {
 }
 
 func TestCallLog_RecoveryEndsOpenCallsAtLastSeen(t *testing.T) {
+	t.Parallel()
 	// A call is live, then the server dies: no stop runs. Boot clears the
 	// voice rows, and the next worker ends the call at the last time it was
 	// seen occupied, then logs the end as a frame.
@@ -465,6 +477,7 @@ func TestCallLog_RecoveryEndsOpenCallsAtLastSeen(t *testing.T) {
 }
 
 func TestCallLog_StopStampsLastSeen(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.svc.running = false
 	ctx := t.Context()
@@ -488,6 +501,7 @@ func TestCallLog_StopStampsLastSeen(t *testing.T) {
 }
 
 func TestCallLog_TickAdvancesLastSeen(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM)
 	f.pass(t)
@@ -507,6 +521,7 @@ func TestCallLog_TickAdvancesLastSeen(t *testing.T) {
 }
 
 func TestCallLog_ChannelDeletedDropsState(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.svc.NoteJoin(999, clAlice, clT0)
 	f.svc.setSuppressed(999, true)
@@ -520,6 +535,7 @@ func TestCallLog_ChannelDeletedDropsState(t *testing.T) {
 }
 
 func TestCallLog_ReopensClosedDMBeforeRow(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	ctx := context.Background()
 	mustDo(t, "CloseDM", f.database.CloseDM(ctx, clBob, clDM))
@@ -538,6 +554,7 @@ func TestCallLog_ReopensClosedDMBeforeRow(t *testing.T) {
 }
 
 func TestCallLog_WorkerExitsOnCtxDone(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.svc.running = false
 	ctx, cancel := context.WithCancel(context.Background())
@@ -552,6 +569,7 @@ func TestCallLog_WorkerExitsOnCtxDone(t *testing.T) {
 }
 
 func TestCallLog_RequeuesNotesOnStoreError(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	good := f.svc.st
 	f.svc.st = errChannelStore{Store: good.(Store)}
@@ -576,6 +594,7 @@ func (errChannelStore) GetChannel(context.Context, int64) (*db.Channel, error) {
 }
 
 func TestVoiceService_NotesJoinAndLeaveOnlyWhenDeleted(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	ctx := context.Background()
 	voice := NewVoiceService(f.database)
@@ -606,6 +625,7 @@ func TestVoiceService_NotesJoinAndLeaveOnlyWhenDeleted(t *testing.T) {
 // Joins and leaves racing on one channel while the real worker runs: every
 // call row ends up closed, and the channel never holds two live calls.
 func TestCallLog_ConcurrentJoinsAndLeavesOneChannel(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 	ctx := t.Context()
 	const users = 6
@@ -663,6 +683,7 @@ func TestCallLog_ConcurrentJoinsAndLeavesOneChannel(t *testing.T) {
 // Cycling in and out faster than the end grace stays one row and sends no
 // frames beyond the first.
 func TestCallLog_JoinLeaveCyclingInsideGraceStaysOneRow(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM)
 	f.pass(t)
@@ -686,6 +707,7 @@ func TestCallLog_JoinLeaveCyclingInsideGraceStaysOneRow(t *testing.T) {
 // An unanswered call leaves one row for the callee to see as a missed call:
 // the caller authors it and is its only participant, and the end reaches both.
 func TestCallLog_UnansweredCallLeavesOneMissedRow(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM) // the caller; bob never joins
 	f.pass(t)
@@ -723,6 +745,7 @@ func TestCallLog_UnansweredCallLeavesOneMissedRow(t *testing.T) {
 // There is no server-side decline state: call_decline is a stateless nudge to
 // the caller's client, so a declined call is the callee never joining.
 func TestCallLog_CalleeDeclinesIsCalleeNeverJoining(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM)
 	f.pass(t)

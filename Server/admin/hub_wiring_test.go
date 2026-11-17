@@ -39,3 +39,8 @@ var _ gameActivityPolicyApplier = (*ws.Hub)(nil)
 
 // The video cap reaches the hub the same way.
 var _ videoBitrateCapApplier = (*ws.Hub)(nil)
+
+// handlePatchSettings and handleSetup reach ExpireSettingsCache the same way; a
+// renamed hub method would leave a new server name unseen at sign-in until the
+// settings cache aged out.
+var _ settingsCacheExpirer = (*ws.Hub)(nil)

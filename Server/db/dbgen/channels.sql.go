@@ -8,6 +8,7 @@ package dbgen
 import (
 	"context"
 	"database/sql"
+	"strings"
 )
 
 const adminUpdateChannel = `-- name: AdminUpdateChannel :exec
@@ -488,7 +489,7 @@ SELECT c.id, c.name, c.type, COALESCE(cc.name, '') AS category,
 FROM channels c
 LEFT JOIN channels p ON p.id = c.parent_channel_id
 LEFT JOIN channel_categories cc ON cc.id = c.category_id
-WHERE c.parent_channel_id IS NULL AND c.import_pending = 0
+WHERE c.parent_channel_id IS NULL AND c.import_pending = 0 AND c.type != 'dm'
 ORDER BY c.position ASC, c.id ASC
 `
 
@@ -520,7 +521,8 @@ type ListChannelsRow struct {
 
 // import_pending = 0 keeps a channel a Discord import is still building out of
 // every client-facing read (here, GetChannel and GetAFKChannel): nobody can see
-// or address it until the import finishes.
+// or address it until the import finishes. Guild channels only: DM rows share the
+// table and are read through the DM queries.
 func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 	rows, err := q.db.QueryContext(ctx, listChannels)
 	if err != nil {
@@ -555,6 +557,85 @@ func (q *Queries) ListChannels(ctx context.Context) ([]ListChannelsRow, error) {
 			&i.ForumDefaultAutoArchiveMinutes,
 			&i.JoinLocked,
 		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDMChannelIDsAmong = `-- name: ListDMChannelIDsAmong :many
+SELECT id FROM channels WHERE type = 'dm' AND id IN (/*SLICE:ids*/?)
+`
+
+func (q *Queries) ListDMChannelIDsAmong(ctx context.Context, ids []int64) ([]int64, error) {
+	query := listDMChannelIDsAmong
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []int64{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		items = append(items, id)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const listDMChannelNamesAmong = `-- name: ListDMChannelNamesAmong :many
+SELECT id, name FROM channels WHERE type = 'dm' AND id IN (/*SLICE:ids*/?)
+`
+
+type ListDMChannelNamesAmongRow struct {
+	ID   int64  `json:"id"`
+	Name string `json:"name"`
+}
+
+func (q *Queries) ListDMChannelNamesAmong(ctx context.Context, ids []int64) ([]ListDMChannelNamesAmongRow, error) {
+	query := listDMChannelNamesAmong
+	var queryParams []interface{}
+	if len(ids) > 0 {
+		for _, v := range ids {
+			queryParams = append(queryParams, v)
+		}
+		query = strings.Replace(query, "/*SLICE:ids*/?", strings.Repeat(",?", len(ids))[1:], 1)
+	} else {
+		query = strings.Replace(query, "/*SLICE:ids*/?", "NULL", 1)
+	}
+	rows, err := q.db.QueryContext(ctx, query, queryParams...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDMChannelNamesAmongRow{}
+	for rows.Next() {
+		var i ListDMChannelNamesAmongRow
+		if err := rows.Scan(&i.ID, &i.Name); err != nil {
 			return nil, err
 		}
 		items = append(items, i)

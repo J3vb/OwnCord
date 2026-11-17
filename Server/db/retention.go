@@ -64,7 +64,7 @@ func (d *DB) ListChannelRetention(ctx context.Context) ([]ChannelRetention, erro
 	if err != nil {
 		return nil, fmt.Errorf("ListChannelRetention: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	out := []ChannelRetention{}
 	for rows.Next() {
 		var c ChannelRetention
@@ -132,7 +132,7 @@ func (d *DB) RetentionWindows(ctx context.Context) ([]RetentionWindow, error) {
 	if err != nil {
 		return nil, fmt.Errorf("RetentionWindows: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	out := []RetentionWindow{}
 	for rows.Next() {
 		var w RetentionWindow
@@ -173,6 +173,17 @@ func (d *DB) CountRetentionCandidates(ctx context.Context, channelID int64, cuto
 	return n, nil
 }
 
+// HasRetentionCandidates reports whether a sweep of channelID at cutoff would remove anything. It reads on
+// the reader pool, so a tick can skip a channel with nothing due without taking the write lock.
+func (d *DB) HasRetentionCandidates(ctx context.Context, channelID int64, cutoff time.Time) (bool, error) {
+	var found bool
+	if err := d.reader.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM messages WHERE `+retentionCandidates+`)`,
+		channelID, cutoff.UTC().Format(dbtime.SQLiteLayout)).Scan(&found); err != nil {
+		return false, fmt.Errorf("HasRetentionCandidates: %w", err)
+	}
+	return found, nil
+}
+
 // SweepRetention hard-deletes up to limit of the oldest messages in channelID
 // older than cutoff (pinned exempt) in one transaction: mention counts are
 // reversed first, attachment rows go with their stored_as names returned for
@@ -201,7 +212,7 @@ func (d *DB) sweepRetention(ctx context.Context, runID, channelID int64, cutoff 
 	if err != nil {
 		return runID, nil, nil, fmt.Errorf("SweepRetention begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	rows, err := tx.QueryContext(ctx, `SELECT id FROM messages WHERE `+retentionCandidates+` ORDER BY id LIMIT ?`,
 		channelID, cutoff.UTC().Format(dbtime.SQLiteLayout), limit)
@@ -350,7 +361,7 @@ func collectAndDeleteAttachments(ctx context.Context, tx *sql.Tx, in string, arg
 	if err != nil {
 		return nil, fmt.Errorf("SweepRetention attachments: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	files := []string{}
 	for rows.Next() {
 		var name string
@@ -365,11 +376,11 @@ func collectAndDeleteAttachments(ctx context.Context, tx *sql.Tx, in string, arg
 // EventNamesMessagePredicate is the SQL deciding whether a persisted replay
 // event is about one of a set of messages, bound to a JSON array of ids as ?1:
 // a message-family frame (chat_message, chat_edited, chat_deleted,
-// chat_bulk_deleted, reaction_update, poll_update) whose payload.id,
+// chat_bulk_deleted, reaction_update, poll_update, message_link_previews) whose payload.id,
 // payload.referenced_message.id, payload.message_id or one of payload.ids is in
 // the set. ws.eventNamesMessage is the same rule over the ring buffer; the two
 // must stay in step.
-const EventNamesMessagePredicate = `(json_extract(payload, '$.type') IN ('chat_message', 'chat_edited', 'chat_deleted', 'chat_bulk_deleted', 'reaction_update', 'poll_update')
+const EventNamesMessagePredicate = `(json_extract(payload, '$.type') IN ('chat_message', 'chat_edited', 'chat_deleted', 'chat_bulk_deleted', 'reaction_update', 'poll_update', 'message_link_previews')
 	 AND (json_extract(payload, '$.payload.id') IN (SELECT value FROM json_each(?1))
 	   OR json_extract(payload, '$.payload.referenced_message.id') IN (SELECT value FROM json_each(?1))
 	   OR json_extract(payload, '$.payload.message_id') IN (SELECT value FROM json_each(?1))

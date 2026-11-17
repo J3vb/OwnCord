@@ -121,6 +121,7 @@ export function mediaNotificationSoundMock() {
     stopRingChime: vi.fn(),
     startRingback: vi.fn(),
     stopRingback: vi.fn(),
+    playCallEnded: vi.fn(),
     cleanupNotificationAudio: vi.fn(),
     playVoiceSound: vi.fn(),
   };
@@ -132,8 +133,10 @@ export function messagesCallAlertsMock() {
   return {
     alertIncomingCall: vi.fn(),
     alertMissedCall: vi.fn(),
+    alertRedial: vi.fn(),
     alertSupersededCall: vi.fn(),
     clearIncomingCall: vi.fn(),
+    isHostRing: vi.fn(() => false),
   };
 }
 
@@ -309,6 +312,7 @@ export function pageChatAreaMock() {
           nameEl: document.createElement("span"),
           topicEl: document.createElement("span"),
           callBtn: document.createElement("button"),
+          videoCallBtn: document.createElement("button"),
           profileBtn,
           memberListBtn: document.createElement("button"),
           callChatBtn: document.createElement("button"),
@@ -316,7 +320,7 @@ export function pageChatAreaMock() {
         },
         sidebarToggle: document.createElement("button"),
         refreshCallBar: vi.fn(),
-        closePinnedPanel: vi.fn(),
+        closeSidePanels: vi.fn(),
         searchCtrl: { open: vi.fn(), cleanup: vi.fn() },
         dmProfileSlot,
         children: [],

@@ -83,6 +83,16 @@ impl NativeSession {
         &mut self,
         capture: u64,
     ) -> (Retired, Result<String, String>) {
+        self.publish_screen_audio_until(capture, None).await
+    }
+
+    /// As `publish_screen_audio`, giving up on the SFU once `closing` turns
+    /// true (a leave): the capture is then retired like any failed publish.
+    pub async fn publish_screen_audio_until(
+        &mut self,
+        capture: u64,
+        closing: Option<tokio::sync::watch::Receiver<bool>>,
+    ) -> (Retired, Result<String, String>) {
         if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
             return (
                 Retired::default(),
@@ -95,8 +105,11 @@ impl NativeSession {
             .as_ref()
             .and_then(|s| screen::target_pid(s.capture.target()));
         let feed = ShareAudio::start(source.clone(), app);
-        self.publish_screen_audio_from(capture, source, Some(feed))
-            .await
+        let mut retired = Retired::default();
+        let result = self
+            .publish_screen_audio_into(capture, source, Some(feed), &mut retired, closing)
+            .await;
+        (retired, result)
     }
 
     /// As `publish_screen_audio`, but fed by the caller: the interop example's
@@ -117,7 +130,7 @@ impl NativeSession {
     ) -> (Retired, Result<String, String>) {
         let mut retired = Retired::default();
         let result = self
-            .publish_screen_audio_into(capture, source, feed, &mut retired)
+            .publish_screen_audio_into(capture, source, feed, &mut retired, None)
             .await;
         (retired, result)
     }
@@ -128,6 +141,7 @@ impl NativeSession {
         source: NativeAudioSource,
         feed: Option<ShareAudio>,
         retired: &mut Retired,
+        closing: Option<tokio::sync::watch::Receiver<bool>>,
     ) -> Result<String, String> {
         if !self.screen.as_ref().is_some_and(|s| s.id == capture) {
             retired.share_audio.extend(feed);
@@ -140,12 +154,18 @@ impl NativeSession {
             "screen_share_audio",
             RtcAudioSource::Native(source),
         );
-        let published = self
-            .room
-            .local_participant()
-            .publish_track(LocalTrack::Audio(track), screen_audio_publish_options())
-            .await
-            .map_err(|e| e.to_string());
+        let participant = self.room.local_participant();
+        let published = crate::native_voice::quick::unless_closing(
+            closing,
+            async {
+                participant
+                    .publish_track(LocalTrack::Audio(track), screen_audio_publish_options())
+                    .await
+                    .map_err(|e| e.to_string())
+            },
+            || "the session is closing".to_string(),
+        )
+        .await;
         let publication = match published {
             Ok(publication) => publication,
             Err(e) => {

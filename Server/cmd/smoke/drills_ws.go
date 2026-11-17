@@ -98,7 +98,7 @@ func dialWS(token string) (*wsConn, error) {
 	if dialResp != nil && dialResp.Body != nil {
 		// Dial has already closed it (coder/websocket v1.8.15); the guard is here because bodyclose cannot see
 		// that, as in api/livekit_proxy.go.
-		defer dialResp.Body.Close() //nolint:errcheck // best-effort close of an already-closed body
+		defer dialResp.Body.Close()
 	}
 	if err != nil {
 		return nil, fmt.Errorf("dialling %s: %w", wsURL(defaultBaseURL), err)

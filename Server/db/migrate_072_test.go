@@ -13,6 +13,7 @@ import (
 // lowest-positioned channel, ordered by that channel, and no category at all
 // for an empty or whitespace-only value.
 func TestMigrate_072BackfillsCategoriesFromFreeText(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 
@@ -105,6 +106,7 @@ func TestMigrate_072BackfillsCategoriesFromFreeText(t *testing.T) {
 // A database with no categorized channel upgrades to an empty category table,
 // and the dropped-column rollback story is untouched: the column stays.
 func TestMigrate_072WithNoCategorizedChannels(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 	mustDo(t, "pre-072", db.MigrateFS(database, migrationsUpTo(t, "072_")))

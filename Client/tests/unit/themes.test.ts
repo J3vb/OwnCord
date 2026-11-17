@@ -212,7 +212,7 @@ describe("readableRoleColor (B9 Q13 role clamp)", () => {
     expect(contrastRatio(blue, row)).toBeGreaterThanOrEqual(4.5);
   });
 
-  it("keeps the strict fallback to --text-normal under High Contrast", () => {
+  it("keeps the strict fallback to --text-normal under High contrast", () => {
     document.documentElement.classList.add("high-contrast");
     try {
       setSurfaces(LIGHT);
@@ -235,7 +235,7 @@ describe("readableRoleColor (B9 Q13 role clamp)", () => {
     expect(pill.style.color).toBe("");
   });
 
-  it("re-clamps rendered names when High Contrast is toggled", () => {
+  it("re-clamps rendered names when High contrast is toggled", () => {
     setSurfaces(DARK);
     const name = document.createElement("span");
     name.dataset["roleColor"] = "#ff0000";

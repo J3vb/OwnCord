@@ -331,7 +331,7 @@ sites can see their IP address
 (`Client/src/features/content-consent/external.ts`). The check sits in front
 of every broker call in `Client/src/features/messaging/content/attachments.ts`,
 so a render path that forgets to ask still fetches nothing. Turning off a
-Text & Images toggle, or its "Reset external content consent" action, revokes
+Text & images toggle, or its "Reset external content consent" action, revokes
 every server's choice, drops fetched bytes and late answers, and re-conceals
 rendered items. YouTube playback stays a separate click. The grant is
 separate from NSFW consent and Message Request trust and satisfies neither.

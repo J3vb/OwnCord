@@ -52,20 +52,25 @@ function appendManageItems(
         "context-menu-item",
         "ctx-category-create",
         onCreateCategory,
+        "folder-plus",
       ),
     );
   }
   if (real && onRenameCategory !== undefined) {
     manage.push(() =>
-      addItem(shellText("category.rename"), "context-menu-item", "ctx-category-rename", () =>
-        onRenameCategory(ref),
+      addItem(
+        shellText("category.rename"),
+        "context-menu-item",
+        "ctx-category-rename",
+        () => onRenameCategory(ref),
+        "pencil",
       ),
     );
   }
   if (real && onMoveCategory !== undefined) {
-    for (const [direction, label, testId] of [
-      [-1, "category.moveUp", "ctx-category-move-up"],
-      [1, "category.moveDown", "ctx-category-move-down"],
+    for (const [direction, label, testId, icon] of [
+      [-1, "category.moveUp", "ctx-category-move-up", "arrow-up"],
+      [1, "category.moveDown", "ctx-category-move-down", "arrow-down"],
     ] as const) {
       const can = canMoveCategory(target.id, direction);
       manage.push(() =>
@@ -74,14 +79,19 @@ function appendManageItems(
           can ? "context-menu-item" : "context-menu-item disabled",
           testId,
           can ? () => onMoveCategory(ref, direction) : null,
+          icon,
         ),
       );
     }
   }
   if (real && onDeleteCategory !== undefined) {
     manage.push(() =>
-      addItem(shellText("category.delete"), "context-menu-item danger", "ctx-category-delete", () =>
-        onDeleteCategory(ref),
+      addItem(
+        shellText("category.delete"),
+        "context-menu-item danger",
+        "ctx-category-delete",
+        () => onDeleteCategory(ref),
+        "trash-2",
       ),
     );
   }
@@ -131,13 +141,16 @@ export function attachCategoryContextMenu(
       unreadIds.length > 0 ? "context-menu-item" : "context-menu-item disabled",
       "ctx-category-mark-read",
       unreadIds.length > 0 ? () => markChannelsRead(unreadIds) : null,
+      "check-check",
     );
 
+    const collapsed = isCategoryCollapsed(category);
     addItem(
-      shellText(isCategoryCollapsed(category) ? "category.expand" : "category.collapse"),
+      shellText(collapsed ? "category.expand" : "category.collapse"),
       "context-menu-item",
       "ctx-category-toggle",
       () => toggleCategory(category),
+      collapsed ? "chevron-down" : "chevron-up",
     );
 
     const names = [...groups.keys()].filter((name): name is string => name !== null);
@@ -146,6 +159,7 @@ export function attachCategoryContextMenu(
       "context-menu-item",
       "ctx-category-collapse-all",
       () => collapseCategories(names),
+      "chevrons-down-up",
     );
 
     // Management: read now, like every other gate, so a role change is current.

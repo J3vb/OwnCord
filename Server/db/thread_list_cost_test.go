@@ -30,6 +30,7 @@ func pageAll(t *testing.T, f listFixture, archived bool, opts db.ThreadListOptio
 // The counts a list row carries are the live user messages of its thread, the
 // same numbers GetThread reports, on every page and in every filter.
 func TestListThreadsBy_RowsCarryCountsAcrossTiesNullActivityTagsAndArchive(t *testing.T) {
+	t.Parallel()
 	f := newListFixture(t)
 	ctx := context.Background()
 	p := f.posts // p[0] oldest ... p[3] newest

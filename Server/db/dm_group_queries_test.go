@@ -21,6 +21,7 @@ func groupDMFixture(t *testing.T) *db.DB {
 }
 
 func TestCreateGroupDMChannel_OpensForEveryone(t *testing.T) {
+	t.Parallel()
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
@@ -58,6 +59,7 @@ func TestCreateGroupDMChannel_OpensForEveryone(t *testing.T) {
 }
 
 func TestCreateGroupDMChannel_RefusesUnderThree(t *testing.T) {
+	t.Parallel()
 	database := groupDMFixture(t)
 	if _, err := database.CreateGroupDMChannel(context.Background(), "", 1, []int64{1, 2}); err == nil {
 		t.Fatal("expected an error creating a 2-person group DM")
@@ -67,6 +69,7 @@ func TestCreateGroupDMChannel_RefusesUnderThree(t *testing.T) {
 // The 1:1 lookup must never return a group DM, even one whose membership has
 // shrunk to exactly the two users being looked up.
 func TestGetOrCreateDMChannel_IgnoresShrunkGroup(t *testing.T) {
+	t.Parallel()
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
@@ -87,6 +90,7 @@ func TestGetOrCreateDMChannel_IgnoresShrunkGroup(t *testing.T) {
 }
 
 func TestLeaveGroupDM_DeletesChannelOnLastLeave(t *testing.T) {
+	t.Parallel()
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
@@ -117,6 +121,7 @@ func TestLeaveGroupDM_DeletesChannelOnLastLeave(t *testing.T) {
 // orphan sweep (DeleteOrphanedAttachments) has on the uploaded files,
 // stranding them on disk with no query left able to name them.
 func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
+	t.Parallel()
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
@@ -159,6 +164,7 @@ func TestLeaveGroupDM_LastLeavePreservesAttachmentsForReclaim(t *testing.T) {
 // An invisible participant must read as offline to everyone but themselves,
 // on the DM list exactly as everywhere else.
 func TestGetDMParticipants_CollapsesInvisible(t *testing.T) {
+	t.Parallel()
 	database := groupDMFixture(t)
 	ctx := context.Background()
 
@@ -184,6 +190,7 @@ func TestGetDMParticipants_CollapsesInvisible(t *testing.T) {
 }
 
 func TestNewDMChannelInfo_ExcludesViewerAndPicksRecipient(t *testing.T) {
+	t.Parallel()
 	participants := []db.DMUser{
 		{ID: 1, Username: "a"},
 		{ID: 2, Username: "b"},
@@ -211,6 +218,7 @@ func TestNewDMChannelInfo_ExcludesViewerAndPicksRecipient(t *testing.T) {
 // A DM with no other participants (the moment before the row is cleaned up)
 // must produce an empty list, not a nil one — clients iterate it directly.
 func TestNewDMChannelInfo_EmptyRecipientsIsNotNil(t *testing.T) {
+	t.Parallel()
 	info := db.NewDMChannelInfo(9, "", false, 0, "", []db.DMUser{{ID: 5}}, 5)
 	if info.Recipients == nil {
 		t.Fatal("recipients must be an empty slice, not nil")
@@ -224,6 +232,7 @@ func TestNewDMChannelInfo_EmptyRecipientsIsNotNil(t *testing.T) {
 // field is omitted from the JSON rather than reported as 0. The
 // dm_channel_open frame is built the same way.
 func TestNewDMChannelInfo_OmitsLastRead(t *testing.T) {
+	t.Parallel()
 	info := db.NewDMChannelInfo(7, "", false, 0, "", []db.DMUser{{ID: 1}, {ID: 2}}, 1)
 	if info.LastReadMessageID != nil {
 		t.Fatalf("LastReadMessageID = %v, want nil", *info.LastReadMessageID)

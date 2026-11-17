@@ -2,7 +2,7 @@
 
 .msg-thread-name,
 .thread-panel-name,
-.thread-popover-name {
+.thread-list-name {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -10,20 +10,20 @@
 }
 .thread-panel-parent,
 .thread-panel-status,
-.thread-popover-head,
-.thread-popover-meta,
-.thread-popover-empty,
-.thread-popover-status {
+.thread-list-head,
+.thread-list-meta,
+.thread-list-empty,
+.thread-list-status {
   font-size: var(--font-size-xs);
   color: var(--text-muted);
 }
 .thread-panel-btn,
-.thread-popover-open,
-.thread-popover-more {
+.thread-list-open,
+.thread-list-more {
   border-radius: var(--radius-sm);
 }
 .thread-panel-btn:hover,
-.thread-popover-open:hover,
+.thread-list-open:hover,
 button.msg-thread-chip:hover {
   background: var(--bg-hover);
 }
@@ -215,34 +215,21 @@ button.msg-thread-chip:hover {
   }
 }
 
-/* The channel's thread list under the header button. */
-.thread-popover {
-  position: fixed;
-  z-index: 60;
-  width: min(360px, calc(100vw - 16px));
-  max-height: min(70vh, 480px);
-  display: flex;
-  flex-direction: column;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--bg-secondary);
-  box-shadow: var(--shadow-md);
-}
-.thread-popover-body {
-  overflow-y: auto;
+/* The channel's thread list, in the channel side panel. */
+.thread-list-body {
   padding: 8px;
 }
-.thread-popover-head {
+.thread-list-head {
   padding: 6px 8px 4px;
   font-weight: 600;
   text-transform: uppercase;
 }
-.thread-popover-list {
+.thread-list-list {
   margin: 0;
   padding: 0;
   list-style: none;
 }
-.thread-popover-open {
+.thread-list-open {
   width: 100%;
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -253,14 +240,14 @@ button.msg-thread-chip:hover {
   color: var(--text-normal);
   text-align: left;
 }
-.thread-popover-meta {
+.thread-list-meta {
   grid-column: 2;
 }
-.thread-popover-empty,
-.thread-popover-status {
+.thread-list-empty,
+.thread-list-status {
   padding: 8px;
 }
-.thread-popover-more {
+.thread-list-more {
   margin: 4px 8px;
   padding: 4px 10px;
   background: var(--bg-hover);

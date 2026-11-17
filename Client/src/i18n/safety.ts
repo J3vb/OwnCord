@@ -11,7 +11,7 @@ export const safetyText = defineCatalog("safety", {
   "notice.acknowledge": "Acknowledge",
   "notice.acknowledging": "Acknowledging…",
   "notice.ackFailed": "Your acknowledgement wasn't recorded. Try again.",
-  "notice.viewSafety": "View in Privacy & Safety settings",
+  "notice.viewSafety": "View in Privacy & safety settings",
   "toast.warning": "You received a warning from the moderators: {reason}",
   "toast.timeout": "You're timed out until {time}.",
   "toast.acknowledged": "Warning acknowledged.",
@@ -25,6 +25,7 @@ export const safetyText = defineCatalog("safety", {
   },
   "tab.timedOut":
     "You're timed out until {time}. You can't send messages, react or join voice until then.",
+  "tab.standing": "Account standing",
   "tab.history": "Moderation history",
   "tab.historyHint":
     "Warnings, timeouts, removed messages and lifted bans on your account. Moderators, reporters and internal notes are never shown.",

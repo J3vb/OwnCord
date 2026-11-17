@@ -24,6 +24,7 @@ func seedReactedMessage(t *testing.T, svc *MessageService, database *db.DB, emoj
 }
 
 func TestGetReactionUsers_ReturnsReactors(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
 	seedUserRole(t, database, 2, permissions.MemberRoleID)
@@ -42,6 +43,7 @@ func TestGetReactionUsers_ReturnsReactors(t *testing.T) {
 // An emoji nobody used is an empty list, never nil — the handler serialises it
 // straight to JSON and `null` is not a list the client can iterate.
 func TestGetReactionUsers_EmptyIsNonNil(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	msgID := seedReactedMessage(t, svc, database, "👍", 1)
 
@@ -59,6 +61,7 @@ func TestGetReactionUsers_EmptyIsNonNil(t *testing.T) {
 // the channel's history: a reaction pill must not leak who is in a channel the
 // caller cannot see.
 func TestGetReactionUsers_ForbiddenWithoutReadPermission(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	msgID := seedReactedMessage(t, svc, database, "👍", 1)
 
@@ -75,6 +78,7 @@ func TestGetReactionUsers_ForbiddenWithoutReadPermission(t *testing.T) {
 // The channel in the URL is what the permission check ran against, so a message
 // that lives elsewhere must not be answered from that check.
 func TestGetReactionUsers_MessageInAnotherChannelIsNotFound(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	seedChannel(t, database, &db.Channel{ID: 11, Name: "other", Type: "text"})
 	msgID := seedReactedMessage(t, svc, database, "👍", 1)
@@ -86,6 +90,7 @@ func TestGetReactionUsers_MessageInAnotherChannelIsNotFound(t *testing.T) {
 }
 
 func TestGetReactionUsers_RejectsBadInput(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	msgID := seedReactedMessage(t, svc, database, "👍", 1)
 
@@ -117,6 +122,7 @@ func TestGetReactionUsers_RejectsBadInput(t *testing.T) {
 // A DM the caller is not a participant of is reported as not-found (matching
 // requireChannelRead), so its existence stays hidden.
 func TestGetReactionUsers_ForeignDMIsNotFound(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
@@ -148,6 +154,7 @@ func TestGetReactionUsers_ForeignDMIsNotFound(t *testing.T) {
 // stayed forever fetchable by direct URL even though the client no longer
 // renders the message at all.
 func TestGetReactionUsers_DeletedMessageIsNotFound(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	msgID := seedReactedMessage(t, svc, database, "👍", 1)
 
@@ -165,6 +172,7 @@ func TestGetReactionUsers_DeletedMessageIsNotFound(t *testing.T) {
 // shortcode produced an emoji that rendered in messages but was silently
 // refused as a reaction.
 func TestReaction_AcceptsLongestCustomShortcode(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	msgID := mustCreateMessage(t, database, 10, 1, "react to me", nil)
 

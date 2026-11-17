@@ -85,8 +85,12 @@ function appendInline(parent: HTMLElement, text: string): void {
   if (last < text.length) parent.append(text.slice(last));
 }
 
-/** One version's notes as DOM, ready to append. */
-export function renderChangelogBody(body: string): HTMLDivElement {
+/** One version's notes as DOM, ready to append. Its headings are
+ *  h`level` and its sub-headings one level lower, so they nest under the
+ *  heading of the place they are shown in. */
+export function renderChangelogBody(body: string, level: 3 | 4 = 4): HTMLDivElement {
+  const headingTag = level === 3 ? "h3" : "h4";
+  const subheadingTag = level === 3 ? "h4" : "h5";
   const root = createElement("div", { class: "changelog-body" });
   let paragraph: string[] = [];
   let list: HTMLUListElement | null = null;
@@ -107,7 +111,7 @@ export function renderChangelogBody(body: string): HTMLDivElement {
     // A line that is only bold text is a sub-heading ("**Voice and video**").
     const subheading = /^\*\*([^*]+)\*\*$/.exec(text);
     if (subheading?.[1] !== undefined) {
-      root.append(createElement("h5", { class: "changelog-subheading" }, subheading[1]));
+      root.append(createElement(subheadingTag, { class: "changelog-subheading" }, subheading[1]));
       return;
     }
     const p = createElement("p");
@@ -120,7 +124,9 @@ export function renderChangelogBody(body: string): HTMLDivElement {
     if (line.startsWith("### ") || line.startsWith("#### ")) {
       flushParagraph();
       flushList();
-      root.append(createElement("h4", { class: "changelog-heading" }, line.replace(/^#+\s*/, "")));
+      root.append(
+        createElement(headingTag, { class: "changelog-heading" }, line.replace(/^#+\s*/, "")),
+      );
     } else if (/^\s*[-*] /.test(line)) {
       flushParagraph();
       flushItem();

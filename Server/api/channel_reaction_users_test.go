@@ -64,6 +64,7 @@ func decodeReactionUsers(t *testing.T, rr *httptest.ResponseRecorder) reactionUs
 }
 
 func TestReactionUsers_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	router := buildChannelRouter(newChannelTestDB(t))
 	rr := chGet(t, router, reactionUsersPath(1, 1, "👍"), "")
 	expectStatus(t, rr, http.StatusUnauthorized)
@@ -72,6 +73,7 @@ func TestReactionUsers_Unauthenticated(t *testing.T) {
 // The emoji reaches the handler percent-encoded; chi routes on RawPath, so the
 // handler must unescape it or every non-ASCII emoji looks like a different one.
 func TestReactionUsers_PercentEncodedEmojiResolves(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "ru-author", 4)
 	_ = chTestCreateToken(t, database, "ru-bob", 4)
@@ -95,6 +97,7 @@ func TestReactionUsers_PercentEncodedEmojiResolves(t *testing.T) {
 }
 
 func TestReactionUsers_EmojiWithNoReactorsIsEmptyList(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "ru-empty", 4)
 	chID, msgID := seedReactedMessage(t, database, "ru-emptychan", "ru-empty", "👍", "ru-empty")
@@ -112,6 +115,7 @@ func TestReactionUsers_EmojiWithNoReactorsIsEmptyList(t *testing.T) {
 }
 
 func TestReactionUsers_DeniedChannelIsForbidden(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "ru-denied", 4)
 	chID, msgID := seedReactedMessage(t, database, "ru-deniedchan", "ru-denied", "👍", "ru-denied")
@@ -122,6 +126,7 @@ func TestReactionUsers_DeniedChannelIsForbidden(t *testing.T) {
 }
 
 func TestReactionUsers_MessageFromAnotherChannelIsNotFound(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "ru-cross", 4)
 	_, msgID := seedReactedMessage(t, database, "ru-crossA", "ru-cross", "👍", "ru-cross")
@@ -132,6 +137,7 @@ func TestReactionUsers_MessageFromAnotherChannelIsNotFound(t *testing.T) {
 }
 
 func TestReactionUsers_InvalidIDs(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "ru-badid", 4)
 

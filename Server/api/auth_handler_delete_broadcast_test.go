@@ -28,6 +28,7 @@ func (r *recordingAuthBroadcaster) BroadcastMemberBan(userID int64) {
 // broadcast an event. Every other connected client kept the deleted user's
 // pre-deletion username in its member list until it reconnected (v068).
 func TestDeleteAccount_BroadcastsMemberBan(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	broadcaster := &recordingAuthBroadcaster{}
@@ -52,6 +53,7 @@ func TestDeleteAccount_BroadcastsMemberBan(t *testing.T) {
 // A nil broadcaster (the shape every test mount uses) must keep working
 // exactly as before: no event, no panic.
 func TestDeleteAccount_NoBroadcasterOmitted(t *testing.T) {
+	t.Parallel()
 	database := newMigratedAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 

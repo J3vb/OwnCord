@@ -41,6 +41,9 @@ export interface RingControllerOptions {
   /** A new ring began: not a redial of the ring already on screen. The OS
    *  notification and the attention request hang off this, once per ring. */
   readonly onRingStart?: (state: RingState) => void;
+  /** The ring on screen was rung again and its 30s started over, so whatever
+   *  shows it for a set time can start over too. */
+  readonly onRedial?: (state: RingState) => void;
   /** The ring ended with nobody answering: the timeout, or the ringer
    *  hanging up first. An accept, a decline or a newer call is not a miss. */
   readonly onMissed?: (state: RingState) => void;
@@ -112,7 +115,8 @@ export function createRingController(opts: RingControllerOptions): RingControlle
     }, RING_TIMEOUT_MS);
     opts.onRingStateChange(next);
     opts.onChime(true);
-    if (!redial) opts.onRingStart?.(next);
+    if (redial) opts.onRedial?.(next);
+    else opts.onRingStart?.(next);
   }
 
   function accept(): void {
@@ -174,6 +178,10 @@ export interface OutgoingCallOptions {
   /** The caller's ringback: true while `phase === "ringing"`, false the moment
    *  the ring ends for any reason. Never true after `clear`. */
   readonly onRingback?: (playing: boolean) => void;
+  /** The ring ended without a call: declined, unanswered, or the 1:1 callee
+   *  offline. Once per ring, after `onRingback(false)` and `onChange`; never
+   *  for a ring that was answered or that the caller ended. */
+  readonly onUnanswered?: () => void;
   /** Test seam for the 30s timer. */
   readonly setTimer?: (fn: () => void, ms: number) => ReturnType<typeof setTimeout>;
   readonly clearTimer?: (handle: ReturnType<typeof setTimeout>) => void;
@@ -218,15 +226,21 @@ export function createOutgoingCall(opts: OutgoingCallOptions): OutgoingCall {
     opts.onChange(next);
   }
 
+  /** The ring is over without a call. */
+  function end(next: OutgoingCallState): void {
+    set(next);
+    opts.onUnanswered?.();
+  }
+
   function start(channelId: number, calleeIds: readonly number[], offline = false): void {
     stopTimer();
     if (offline) {
-      set({ channelId, phase: "offline", pending: [...calleeIds] });
+      end({ channelId, phase: "offline", pending: [...calleeIds] });
       return;
     }
     timer = setTimer(() => {
       timer = null;
-      if (state?.phase === "ringing") set({ ...state, phase: "no-answer" });
+      if (state?.phase === "ringing") end({ ...state, phase: "no-answer" });
     }, RING_TIMEOUT_MS);
     set({ channelId, phase: "ringing", pending: [...calleeIds] });
   }
@@ -242,7 +256,7 @@ export function createOutgoingCall(opts: OutgoingCallOptions): OutgoingCall {
       return;
     }
     stopTimer();
-    set({ ...state, phase: "declined", pending });
+    end({ ...state, phase: "declined", pending });
   }
 
   function clear(): void {

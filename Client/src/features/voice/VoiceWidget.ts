@@ -7,10 +7,10 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren, setText } from "@lib/dom";
-import { createIcon } from "@lib/icons";
+import { createIcon, swapIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { voiceStore, type VoiceStatus } from "@stores/voice.store";
+import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { uiStore } from "@stores/ui.store";
@@ -23,9 +23,10 @@ import { enhancedNoiseSuppressionEnabled } from "@lib/voice/audioPipeline";
 import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "@lib/voice/livekitSession";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../../i18n/voice";
-import { formatElapsed, headerStatusText, isConnecting } from "./voiceStatusText";
+import { callStatusText, isConnecting, isPhoneCallHold } from "./voiceStatusText";
 import { shareBlockReason } from "./shareGate";
 import { canPublishScreen } from "./native/platform";
+import { createMusicButton, syncMusicButton, watchMusicSupport } from "./musicControl";
 import { createSecuredBadge, type SecuredBadge } from "./securedBadge";
 import type { StreamCard } from "./voiceWidget/streamCard";
 import {
@@ -35,7 +36,9 @@ import {
   type StatsPane,
 } from "./widget/statsPane";
 import { subscribeVoiceWidget } from "./widget/subscriptions";
+import { isShareLive } from "./widget/liveShare";
 import { createListenOnlyUi, type ListenOnlyUi } from "./widget/listenOnly";
+import { formatDuration } from "@lib/text/duration";
 
 export interface VoiceWidgetOptions {
   onDisconnect(): void;
@@ -44,13 +47,6 @@ export interface VoiceWidgetOptions {
   /** Open the call's channel: the DM for a DM call, the call view for a guild
    *  voice channel. Without it the call name is plain text. */
   onOpenCall?(channelId: number): void;
-}
-
-function swapIcon(btn: HTMLButtonElement, name: IconName): void {
-  const existing = btn.querySelector("svg");
-  if (existing?.getAttribute("data-icon") === name) return;
-  existing?.remove();
-  btn.appendChild(createIcon(name, 18));
 }
 
 /** The moderator-imposed state as a sentence, or "" when there is none. */
@@ -72,6 +68,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let controlsRow: HTMLDivElement | null = null;
   let cameraBtn: HTMLButtonElement | null = null;
   let shareBtn: HTMLButtonElement | null = null;
+  /** Share music; stays visible (disabled with its reason) where unsupported. */
+  let musicBtn: HTMLButtonElement | null = null;
   let disconnectBtn: HTMLButtonElement | null = null;
   /** Quick toggle for the Enhanced Noise Suppression pref Settings also sets. */
   let nsBtn: HTMLButtonElement | null = null;
@@ -131,7 +129,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   function updateElapsedTimer(): void {
     const joinedAt = voiceStore.getState().joinedAt;
     if (timerEl === null || joinedAt === null) return;
-    setText(timerEl, formatElapsed(Date.now() - joinedAt));
+    setText(timerEl, formatDuration(Date.now() - joinedAt, true));
   }
 
   function startElapsedTimer(): void {
@@ -156,13 +154,15 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
    *  voiceStatus alone reaches "connected" in that case, so the badge must
    *  never claim "Secured" from voiceStatus in isolation: it renders a
    *  distinct, still-visible not-secured warning instead of just hiding. */
-  function updateStatus(status: VoiceStatus, encryptionDegraded: boolean): void {
+  function updateStatus(voice: VoiceState): void {
+    const status = voice.voiceStatus;
     if (statusLabel !== null) {
-      setText(statusLabel, headerStatusText(status));
+      setText(statusLabel, callStatusText(voice));
       statusLabel.classList.toggle("vw-securing", status === "securing");
       statusLabel.classList.toggle("vw-reconnecting", status === "reconnecting");
+      statusLabel.classList.toggle("vw-paused", isPhoneCallHold(voice));
     }
-    securedBadge?.sync(status === "connected", encryptionDegraded);
+    securedBadge?.sync(status === "connected", voice.encryptionDegraded === true);
   }
 
   /** A live control's tooltip: what a press does next. */
@@ -265,7 +265,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     const voice = voiceStore.getState();
     const channelId = voice.currentChannelId;
-    syncStreamCard(channelId !== null && voice.localScreenshare);
+    syncStreamCard(isShareLive(voice));
 
     if (channelId === null) {
       root.classList.remove("visible");
@@ -278,11 +278,12 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     root.classList.add("visible");
     startStatsPoller();
     startElapsedTimer();
-    updateStatus(voice.voiceStatus, voice.encryptionDegraded === true);
+    updateStatus(voice);
     updateFrozen(uiStore.getState().connectionStatus);
     renderChannelName(channelId);
     renderModStatus(voice.localServerMuted === true, voice.localServerDeafened === true);
     renderMediaButtons(voice.localCamera, voice.localScreenshare);
+    if (musicBtn !== null) syncMusicButton(musicBtn, voice);
     listenOnly?.sync(voice.listenOnly);
   }
 
@@ -405,6 +406,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       options.onScreenshareToggle,
       "vw-share-btn",
     );
+    musicBtn = createMusicButton(disposable.signal);
     disconnectBtn = createControlButton(
       t("widget.control.disconnect"),
       "phone",
@@ -413,9 +415,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     );
     // A phone can watch a share but not start one.
     if (!canPublishScreen()) {
-      appendChildren(controls, cameraBtn, disconnectBtn);
+      appendChildren(controls, cameraBtn, musicBtn, disconnectBtn);
     } else {
-      appendChildren(controls, cameraBtn, shareBtn, disconnectBtn);
+      appendChildren(controls, cameraBtn, shareBtn, musicBtn, disconnectBtn);
     }
     return controls;
   }
@@ -447,6 +449,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     );
 
     render();
+    watchMusicSupport(render, disposable.signal);
     unsubs.push(...subscribeVoiceWidget(render));
     container.appendChild(root);
   }
@@ -468,6 +471,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     cameraBtn = null;
     nsBtn = null;
     shareBtn = null;
+    musicBtn = null;
     disconnectBtn = null;
     streamCardScope?.destroy();
     streamCardScope = null;

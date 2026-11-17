@@ -10,6 +10,7 @@ import {
   setChannelLoadError,
   isWindowDetached,
 } from "../../stores/messages.store";
+import { recoverAfterReattach } from "./historyFetch";
 import { clearReactionUsersCache } from "./reactionUsers";
 import { showToast } from "../../lib/ui/toast";
 import { connectText } from "../../i18n/connect";
@@ -60,7 +61,8 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
       // the window. A reader back in history (a detached window) is refetched
       // around the message at the top of the list, so it stays where it is;
       // with no list showing it, the tail is refetched instead.
-      const anchor = isWindowDetached(activeAfterReady) ? readingAnchor(activeAfterReady) : null;
+      const wasDetached = isWindowDetached(activeAfterReady);
+      const anchor = wasDetached ? readingAnchor(activeAfterReady) : null;
       // Mark the active channel loading BEFORE invalidating: it records the
       // watermark the splice checks the page against, and a channel with no
       // rows shows the in-region spinner instead of reading as a genuinely
@@ -87,6 +89,7 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
                 resp.has_more_after,
                 true,
               );
+              recoverAfterReattach({ getMessages }, activeAfterReady, wasDetached);
             })
           : getMessages(activeAfterReady, { limit: 50 }).then((resp) => {
               if (!stillActive()) return;
@@ -97,6 +100,7 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
                 true,
                 readingAnchor(activeAfterReady),
               );
+              recoverAfterReattach({ getMessages }, activeAfterReady, wasDetached);
             });
       refetch.catch((err: unknown) => {
         log.warn("Failed to reload message history after resync", { error: String(err) });

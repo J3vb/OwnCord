@@ -12,6 +12,7 @@ import (
 // index alone. Falling back to idx_messages_channel reads every row to check
 // its deleted flag, which made the query four times slower on a large channel.
 func TestChannelUnreadCounts_PlanUsesLiveIndex(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	plan := queryPlan(t, database, db.ChannelUnreadCountsSQLForTest, 1, 1, 1, 1)
 	covering := 0
@@ -29,6 +30,7 @@ func TestChannelUnreadCounts_PlanUsesLiveIndex(t *testing.T) {
 // MoveReadPointer's two channel bounds run under the writer on every
 // mark-read, so each must read its index alone, never fetch message rows.
 func TestMoveReadPointer_BoundsPlansUseIndexes(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	for name, tc := range map[string]struct{ sql, index string }{
 		"any":  {db.ChannelMaxAnySQLForTest, "idx_messages_channel "},

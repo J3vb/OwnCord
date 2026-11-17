@@ -5,12 +5,10 @@
 
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
-import { createIcon } from "@lib/icons";
 import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
 import { syncVideoSurface } from "@lib/voice/videoSurface";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { voiceText } from "../../../i18n/voice";
 import type { StreamInfo } from "./streamInfo";
 import type { VoiceModMenuOptions } from "../../channels/sidebar/volumeMenu";
 import type { StreamSample, VideoView } from "../remoteTracks";
@@ -124,6 +122,8 @@ export interface CallState {
   readonly listenOnly: boolean;
   readonly camera?: boolean;
   readonly screenshare?: boolean;
+  /** You are sharing music: the music control reads Stop. */
+  readonly music?: boolean;
   /** The join has not reached the room yet: camera and share are inert. */
   readonly connecting?: boolean;
   /** A moderator muted or deafened you: that control is inert. */
@@ -133,6 +133,9 @@ export interface CallState {
   readonly offline?: "reconnecting" | "disconnected";
   /** Why share is inert (no permission, video limit), when it is. */
   readonly shareBlock?: string;
+  /** A phone call holds the call (the Android app): the mic control is inert
+   *  and the bar says the call is paused. */
+  readonly phoneHold?: boolean;
 }
 
 export interface VideoGridComponent extends MountableComponent {
@@ -215,7 +218,6 @@ export function createVideoGrid(): VideoGridComponent {
     flipCheck: "idle",
     flipCheckGen: 0,
     flipping: false,
-    exitBtn: null,
     callView: false,
     viewBar: null,
     callBar: null,
@@ -227,11 +229,12 @@ export function createVideoGrid(): VideoGridComponent {
     gridListeners: new Disposable(),
     callPop: null,
     callHome: null,
-    popBtn: null,
+    viewBtn: null,
     popRestore: true,
     lastInfo: new Map<number, StreamInfo>(),
     infoModule: null,
     miniRequest: 0,
+    onScreen: false,
   };
   const api = {} as GridApi;
   Object.assign(
@@ -280,27 +283,6 @@ export function createVideoGrid(): VideoGridComponent {
       // (its peer left), focus lands here rather than dropping to <body>.
       tabindex: "-1",
     });
-
-    // An exit control, always reachable while a tile is focused too: the focused
-    // tile's own "Back to grid" nav can be scrolled off, and an empty grid
-    // could otherwise cover the chat with no way back (OC video-grid exit).
-    st.exitBtn = createElement("button", {
-      type: "button",
-      class: "video-grid__exit",
-      "aria-label": voiceText("grid.showChat"),
-      title: voiceText("grid.showChat"),
-      "data-tile-control": "exit-grid",
-    });
-    st.exitBtn.appendChild(createIcon("message-square", 18));
-    st.exitBtn.hidden = true;
-    st.exitBtn.addEventListener("click", () => {
-      // Clearing the grid's own focus keeps it consistent if the host only
-      // hides the grid (rather than tearing it down) and later reopens it.
-      api.setFocusedTile(null);
-      st.callbacks.onExitGrid?.();
-    });
-    st.root.appendChild(st.exitBtn);
-
     container.appendChild(st.root);
     if (st.callView) api.setCallView(true);
     // The size controls give way to the tile menu on a phone, and back.
@@ -364,13 +346,14 @@ export function createVideoGrid(): VideoGridComponent {
       syncVideoSurface(entry.video);
     }
     st.cells.clear();
+    api.syncOnScreen();
     api.forgetTileSizes();
     st.focusedTileId = null;
     st.people = [];
     st.personCells.clear();
     st.callView = false;
     st.viewBar = null;
-    st.popBtn = null;
+    st.viewBtn = null;
     st.callBar = null;
 
     if (st.root !== null) {

@@ -205,7 +205,7 @@ test.describe("account settings feedback and disclosure", () => {
     await pane.locator("#pw-old").fill("wrongold");
     await pane.locator("#pw-new").fill("newpassword123");
     await pane.locator("#pw-confirm").fill("newpassword123");
-    const changeBtn = pane.getByRole("button", { name: "Change Password" });
+    const changeBtn = pane.getByRole("button", { name: "Change password" });
     await changeBtn.focus();
     await page.keyboard.press("Enter");
 
@@ -222,7 +222,7 @@ test.describe("account settings feedback and disclosure", () => {
 
   for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
     for (const highContrast of [false, true]) {
-      test(`${theme}${highContrast ? " + High Contrast" : ""}: the Security card's status text reads at 4.5:1`, async ({
+      test(`${theme}${highContrast ? " + High contrast" : ""}: the Security card's status text reads at 4.5:1`, async ({
         page,
       }) => {
         await page.addInitScript(

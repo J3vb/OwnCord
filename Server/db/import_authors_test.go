@@ -21,6 +21,7 @@ func seedImported(t *testing.T, database *db.DB, ch, owner int64, content, name 
 }
 
 func TestImportedAuthor_HistoryAndPins(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	owner := seedUser(t, database, "importer")
@@ -72,6 +73,7 @@ func TestImportedAuthor_HistoryAndPins(t *testing.T) {
 }
 
 func TestImportedAuthor_NullColourOmitted(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	owner := seedUser(t, database, "importer")
 	ch := seedChannel(t, database, "general")
@@ -83,6 +85,7 @@ func TestImportedAuthor_NullColourOmitted(t *testing.T) {
 }
 
 func TestImportedAuthor_ReplyPreview(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	owner := seedUser(t, database, "importer")
@@ -100,6 +103,7 @@ func TestImportedAuthor_ReplyPreview(t *testing.T) {
 }
 
 func TestImportedAuthor_Search(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	owner := seedUser(t, database, "importer")

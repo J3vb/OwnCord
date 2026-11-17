@@ -26,17 +26,17 @@ describe("keybind catalog", () => {
     }
   });
 
-  it("has the Ctrl + / row in Navigation, after Open Settings", () => {
+  it("has the Ctrl + / row in Navigation, after Open settings", () => {
     const nav = KEYBIND_GROUPS[0]!.rows.map((r) => `${t(r.action)}|${t(r.combo)}`);
-    const settings = nav.indexOf("Open Settings|Ctrl + ,");
+    const settings = nav.indexOf("Open settings|Ctrl + ,");
     expect(settings).toBeGreaterThanOrEqual(0);
-    expect(nav[settings + 1]).toBe("Show Keyboard Shortcuts|Ctrl + /");
+    expect(nav[settings + 1]).toBe("Show keyboard shortcuts|Ctrl + /");
   });
 
   it("keeps the fixed rows the Keybinds tab has always shown", () => {
     const rows = KEYBIND_GROUPS.flatMap((g) => g.rows.map((r) => `${t(r.action)}|${t(r.combo)}`));
-    expect(rows).toContain("Quick Switcher|Ctrl + K");
-    expect(rows).toContain("Toggle Camera|Ctrl + Shift + V");
+    expect(rows).toContain("Quick switcher|Ctrl + K");
+    expect(rows).toContain("Toggle camera|Ctrl + Shift + V");
     expect(rows).toContain("Underline|Ctrl + U");
     expect(rows).toHaveLength(18);
   });

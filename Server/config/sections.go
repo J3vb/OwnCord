@@ -11,6 +11,19 @@ type ModerationConfig struct {
 	ActionRetentionDays int `yaml:"action_retention_days"`
 }
 
+// LinkPreviewsConfig controls the server-side link preview store: the text of a fetched page card in the
+// database and its shrunk thumbnail on disk under <data_dir>/link-previews.
+type LinkPreviewsConfig struct {
+	// Enabled: Fetch links in new messages and keep their previews. false stops fetching only; the thumbnail
+	// sweep still runs so turning it off reclaims disk down to ThumbnailCacheMB.
+	Enabled bool `yaml:"enabled"`
+	// ThumbnailCacheMB caps the thumbnails kept on disk, oldest-used first out. 0 keeps no thumbnails.
+	ThumbnailCacheMB int `yaml:"thumbnail_cache_mb"`
+	// ThumbnailUnusedDays drops a thumbnail nothing has shown for this many days, whatever the cap says.
+	// Link cards no message names are pruned on the same clock, but never within seven days of use.
+	ThumbnailUnusedDays int `yaml:"thumbnail_unused_days"`
+}
+
 // LoggingConfig controls log verbosity; Level gates both stdout and the admin panel's in-memory log view.
 type LoggingConfig struct {
 	// Level: The minimum level logged: "debug" | "info" | "warn" | "error". Override with
@@ -28,19 +41,19 @@ type GIFConfig struct {
 	APIKey string `yaml:"api_key"`
 }
 
-// PushConfig is the owner gate for Web Push subscription storage and dispatch. While Enabled is false (the
+// PushConfig is the owner gate for Web Push device registration and sending. While Enabled is false (the
 // default) every /api/v1/push route answers 503 PUSH_DISABLED after authentication. Turning it off later
 // keeps existing rows and the staleness sweep still runs.
 type PushConfig struct {
-	// Enabled: The owner opt-in for subscription storage; routes are always mounted.
+	// Enabled: The single owner opt-in: devices may register and the server sends to them. Sending opens
+	// outbound HTTPS to each subscription's push service (see docs/architecture/diagnostics.md's egress
+	// table). Routes are always mounted.
 	Enabled bool `yaml:"enabled"`
 	// SubscriptionTTLDays: A subscription whose last_seen_at is older than this is removed by the maintenance
 	// sweep; clients keep a row alive by re-POSTing. Default 90, bounded to [1, 3650] in boundedKeys.
 	SubscriptionTTLDays int `yaml:"subscription_ttl_days"`
-	// DispatchEnabled: A SECOND owner opt-in on top of Enabled, so an operator who enabled storage before
-	// dispatch existed does not acquire dispatch on upgrade. It opens outbound HTTPS to each subscription's
-	// push service (see docs/architecture/diagnostics.md's egress table). Dispatch runs only when both are
-	// true.
+	// DispatchEnabled: Deprecated and ignored; Enabled alone turns sending on. The field stays so a
+	// config file or environment that still names the key loads without an unknown-key warning.
 	DispatchEnabled bool `yaml:"dispatch_enabled"`
 	// Contact: The operator contact a VAPID JWT's "sub" claim names (RFC 8292), sent as "mailto:"+Contact;
 	// empty omits the claim, which some push services refuse.
@@ -264,9 +277,9 @@ type SecurityConfig struct {
 	// about one person per IP, so a shared NAT hits them collectively. 0 or unset = 1.0; clamped to [0.1,
 	// 100].
 	AuthRateLimitMultiplier float64 `yaml:"auth_rate_limit_multiplier"`
-	// ExpensiveAuthConcurrency bounds concurrent bcrypt computations (the admission budget). Login,
-	// registration and recovery-code checks over it queue for up to 10 s; a refused attempt gets 429
-	// AUTH_BUSY, runs no bcrypt and consumes no lockout attempt. 0 or unset = twice the CPU count (min 4);
+	// ExpensiveAuthConcurrency bounds concurrent password-hash computations (the admission budget).
+	// Login, registration and recovery-code checks over it queue for up to 10 s; a refused attempt
+	// gets 429 AUTH_BUSY, runs no hash and consumes no lockout attempt. 0 or unset = twice the CPU count (min 4);
 	// clamped to [1, 4096].
 	ExpensiveAuthConcurrency int `yaml:"expensive_auth_concurrency"`
 }

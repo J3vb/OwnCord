@@ -59,6 +59,8 @@
               "dm_privacy": true,
               "forums": true,
               "game_activity": true,
+              "id_mentions": true,
+              "link_previews": false,
               "listening_activity": true,
               "manage_nicknames": true,
               "message_deduplication": true,
@@ -211,6 +213,7 @@
               }
             ],
             "server_name": "OwnCord Server",
+            "server_time_ms": "<clock:number>",
             "threads": [],
             "voice_states": []
           },
@@ -373,6 +376,8 @@
               "dm_privacy": true,
               "forums": true,
               "game_activity": true,
+              "id_mentions": true,
+              "link_previews": false,
               "listening_activity": true,
               "manage_nicknames": true,
               "message_deduplication": true,
@@ -525,6 +530,7 @@
               }
             ],
             "server_name": "OwnCord Server",
+            "server_time_ms": "<clock:number>",
             "threads": [],
             "voice_states": []
           },

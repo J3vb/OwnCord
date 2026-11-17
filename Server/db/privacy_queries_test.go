@@ -10,6 +10,7 @@ import (
 )
 
 func TestUserPrivacy_DefaultsWithoutRow(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	uid := seedUser(t, database, "no-privacy-row")
 
@@ -24,6 +25,7 @@ func TestUserPrivacy_DefaultsWithoutRow(t *testing.T) {
 }
 
 func TestUserPrivacy_UpsertRoundTripAndReplacesWholeRow(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "privacy-owner")
@@ -49,6 +51,7 @@ func TestUserPrivacy_UpsertRoundTripAndReplacesWholeRow(t *testing.T) {
 }
 
 func TestUserPrivacy_NotInMemberPayloads(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "payload-user")
@@ -70,6 +73,7 @@ func TestUserPrivacy_NotInMemberPayloads(t *testing.T) {
 }
 
 func TestUserPrivacy_CheckConstraintRejectsOutOfRange(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	uid := seedUser(t, database, "check-user")
 	_, err := database.ExecContext(context.Background(),

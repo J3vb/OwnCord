@@ -80,7 +80,7 @@ export function createGridMenus(st: GridState, api: GridApi) {
       api.setView("selfCamera", false);
       const back = isPhoneLayout()
         ? st.callBar?.querySelector<HTMLElement>("[data-call-control='views']")
-        : st.viewBar?.querySelector<HTMLElement>("[data-view-toggle='selfCamera']");
+        : st.viewBtn;
       back?.focus();
     };
     return {

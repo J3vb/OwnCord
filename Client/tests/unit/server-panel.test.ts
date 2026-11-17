@@ -4,7 +4,7 @@ import {
   createServerPanel,
   type ServerPanelOptions,
   type SimpleProfile,
-} from "@pages/connect-page/ServerPanel";
+} from "../../src/features/connection/ServerPanel";
 
 // ---------------------------------------------------------------------------
 // Mocks

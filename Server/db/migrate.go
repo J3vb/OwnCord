@@ -82,7 +82,7 @@ func CheckBackupSchemaAhead(ctx context.Context, path string) ([]string, error) 
 	if err != nil {
 		return nil, fmt.Errorf("CheckBackupSchemaAhead: reading schema_versions: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var versions []string
 	for rows.Next() {
 		var v string
@@ -143,7 +143,7 @@ func recordedSchemaVersions(d *DB) ([]string, error) {
 	if err != nil {
 		return nil, fmt.Errorf("reading schema_versions: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var versions []string
 	for rows.Next() {
 		var v string

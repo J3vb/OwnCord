@@ -34,7 +34,7 @@ export function describeAppProcessSuite(
       expect(ctx.native.relaunches()).toBe(1);
     });
 
-    // "Clear & Restart" shows "Failed" on a rejection.
+    // "Clear & restart" shows "Failed" on a rejection.
     check("rejects when the relaunch fails", async () => {
       ctx.native.failWith(new Error("relaunch failed"));
       await expect(ctx.subject.relaunch()).rejects.toThrow("relaunch failed");

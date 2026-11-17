@@ -223,7 +223,7 @@ func readHeader(ctx context.Context, ex Export) (Header, error) {
 	if err != nil {
 		return Header{}, fmt.Errorf("opening the export: %w", err)
 	}
-	defer rc.Close() //nolint:errcheck
+	defer rc.Close()
 	var h Header
 	_, err = Decode(ctx, rc, Visitor{Header: func(got Header) error { h = got; return errHeaderDone }})
 	if err != nil && !errors.Is(err, errHeaderDone) {
@@ -235,6 +235,10 @@ func readHeader(ctx context.Context, ex Export) (Header, error) {
 // cleanText sanitizes like any other free text, trims it and cuts it to max runes; an empty result becomes
 // fallback.
 func cleanText(s string, maxRunes int, fallback string) string {
+	// Cut the raw bytes first, as service.SanitizeImportedContent does, so sanitizing stays bounded.
+	if len(s) > maxRunes*4 {
+		s = strings.ToValidUTF8(s[:maxRunes*4], "")
+	}
 	s = strings.TrimSpace(service.SanitizeText(s))
 	if r := []rune(s); len(r) > maxRunes {
 		s = strings.TrimSpace(string(r[:maxRunes]))
@@ -252,7 +256,7 @@ type runState struct {
 	account, channelID, jobID int64
 	// discordChannel is the export's channel id: a reply only links when it points into this channel.
 	discordChannel string
-	ids            map[string]int64
+	ids            *knownIDs
 	chunk          []db.ImportMessage
 	chunks         int
 	lastID         int64
@@ -265,7 +269,7 @@ type runState struct {
 }
 
 func (r *Runner) run(ctx, stop context.Context, ex Export, account, channelID, jobID int64, discordChannel string) Result {
-	st := &runState{stop: stop, account: account, channelID: channelID, jobID: jobID, discordChannel: discordChannel, ids: map[string]int64{}}
+	st := &runState{stop: stop, account: account, channelID: channelID, jobID: jobID, discordChannel: discordChannel, ids: newKnownIDs()}
 	err := r.execute(ctx, ex, st)
 	if err == nil {
 		return Result{Status: db.ImportDone, Imported: st.prog.Imported, Skipped: st.prog.Skipped, SkippedAttachments: st.prog.SkippedAttachments}
@@ -301,7 +305,7 @@ func (r *Runner) execute(ctx context.Context, ex Export, st *runState) error {
 	if err != nil {
 		return fmt.Errorf("opening the export: %w", err)
 	}
-	defer rc.Close() //nolint:errcheck
+	defer rc.Close()
 
 	sum, err := Decode(ctx, rc, Visitor{Message: func(m Message) error { return r.addMessage(ctx, ex, st, &m) }})
 	if err != nil {
@@ -418,13 +422,13 @@ func (r *Runner) flush(ctx context.Context, st *runState) error {
 	pr.Imported += int64(len(st.chunk))
 	ids, err := r.cfg.Store.ImportChunk(ctx, db.ImportChunkParams{
 		JobID: st.jobID, ChannelID: st.channelID, AuthorID: st.account,
-		Messages: st.chunk, KnownIDs: st.ids, Progress: pr,
+		Messages: st.chunk, KnownIDs: st.ids.forReplies(st.chunk), Progress: pr,
 	})
 	if err != nil {
 		return err
 	}
 	for k, v := range ids {
-		st.ids[k] = v
+		st.ids.put(k, v)
 		st.lastID = max(st.lastID, v)
 	}
 	st.prog = pr

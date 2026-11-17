@@ -9,6 +9,7 @@ import (
 )
 
 func TestMediaCursor_RoundTrip(t *testing.T) {
+	t.Parallel()
 	c := db.MediaCursor{MessageID: 42, AttachmentID: "3f2a-9B"}
 	got, err := ParseMediaCursor(FormatMediaCursor(c))
 	if err != nil || got != c {
@@ -22,6 +23,7 @@ func TestMediaCursor_RoundTrip(t *testing.T) {
 }
 
 func TestFoldMediaMonths_LocalMonthsNewestFirst(t *testing.T) {
+	t.Parallel()
 	kolkata, err := time.LoadLocation("Asia/Kolkata")
 	if err != nil {
 		t.Skipf("tzdata: %v", err)
@@ -45,6 +47,7 @@ func TestFoldMediaMonths_LocalMonthsNewestFirst(t *testing.T) {
 }
 
 func TestParseMediaMonth_Bounds(t *testing.T) {
+	t.Parallel()
 	start, next, err := parseMediaMonth("2026-12", time.UTC)
 	if err != nil || !start.Equal(time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)) || !next.Equal(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("2026-12 = %v %v %v", start, next, err)

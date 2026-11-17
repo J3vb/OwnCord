@@ -112,8 +112,11 @@
   padding: 2px 8px;
   background: var(--bg-secondary);
 }
+/* The same box as the chat header's search. */
 .member-search-wrap .member-search {
-  padding: 2px 8px;
+  height: 28px;
+  padding: 0 8px;
+  font-size: var(--font-size-xs);
 }
 .sidebar-resize-handle {
   height: 4px;

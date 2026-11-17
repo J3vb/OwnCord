@@ -12,6 +12,7 @@
 import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { idMentionsToNames } from "@lib/text/mentionNames";
 import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { showToast } from "@lib/ui/toast";
 import { channelsStore } from "@stores/channels.store";
@@ -23,6 +24,7 @@ import {
   filterForwardTargets,
   listForwardTargets,
   pruneSelection,
+  targetRowParts,
   toggleForwardTarget,
   type ForwardTarget,
 } from "./forwardTargets";
@@ -48,9 +50,6 @@ export interface ForwardPickerOptions {
 }
 
 const PREVIEW_CHARS = 120;
-
-const iconFor = (t: ForwardTarget): SVGSVGElement =>
-  createIcon(t.kind === "dm" ? "user" : t.kind === "announcement" ? "megaphone" : "hash", 14);
 
 /** The label a result line uses for a target: "#general", "@alex". */
 const labelOf = (t: ForwardTarget): string => `${t.kind === "dm" ? "@" : "#"}${t.name}`;
@@ -164,17 +163,7 @@ export function openForwardPicker(opts: ForwardPickerOptions): void {
         "data-testid": `forward-target-${t.id}`,
       });
       const box = createElement("input", { type: "checkbox", value: String(t.id) });
-      const icon = createElement("span", { class: "quick-switcher__icon" });
-      icon.appendChild(iconFor(t));
-      const parts: (Element | string)[] = [
-        box,
-        icon,
-        createElement("span", { class: "quick-switcher__name" }, t.name),
-      ];
-      if (t.category !== null) {
-        parts.push(createElement("span", { class: "quick-switcher__category" }, t.category));
-      }
-      appendChildren(row, ...parts);
+      appendChildren(row, box, ...targetRowParts(t));
       list.appendChild(row);
     }
     syncSelection();
@@ -291,7 +280,7 @@ export function openForwardPicker(opts: ForwardPickerOptions): void {
     closeBtn,
   );
 
-  const preview = source.content.trim().slice(0, PREVIEW_CHARS);
+  const preview = idMentionsToNames(source.content).trim().slice(0, PREVIEW_CHARS);
   const body = createElement("div", { class: "modal-body" });
   appendChildren(
     body,

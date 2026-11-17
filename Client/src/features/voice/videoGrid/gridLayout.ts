@@ -53,12 +53,19 @@ export function createGridLayout(st: GridState, api: GridApi) {
     }
   }
 
+  /** Your own camera tile, hidden without "Show my camera". */
+  function streamHidden(config: TileConfig | undefined): boolean {
+    return !st.viewOn.selfCamera && isSelfCamera(config);
+  }
+
   /** A tile the call view's toggles hide: avatar tiles without "Show
-   *  non-video participants", your own camera without "Show my camera". */
+   *  non-video participants" (it makes room for video, so it waits while
+   *  there is none on show), your own camera without "Show my camera". */
   function hiddenByView(el: HTMLDivElement, config: TileConfig | undefined): boolean {
     if (!st.callView) return false;
-    if (el.classList.contains("video-cell--avatar")) return !st.viewOn.nonVideo;
-    return !st.viewOn.selfCamera && isSelfCamera(config);
+    if (!el.classList.contains("video-cell--avatar")) return streamHidden(config);
+    if (st.viewOn.nonVideo) return false;
+    return [...st.cells.values()].some((entry) => !streamHidden(entry.config));
   }
 
   /** Mark each tile hidden or shown by the view toggles. A focused tile that
@@ -101,7 +108,8 @@ export function createGridLayout(st: GridState, api: GridApi) {
     // A control the user is on keeps focus while its cell moves.
     keepFocus(allTiles(), () => {
       for (const el of allTiles()) {
-        // The people strip's cells stay put: applyGridSizes seats them.
+        // The people strip's and the cards box's cells stay put:
+        // applyGridSizes seats them.
         if (inPeopleStrip(el)) continue;
         if (el.classList.contains("video-cell--avatar") || el.parentElement !== st.root) {
           beforeChrome(el);
@@ -169,27 +177,25 @@ export function createGridLayout(st: GridState, api: GridApi) {
     }
   }
 
-  /** The grid's own controls, after the tiles: the exit control, the view
-   *  toggles and the call view's control bar. */
+  /** The grid's own controls, after the tiles: the call view's View button
+   *  and control bar. */
   function appendChrome(): void {
     if (st.root === null) return;
-    // In the call view the exit control rides in the view bar.
-    for (const el of [st.viewBar === null ? st.exitBtn : null, st.viewBar, st.callBar]) {
+    for (const el of [st.viewBar, st.callBar]) {
       if (el !== null && el.parentNode !== st.root) st.root.appendChild(el);
     }
-    api.syncViewBar();
   }
 
   function isChrome(node: Node): boolean {
-    return node === st.exitBtn || node === st.viewBar || node === st.callBar;
+    return node === st.viewBar || node === st.callBar;
   }
 
   /** Seat a tile (or layout area) after the tiles and before the grid's own
    *  controls, which stay last in tab order. */
   function beforeChrome(el: HTMLElement): void {
     if (st.root === null) return;
-    // The trailing run of controls (mount puts the exit control first), with
-    // the people strip among them: tiles go before it, in tab order too.
+    // The trailing run of controls, with the people strip among them: tiles
+    // go before it, in tab order too.
     let anchor: Element | null = null;
     for (
       let c = st.root.lastElementChild;

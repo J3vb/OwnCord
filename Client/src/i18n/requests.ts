@@ -37,6 +37,11 @@ export const requestsText = defineCatalog("requests", {
   "dm.empty": "No direct messages yet",
   "dm.emptyStart": "Start one",
   "dm.showProfile": "Show User Profile",
+  "dm.requestPending": "Waiting for {name} to accept your message request.",
+  "dm.requestPendingCalls": "Calls work once they accept.",
+  "dm.requestPendingCallTitle": "{action} ({name} may not have accepted your request yet)",
+  "dm.callNeedsAcceptance": "Calls work once {name} accepts your message request",
+  "dm.callNeedsAcceptanceFallback": "the other person",
   "dm.groupSubtitle": "{count} members: You, {names}",
 
   "profile.label": "User profile",

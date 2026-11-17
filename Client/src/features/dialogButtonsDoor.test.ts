@@ -10,6 +10,16 @@ import { describe, expect, it } from "vitest";
 
 const srcDir = path.resolve(__dirname, "..");
 
+// The connect page's own screens (they moved out of pages/connect-page/ and keep the look).
+const CONNECT_SCREEN_FILES = [
+  "features/connection/IncompatibleNotice.ts",
+  "features/connection/LoginForm.ts",
+  "features/connection/RecoverOverlay.ts",
+  "features/connection/ServerPanel.ts",
+  "features/connection/serverPanelParts.ts",
+  "features/connection/login-form/",
+];
+
 const ALLOWLIST: Readonly<Record<string, string>> = {};
 
 const OPENS_DIALOG = /\bcreateModal\(/;
@@ -18,7 +28,7 @@ const LOGIN_BUTTON = /["'\s]btn-(?:primary|secondary)\b/;
 const dialogFiles = readdirSync(srcDir, { recursive: true, encoding: "utf8" })
   .filter((entry) => entry.endsWith(".ts") && !entry.endsWith(".test.ts"))
   .map((entry) => entry.split(path.sep).join("/"))
-  .filter((file) => !file.startsWith("pages/connect-page/"))
+  .filter((file) => !CONNECT_SCREEN_FILES.some((screen) => file.startsWith(screen)))
   .filter((file) => OPENS_DIALOG.test(readFileSync(path.join(srcDir, file), "utf8")));
 
 const offending = dialogFiles.filter((file) =>

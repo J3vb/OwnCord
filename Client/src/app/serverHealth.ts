@@ -71,6 +71,12 @@ export async function probeServerInfo(
     const info = await api.getServerInfo(host, 3000, owner.signal);
     owner.assertCurrent();
     serverInfoByHost.set(host, info);
+    // Lazy: the icon cache is not needed to start, so it stays out of the startup closure.
+    void import("./serverIconSync")
+      .then((m) => m.refreshServerIcon(api, host, info))
+      .catch((err: unknown) =>
+        log.debug("server icon sync unavailable", { host, error: String(err) }),
+      );
     serverEpoch = info.protocol_epoch;
     compatibility = deriveCompatibility(serverEpoch, PROTOCOL_EPOCH);
   } catch (infoErr) {

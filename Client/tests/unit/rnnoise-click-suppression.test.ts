@@ -1,4 +1,4 @@
-// Enhanced Noise Suppression has to remove a mouse click, the way Discord's
+// Enhanced noise suppression has to remove a mouse click, the way Discord's
 // Krisp does. This drives the real public/rnnoise-worklet.js with the shipped
 // public/rnnoise.wasm over a recorded click and a speech clip, in the
 // 128-sample render quanta the audio thread delivers.

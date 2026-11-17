@@ -9,7 +9,7 @@ test("Android data saver settings and per-image placeholders", async ({ page }, 
   await startFullSession(page, { ready: true });
   await page.getByRole("button", { name: "Open navigation", exact: true }).click();
   await openSettings(page);
-  await switchSettingsTab(page, "Text & Images");
+  await switchSettingsTab(page, "Text & images");
   const select = page.getByRole("combobox", { name: "Data saver" });
   await expect(select).toHaveValue("off");
   await select.selectOption("always");

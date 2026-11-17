@@ -9,6 +9,7 @@ import { statusIndicatorLabel } from "@lib/ui/statusIndicator";
 import type { Channel } from "@stores/channels.store";
 import { memberDisplayName, type Member } from "@stores/members.store";
 import type { VoiceUser } from "@stores/voice.store";
+import { nameCollator } from "../members/memberModel";
 import { playingLine } from "../members/gameActivityLine";
 import { rowActivity } from "../members/listeningLine";
 
@@ -67,7 +68,7 @@ function personOf(member: Member): PersonModel {
 }
 
 const byName = (a: PersonModel, b: PersonModel): number =>
-  a.name.localeCompare(b.name, undefined, { sensitivity: "base" }) || a.id - b.id;
+  nameCollator.compare(a.name, b.name) || a.id - b.id;
 
 function inScope(member: Member, scope: PeopleScope): boolean {
   return member.id !== scope.selfId && !scope.blocked.has(member.id);

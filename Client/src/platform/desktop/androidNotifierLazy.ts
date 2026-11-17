@@ -9,12 +9,13 @@ const load = (): Promise<Notifier> =>
 
 export const androidNotifier: Notifier = {
   readsOsPermission: true,
+  ringsCalls: true,
   permissionGranted: async () => (await load()).permissionGranted(),
   requestPermission: async () => (await load()).requestPermission(),
   show: async (title, body, options) => (await load()).show(title, body, options),
   showMessage: async (title, body, target) => (await load()).showMessage(title, body, target),
-  showCall: async (title, body, target, ringing) =>
-    (await load()).showCall(title, body, target, ringing),
+  showCall: async (title, body, target, ringing, quiet) =>
+    (await load()).showCall(title, body, target, ringing, quiet),
   clearCall: async (channelId) => (await load()).clearCall(channelId),
   clearMessages: async (channelId) => (await load()).clearMessages(channelId),
   onMessageActivated(handler) {

@@ -9,6 +9,7 @@ const store = vi.hoisted(() => ({
   inAfkChannel: false,
   localCamera: false,
   localScreenshare: false,
+  localMusic: false,
 }));
 const log = vi.hoisted(() => ({
   debug: vi.fn(),
@@ -39,9 +40,20 @@ const gate = vi.hoisted(() => ({ gated: false }));
 
 vi.mock("livekit-client", () => ({
   Track: {
-    Source: { Microphone: "microphone", ScreenShare: "screen_share", Camera: "camera" },
+    Source: {
+      Microphone: "microphone",
+      ScreenShare: "screen_share",
+      Camera: "camera",
+      ScreenShareAudio: "screen_share_audio",
+    },
     sourceToProto: (source: string) =>
-      source === "screen_share" ? 3 : source === "camera" ? 1 : 2,
+      source === "screen_share"
+        ? 3
+        : source === "camera"
+          ? 1
+          : source === "screen_share_audio"
+            ? 4
+            : 2,
   },
 }));
 vi.mock("../../stores/voice.store", () => ({
@@ -210,6 +222,7 @@ function setup(
     configuredAudioOptions: vi.fn((): { audioPreset: { maxBitrate: number } } | undefined => ({
       audioPreset: { maxBitrate: 64000 },
     })),
+    stopMusic: vi.fn(),
   };
   const media = new MediaControl(host as unknown as MediaControlHost);
   return {
@@ -237,6 +250,7 @@ beforeEach(() => {
     inAfkChannel: false,
     localCamera: false,
     localScreenshare: false,
+    localMusic: false,
   });
   gate.gated = false;
   inPlaceSource.value = null;
@@ -1083,6 +1097,22 @@ describe("session wiring", () => {
     media.dropDeniedVideo(room);
     expect(disableCamera).not.toHaveBeenCalled();
     expect(disableScreenshare).not.toHaveBeenCalled();
+  });
+
+  it("stops a music share the grant no longer allows, and keeps one it allows", () => {
+    store.localMusic = true;
+    const denied = fakeRoom({ canPublish: true, canPublishSources: [1, 2, 3] });
+    const a = setup(denied);
+    a.media.dropDeniedVideo(denied);
+    expect(a.host.stopMusic).toHaveBeenCalledTimes(1);
+    const allowed = fakeRoom({ canPublish: true, canPublishSources: [4] });
+    const b = setup(allowed);
+    b.media.dropDeniedVideo(allowed);
+    expect(b.host.stopMusic).not.toHaveBeenCalled();
+    store.localMusic = false;
+    const c = setup(denied);
+    c.media.dropDeniedVideo(denied);
+    expect(c.host.stopMusic).not.toHaveBeenCalled();
   });
 
   it("only stops what is on", () => {

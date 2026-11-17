@@ -78,7 +78,7 @@ test.describe("Connect Page", () => {
     await expect(toggleLink).toHaveText(/Register/);
 
     await toggleLink.click();
-    await expect(toggleLink).toHaveText(/Login/);
+    await expect(toggleLink).toHaveText(/Sign in/);
 
     const inviteInput = page.locator("#invite");
     await expect(inviteInput).toBeVisible();
@@ -88,12 +88,12 @@ test.describe("Connect Page", () => {
 
     await toggleLink.click();
     await expect(toggleLink).toHaveText(/Register/);
-    await expect(submitBtnText).toHaveText("Login");
+    await expect(submitBtnText).toHaveText("Sign in");
   });
 
   test("recover-account link spans the form and stays centred", async ({ page }) => {
     // A block <button> shrinks to its text unlike the <a> it replaced, which
-    // left the link left-aligned under Login.
+    // left the link left-aligned under Sign in.
     const link = page.locator("[data-testid='recover-account-link']");
     const submit = page.locator("button.btn-primary[type='submit']");
     const [linkBox, submitBox] = [await link.boundingBox(), await submit.boundingBox()];
@@ -141,7 +141,7 @@ test.describe("Connect Page", () => {
     // attached, which is true whenever the element exists.
     await expect(submitBtn).toHaveClass(/loading/, { timeout: 3_000 });
     await expect(submitBtn).toBeDisabled();
-    await expect(submitBtn.locator(".btn-text")).toHaveText(/Logging in/);
+    await expect(submitBtn.locator(".btn-text")).toHaveText(/Signing in/);
     await expect(page.locator(".status-bar")).toHaveClass(/visible/);
   });
 
@@ -157,16 +157,17 @@ test.describe("Connect Page", () => {
     await expect(header.locator("h2")).toHaveText("Servers");
   });
 
-  test("form logo shows OwnCord branding", async ({ page }) => {
-    const logo = page.locator(".form-logo");
-    await expect(logo).toBeVisible();
+  test("shows the OwnCord logo and name once, in the server panel", async ({ page }) => {
+    const branding = page.locator(".server-panel .server-branding");
+    await expect(branding.locator("svg.oc-logo")).toBeVisible();
+    await expect(branding.locator(".brand-name")).toHaveText("OwnCord");
 
-    // The logo contains an SVG with the "OC" text and an h1 with "OwnCord"
-    const logoSvg = logo.locator("svg.oc-logo");
-    await expect(logoSvg).toBeVisible();
-
-    const logoTitle = logo.locator("h1");
-    await expect(logoTitle).toHaveText("OwnCord");
+    // The form keeps its subtitle but not a second logo and name.
+    const formLogo = page.locator(".form-logo");
+    await expect(formLogo.locator("p")).toBeVisible();
+    await expect(formLogo.locator("svg.oc-logo")).toBeHidden();
+    await expect(formLogo.locator("h1")).toBeHidden();
+    await expect(page.locator("svg.oc-logo:visible")).toHaveCount(1);
   });
 
   test("status bar exists at bottom of form", async ({ page }) => {

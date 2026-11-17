@@ -17,7 +17,7 @@ import { modRow } from "./support/moderationFixtures";
 // ---------------------------------------------------------------------------
 // B9-12: a report's review controls, internal notes and history against the
 // owner's Q1 checks — keyboard, names, targets, contrast in every theme and
-// High Contrast, motion, and reflow at 940x500 with 20 px Large Font.
+// High contrast, motion, and reflow at 940x500 with 20 px Large font.
 //
 // The server is mocked with one unassigned report and one assigned to the
 // signed-in moderator (testuser, id 1), with a note, events and a moderator
@@ -235,7 +235,7 @@ test.describe("moderation review accessibility", () => {
     test(c.title, c.run);
   }
 
-  test.describe("reflow at the 940x500 minimum window with 20 px Large Font", () => {
+  test.describe("reflow at the 940x500 minimum window with 20 px Large font", () => {
     test.use({ viewport: { width: 940, height: 500 } });
 
     test("every control and line is reachable and nothing scrolls sideways", async ({

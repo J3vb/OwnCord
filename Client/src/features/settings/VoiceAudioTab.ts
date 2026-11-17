@@ -6,6 +6,7 @@ import { createElement } from "@lib/dom";
 import { isAndroidApp, isLinuxDesktop } from "../voice/native/platform";
 import { settingsText as t } from "../../i18n/settings";
 import { inputMode } from "@lib/ui/inputMode";
+import { buildSettingsSection } from "./settingsSection";
 import { mountMicControls } from "./voice-audio/voiceMicControls";
 import { mountMicTest } from "./voice-audio/voiceMicTest";
 import { mountOutputAndVideo } from "./voice-audio/voiceOutputVideo";
@@ -147,16 +148,16 @@ function buildVoiceAudioTabInner(
 
   // Five cards: when you transmit, what you speak into, what you hear, what
   // you show, and how your voice is processed.
+  const heads = new Map<HTMLElement, HTMLElement>();
   sc.card = (title: string): HTMLElement => {
-    const el = createElement("section", { class: "settings-card" });
-    const head = createElement("div", { class: "settings-card-head" });
-    head.appendChild(createElement("h3", {}, title));
-    el.appendChild(head);
+    const { el, head, card } = buildSettingsSection({ label: title });
     sc.section.appendChild(el);
-    return el;
+    heads.set(card, head);
+    return card;
   };
   sc.inputModeCard = sc.card(t("voiceAudio.card.inputMode"));
   sc.micCard = sc.card(t("voiceAudio.card.microphone"));
+  sc.micHead = heads.get(sc.micCard)!;
   sc.speakersCard = sc.card(t("voiceAudio.card.speakers"));
   sc.cameraCard = sc.card(
     t(sc.android ? "voiceAudio.card.camera.android" : "voiceAudio.card.camera"),

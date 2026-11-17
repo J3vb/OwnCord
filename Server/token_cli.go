@@ -35,7 +35,18 @@ func runTokenCLI(args []string) int {
 		return 1
 	}
 	defer database.Close() //nolint:errcheck
-	// Idempotent: ensure the api_tokens table exists even if the server never started on this database.
+	// PendingMigrations is empty for a brand-new database and for one at head. Migrating here would
+	// skip the server's pre-migration backup and could move the schema ahead of a running server, so
+	// only a brand-new database is migrated (to create api_tokens before the server's first start).
+	pending, err := db.PendingMigrations(database)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: check migrations: %v\n", err)
+		return 1
+	}
+	if len(pending) > 0 {
+		fmt.Fprintf(os.Stderr, "error: the database has %d pending migration(s); start the server once so it can back up and migrate the database, then run this command again\n", len(pending))
+		return 1
+	}
 	if err := db.Migrate(database); err != nil {
 		fmt.Fprintf(os.Stderr, "error: migrate: %v\n", err)
 		return 1

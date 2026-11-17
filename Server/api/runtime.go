@@ -6,6 +6,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/admin"
 	"github.com/J3vb/OwnCord/Server/auth"
+	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/lkstats"
 	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -43,7 +44,10 @@ type Runtime struct {
 	// The one upload file store, shared by routes, the maintenance sweep and erasure replay. Nil when it
 	// could not be opened; the upload, avatar and emoji routes are then not mounted.
 	Storage *storage.Storage
-	Updater *updater.Updater
+	// The one link preview store, shared with history and the maintenance sweep. Nil when it could not be
+	// opened; the thumbnail route is then not mounted.
+	LinkPreviews *linkpreview.Store
+	Updater      *updater.Updater
 	// The browser client bundle served when server.browser_client_enabled is on; nil uses the embedded one,
 	// tests pass an fstest.MapFS.
 	WebClient fs.FS

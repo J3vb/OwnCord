@@ -11,6 +11,7 @@ import (
 // ─── UpdateUserProfile tests ─────────────────────────────────────────────────
 
 func TestUpdateUserProfile_UsernameAndAvatar(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	id := mustCreateUser(t, database, "profileuser", "hash", 4)
 
@@ -27,6 +28,7 @@ func TestUpdateUserProfile_UsernameAndAvatar(t *testing.T) {
 }
 
 func TestUpdateUserProfile_UsernameOnly(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	id, _ := database.CreateUser(context.Background(), "keepavatar", "hash", 4)
 
@@ -42,6 +44,7 @@ func TestUpdateUserProfile_UsernameOnly(t *testing.T) {
 }
 
 func TestUpdateUserProfile_DuplicateUsername(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	database.CreateUser(context.Background(), "existing", "hash", 4)
 	id2, _ := database.CreateUser(context.Background(), "changeme", "hash", 4)
@@ -53,6 +56,7 @@ func TestUpdateUserProfile_DuplicateUsername(t *testing.T) {
 }
 
 func TestUpdateUserProfile_NonExistentUser(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	err := database.UpdateUserProfile(context.Background(), 99999, "ghost", nil, nil, nil, nil, nil)
 	if err == nil {
@@ -63,6 +67,7 @@ func TestUpdateUserProfile_NonExistentUser(t *testing.T) {
 // ─── UpdateUserPassword tests ────────────────────────────────────────────────
 
 func TestUpdateUserPassword_Success(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	id, _ := database.CreateUser(context.Background(), "pwuser", "oldhash", 4)
 
@@ -77,6 +82,7 @@ func TestUpdateUserPassword_Success(t *testing.T) {
 // ─── ListUserSessions tests ─────────────────────────────────────────────────
 
 func TestListUserSessions_ReturnsSessions(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "sessuser", "hash", 4)
 
@@ -91,6 +97,7 @@ func TestListUserSessions_ReturnsSessions(t *testing.T) {
 }
 
 func TestListUserSessions_EmptyArray(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "nosess", "hash", 4)
 
@@ -105,6 +112,7 @@ func TestListUserSessions_EmptyArray(t *testing.T) {
 }
 
 func TestListUserSessions_DoesNotReturnOtherUsers(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	uid1, _ := database.CreateUser(context.Background(), "user1", "hash", 4)
 	uid2, _ := database.CreateUser(context.Background(), "user2", "hash", 4)
@@ -121,6 +129,7 @@ func TestListUserSessions_DoesNotReturnOtherUsers(t *testing.T) {
 // ─── SignOutEverywhere tests (B4-7, sign-out-everywhere) ─────────────────────
 
 func TestSignOutEverywhere_RevokesEveryOneOfTheUsersOnly(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice, _ := database.CreateUser(ctx, "alice-all", "hash", 4)
@@ -163,6 +172,7 @@ func TestSignOutEverywhere_RevokesEveryOneOfTheUsersOnly(t *testing.T) {
 // A failure deleting the sessions leaves the API tokens live too: the two
 // revocations commit together or not at all.
 func TestSignOutEverywhere_RollsBackAsAWhole(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "unlucky-all", "hash", 4)
@@ -190,6 +200,7 @@ func TestSignOutEverywhere_RollsBackAsAWhole(t *testing.T) {
 // ─── DeleteSessionByID tests ─────────────────────────────────────────────────
 
 func TestDeleteSessionByID_Success(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "delsess", "hash", 4)
 	sessID, _ := database.CreateSession(context.Background(), uid, "deltok", "Chrome", "1.2.3.4")
@@ -205,6 +216,7 @@ func TestDeleteSessionByID_Success(t *testing.T) {
 }
 
 func TestDeleteSessionByID_WrongOwner(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	uid1, _ := database.CreateUser(context.Background(), "owner1", "hash", 4)
 	uid2, _ := database.CreateUser(context.Background(), "owner2", "hash", 4)
@@ -217,6 +229,7 @@ func TestDeleteSessionByID_WrongOwner(t *testing.T) {
 }
 
 func TestDeleteSessionByID_NotFound(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "delnf", "hash", 4)
 
@@ -230,6 +243,7 @@ func TestDeleteSessionByID_NotFound(t *testing.T) {
 // unseen new login until another device lists sessions, and the device that
 // signed in never acknowledges itself.
 func TestMarkSessionsSeen_AcknowledgesEveryLoginButTheCallers(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	ctx := context.Background()
 	uid := mustCreateUser(t, database, "seenuser", "hash", 4)
@@ -309,6 +323,7 @@ func TestMarkSessionsSeen_AcknowledgesEveryLoginButTheCallers(t *testing.T) {
 // the whole write, so the key is not published either; a clean write stores
 // both.
 func TestUpdateUserProfileAndIdentityKey_AllOrNothing(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "pk-alice")
@@ -331,5 +346,37 @@ func TestUpdateUserProfileAndIdentityKey_AllOrNothing(t *testing.T) {
 
 	if err := database.UpdateUserProfileAndIdentityKey(ctx, 999999, "ghost", nil, nil, nil, nil, nil, "k"); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("missing user err = %v, want ErrNotFound", err)
+	}
+}
+
+// ─── UpgradeUserPasswordHash tests ───────────────────────────────────────────
+
+func TestUpgradeUserPasswordHash_SwapsOnlyTheCheckedHash(t *testing.T) {
+	ctx := context.Background()
+	database := newSchemaTestDB(t, testSchema)
+	id, _ := database.CreateUser(ctx, "upgradeuser", "oldhash", 4)
+
+	ok, err := database.UpgradeUserPasswordHash(ctx, id, "stalehash", "newhash")
+	mustDo(t, "UpgradeUserPasswordHash stale", err)
+	if ok {
+		t.Fatal("upgrade from a hash that is no longer stored reported success")
+	}
+	if user, _ := database.GetUserByID(ctx, id); user.PasswordHash != "oldhash" {
+		t.Fatalf("PasswordHash = %q after a stale upgrade, want it unchanged", user.PasswordHash)
+	}
+
+	ok, err = database.UpgradeUserPasswordHash(ctx, id, "oldhash", "newhash")
+	mustDo(t, "UpgradeUserPasswordHash", err)
+	if !ok {
+		t.Fatal("upgrade from the stored hash reported no change")
+	}
+	if user, _ := database.GetUserByID(ctx, id); user.PasswordHash != "newhash" {
+		t.Fatalf("PasswordHash = %q, want %q", user.PasswordHash, "newhash")
+	}
+
+	ok, err = database.UpgradeUserPasswordHash(ctx, id+1000, "oldhash", "x")
+	mustDo(t, "UpgradeUserPasswordHash missing user", err)
+	if ok {
+		t.Fatal("upgrade of a missing user reported success")
 	}
 }

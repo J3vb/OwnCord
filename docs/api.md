@@ -36,7 +36,7 @@ Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are r
 
 <!-- gendocs:routes:start -->
 
-Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 263 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
+Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts. 268 routes, from the `otel,wazero` build with every optional family enabled (uploads, voice, the GIF proxy, the browser client portal, and telemetry with the Prometheus exporter, which is what mounts `/metrics`).
 
 | Method  | Path                                                                 |
 | ------- | -------------------------------------------------------------------- |
@@ -107,6 +107,8 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | PATCH   | `/admin/api/roles/reorder`                                           |
 | DELETE  | `/admin/api/roles/{id}`                                              |
 | PATCH   | `/admin/api/roles/{id}`                                              |
+| DELETE  | `/admin/api/server-icon`                                             |
+| PUT     | `/admin/api/server-icon`                                             |
 | GET     | `/admin/api/settings`                                                |
 | PATCH   | `/admin/api/settings`                                                |
 | POST    | `/admin/api/setup`                                                   |
@@ -204,8 +206,10 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | GET     | `/api/v1/info`                                                       |
 | GET     | `/api/v1/invites/`                                                   |
 | POST    | `/api/v1/invites/`                                                   |
+| DELETE  | `/api/v1/invites/id/{id}`                                            |
 | DELETE  | `/api/v1/invites/{code}`                                             |
 | GET     | `/api/v1/invites/{code}/redemptions`                                 |
+| GET     | `/api/v1/link-previews/images/{hash}`                                |
 | GET     | `/api/v1/livekit/health`                                             |
 | POST    | `/api/v1/livekit/webhook`                                            |
 | GET     | `/api/v1/metrics`                                                    |
@@ -246,6 +250,7 @@ Generated from the mounted router by `cd Server && go run -tags otel,wazero ./cm
 | POST    | `/api/v1/reports/`                                                   |
 | GET     | `/api/v1/reports/mine`                                               |
 | GET     | `/api/v1/search`                                                     |
+| GET     | `/api/v1/server-icon`                                                |
 | GET     | `/api/v1/server-info`                                                |
 | GET     | `/api/v1/stickers/`                                                  |
 | POST    | `/api/v1/stickers/`                                                  |
@@ -327,41 +332,43 @@ Every code a reply can carry is listed in `error_codes.rest` of
 list as `RestErrorCode` in `Client/src/lib/protocolTypes.ts`. A code is never
 renamed once shipped, because clients compare it. The common ones:
 
-| Code                            | HTTP Status | When It Occurs                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| ------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `UNAUTHORIZED`                  | 401         | Missing/invalid/expired session token                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `INVALID_CREDENTIALS`           | 401         | Login/register with bad username/password/invite (generic to prevent enumeration)                                                                                                                                                                                                                                                                                                                                                                                          |
-| `FORBIDDEN`                     | 403         | Insufficient permissions, banned account, or admin IP restriction                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `TIMED_OUT`                     | 403         | The caller has an active moderator timeout and the action is one it refuses (B5-9) — see `POST /api/v1/moderation/users/{id}/timeout` for the full list                                                                                                                                                                                                                                                                                                                    |
-| `TRANSFER_TIMED_OUT`            | 408         | The upload sent no byte for 30 s or ran past its transfer lifetime (`upload.transfer_lifetime_seconds` in server-info); nothing was stored                                                                                                                                                                                                                                                                                                                                 |
-| `NOT_FOUND`                     | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                                                                                                                                                                                                                                          |
-| `RATE_LIMITED`                  | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                                                                                                                                                                                                                                                    |
-| `AUTH_BUSY`                     | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                                                                                                                                                                                                                                                     |
-| `LOGIN_SESSION_REQUIRED`        | 403         | An account-security route (password, two-factor, recovery codes or kit, sessions, account deletion, publishing a device key) was called with an API token; sign in and use the login session                                                                                                                                                                                                                                                                               |
-| `INVALID_INPUT` / `BAD_REQUEST` | 400         | Missing required fields, invalid query params, a non-positive or non-numeric id in a path (emoji and sticker image routes answer 404 instead), or a file over the upload size limit. A JSON body that does not decode (an empty one included where the body is required) is always `400 INVALID_INPUT` "malformed request body" on the `/api/v1` routes and `400 BAD_REQUEST` "malformed request body" under `/admin/api` and `/api/v1/moderation/members` and `/channels` |
-| `PAYLOAD_TOO_LARGE`             | 413         | A JSON body past its route's size cap (every route that reads JSON, `/admin/api` included), or an upload body padded past its cap, the plugin-install upload included                                                                                                                                                                                                                                                                                                      |
-| `UNSUPPORTED_MEDIA_TYPE`        | 415         | A plugin upload whose file part is labelled as something other than a `.zip`                                                                                                                                                                                                                                                                                                                                                                                               |
-| `CONFLICT`                      | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                                                                                                                                                                                                                                                     |
-| `DUPLICATE_REPORT`              | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                                                                                                                                                                                                                                                       |
-| `ALREADY_DELETED`               | 409         | The target of a removal was already soft-deleted, e.g. the author deleted the reported message first (B9-14)                                                                                                                                                                                                                                                                                                                                                               |
-| `ALREADY_APPEALED`              | 409         | An appeal against this moderation action already exists, in any state — decided appeals can never be re-appealed (B5-10)                                                                                                                                                                                                                                                                                                                                                   |
-| `SELF_REVIEW`                   | 403         | A moderator acting on their own filed report, deciding/assigning the appeal of an action they themselves took where another eligible moderator exists, or being that appeal's own appellant (B5-8/B5-10)                                                                                                                                                                                                                                                                   |
-| `REVERSAL_FAILED`               | 409         | Overturning an appeal hit a genuine error applying its ledger reversal — nothing committed, including the decision itself (B5-10)                                                                                                                                                                                                                                                                                                                                          |
-| `INTERNAL_ERROR`                | 500         | Internal server error                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-| `STORAGE_ERROR`                 | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `BAD_GATEWAY`                   | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                                                                                                                                                                                                                                                       |
-| `GIF_DISABLED`                  | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `GIF_FAVORITES_FULL`            | 409         | You have reached the favorite GIF limit (250)                                                                                                                                                                                                                                                                                                                                                                                                                              |
-| `PUSH_DISABLED`                 | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                                                                                                                                                                                                                                           |
-| `PLUGINS_DISABLED`              | 503         | A plugin install, enable, disable or uninstall on a server whose plugin runtime is off                                                                                                                                                                                                                                                                                                                                                                                     |
-| `SERVICE_UNAVAILABLE`           | 503         | The request ran past the server's 15 s request deadline and failed (`Retry-After: 2`; see Request deadline below), or the auth store was unavailable while resolving a token                                                                                                                                                                                                                                                                                               |
-| `UPDATE_CHECK_FAILED`           | 502         | The release lookup or its signature fetch failed (client-update route and admin update check)                                                                                                                                                                                                                                                                                                                                                                              |
-| `NSFW_ACKNOWLEDGEMENT_REQUIRED` | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                                                                                                                                                                                                                                                       |
-| `NOT_NSFW`                      | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                                                                                                                                                                                                                                                         |
-| `CHANNEL_NAME_TAKEN`            | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                                                                                                                                                                                                                                                      |
-| `CATEGORY_NAME_TAKEN`           | 409         | Category create or rename onto a name another category already has, ignoring case                                                                                                                                                                                                                                                                                                                                                                                          |
-| `CATEGORY_LIST_STALE`           | 409         | `PUT .../categories/order` with an id set that is not exactly the current set of categories; nothing is written                                                                                                                                                                                                                                                                                                                                                            |
-| `PERMISSIONS_CHANGED`           | 409         | A channel sync found override rows it had not checked (they changed under it); nothing is written, retry                                                                                                                                                                                                                                                                                                                                                                   |
+| Code                             | HTTP Status | When It Occurs                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| -------------------------------- | ----------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `UNAUTHORIZED`                   | 401         | Missing/invalid/expired session token                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `INVALID_CREDENTIALS`            | 401         | Login/register with bad username/password/invite (generic to prevent enumeration)                                                                                                                                                                                                                                                                                                                                                                                          |
+| `FORBIDDEN`                      | 403         | Insufficient permissions, banned account, or admin IP restriction                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `TIMED_OUT`                      | 403         | The caller has an active moderator timeout and the action is one it refuses (B5-9) — see `POST /api/v1/moderation/users/{id}/timeout` for the full list                                                                                                                                                                                                                                                                                                                    |
+| `TRANSFER_TIMED_OUT`             | 408         | The upload sent no byte for 30 s or ran past its transfer lifetime (`upload.transfer_lifetime_seconds` in server-info); nothing was stored                                                                                                                                                                                                                                                                                                                                 |
+| `NOT_FOUND`                      | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                                                                                                                                                                                                                                          |
+| `RATE_LIMITED`                   | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                                                                                                                                                                                                                                                    |
+| `AUTH_BUSY`                      | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                                                                                                                                                                                                                                                     |
+| `LOGIN_SESSION_REQUIRED`         | 403         | An account-security route (password, two-factor, recovery codes or kit, sessions, account deletion, publishing a device key) was called with an API token; sign in and use the login session                                                                                                                                                                                                                                                                               |
+| `INVALID_INPUT` / `BAD_REQUEST`  | 400         | Missing required fields, invalid query params, a non-positive or non-numeric id in a path (emoji and sticker image routes answer 404 instead), or a file over the upload size limit. A JSON body that does not decode (an empty one included where the body is required) is always `400 INVALID_INPUT` "malformed request body" on the `/api/v1` routes and `400 BAD_REQUEST` "malformed request body" under `/admin/api` and `/api/v1/moderation/members` and `/channels` |
+| `PAYLOAD_TOO_LARGE`              | 413         | A JSON body past its route's size cap (every route that reads JSON, `/admin/api` included), or an upload body padded past its cap, the plugin-install upload included                                                                                                                                                                                                                                                                                                      |
+| `UNSUPPORTED_MEDIA_TYPE`         | 415         | A plugin upload whose file part is labelled as something other than a `.zip`                                                                                                                                                                                                                                                                                                                                                                                               |
+| `CONFLICT`                       | 409         | Duplicate username on register, or server already up-to-date on update                                                                                                                                                                                                                                                                                                                                                                                                     |
+| `DUPLICATE_REPORT`               | 409         | The reporter already has an open or assigned report against this exact target (B5-8)                                                                                                                                                                                                                                                                                                                                                                                       |
+| `ALREADY_DELETED`                | 409         | The target of a removal was already soft-deleted, e.g. the author deleted the reported message first (B9-14)                                                                                                                                                                                                                                                                                                                                                               |
+| `ALREADY_APPEALED`               | 409         | An appeal against this moderation action already exists, in any state — decided appeals can never be re-appealed (B5-10)                                                                                                                                                                                                                                                                                                                                                   |
+| `SELF_REVIEW`                    | 403         | A moderator acting on their own filed report, deciding/assigning the appeal of an action they themselves took where another eligible moderator exists, or being that appeal's own appellant (B5-8/B5-10)                                                                                                                                                                                                                                                                   |
+| `REVERSAL_FAILED`                | 409         | Overturning an appeal hit a genuine error applying its ledger reversal — nothing committed, including the decision itself (B5-10)                                                                                                                                                                                                                                                                                                                                          |
+| `INTERNAL_ERROR`                 | 500         | Internal server error                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
+| `STORAGE_ERROR`                  | 507         | Upload could not be persisted (storage backend write failure)                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `BAD_GATEWAY`                    | 502         | Upstream failure (GitHub API, LiveKit, GIF provider, asset download)                                                                                                                                                                                                                                                                                                                                                                                                       |
+| `GIF_DISABLED`                   | 503         | GIF proxy is not configured on this server (no `gif.api_key`)                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `GIF_FAVORITES_FULL`             | 409         | You have reached the favorite GIF limit (250)                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| `PUSH_DISABLED`                  | 503         | Web Push is not enabled on this server (`push.enabled` is false)                                                                                                                                                                                                                                                                                                                                                                                                           |
+| `PUSH_SERVER_NOT_PUBLIC`         | 400         | The push server in a subscription is on a private, loopback or otherwise non-public address (see POST /api/v1/push/subscriptions)                                                                                                                                                                                                                                                                                                                                          |
+| `PUSH_SERVER_PORT_NOT_SUPPORTED` | 400         | The push server in a subscription names a port other than 443 (see POST /api/v1/push/subscriptions)                                                                                                                                                                                                                                                                                                                                                                        |
+| `PLUGINS_DISABLED`               | 503         | A plugin install, enable, disable or uninstall on a server whose plugin runtime is off                                                                                                                                                                                                                                                                                                                                                                                     |
+| `SERVICE_UNAVAILABLE`            | 503         | The request ran past the server's 15 s request deadline and failed (`Retry-After: 2`; see Request deadline below), or the auth store was unavailable while resolving a token                                                                                                                                                                                                                                                                                               |
+| `UPDATE_CHECK_FAILED`            | 502         | The release lookup or its signature fetch failed (client-update route and admin update check)                                                                                                                                                                                                                                                                                                                                                                              |
+| `NSFW_ACKNOWLEDGEMENT_REQUIRED`  | 403         | Content from a labelled channel requested before the caller acknowledged it (history, around, pins, reaction users, search, attachment bytes — B5-7)                                                                                                                                                                                                                                                                                                                       |
+| `NOT_NSFW`                       | 409         | `PUT /api/v1/channels/{id}/nsfw-acknowledgement` on a channel that is not labelled                                                                                                                                                                                                                                                                                                                                                                                         |
+| `CHANNEL_NAME_TAKEN`             | 409         | Admin channel create or rename onto a name the same type already has in that category                                                                                                                                                                                                                                                                                                                                                                                      |
+| `CATEGORY_NAME_TAKEN`            | 409         | Category create or rename onto a name another category already has, ignoring case                                                                                                                                                                                                                                                                                                                                                                                          |
+| `CATEGORY_LIST_STALE`            | 409         | `PUT .../categories/order` with an id set that is not exactly the current set of categories; nothing is written                                                                                                                                                                                                                                                                                                                                                            |
+| `PERMISSIONS_CHANGED`            | 409         | A channel sync found override rows it had not checked (they changed under it); nothing is written, retry                                                                                                                                                                                                                                                                                                                                                                   |
 
 ### Request deadline
 
@@ -577,10 +584,16 @@ If the account has TOTP enabled:
 | ------ | ---------------- | ---------------------------------------------------------------------------------------------------------------------- |
 | 400    | `INVALID_INPUT`  | Missing username or password                                                                                           |
 | 401    | `UNAUTHORIZED`   | Wrong username or password                                                                                             |
-| 403    | `FORBIDDEN`      | Account is banned/suspended                                                                                            |
+| 403    | `FORBIDDEN`      | Account is banned/suspended; the body also carries `appeal_contact` when the owner set one (see below)                 |
 | 429    | `RATE_LIMITED`   | IP locked out after 10 consecutive failures (15 min cooldown)                                                          |
 | 429    | `AUTH_BUSY`      | Too many logins in progress: the queue for password checks is full, or the login waited 10 s in it (`Retry-After` set) |
 | 500    | `INTERNAL_ERROR` | Session creation failure                                                                                               |
+
+The banned-account `403` body is `{"error": "FORBIDDEN", "message": "your account has been suspended"}` plus
+`"appeal_contact": "<owner text>"` when the `appeal_contact` setting is non-empty. It is sent only after the
+password check passed (a wrong password is the ordinary `401`), on no other refusal, and not by
+`GET /api/v1/server-info`. `POST /api/v1/auth/verify-totp` answers a ban the same way. If the setting cannot be
+read, the refusal is sent without the field.
 
 ---
 
@@ -1376,6 +1389,18 @@ or an `@everyone` from a user without the bit, carries no mention semantics and
 stays plain text. The same fields appear on pinned-message responses and on the
 WebSocket `chat_message`/`chat_edited` payloads.
 
+A message whose links the server has previewed also carries
+`"link_previews": [{"url", "title"?, "description"?, "site_name"?, "image"?: {"hash", "width", "height"}}]`
+on history, pins and `around` (never on search results or `referenced_message`). The
+array is in the order the links appear in the text, holds at most five cards, and is
+omitted when the message has none. Only a link still in the message's current text
+has a card, so an edit that removed a link hides its card at once. A card with
+`image` has a thumbnail at `GET /api/v1/link-previews/images/{hash}`. A message with
+links and no card yet is queued for the server to preview, so a later read of it, or a
+`message_link_previews` frame (see [protocol.md](protocol.md)), brings the cards. The
+send and edit payloads (`chat_message`, `chat_edited`) carry none: the server builds
+them after the message is delivered.
+
 A message imported from a Discord export also carries
 `"imported_author": {"name", "color"}` (`color` omitted when the export had none)
 on history, pins, `around`, search results and `referenced_message`, and is
@@ -1679,7 +1704,7 @@ Unpin a message from a channel.
 
 ### GET /api/v1/search
 
-Full-text search across messages in channels the user can read. Uses SQLite FTS5 for matching.
+Full-text search across messages in channels the user can read, including the threads and forum posts under them (read through their parent). Uses SQLite FTS5 for matching.
 
 **Auth:** Required
 **Rate limit:** 30 requests/minute
@@ -1689,7 +1714,7 @@ Full-text search across messages in channels the user can read. Uses SQLite FTS5
 | Param        | Type   | Default        | Range                   | Description                                                                                                                                                                                                     |
 | ------------ | ------ | -------------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `q`          | string | (required)     | non-empty               | Search words and filters (see [Filters](#filters)). Punctuation separates words; the last word, if three or more characters, also matches as a prefix (`deplo` finds `deploy`; `de` finds only `de`)            |
-| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel                                                                                                                                                                             |
+| `channel_id` | int64  | (all channels) | > 0                     | Restrict search to a single channel; a forum or text channel also covers its threads and forum posts, and a thread id searches just that thread                                                                 |
 | `limit`      | int    | 50             | 1-100                   | Maximum results to return                                                                                                                                                                                       |
 | `sort`       | string | `relevance`    | `relevance` \| `recent` | `relevance` is best match first among the newest 2,000 matching messages in scope (older matches appear only with `recent`); `recent` is newest first. A query with filters and no words is always newest first |
 | `before`     | int64  | (none)         | > 0                     | With `sort=recent` only: return messages with an id below this one. Pass the previous page's `next_before`                                                                                                      |
@@ -1703,16 +1728,16 @@ text. Keys are case-insensitive and only count at the start of a token, so
 double-quoted to hold spaces (`from:"ann lee"`); an unterminated quote runs to
 the end of `q`.
 
-| Filter          | Value                                                     | Matches                                                                  |
-| --------------- | --------------------------------------------------------- | ------------------------------------------------------------------------ |
-| `from:name`     | username, optional leading `@`                            | Messages by that user (case-insensitive)                                 |
-| `in:name`       | channel name, optional leading `#`                        | Messages in every readable channel with that name (names are not unique) |
-| `before:date`   | `YYYY-MM-DD`                                              | Sent before 00:00 of that day in `tz`                                    |
-| `after:date`    | `YYYY-MM-DD`                                              | Sent from 00:00 of the day after, in `tz`                                |
-| `during:date`   | `YYYY-MM-DD`                                              | Sent during that day in `tz`                                             |
-| `has:kind`      | `link`, `file`, `image`, `video`, `sound` (alias `audio`) | Messages with a link, or with an attachment of that kind                 |
-| `mentions:name` | username, optional leading `@`                            | Messages whose text mentions that user (case-insensitive)                |
-| `pinned:bool`   | `true` or `false`                                         | Messages that are (or are not) pinned                                    |
+| Filter          | Value                                                     | Matches                                                                                                                                           |
+| --------------- | --------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `from:name`     | username, optional leading `@`                            | Messages by that user (case-insensitive)                                                                                                          |
+| `in:name`       | channel name, optional leading `#`                        | Messages in every readable channel with that name, and in its threads and forum posts (names are not unique; thread and post titles do not match) |
+| `before:date`   | `YYYY-MM-DD`                                              | Sent before 00:00 of that day in `tz`                                                                                                             |
+| `after:date`    | `YYYY-MM-DD`                                              | Sent from 00:00 of the day after, in `tz`                                                                                                         |
+| `during:date`   | `YYYY-MM-DD`                                              | Sent during that day in `tz`                                                                                                                      |
+| `has:kind`      | `link`, `file`, `image`, `video`, `sound` (alias `audio`) | Messages with a link, or with an attachment of that kind                                                                                          |
+| `mentions:name` | username, optional leading `@`                            | Messages whose text mentions that user (case-insensitive)                                                                                         |
+| `pinned:bool`   | `true` or `false`                                         | Messages that are (or are not) pinned                                                                                                             |
 
 - Repeated `from:` or `in:` values match any of them; repeated `has:` or
   `mentions:` values must all match; different filters must all match. Several date filters intersect, and an empty range returns no results.
@@ -1760,6 +1785,8 @@ the end of `q`.
   "next_before": 1042
 }
 ```
+
+A hit in a thread or forum post carries `thread_parent_id`, the id of its parent channel; the field is absent otherwise.
 
 `next_before` is the `before` value for the next `sort=recent` page, or `null`
 when there are no more results. It is always `null` for `sort=relevance` when `q` has words.
@@ -1880,16 +1907,22 @@ Removes a favorite. The GIF is named by the `url` query parameter. Responds
 
 ## Web Push
 
-Server-side storage of Web Push subscriptions, plus dispatch behind its own,
-second opt-in: `push.dispatch_enabled` (default **off**, independent of
-`push.enabled`). See [Server Configuration](server-configuration.md#web-push-push)
-for both keys, the staleness window, and the rotation procedure below.
+Server-side storage of Web Push subscriptions, plus sending to them, both
+behind the one `push.enabled` switch (default **off**). See
+[Server Configuration](server-configuration.md#web-push-push) for the key,
+the staleness window, and the rotation procedure below.
 
 **Default-off contract:** with `push.enabled` false, every endpoint below
 answers `503 PUSH_DISABLED` after authenticating the caller. A disabled
-server writes nothing. With `push.enabled` true but `push.dispatch_enabled`
-false — the state an install upgraded from an earlier release starts in —
-subscriptions are stored but nothing is ever sent to one.
+server writes nothing and sends nothing. The older `push.dispatch_enabled`
+key is deprecated and ignored.
+
+**Call rings.** With `push.enabled` true, a DM `call_ring` also sends
+`{"t":"ring","c":<channel id>}` to every subscription of the users it rings,
+connected or not, unless their status is Do Not Disturb or they are already in the call; declining (`call_decline`),
+joining the call on any device, or the caller leaving it sends
+`{"t":"ring_end","c":<channel id>}` to the subscriptions still ringing. Urgency
+`high`, TTL 30 seconds, one retry. Only the DM channel id is sent.
 
 **What dispatch sends, and to whom.** With both keys true, a new message
 sends a fixed, generic `{"t":"activity"}` payload — no message text, channel
@@ -1983,6 +2016,16 @@ to a 65-byte uncompressed P-256 point (`0x04` prefix) that lies on the curve; `a
 characters. A user may hold at most 10 subscriptions; the 11th evicts the
 oldest by `last_seen_at`.
 
+The endpoint's host must be a public push server: an IP literal, or a name
+with any address (loopback, private, link-local, carrier-grade NAT, unique-local),
+that the dispatcher would refuse to send to is refused up front with
+`400 PUSH_SERVER_NOT_PUBLIC` and nothing is stored. The check uses the same
+address classifier as dispatch and looks the name up with a 3 s bound; a failed
+or timed-out lookup is accepted, since dispatch still refuses a non-public
+address when it sends. An endpoint with an explicit port other than 443 is
+refused with `400 PUSH_SERVER_PORT_NOT_SUPPORTED`, because dispatch only sends
+to port 443.
+
 #### Response 201 Created
 
 ```json
@@ -1991,10 +2034,12 @@ oldest by `last_seen_at`.
 
 #### Errors
 
-| Status | Code            | When                                                   |
-| ------ | --------------- | ------------------------------------------------------ |
-| 400    | `INVALID_INPUT` | Malformed body, or a credential field fails validation |
-| 503    | `PUSH_DISABLED` | `push.enabled` is false                                |
+| Status | Code                             | When                                                                                          |
+| ------ | -------------------------------- | --------------------------------------------------------------------------------------------- |
+| 400    | `INVALID_INPUT`                  | Malformed body, or a credential field fails validation                                        |
+| 400    | `PUSH_SERVER_NOT_PUBLIC`         | The endpoint host is an IP literal, or resolves to any address, that is not publicly routable |
+| 400    | `PUSH_SERVER_PORT_NOT_SUPPORTED` | The endpoint names a port other than 443                                                      |
+| 503    | `PUSH_DISABLED`                  | `push.enabled` is false                                                                       |
 
 ### DELETE /api/v1/push/subscriptions/{id}
 
@@ -2710,7 +2755,7 @@ Create a new invite code.
 }
 ```
 
-Both fields are optional. An empty body (or `0`) creates an invite with unlimited uses and no expiry; a negative value is `400 BAD_REQUEST`.
+Both fields are optional. An empty body (or `0`) creates an invite with unlimited uses and no expiry; a negative value is `400 BAD_REQUEST`. Each user may create 20 invites per hour; past that the reply is `429 RATE_LIMITED` with `Retry-After`.
 
 #### Response 201 Created
 
@@ -2731,20 +2776,39 @@ Both fields are optional. An empty body (or `0`) creates an invite with unlimite
 
 ### GET /api/v1/invites
 
-List all invites (active, expired, and revoked).
+List invites: live ones first, then dead ones (revoked, used up or expired).
 
 **Auth:** Required
 **Permission:** `MANAGE_INVITES`
 
+| Query    | Description                                                                                                                          |
+| -------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `state`  | Optional `live` or `dead`: return only that list. Omitted: the first page of both, live first.                                       |
+| `before` | Optional invite id: only invites with a smaller id, newest id first. Pass the last id of the previous page. Ignored without `state`. |
+| `limit`  | Optional size of the dead list, default 50, at most 200. The live list is never cut by dead invites; it holds at most 500 per page.  |
+
+A client pages the rest with `?state=dead&before=<last id>&limit=<n>` until a page comes back shorter than `limit`; a live list of 500 continues with `?state=live&before=<last id>`. An invite can expire between two reads and then appear in both a live and a later dead page, so merge pages by `id`. With no query the reply is the same array old clients already read.
+
 #### Response 200 OK
 
-Returns a JSON array of invite objects, newest first (at most 200). Each carries `creator_username`, the creator's username (empty once that account is erased); the create response leaves it empty.
+Returns a JSON array of invite objects, ordered as above. Each carries `creator_username`, the creator's username (empty once that account is erased); the create response leaves it empty.
 
 ---
 
 ### DELETE /api/v1/invites/{code}
 
 Revoke an invite by its code string.
+
+**Auth:** Required
+**Permission:** `MANAGE_INVITES`
+
+#### Response 204 No Content
+
+---
+
+### DELETE /api/v1/invites/id/{id}
+
+Revoke an invite by its numeric `id` (as listed). Revoking an already revoked invite is `204` again; an unknown or malformed id is `404 NOT_FOUND`.
 
 **Auth:** Required
 **Permission:** `MANAGE_INVITES`
@@ -2988,6 +3052,20 @@ a plain file. The original stays at
 `GET /api/v1/files/{id}`. A file uploaded before the server knew these formats
 was stored as `application/octet-stream` and stays a plain file.
 
+**Query:** `size` (optional) selects a small preview for avatar-sized slots:
+`128` or `256` (any other value is a `400`). Without it the route answers as
+described above. A small size scales the image to fit a `size`×`size` box
+(never enlarged), upright, as a JPEG, or a PNG when it has transparent pixels
+(`Content-Type` says which), and it applies to a GIF too, which becomes a still
+of its first frame. A GIF of more than one frame is answered with
+`X-Image-Animated: 1` (exposed to cross-origin callers), so a client showing the
+still knows the full original at `GET /api/v1/files/{id}` is the animated one.
+An animated WebP, a type with no decoder, an image that does not decode or one
+too large to read is served as the original bytes, as above. HEIC, HEIF and TIFF
+ignore `size`. Each size is made once, on its first request or, for an avatar or
+group icon, when it is uploaded, and kept as its own file under
+`upload.storage_dir/thumbs/`; it is removed with the original.
+
 A thumbnail is made on the first request, kept beside the original under
 `upload.storage_dir/thumbs/`, and removed with it; an image that fails to
 decode is remembered there too and not tried again. Previews are made a few
@@ -2996,6 +3074,28 @@ than 5 seconds for its turn gets the original bytes instead, or for a HEIC,
 HEIF or TIFF a `503` with `Retry-After`, and nothing is remembered, so a later
 request makes the preview. A server that has this route says so with
 `upload_policy.thumbnails` on `auth_ok`.
+
+### GET /api/v1/link-previews/images/{hash}
+
+Serve the stored thumbnail of a link preview card. `{hash}` is the `image.hash` of a
+card: 64 lower-case hex characters, the SHA-256 of the thumbnail's bytes, so a name
+never changes its content.
+
+**Auth:** Required (Bearer token). Any signed-in member may fetch any stored thumbnail:
+the picture is public content the server fetched from the open web, and the hash is
+only ever sent with a card the member can read. **Rate limit:** 300 requests per minute
+per client.
+
+**Response 200:** the thumbnail (a JPEG, or a PNG when it has transparency, at most 640
+pixels on a side) with its `Content-Type`, `ETag: "{hash}"` and `Cache-Control: private,
+max-age=31536000, immutable`, plus `X-Content-Type-Options: nosniff` and
+`Content-Security-Policy: default-src 'none'; sandbox`. A request carrying a matching
+`If-None-Match` gets `304`. Each response marks the thumbnail as used, which defers
+its removal (`link_previews.thumbnail_unused_days`).
+
+**Errors:** `404` for a hash that is not 64 lower-case hex characters, one with no
+stored thumbnail, or one whose file is gone (the sweep removed it). A card whose
+thumbnail was removed arrives without `image` on its next read.
 
 ---
 
@@ -4112,16 +4212,17 @@ sign-in.
 
 **Auth:** None
 
-| Field                              | Type    | Meaning                                                                                                                                                               |
-| ---------------------------------- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `name`                             | string  | The operator's server name (`server.name`)                                                                                                                            |
-| `protocol_epoch`                   | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect                                                                               |
-| `browser_client_enabled`           | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`)                                                                         |
-| `registration_mode`                | string  | `closed`, `invite`, `approval`, or `open`. A missing setting defaults to `invite`; an invalid value fails closed to `closed`                                          |
-| `retention`                        | object  | Server-default message retention only; channel overrides are not disclosed                                                                                            |
-| `retention.messages_days`          | integer | Server-default message window in days; `0` means kept indefinitely. Attachments are deleted with their messages; there is no separate attachment window               |
-| `upload`                           | object  | Upload limits a client sizes its own bounds from                                                                                                                      |
-| `upload.transfer_lifetime_seconds` | integer | How long an upload may take under the current `upload.max_size_mb` before the server answers `408 TRANSFER_TIMED_OUT`; a client's own transfer bound should be longer |
+| Field                              | Type    | Meaning                                                                                                                                                                                                           |
+| ---------------------------------- | ------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `name`                             | string  | The operator's server name (`server.name`)                                                                                                                                                                        |
+| `protocol_epoch`                   | integer | The wire-protocol epoch this server speaks. A client whose epoch differs cannot connect                                                                                                                           |
+| `browser_client_enabled`           | boolean | Whether the operator has opted in to browser-client hosting (`server.browser_client_enabled`)                                                                                                                     |
+| `registration_mode`                | string  | `closed`, `invite`, `approval`, or `open`. A missing setting defaults to `invite`; an invalid value fails closed to `closed`                                                                                      |
+| `retention`                        | object  | Server-default message retention only; channel overrides are not disclosed                                                                                                                                        |
+| `retention.messages_days`          | integer | Server-default message window in days; `0` means kept indefinitely. Attachments are deleted with their messages; there is no separate attachment window                                                           |
+| `upload`                           | object  | Upload limits a client sizes its own bounds from                                                                                                                                                                  |
+| `upload.transfer_lifetime_seconds` | integer | How long an upload may take under the current `upload.max_size_mb` before the server answers `408 TRANSFER_TIMED_OUT`; a client's own transfer bound should be longer                                             |
+| `icon`                             | string  | Content hash (16 hex characters) of the owner-uploaded server icon, `""` when there is none. When it differs from the one a client holds, the client refetches [`GET /api/v1/server-icon`](#get-apiv1server-icon) |
 
 ```json
 {
@@ -4134,7 +4235,8 @@ sign-in.
   },
   "upload": {
     "transfer_lifetime_seconds": 1600
-  }
+  },
+  "icon": ""
 }
 ```
 
@@ -4156,6 +4258,18 @@ a 404 note even when the flag is on. With the flag off, no route is mounted and
 no asset is served in any build —
 `Server/api/browser_hosting_posture_test.go` proves it by route walk and by
 wire probe.
+
+### GET /api/v1/server-icon
+
+The owner-uploaded server icon. Public, like `server-info`, so a client can show
+it before sign-in.
+
+**Auth:** None
+
+Answers `200` with the PNG, `Content-Type: image/png`,
+`X-Content-Type-Options: nosniff`, `Cache-Control: public, max-age=300` and an
+`ETag` equal to the quoted `icon` hash from `server-info` (`If-None-Match`
+answers `304`). Answers `404 NOT_FOUND` when the server has no icon file.
 
 ---
 
@@ -4743,8 +4857,20 @@ Nothing here is exported off the host.
   both `0`).
   It is never reported as healthy and neither raises nor clears a warning.
 - `signals` ids: `disk`, `db_writer_wait`, `reconnects`, `delivery`, `voice`,
-  `certificate`, `last_exit`, `last_restore`, `backup`, and `job:<name>` for each maintenance
-  step.
+  `certificate`, `last_exit`, `last_restore`, `backup`, `owner_recovery_kit`, `moderators`,
+  `moderate_role`, and `job:<name>` for each maintenance step.
+- `owner_recovery_kit` is a `warning` when the owner account has no unspent
+  recovery kit (none issued, or the only one was used): a lost owner password
+  then means restoring a backup and running setup again. The owner makes one in
+  Settings > Account > Recovery kit.
+- `moderators` is a `warning` when fewer than two active people can work
+  reports: approved, not banned, non-system accounts that are the owner or hold
+  a role with Administrator or Moderate Members. `value` is the count.
+- `moderate_role` is a `warning` when no role other than Owner carries Moderate
+  Members itself (Administrator does not count). These three are levels read
+  from the database each sample, so a fix clears them on the next sample. A
+  failed read is `unknown` with the reason in `detail` and leaves any existing
+  warning as it is.
 - `certificate` reports the served TLS certificate's expiry. A `self_signed`
   or `manual` certificate is `ok` with 21 days or more left, `warning` inside
   21 days and `critical` inside 7 days or once expired. An `acme` certificate
@@ -5578,8 +5704,8 @@ audited as `setting_change`.
 
 #### Request
 
-A flat map of key → string value. Allowed keys: `server_name`, `server_icon`,
-`motd`, `require_2fa`,
+A flat map of key → string value. Allowed keys: `server_name`,
+`motd`, `appeal_contact`, `require_2fa`,
 `registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
 `upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
 `voice_owner_movable`, `game_activity_enabled`, `welcome_channel_id`,
@@ -5664,8 +5790,15 @@ deleted or archived): registration then writes no row and still succeeds.
 `server_name` (1–100 bytes) and `motd` (at most 500 bytes) are trimmed and
 held to the same limits the first-run setup wizard enforces.
 
-`server_icon` is accepted and stored but has **no runtime effect** (reserved
-for a future release). `max_upload_bytes` and `voice_quality` are refused with
+`appeal_contact` is one line shown to a banned member who tries to sign in (see
+`POST /api/v1/auth/login`). It is trimmed, at most 200 characters, with no control
+or invisible characters and no more than two stacked combining marks; empty clears
+it. It is plain text and needs no row to exist.
+
+`server_icon` is refused with `400` (`server_icon is set with the server icon
+upload, not here`): the row mirrors the icon's content hash and is written only by
+[`PUT /admin/api/server-icon`](#put-adminapiserver-icon) and its `DELETE`.
+`max_upload_bytes` and `voice_quality` are refused with
 `400` (`<key> is set in config.yaml, not here`): the real settings are
 `upload.max_size_mb` and `voice.quality` in config.yaml. The setup wizard still
 writes both rows and `GET /admin/api/settings` still returns them; the admin
@@ -5684,6 +5817,58 @@ user has TOTP enabled.
 | 400    | `BAD_REQUEST` | Unknown key, a value outside its key's rules above, or `require_2fa` preconditions not met |
 
 ---
+
+### PUT /admin/api/server-icon
+
+Sets the server icon.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Request
+
+The body is the PNG itself (`Content-Type: image/png`), at most 64 KiB, square,
+between 32 and 256 pixels a side. The server decodes it with the standard
+library to validate it, then encodes the decoded image afresh and stores that,
+which drops text and other ancillary chunks and trailing data (an image whose
+re-encoded form passes 64 KiB is refused). The file is written to
+`<data_dir>/server-icon.png` through a temp file in the same directory, synced
+and renamed, so a failure leaves the previous icon whole.
+
+The file is the source of truth: the `icon` hash that `server-info` reports and
+the `GET /api/v1/server-icon` ETag are the first 16 hex characters of the
+SHA-256 of the bytes on disk. The `server_icon` setting mirrors that hash after
+the rename, best effort; nothing reads it for decisions. The change is
+audit-logged as `setting_change`.
+
+#### Response 200 OK
+
+```json
+{ "icon": "0123456789abcdef" }
+```
+
+#### Errors
+
+`400 BAD_REQUEST` when the body is not a PNG, is over 64 KiB, is not square or
+is outside 32 to 256 pixels; `403 FORBIDDEN` without `MANAGE_SERVER`.
+
+Regular backups are SQLite snapshots only, so a database restored on another
+machine has the hash but not the file, and the server then reports no icon
+(`icon` is `""`, `GET /api/v1/server-icon` answers `404`) until one is
+uploaded again. The full archive includes the data directory and carries the
+icon file.
+
+### DELETE /admin/api/server-icon
+
+Removes the server icon and clears the `server_icon` setting. Succeeds when
+there is none.
+
+**Auth:** `MANAGE_SERVER`
+
+#### Response 200 OK
+
+```json
+{ "icon": "" }
+```
 
 ### PUT /admin/api/afk-channel
 

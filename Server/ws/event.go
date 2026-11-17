@@ -66,6 +66,9 @@ type Result struct {
 	// LeaveVoiceReason is logged on the "voice leave" line to tell teardown paths
 	// apart; use a voiceLeaveReason* constant.
 	LeaveVoiceReason string
+	// AfterEmit runs once Events are emitted, so work that must be sequenced behind
+	// them (a link preview for the message just sent) cannot overtake them.
+	AfterEmit func()
 }
 
 // Event is the base interface for all server-to-client events.

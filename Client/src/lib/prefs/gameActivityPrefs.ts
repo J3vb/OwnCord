@@ -16,6 +16,7 @@
 
 import { loadPref, savePref } from "./preferences";
 import type { DetectPrefs } from "../../platform/contracts/gameDetector";
+import { isRecord } from "../isRecord";
 
 /** The pref holding `{ manual, hidden, renames }`. */
 export const GAME_PREFS_KEY = "gameActivityGames";
@@ -75,10 +76,6 @@ export function pathKey(raw: string): string {
   const noSuffix = lower.endsWith(" (deleted)") ? lower.slice(0, -" (deleted)".length) : lower;
   const noPrefix = noSuffix.startsWith("//?/") ? noSuffix.slice(4) : noSuffix;
   return /^[a-z]:/.test(noPrefix) ? noPrefix.slice(2) : noPrefix;
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
 function parseManual(raw: unknown): ManualGameEntry[] {

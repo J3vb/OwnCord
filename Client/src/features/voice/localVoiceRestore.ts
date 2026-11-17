@@ -106,7 +106,10 @@ export async function restoreLocalVoiceState(
   // The AFK channel is listen-only: publish nothing there, and do not read
   // the empty mic as a failure (no listen-only notice, nothing to retry).
   // enableMicrophone(false) is a no-op publish, so nothing can be refused.
-  const shouldEnableMicrophone = !muted && state.inAfkChannel !== true;
+  // A phone call's hold keeps the mic closed the same way; the hold's end
+  // opens it (syncMicrophoneGate).
+  const shouldEnableMicrophone =
+    !muted && state.inAfkChannel !== true && state.phoneCallHold !== true;
 
   try {
     await host.media.enableMicrophone(room, shouldEnableMicrophone);
@@ -137,7 +140,9 @@ export async function restoreLocalVoiceState(
   // Always enforce mute at the track level even if no pipeline exists yet.
   // setMicrophoneEnabled(false) doesn't guarantee mediaStreamTrack.enabled=false,
   // and renegotiation when a new participant joins can bring a track back alive.
-  if (muted) {
+  // A phone call's hold is read now, not from the state above: it may have
+  // begun while the microphone was being opened.
+  if (muted || voiceStore.getState().phoneCallHold === true) {
     host
       .applyMicMuteState(true)
       .catch((e) => log.warn("applyMicMuteState failed in restoreLocalVoiceState", e));

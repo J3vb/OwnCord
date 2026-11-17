@@ -45,14 +45,18 @@ func (s *ThreadService) List(ctx context.Context, userID, parentID int64, p Thre
 	default:
 		return nil, ThreadCursor{}, false, fmt.Errorf("%w: sort must be activity or created", ErrBadRequest)
 	}
-	ch, err := s.st.GetChannel(ctx, parentID)
-	if err != nil || ch == nil {
-		return nil, ThreadCursor{}, false, fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, s.st, parentID)
+	if err != nil {
+		return nil, ThreadCursor{}, false, err
 	}
 	if ch.IsThread() {
 		return nil, ThreadCursor{}, false, fmt.Errorf("%w: channel not found", ErrNotFound)
 	}
-	if err := readContentDenial(permissions.CanReadContent(readSubject(ctx, s.st, s.perms, userID, ch))); err != nil {
+	sub, err := readSubject(ctx, s.st, s.perms, userID, ch)
+	if err != nil {
+		return nil, ThreadCursor{}, false, err
+	}
+	if err := readContentDenial(permissions.CanReadContent(sub)); err != nil {
 		return nil, ThreadCursor{}, false, err
 	}
 	if len(p.TagIDs) > 0 {

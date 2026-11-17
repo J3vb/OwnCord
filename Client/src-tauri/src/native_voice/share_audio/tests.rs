@@ -159,6 +159,80 @@ fn wanted_keeps_only_the_shared_apps_tree_when_one_is_given() {
     );
 }
 
+fn apps(
+    inputs: &[SinkInputInfo],
+    clients: &[ClientInfo],
+    own: &Own,
+) -> Vec<(String, String, bool)> {
+    group_apps(inputs, Some(1), clients, own)
+        .into_iter()
+        .map(|a| (a.id, a.name, a.playing))
+        .collect()
+}
+
+#[test]
+fn the_app_list_groups_by_a_pid_free_identity_playing_first_then_by_name() {
+    let own = Own::new(me(), BTreeSet::new());
+    let bin = |b: &'static str| [(c"application.process.binary", b)];
+    let clients = [
+        client(1, "Spotify", &[(c"application.name", "Spotify")]),
+        client(2, "mpv", &[]),
+        client(3, "x", &[(c"application.name", "Zed Radio")]),
+        client(4, &format!("cpal-pulseaudio-{}", me()), &[]),
+    ];
+    let mut corked = input(11, 1, 2, &[(c"application.name", "mpv")]);
+    corked.corked = true;
+    let inputs = [
+        // Two streams of one app: one row, playing if any stream plays.
+        input(10, 1, 1, &bin("spotify")),
+        input(12, 1, 1, &bin("spotify")),
+        corked,
+        input(13, 1, 3, &[]),
+        // Ours, off the default sink, and a stream that names nothing.
+        input(14, 1, 4, &bin("owncord")),
+        input(15, 2, 1, &bin("other")),
+        input(16, 1, 99, &[]),
+    ];
+    assert_eq!(
+        apps(&inputs, &clients, &own),
+        vec![
+            ("bin:spotify".into(), "Spotify".into(), true),
+            ("name:Zed Radio".into(), "Zed Radio".into(), true),
+            ("name:mpv".into(), "mpv".into(), false),
+        ]
+    );
+    assert!(group_apps(&inputs, None, &clients, &own).is_empty());
+}
+
+#[test]
+fn an_app_id_ignores_the_pid_and_a_stream_of_ours_is_skipped() {
+    // A Flatpak client reports a pid that means nothing here: the id ignores it.
+    let clients = [client(1, "x", &[(c"application.process.id", "4")])];
+    let inputs = [input(
+        10,
+        1,
+        1,
+        &[(c"application.process.binary", "spotify")],
+    )];
+    let own = Own::new(me(), BTreeSet::new());
+    assert_eq!(
+        apps(&inputs, &clients, &own),
+        vec![("bin:spotify".into(), "spotify".into(), true)]
+    );
+    // The same stream claiming one of our own pids is ours, not listed.
+    let own = Own::new(me(), BTreeSet::from([4]));
+    assert!(apps(&inputs, &clients, &own).is_empty());
+}
+
+#[test]
+fn app_ids_are_checked_for_their_shape() {
+    assert!(valid_app_id("bin:spotify"));
+    assert!(valid_app_id("name:Some App"));
+    assert!(!valid_app_id("pid:42"));
+    assert!(!valid_app_id("bin:"));
+    assert!(!valid_app_id(""));
+}
+
 #[test]
 fn the_socket_is_found_by_pulse_server_then_the_runtime_dir() {
     let all = |_: &Path| true;
@@ -434,6 +508,15 @@ impl Running {
 
     /// As `start`, recording only application `pid` (0: every one).
     fn start_with(fake: &Fake, reconnect: Duration, pid: u32) -> Self {
+        Self::launch(fake, reconnect, pid, None)
+    }
+
+    /// As `start`, recording only application `id`'s streams (a music share).
+    fn start_music(fake: &Fake, reconnect: Duration, id: &str) -> Self {
+        Self::launch(fake, reconnect, 0, Some(id.to_string()))
+    }
+
+    fn launch(fake: &Fake, reconnect: Duration, pid: u32, music: Option<String>) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let frames: Shared<Vec<Vec<i16>>> = Arc::default();
         let inputs: Arc<AtomicUsize> = Arc::default();
@@ -457,6 +540,7 @@ impl Running {
                 s,
                 i,
                 a,
+                music,
             )
         });
         Self {
@@ -553,6 +637,46 @@ fn a_shared_app_records_only_its_streams_and_follows_a_change() {
 }
 
 #[test]
+fn a_music_capture_records_only_its_app_and_picks_up_a_new_stream() {
+    let tone = Tone { hz: 440.0 };
+    let fake = Fake::new("main", vec![(1, 11, 1, tone), (1, 13, 3, tone)]);
+    {
+        let mut scene = at(&fake.scene);
+        let bin = |b: &'static str| [(c"application.process.binary", b)];
+        scene.clients[0] = client(1, "firefox", &bin("firefox"));
+        scene.clients[2] = client(3, "mpv", &bin("mpv"));
+    }
+    let _run = Running::start_music(&fake, Duration::from_millis(100), "bin:mpv");
+    wait_for("the first create", || !at(&fake.seen).is_empty());
+    thread::sleep(Duration::from_millis(150));
+    assert_eq!(*at(&fake.seen), vec![Seen::Create(13)]);
+    // The player opens a second stream: re-matched on the next poll.
+    at(&fake.scene).inputs.push((1, 14, 3, tone));
+    wait_for("the new stream", || at(&fake.seen).len() >= 2);
+    assert_eq!(*at(&fake.seen), vec![Seen::Create(13), Seen::Create(14)]);
+}
+
+#[test]
+fn a_music_capture_of_an_app_that_quit_keeps_sending_silence() {
+    let tone = Tone { hz: 440.0 };
+    let fake = Fake::new("main", vec![(1, 11, 1, tone)]);
+    at(&fake.scene).clients[0] = client(1, "firefox", &[(c"application.name", "Firefox")]);
+    let run = Running::start_music(&fake, Duration::from_millis(100), "name:Firefox");
+    wait_for("tone", || {
+        let f = at(&run.frames);
+        f.len() > 30 && power(&f[f.len() - 10..].concat(), 440.0) > 500.0
+    });
+    at(&fake.scene).inputs.clear();
+    wait_for("silence", || {
+        let f = at(&run.frames);
+        f.len() > 30 && f[f.len() - 10..].concat().iter().all(|s| *s == 0)
+    });
+    let before = at(&run.frames).len();
+    thread::sleep(Duration::from_millis(100));
+    assert!(at(&run.frames).len() > before, "the clock stopped");
+}
+
+#[test]
 fn a_default_sink_move_swaps_the_recorded_streams() {
     let tone = Tone { hz: 440.0 };
     let fake = Fake::new("main", vec![(1, 11, 1, tone), (2, 12, 3, tone)]);
@@ -626,6 +750,7 @@ fn a_hung_server_does_not_delay_a_stop() {
             s,
             Arc::default(),
             Arc::default(),
+            None,
         )
     });
     thread::sleep(Duration::from_millis(100));
@@ -792,6 +917,7 @@ fn share_audio_real() {
             s,
             Arc::default(),
             Arc::default(),
+            None,
         )
     });
     wait_for("captured tone", || {

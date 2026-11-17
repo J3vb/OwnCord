@@ -131,7 +131,11 @@ const commandPassThrough: Record<string, string> = {
   android_notify: "notification text shown as-is",
   notify_message: "notification text shown as-is",
   share_text: "text handed to the share sheet as-is",
+  push_choose: "push app package name used as a lookup key",
+  push_register: "instance and VAPID key handed to the push app, notification text shown as-is",
+  push_unregister: "instance used as a lookup key",
   start_app_audio: "window label and surface name used as lookup keys",
+  start_music_audio: "app id parsed as pid:<n> and used as a lookup key",
   native_voice_play_sound: "device id used as a lookup key",
   native_voice_set_device: "device id used as a lookup key",
   native_voice_start_camera: "camera id used as a lookup key",
@@ -146,7 +150,10 @@ const commandPassThrough: Record<string, string> = {
   native_voice_set_video_bitrate: "video kind and track id used as lookup keys",
   native_voice_set_volume: "participant id used as a lookup key",
   native_voice_set_screenshare_volume: "participant id used as a lookup key",
+  native_voice_set_music_volume: "participant id used as a lookup key",
+  native_voice_start_music: "app id used as a lookup key against the listed apps",
   set_gpu_adapter: "card id matched against the listed cards",
+  mobile_audio_set_route: "route kind matched against the phone's own routes",
 };
 
 /** "<file name>.<function>" for every JSON.parse / Response.json() call in text. */

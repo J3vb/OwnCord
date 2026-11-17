@@ -1362,6 +1362,8 @@ What the endpoint does:
 | `chatserver token revoke <id\|label>`    | Revokes a token by ID or label.                                              |
 | `chatserver restore [--force] <file>`    | Puts a database backup back while the server is stopped.                     |
 
+The `token` commands do not migrate an existing database. If it has pending migrations they exit with an error: start the server once so it can back up and migrate, then run them again. A brand-new database is set up for you.
+
 See [Scheduling backups from outside the server](backups.md#backups-from-cron)
 and [Restoring without a running server](backups.md#when-the-server-will-not-start).
 

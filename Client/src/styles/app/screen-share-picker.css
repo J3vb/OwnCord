@@ -164,3 +164,61 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* Share music: one row per app with sound. */
+.music-picker__list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 320px;
+  overflow-y: auto;
+}
+
+.music-picker__app {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.music-picker__app[aria-checked="true"] {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.music-picker__icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  flex: none;
+}
+
+.music-picker__icon img {
+  width: 24px;
+  height: 24px;
+}
+
+.music-picker__app .ssp-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.music-picker__state {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+
+.music-picker__state--on {
+  color: var(--accent);
+}

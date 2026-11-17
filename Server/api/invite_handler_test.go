@@ -19,7 +19,7 @@ func buildInviteRouter(database *db.DB, limiter *auth.RateLimiter) http.Handler 
 	r := chi.NewRouter()
 	svc := service.New(database, limiter)
 	api.MountAuthRoutes(r, service.NewAuthService(database, limiter, testTOTPKey, nil), api.AuthMiddleware(service.NewSessionService(database)), limiter, nil)
-	api.MountInviteRoutes(r, svc)
+	api.MountInviteRoutes(r, svc, limiter)
 	return r
 }
 
@@ -36,6 +36,7 @@ func loginAndGetToken(t *testing.T, _ http.Handler, database *db.DB, username st
 // ─── POST /api/v1/invites ─────────────────────────────────────────────────────
 
 func TestCreateInvite_Success(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -57,6 +58,7 @@ func TestCreateInvite_Success(t *testing.T) {
 }
 
 func TestCreateInvite_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -69,6 +71,7 @@ func TestCreateInvite_Unauthorized(t *testing.T) {
 }
 
 func TestCreateInvite_MemberForbidden(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -91,6 +94,7 @@ func TestCreateInvite_MemberForbidden(t *testing.T) {
 // Checker.HasChannelPerm" refactor, which would pass naive review because
 // GetChannelPermissions returns (0, 0, nil) when no override row exists.
 func TestCreateInvite_ChannelAllowOverrideDoesNotGrant(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -116,6 +120,7 @@ func TestCreateInvite_ChannelAllowOverrideDoesNotGrant(t *testing.T) {
 }
 
 func TestCreateInvite_Unlimited(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -128,6 +133,7 @@ func TestCreateInvite_Unlimited(t *testing.T) {
 }
 
 func TestCreateInvite_EmptyBody(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -153,6 +159,7 @@ func TestCreateInvite_EmptyBody(t *testing.T) {
 }
 
 func TestCreateInvite_CreateInviteFailure(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -172,6 +179,7 @@ func TestCreateInvite_CreateInviteFailure(t *testing.T) {
 }
 
 func TestCreateInvite_GetInviteFailure(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -202,6 +210,7 @@ func TestCreateInvite_GetInviteFailure(t *testing.T) {
 // ─── GET /api/v1/invites ──────────────────────────────────────────────────────
 
 func TestListInvites_Success(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -223,6 +232,7 @@ func TestListInvites_Success(t *testing.T) {
 }
 
 func TestListInvites_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -234,6 +244,7 @@ func TestListInvites_Unauthorized(t *testing.T) {
 }
 
 func TestListInvites_EmptyArray(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -252,6 +263,7 @@ func TestListInvites_EmptyArray(t *testing.T) {
 // ─── DELETE /api/v1/invites/:code ─────────────────────────────────────────────
 
 func TestRevokeInvite_Success(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -281,6 +293,7 @@ func TestRevokeInvite_Success(t *testing.T) {
 }
 
 func TestRevokeInvite_NotFound(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -293,6 +306,7 @@ func TestRevokeInvite_NotFound(t *testing.T) {
 }
 
 func TestRevokeInvite_MemberForbidden(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -312,6 +326,7 @@ func TestRevokeInvite_MemberForbidden(t *testing.T) {
 }
 
 func TestRevokeInvite_RevokeFailure(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -345,6 +360,7 @@ func TestRevokeInvite_RevokeFailure(t *testing.T) {
 // TestListInvites_IncludesRevokedAndActive checks the list endpoint returns
 // correct data for both revoked and active invites.
 func TestListInvites_IncludesRevokedAndActive(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)

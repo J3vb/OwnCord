@@ -13,6 +13,7 @@ import (
 // the window it was meant to close.
 
 func TestUpsertLockout_RoundTrip(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -33,6 +34,7 @@ func TestUpsertLockout_RoundTrip(t *testing.T) {
 }
 
 func TestUpsertLockout_ReplacesExistingKey(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -54,6 +56,7 @@ func TestUpsertLockout_ReplacesExistingKey(t *testing.T) {
 }
 
 func TestLoadActiveLockouts_ExcludesExpired(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -71,6 +74,7 @@ func TestLoadActiveLockouts_ExcludesExpired(t *testing.T) {
 }
 
 func TestCleanupExpiredLockouts(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -103,6 +107,7 @@ func TestCleanupExpiredLockouts(t *testing.T) {
 }
 
 func TestCleanupExpiredLockouts_EmptyTable(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	if err := database.CleanupExpiredLockouts(context.Background()); err != nil {
 		t.Errorf("CleanupExpiredLockouts on an empty table: %v", err)
@@ -110,6 +115,7 @@ func TestCleanupExpiredLockouts_EmptyTable(t *testing.T) {
 }
 
 func TestDeleteLockout(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -127,6 +133,7 @@ func TestDeleteLockout(t *testing.T) {
 }
 
 func TestDeleteLockout_UnknownKeyIsNoOp(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	if err := database.DeleteLockout(context.Background(), "never-locked"); err != nil {
 		t.Errorf("DeleteLockout on an unknown key: %v", err)

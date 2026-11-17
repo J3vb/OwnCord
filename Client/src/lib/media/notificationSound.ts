@@ -4,19 +4,21 @@
  * pulling the whole message-notification pipeline (the level gate, the
  * markdown body, the dispatcher) into its chunk.
  *
- * Every sound is a row of one tone-spec table (`TONES`), drawn by one of two
- * renderers. `playWeb` is the Web Audio one: all sounds share one
- * `AudioContext`, whose output follows the saved `audioOutputDevice` through
- * `setSinkId` where the host supports it (Chromium and WebView2 do). WebKitGTK,
- * the Linux webview, lacks `setSinkId`, so on the Linux desktop `playSpec`
+ * Every sound is a tone spec from `soundTables.ts`, in the style the user
+ * picked, drawn by one of two renderers. `playWeb` is the Web Audio one: all
+ * sounds share one `AudioContext`, whose output follows the saved
+ * `audioOutputDevice` through `setSinkId` where the host supports it (Chromium
+ * and WebView2 do). WebKitGTK, the Linux webview, lacks `setSinkId`, so on the
+ * Linux desktop `playSpec`
  * sends the spec to the native host instead (`native_voice_play_sound`), which
  * synthesizes it and plays it on the saved output device, in or out of a call;
  * any host failure falls back to `playWeb`. Every gate (deafen,
- * DND, the switches) and the ring timers stay here, ahead of `playSpec`.
+ * DND, the switches) and the ring timers stay here, ahead of `playSpec`; the
+ * Settings previews (`soundPreview.ts`) call `playSpec` directly, ungated.
  */
 
 import { loadPref, onPrefChange } from "../prefs/preferences";
-import { loadAppSoundsGain, soundSwitchOn } from "../prefs/soundPrefs";
+import { loadAppSoundsGain, loadSoundStyle, soundSwitchOn } from "../prefs/soundPrefs";
 import { USER_STATUS_PREF_KEY, loadUserStatus } from "../presence/userStatus";
 import { isVoiceDeafened } from "../voice/voiceDeafened";
 import { createLogger } from "../logger";
@@ -24,24 +26,36 @@ import { Disposable } from "../disposable";
 import { desktop } from "../../platform/desktop";
 import type { NativeToneNote } from "../../platform/contracts/nativeVoice";
 import { isLinuxDesktop } from "../../features/voice/native/platform";
+import { REPEAT_MS, soundSpec, type ToneSpec, type VoiceSound } from "./soundTables";
+
+export type { VoiceSound } from "./soundTables";
 
 const log = createLogger("notifications");
 
 let notifAudioCtx: AudioContext | null = null;
 /** The master gain every sound routes through: the "App sounds
- *  volume" slider scales it, 100% being a gain of 1, i.e. the notes below
- *  exactly as they are. Lives and dies with `notifAudioCtx`. */
+ *  volume" slider scales it, 100% being a gain of 1, i.e. the notes of
+ *  `soundTables.ts` exactly as they are. Lives and dies with `notifAudioCtx`. */
 let masterGain: GainNode | null = null;
 /** The output id currently applied to `notifAudioCtx`, so a play does not
  *  re-issue `setSinkId` for an unchanged device. Empty string means the system
  *  default. Reset with the context, and cleared again if an apply fails so the
  *  next play retries rather than staying on the default for the session. */
 let appliedSink = "";
+/** The tone that says your outgoing call ended unanswered, if it is sounding. */
+let callEndedBurst: Playing | null = null;
+
+/** Cut the call-ended tone if it is still sounding. */
+function stopCallEnded(): void {
+  callEndedBurst?.stop();
+  callEndedBurst = null;
+}
 
 /** Close and release the notification AudioContext. Call on logout/cleanup. */
 export function cleanupNotificationAudio(): void {
   stopRingback();
   stopRingChime();
+  stopCallEnded();
   appliedSink = "";
   masterGain = null;
   if (notifAudioCtx !== null) {
@@ -53,47 +67,91 @@ export function cleanupNotificationAudio(): void {
 }
 
 // The ring chime repeats until the call is answered, declined or times out —
-// unlike a message chime, which fires once. It is its own rising pattern, not
-// the message blip, so a call is told apart from a message by ear.
+// unlike a message chime, which fires once. It is its own pattern, not the
+// message sound, so a call is told apart from a message by ear.
 let ringInterval: ReturnType<typeof setInterval> | null = null;
 /** The chime burst currently sounding, so stopping the chime cuts the
  *  in-flight notes instead of leaving them under the ringback. */
 let ringtoneBurst: Playing | null = null;
+/** A ring is in flight and wants its sound. */
+let chimeWanted = false;
+/** On a host that rings for a call by itself (`Notifier.ringsCalls`: the
+ *  Android app, with the phone's ringtone), whether it does for the ring in
+ *  flight. Null until whoever asks the host has said (`setHostRinging`); the
+ *  chime waits for that word, so the two never sound together and a ring the
+ *  host did not take still rings here. */
+let hostRings: boolean | null = null;
 
-/** Start the repeating incoming-call chime. Idempotent. */
-export function startRingChime(): void {
-  if (ringInterval !== null) return;
+/** Whether a ringing call makes a sound right now. */
+export function ringSoundOn(): boolean {
   // DND silences a call chime for the same reason it silences a message one:
   // the settings panel promises no notification sounds, and a ringing phone is
   // the loudest possible violation of that. The banner still appears.
   // D2(b): the call sound has its own toggle, so muting message sounds does
   // not silence a ringing phone; the ring has its own switch too.
+  return (
+    loadUserStatus() !== "dnd" && loadPref<boolean>("callSounds", true) && soundSwitchOn("ring")
+  );
+}
+
+/** The ring in flight sounds here, not on the host. */
+function chimeIsOurs(): boolean {
+  return desktop.notifier.ringsCalls === true ? hostRings === false : true;
+}
+
+/** Start the repeating incoming-call chime. Idempotent. */
+export function startRingChime(): void {
+  chimeWanted = true;
+  if (chimeIsOurs()) soundRingChime();
+}
+
+function soundRingChime(): void {
+  if (ringInterval !== null) return;
   // A ring that will not sound pre-empts nothing: the outgoing ringback goes on.
-  if (loadUserStatus() === "dnd") return;
-  if (!loadPref<boolean>("callSounds", true)) return;
-  if (!soundSwitchOn("ring")) return;
+  if (!ringSoundOn()) return;
   // A client is either calling or being called; an incoming ring pre-empts the
   // outgoing ringback. The outgoing call keeps wanting its
   // ringback, so it resumes when this chime ends.
   silenceRingback();
+  stopCallEnded();
   playRingtone();
   // The ring switch is re-read before each burst, so turning it off while the
-  // phone rings stops the chime (and lets a pre-empted ringback resume).
+  // phone rings stops the chime (and lets a pre-empted ringback resume). The
+  // period is the style's when the ring starts; each burst reads its notes.
   ringInterval = setInterval(() => {
     if (soundSwitchOn("ring")) playRingtone();
-    else stopRingChime();
-  }, 2000);
+    else silenceRingChime();
+  }, REPEAT_MS[loadSoundStyle()].ring);
 }
 
 /** Stop the repeating incoming-call chime. Idempotent. */
 export function stopRingChime(): void {
+  chimeWanted = false;
+  hostRings = null;
+  silenceRingChime();
+}
+
+/** Cut the chime's sound; the ring in flight, if any, keeps wanting one. */
+function silenceRingChime(): void {
   stopRingtoneBurst();
   if (ringInterval !== null) {
     clearInterval(ringInterval);
     ringInterval = null;
   }
-  // The incoming ring ended: an outgoing ring that was pre-empted resumes.
+  // An outgoing ring this chime pre-empted resumes, unless the host now rings
+  // in its place.
   syncRingback();
+}
+
+/**
+ * The word of whoever asked the host about the ring in flight: the host rings
+ * for it (true), it does not and the chime rings here after all (false), or
+ * that ring is over (null).
+ */
+export function setHostRinging(rings: boolean | null): void {
+  hostRings = rings;
+  if (chimeWanted && chimeIsOurs()) soundRingChime();
+  else silenceRingChime();
 }
 
 /** Cut the chime burst that is sounding right now, if any. */
@@ -145,21 +203,33 @@ function unwatchRingbackInputs(): void {
   ringbackWatch = null;
 }
 
-/** (Re)evaluate whether the ringback should be sounding right now. */
-function syncRingback(): void {
-  const shouldPlay =
-    ringbackWanted &&
-    ringInterval === null &&
+/** An incoming ring is sounding, here or on the host. */
+function incomingRingSounds(): boolean {
+  return ringInterval !== null || (chimeWanted && hostRings === true && ringSoundOn());
+}
+
+/** The caller's tones may sound: no incoming ring over them, not Do Not
+ *  Disturb, and both the call sound switch and the ringback's own on. */
+function callerTonesOn(): boolean {
+  return (
+    !incomingRingSounds() &&
     loadUserStatus() !== "dnd" &&
     loadPref<boolean>("callSounds", true) &&
-    soundSwitchOn("ringback");
+    soundSwitchOn("ringback")
+  );
+}
+
+/** (Re)evaluate whether the ringback should be sounding right now. */
+function syncRingback(): void {
+  const shouldPlay = ringbackWanted && callerTonesOn();
   if (!shouldPlay) {
     silenceRingback();
     return;
   }
   if (ringbackInterval !== null) return;
+  stopCallEnded();
   playRingback();
-  ringbackInterval = setInterval(() => playRingback(), 3000);
+  ringbackInterval = setInterval(() => playRingback(), REPEAT_MS[loadSoundStyle()].ringback);
 }
 
 /** Start the repeating outgoing-call ringback. Idempotent. */
@@ -176,6 +246,16 @@ export function stopRingback(): void {
   ringbackWanted = false;
   unwatchRingbackInputs();
   silenceRingback();
+}
+
+/** Your outgoing call was declined, went unanswered or could not ring: play
+ *  the call-ended tone once, under the ringback's gates. Call it after the
+ *  ringback stopped, so its last burst is already cut. */
+export function playCallEnded(): void {
+  if (!callerTonesOn() || deafened()) return;
+  stopCallEnded();
+  // i18n-exempt: log text, never displayed
+  callEndedBurst = playSpec(soundSpec(loadSoundStyle(), "callEnded"), "Call ended sound");
 }
 
 /** Every sound this module makes is silenced while the local user is deafened
@@ -227,46 +307,37 @@ function syncSink(): void {
 }
 
 /** A sound being played: stopping it cuts the notes still sounding. */
-interface Playing {
+export interface Playing {
   stop(): void;
 }
 
-/** A sound as data: the one table both renderers draw from, so the
- *  Web Audio and native notes cannot drift. */
-type ToneSpec = readonly NativeToneNote[];
+/** Step (or, with `glide`, slide) the oscillator through the note's points. */
+function scheduleFreqs(freq: AudioParam, n: NativeToneNote, start: number): void {
+  n.freqs.forEach(([offset, hz], i) => {
+    if (i > 0 && n.glide === true) freq.exponentialRampToValueAtTime(hz, start + offset);
+    else freq.setValueAtTime(hz, start + offset);
+  });
+}
 
-const note = (at: number, duration: number, gain: number, hz: number): NativeToneNote => ({
-  at,
-  duration,
-  gain,
-  endGain: 0.01,
-  freqs: [[0, hz]],
-});
+/** Shape the note's gain: the attack, the fade to `endGain`, the release.
+ *  Returns when the note falls silent. */
+function scheduleGain(gain: AudioParam, n: NativeToneNote, start: number): number {
+  const attack = n.attack ?? 0;
+  const release = n.release ?? 0;
+  if (attack > 0) {
+    gain.setValueAtTime(0, start);
+    gain.linearRampToValueAtTime(n.gain, start + attack);
+  } else {
+    gain.setValueAtTime(n.gain, start);
+  }
+  gain.exponentialRampToValueAtTime(n.endGain, start + n.duration);
+  if (release <= 0) return start + n.duration;
+  gain.linearRampToValueAtTime(0, start + n.duration + release);
+  return start + n.duration + release;
+}
 
-/** The message chime: one tone that falls from 800 Hz to 600 Hz. */
-const NOTIFICATION_TONE: ToneSpec = [
-  {
-    at: 0,
-    duration: 0.2,
-    gain: 0.3,
-    endGain: 0.01,
-    freqs: [
-      [0, 800],
-      [0.1, 600],
-    ],
-  },
-];
-
-/** One burst of the ringtone: two rising notes, where a message falls. */
-const RINGTONE_TONE: ToneSpec = [note(0, 0.16, 0.25, 660), note(0.18, 0.16, 0.25, 880)];
-
-/** One burst of the ringback: a single soft, low tone, slower than the
- *  incoming ringtone and quieter, so the caller and the callee hear different
- *  things. */
-const RINGBACK_TONE: ToneSpec = [note(0, 0.5, 0.12, 440)];
-
-/** Render `spec` through Web Audio on the shared context, node for node as the
- *  sounds always were. A host without Web Audio logs `what` and plays nothing. */
+/** Render `spec` through Web Audio on the shared context: one oscillator and
+ *  one gain node per note. A host without Web Audio logs `what` and plays nothing. */
 function playWeb(spec: ToneSpec, what: string): Playing {
   const oscs: OscillatorNode[] = [];
   try {
@@ -278,11 +349,10 @@ function playWeb(spec: ToneSpec, what: string): Playing {
       osc.connect(gain);
       gain.connect(out);
       const start = ctx.currentTime + n.at;
-      for (const [offset, hz] of n.freqs) osc.frequency.setValueAtTime(hz, start + offset);
-      gain.gain.setValueAtTime(n.gain, start);
-      gain.gain.exponentialRampToValueAtTime(n.endGain, start + n.duration);
+      scheduleFreqs(osc.frequency, n, start);
+      const end = scheduleGain(gain.gain, n, start);
       osc.start(start);
-      osc.stop(start + n.duration);
+      osc.stop(end);
       oscs.push(osc);
     }
   } catch (err) {
@@ -330,15 +400,16 @@ function playNative(spec: ToneSpec, what: string): Playing {
 }
 
 /** Play `spec` on the Linux desktop through the native host, anywhere else
- *  through Web Audio (whose `setSinkId` carries the saved output). */
-function playSpec(spec: ToneSpec, what: string): Playing {
+ *  through Web Audio (whose `setSinkId` carries the saved output). Ungated:
+ *  only this module's gated players and the Settings previews call it. */
+export function playSpec(spec: ToneSpec, what: string): Playing {
   return isLinuxDesktop() ? playNative(spec, what) : playWeb(spec, what);
 }
 
-/** One burst of the ringtone. */
+/** One burst of the ringtone, in the style saved now. */
 function playRingtone(): void {
   // i18n-exempt: log text, never displayed
-  ringtoneBurst = playSpec(RINGTONE_TONE, "Ringtone");
+  ringtoneBurst = playSpec(soundSpec(loadSoundStyle(), "ring"), "Ringtone");
 }
 
 /** One burst of the ringback. Silent while deafened: the interval keeps
@@ -346,89 +417,19 @@ function playRingtone(): void {
 function playRingback(): void {
   if (deafened()) return;
   // i18n-exempt: log text, never displayed
-  ringbackBurst = playSpec(RINGBACK_TONE, "Ringback");
+  ringbackBurst = playSpec(soundSpec(loadSoundStyle(), "ringback"), "Ringback");
 }
 
-/** Play a brief notification chime. Silent while deafened. */
-export function playNotificationSound(): void {
+/** Play a brief notification chime, a mention's or a plain message's.
+ *  Silent while deafened. */
+export function playNotificationSound(mentioned = false): void {
   if (deafened()) return;
   // i18n-exempt: log text, never displayed
-  playSpec(NOTIFICATION_TONE, "Notification sound");
-}
-
-/** The short voice UI sounds: join/leave, a moderator's move,
- *  mute/unmute, deafen/undeafen, a stream starting and ending. */
-export type VoiceSound =
-  | "join"
-  | "leave"
-  | "moved"
-  | "mute"
-  | "unmute"
-  | "deafen"
-  | "undeafen"
-  | "streamStart"
-  | "streamEnd"
-  | "viewerJoin"
-  | "viewerLeave";
-
-// A note (or pair) per edge, all under a fifth of a second. Distinct enough to
-// tell apart by ear without being a message or a call.
-const VOICE_SOUND_NOTES: Readonly<Record<VoiceSound, readonly (readonly [number, number])[]>> = {
-  join: [
-    [523, 0],
-    [784, 0.09],
-  ],
-  leave: [
-    [784, 0],
-    [523, 0.09],
-  ],
-  // Two quick equal notes: you landed somewhere you did not pick.
-  moved: [
-    [659, 0],
-    [659, 0.09],
-  ],
-  mute: [[392, 0]],
-  unmute: [[587, 0]],
-  deafen: [[330, 0]],
-  undeafen: [[494, 0]],
-  // Three notes, so a stream is told apart from a join or a leave.
-  streamStart: [
-    [440, 0],
-    [587, 0.08],
-    [880, 0.16],
-  ],
-  streamEnd: [
-    [880, 0],
-    [587, 0.08],
-    [440, 0.16],
-  ],
-  // The streamer's cue that someone started or stopped watching: two soft
-  // notes, the pair reversed for leaving (voiceTone plays them quieter).
-  viewerJoin: [
-    [659, 0],
-    [880, 0.07],
-  ],
-  viewerLeave: [
-    [880, 0],
-    [659, 0.07],
-  ],
-};
-
-/** Per-sound gain; the viewer cues sit well under the others (0.2). */
-const VOICE_SOUND_GAIN: Readonly<Partial<Record<VoiceSound, number>>> = {
-  viewerJoin: 0.1,
-  viewerLeave: 0.1,
-};
-
-/** Each voice sound as a tone spec: a short note per `[hz, at]` pair. */
-function voiceTone(kind: VoiceSound): ToneSpec {
-  return VOICE_SOUND_NOTES[kind].map(([hz, at]) =>
-    note(at, 0.12, VOICE_SOUND_GAIN[kind] ?? 0.2, hz),
-  );
+  playSpec(soundSpec(loadSoundStyle(), mentioned ? "mention" : "message"), "Notification sound");
 }
 
 /** Play one voice UI sound. */
 export function playVoiceSound(kind: VoiceSound): void {
   // i18n-exempt: log text, never displayed
-  playSpec(voiceTone(kind), "Voice sound");
+  playSpec(soundSpec(loadSoundStyle(), kind), "Voice sound");
 }

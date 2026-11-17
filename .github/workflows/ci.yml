@@ -75,13 +75,13 @@ jobs:
       changelog: ${{ steps.select.outputs.changelog }}
       android: ${{ steps.select.outputs.android }}
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The diff is taken from the merge base, so both ends of it have to be
           # present. docs-consistency fetches full history for the same reason.
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
 
@@ -194,11 +194,11 @@ jobs:
       run:
         working-directory: Server/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
@@ -306,7 +306,7 @@ jobs:
       run:
         working-directory: Server/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -344,7 +344,7 @@ jobs:
             echo "::notice::not selected for this change — this leg runs no server checks"
           fi
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         if: env.RUN_SERVER != 'false' || (matrix.os == 'ubuntu-latest' && env.RUN_CHANGELOG != 'false')
         with:
           go-version: "1.27"
@@ -366,7 +366,7 @@ jobs:
       # feeds is required, and a missing interpreter would surface as
       # "not a usable floor file", which is the wrong diagnosis. Not cached: the
       # job installs no npm dependencies.
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         if: env.RUN_SERVER != 'false'
         with:
           node-version: 26
@@ -517,13 +517,122 @@ jobs:
       # Coverage is profiled on the Linux leg only: the floor check below reads
       # that leg alone, and coverage instrumentation slows the Windows leg,
       # which is the longest job in the workflow, for a profile nothing reads.
+      # db, service and api run in Server Race Tests (db, service, api) on
+      # their own runner: this runner's cores are full
+      # with the rest, so only a second runner shortens the race run.
       - name: Run tests with race detection and coverage
         if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
-        run: go test -race -timeout 20m ./... -coverprofile=coverage.out -cover
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t race_pkgs < <(go list ./... | grep -vE '/Server/(db|service|api)$')
+          if [ "${#race_pkgs[@]}" -lt 10 ]; then
+            echo "::error::go list returned ${#race_pkgs[@]} packages for the race run"
+            exit 1
+          fi
+          go test -race -timeout 20m "${race_pkgs[@]}" -coverprofile=coverage.out -cover
 
+      # Windows runs db, service and api without -race. Those packages spend
+      # most of their race time instrumenting the SQLite driver, which is C
+      # translated to Go, so on Windows the detector mostly re-checks SQLite
+      # itself. The Linux leg still runs every package under -race, so our own
+      # code keeps its race coverage. The two runs go side by side so the
+      # plain one finishes inside the race one's time.
       - name: Run tests with race detection
         if: matrix.os != 'ubuntu-latest' && env.RUN_SERVER != 'false'
-        run: go test -race -timeout 20m ./...
+        shell: bash
+        run: |
+          set -uo pipefail
+          mapfile -t race_pkgs < <(go list ./... | grep -vE '/Server/(db|service|api)$')
+          if [ "${#race_pkgs[@]}" -lt 10 ]; then
+            echo "::error::go list returned ${#race_pkgs[@]} packages for the race run"
+            exit 1
+          fi
+          logs="$RUNNER_TEMP"
+          go test -race -timeout 20m "${race_pkgs[@]}" > "$logs/race.log" 2>&1 &
+          race=$!
+          go test -timeout 20m ./db/ ./service/ ./api/ > "$logs/plain.log" 2>&1 &
+          plain=$!
+          wait "$race"; race_rc=$?
+          wait "$plain"; plain_rc=$?
+          echo "::group::go test -race (all packages but db, service, api)"
+          cat "$logs/race.log"
+          echo "::endgroup::"
+          echo "::group::go test (db, service, api, no -race)"
+          cat "$logs/plain.log"
+          echo "::endgroup::"
+          grep -E '^(--- FAIL|FAIL|panic:)' "$logs/race.log" "$logs/plain.log" || true
+          exit $(( race_rc != 0 || plain_rc != 0 ))
+
+      # Document gates. Both read a Markdown file OUTSIDE the Server module, so
+      # Go's test cache does not record it as an input and the -race run above
+      # answers a doc-only edit from cache. The deadlock step in Server Deadlock
+      # & Tag Tests happens to run them with -count=1 today; this step says so
+      # on purpose, on both legs,
+      # so narrowing that step's package set cannot silently drop the gates.
+      #   cmd/dbinventory  -> docs/architecture/server-boundaries.md (B3-0)
+      #   migrations       -> docs/architecture/community-services.md (B5-0)
+      #   admin            -> CHANGELOG.md (the panel's bundled release notes)
+      - name: Run document gates (-count=1)
+        if: env.RUN_SERVER != 'false'
+        run: |
+          go test -count=1 ./cmd/dbinventory/ ./migrations/
+          go test -count=1 -run TestBundledChangelog ./admin/
+
+      # Half of the Linux profile; Server Coverage Floor merges it with the
+      # race shard's half and checks the floors.
+      - name: Upload Go coverage
+        if: always() && matrix.os == 'ubuntu-latest'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-coverage-part-main
+          path: Server/coverage.out
+          retention-days: 7
+          overwrite: true
+
+      # verify: false — the action's default `config verify` pass fetches
+      # golangci-lint.run's JSONSchema over HTTPS before linting anything, so a
+      # timeout on that host fails a required job having run zero linters (it
+      # took main red on d352696). `golangci-lint run` rejects a bad config on
+      # its own; the schema pass only bought a prettier error message, priced
+      # at a third-party site inside the gate.
+      - name: Lint
+        if: env.RUN_SERVER != 'false'
+        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
+        with:
+          version: v2.14.0
+          working-directory: Server/
+          verify: false
+
+  # The Linux-only test passes that used to run after the race step inside
+  # Server Build & Test (ubuntu-latest): the deadlock pass, the tag-gated tests
+  # and the real-SFU proofs. They share no state with the race run, so as their
+  # own job they run beside it instead of adding ~6 minutes after it. Gated
+  # like Server Lint & Invariants: a plain job (no matrix), so a job-level
+  # `if:` reports one `skipped` context, which a required check accepts.
+  server-deadlock-tags:
+    name: Server Deadlock & Tag Tests
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: Server/
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache-dependency-path: Server/go.sum
+
+      # install-livekit.mjs below is a node script.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
 
       # Real-SFU proof for single-port UDP (O1). Single-port mode is untested
       # upstream, so a YAML-only assertion cannot tell whether livekit-server
@@ -532,19 +641,16 @@ jobs:
       # mode (the shipped default) and once with voice.udp_port. One leg, no
       # -race: the concern is whether media flows, not new concurrency.
       - name: Cache livekit-server archive
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: Client/tests/e2e/.bin/livekit-cache
           key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Client/tests/e2e/scripts/install-livekit.mjs') }}
 
       - name: Install livekit-server for the generated-config proof
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         working-directory: Client/
         run: node tests/e2e/scripts/install-livekit.mjs
 
       - name: Run the real-SFU proofs
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         env:
           # Relative to each test's working directory, which is its package
           # directory (Server/livekitproc, Server/ws), not Server/.
@@ -564,24 +670,9 @@ jobs:
       # One leg is enough: -tags deadlock swaps syncutil's lock types and
       # reports lock-order inversions, which do not depend on the OS, and no
       # Windows-only file takes a syncutil lock. The race step above still runs
-      # every test on both legs.
+      # every test on both legs, in Server Build & Test.
       - name: Run tests with deadlock detection
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: go test -tags deadlock -count=1 ./...
-
-      # Document gates. Both read a Markdown file OUTSIDE the Server module, so
-      # Go's test cache does not record it as an input and the -race run above
-      # answers a doc-only edit from cache. The ubuntu deadlock step happens to
-      # run them with -count=1 today; this step says so on purpose, on both legs,
-      # so narrowing that step's package set cannot silently drop the gates.
-      #   cmd/dbinventory  -> docs/architecture/server-boundaries.md (B3-0)
-      #   migrations       -> docs/architecture/community-services.md (B5-0)
-      #   admin            -> CHANGELOG.md (the panel's bundled release notes)
-      - name: Run document gates (-count=1)
-        if: env.RUN_SERVER != 'false'
-        run: |
-          go test -count=1 ./cmd/dbinventory/ ./migrations/
-          go test -count=1 -run TestBundledChangelog ./admin/
 
       # Tag-gated tests (DC-06 / T-2026-07-25-16). The build-tag matrix above
       # only COMPILES the otel/wazero variants; the tests behind those tags
@@ -595,7 +686,7 @@ jobs:
       #
       # admin/logstream_alloc_test.go (OC-0398) carries the INVERSE tag
       # `!race && !deadlock`: it needs a leg where NEITHER is set, which is
-      # neither of the two universal legs above (each sets exactly one of
+      # neither of the two universal legs (each sets exactly one of
       # the two) nor this step's own -tags lines — so it gets its own plain
       # line here. Server/ci_tags_test.go guards this class going forward:
       # it fails if any tagged Server test file has no `go test` leg above
@@ -612,44 +703,106 @@ jobs:
       # `!race && !deadlock` test fails the guard instead of being silently
       # left out of the only leg that could run it.
       - name: Run tag-gated tests (-tags wazero, -tags otel)
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: |
           go test -tags wazero -count=1 ./plugin/...
           go test -tags otel -count=1 ./telemetry/... ./api/...
           go test -count=1 -run '^TestRingBuffer_WriteDoesNotAllocate$' ./admin/
           go test -count=1 -run '^TestWriteReady_AllocatesAFifthOfTheRoster$' ./ws/
 
-      # Coverage ratchet (B3-6 item 1). Reads the profile the race step wrote,
-      # but placed after the other test steps so a floor miss does not hide
-      # their results. Linux leg only: the profile is not the same on both legs
-      # — OS-tagged files swap in and out and several tests skip on Windows —
-      # so the floors are pinned to one leg and the figure stays deterministic.
-      # Ratchet rule in Server/CLAUDE.md.
+  # The other half of the Linux race run: the database-heavy packages, whose
+  # tests mostly run in parallel and so need cores of their own to gain.
+  server-race-shard:
+    name: Server Race Tests (db, service, api)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: Server/
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: "1.27"
+          cache-dependency-path: Server/go.sum
+
+      - name: Run tests with race detection and coverage
+        # -p 2: each package already runs its tests in parallel, so two at a
+        # time keep the cores busy without starving tests that wait on a
+        # deadline.
+        run: go test -race -p 2 -timeout 20m ./db/ ./service/ ./api/ -coverprofile=coverage.out -cover
+
+      - name: Upload Go coverage
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: go-coverage-part-shard
+          path: Server/coverage.out
+          retention-days: 7
+          overwrite: true
+
+  # Coverage ratchet (B3-6 item 1) over the two Linux race halves. Linux only:
+  # the profile is not the same on both OS legs (OS-tagged files swap in and
+  # out, several tests skip on Windows), so the floors are pinned to Linux.
+  # Ratchet rule in Server/CLAUDE.md. Both halves are required: a missing one
+  # fails here rather than checking the floor on half the code.
+  server-coverage-floor:
+    name: Server Coverage Floor
+    needs: [changes, server-build-test, server-race-shard]
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.server == 'true') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: Server/
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # coverage-floor.sh reads the floor file with node.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          pattern: go-coverage-part-*
+          path: Server/.coverage-parts
+
+      - name: Merge the two profiles
+        shell: bash
+        run: |
+          set -euo pipefail
+          a=.coverage-parts/go-coverage-part-main/coverage.out
+          b=.coverage-parts/go-coverage-part-shard/coverage.out
+          for f in "$a" "$b"; do
+            if [ ! -s "$f" ]; then
+              echo "::error::missing coverage half $f"
+              exit 1
+            fi
+          done
+          if [ "$(head -1 "$a")" != "$(head -1 "$b")" ]; then
+            echo "::error::coverage modes differ: $(head -1 "$a") vs $(head -1 "$b")"
+            exit 1
+          fi
+          { cat "$a"; tail -n +2 "$b"; } > coverage.out
+
       - name: Check coverage floor
-        if: matrix.os == 'ubuntu-latest' && env.RUN_SERVER != 'false'
         run: bash scripts/coverage-floor.sh coverage.out
 
       - name: Upload Go coverage
-        if: always() && matrix.os == 'ubuntu-latest'
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: go-coverage-${{ matrix.os }}
+          name: go-coverage-ubuntu-latest
           path: Server/coverage.out
           retention-days: 7
-
-      # verify: false — the action's default `config verify` pass fetches
-      # golangci-lint.run's JSONSchema over HTTPS before linting anything, so a
-      # timeout on that host fails a required job having run zero linters (it
-      # took main red on d352696). `golangci-lint run` rejects a bad config on
-      # its own; the schema pass only bought a prettier error message, priced
-      # at a third-party site inside the gate.
-      - name: Lint
-        if: env.RUN_SERVER != 'false'
-        uses: golangci/golangci-lint-action@ba0d7d2ec06a0ea1cb5fa41b2e4a3ab91d21278a # v9.3.0
-        with:
-          version: v2.14.0
-          working-directory: Server/
-          verify: false
+          overwrite: true
 
   # ubuntu-latest deliberately: the client TS code has zero win32-conditional
   # paths (no process.platform / path.sep branches in src or the unit suites),
@@ -665,11 +818,11 @@ jobs:
       run:
         working-directory: Client/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -698,6 +851,11 @@ jobs:
       # (nightly and release); its self-test runs here, on the PR that edits it.
       - name: Self-test the installer size budget
         run: node --test scripts/check-artifact-size.test.mjs
+
+      # The opt-in performance measurements never run in CI; their pure
+      # statistics and analyzer are tested here, on the PR that edits them.
+      - name: Self-test the performance analyzer
+        run: node --test scripts/perf-stats.test.mjs scripts/analyze-perf.test.mjs
 
       # D1: `tests/e2e/quarantine.json` is what keeps a known-flaky required test
       # out of the run. This is the guard that keeps the list honest — a
@@ -782,8 +940,10 @@ jobs:
       # no new status context; it runs only when ci-select's `permissions`
       # capability is true (permissions.ts, its unit test, the Stryker
       # configs, or any non-PR event, which selects everything). The config
-      # mutates one file but Stryker's dry run executes the full Vitest suite
-      # once. Wall time: about 3m40s on ubuntu-latest (first PR run, 2026-10-08).
+      # mutates one file, runs only the tests that import it and type-checks
+      # from it alone (tests/mutation/vitest.permissions.config.mjs,
+      # tsconfig.mutation-permissions.json). It took 10m48s when the dry run
+      # still executed the whole suite; about 1m30s locally after (2026-11-14).
       - name: Permissions mutation hotspot
         if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.permissions == 'true') }}
         run: npx stryker run tests/mutation/stryker.ci.config.mjs
@@ -809,14 +969,14 @@ jobs:
     name: Docs & Ledger Consistency
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # check-migrations.mjs diffs against origin/dev. The default shallow
           # fetch has no such ref, and the script fails closed rather than
           # passing blind, so this job needs the full history.
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
 
@@ -896,6 +1056,11 @@ jobs:
       - name: Self-test the release status gate
         run: node --test scripts/release/verify-release-status.test.mjs
 
+      # The release-notes gate in release.yml, on fixtures and on the real
+      # CHANGELOG.md's Unreleased list, for the same reason.
+      - name: Self-test the release notes gate
+        run: node --test scripts/release/verify-release-notes.test.mjs
+
       - name: Self-test the Claude Code Bash hook
         run: node --test scripts/claude-hook.test.mjs
 
@@ -934,7 +1099,7 @@ jobs:
       # if: always() -- you want it downloadable precisely when the job failed.
       - name: Upload the rendered findings ledger
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: findings-ledger-rendering
           path: .superpowers/FINDINGS.md
@@ -953,11 +1118,11 @@ jobs:
     name: Repository Hygiene
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
 
@@ -990,9 +1155,9 @@ jobs:
       - name: Formatting, shell and workflow gates
         run: npm run check:hygiene
 
-      # Duplicated lines in Client/tests and in the Server Go tests are
-      # shrink-only shares (docs/code-style.md, "Tests"). jscpd comes from the
-      # root install above.
+      # Duplicated lines in the tests and the production code of the client,
+      # the server and the Rust shell are shrink-only shares
+      # (docs/code-style.md, "Tests"). jscpd comes from the root install above.
       - name: Self-test the test duplication ratchet
         run: node --test scripts/checks/check-test-duplication.test.mjs
 
@@ -1022,7 +1187,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -1061,7 +1226,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
@@ -1135,7 +1300,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -1221,11 +1386,11 @@ jobs:
       run:
         working-directory: Client/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -1255,7 +1420,7 @@ jobs:
 
       - name: Upload client coverage
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: client-coverage
           path: Client/coverage/
@@ -1277,7 +1442,7 @@ jobs:
       run:
         working-directory: Client/src-tauri/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
@@ -1319,7 +1484,7 @@ jobs:
       # publish, restores NO cache (zizmor cache-poisoning, #1656) — it always
       # downloads and verifies the pinned sha256.
       - name: Cache libwebrtc
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/owncord-linux-webrtc
           key: linux-webrtc-${{ runner.arch }}-webrtc-a545de4-v1
@@ -1374,7 +1539,7 @@ jobs:
       - name: Build the native-voice interop peer
         run: cargo build --example native_voice_interop
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -1394,7 +1559,7 @@ jobs:
       # different binary. An ordinary PR/branch cache: this job neither is
       # tag-triggered nor publishes a runtime artifact.
       - name: Cache livekit-server archive
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: Client/tests/e2e/.bin/livekit-cache
           key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Client/tests/e2e/scripts/install-livekit.mjs') }}
@@ -1412,7 +1577,7 @@ jobs:
 
       - name: Upload native-voice interop report
         if: failure()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: native-voice-interop-report
           path: |
@@ -1434,11 +1599,11 @@ jobs:
       run:
         working-directory: Client/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -1467,7 +1632,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report
           path: |
@@ -1486,16 +1651,16 @@ jobs:
       run:
         working-directory: Client/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -1513,7 +1678,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: admin-e2e-report
           path: |
@@ -1538,11 +1703,11 @@ jobs:
       run:
         working-directory: Client/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -1560,7 +1725,7 @@ jobs:
 
       - name: Upload Playwright report
         if: always()
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report-parity
           path: |
@@ -1588,15 +1753,15 @@ jobs:
           - os: ubuntu-22.04-arm
             arch: arm64
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+        uses: docker/setup-buildx-action@f87e5991a6d7451dcb8d9637bfbc97413f497069 # v4.4.1
 
       - name: Build image (no push)
-        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
+        uses: docker/build-push-action@c3c9e263c25d99ce0380d002d59b67737d91b0dc # v7.4.0
         with:
           context: Server/
           platforms: linux/${{ matrix.arch }}
@@ -1634,11 +1799,11 @@ jobs:
       run:
         working-directory: Client/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -1671,7 +1836,7 @@ jobs:
       # Same clang + libwebrtc prerequisite as rust-tests, libwebrtc cached per arch.
       - name: Cache libwebrtc
         if: startsWith(matrix.os, 'ubuntu')
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ~/.cache/owncord-linux-webrtc
           key: linux-webrtc-${{ runner.arch }}-webrtc-a545de4-v1
@@ -1738,14 +1903,14 @@ jobs:
       run:
         working-directory: Client/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -1755,7 +1920,7 @@ jobs:
         timeout-minutes: 12
         uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
       - name: Cache livekit-server archive
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: Client/tests/e2e/.bin/livekit-cache
           key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Client/tests/e2e/scripts/install-livekit.mjs') }}
@@ -1764,7 +1929,7 @@ jobs:
         env:
           OWNCORD_E2E_LIVEKIT_BINARY: tests/e2e/.bin/livekit-server
         run: npm run test:e2e:fullstack
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: fullstack-e2e-report
@@ -1794,14 +1959,14 @@ jobs:
       run:
         working-directory: Client/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -1818,7 +1983,7 @@ jobs:
       - name: Smoke the web-embedded server binary
         working-directory: Server/
         run: go run ./cmd/smoke -browser-client ../Client/tests/e2e/.bin/chatserver
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: failure()
         with:
           name: web-e2e-report
@@ -1839,14 +2004,14 @@ jobs:
       run:
         working-directory: Client/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -1861,7 +2026,7 @@ jobs:
       - run: npm ci
       - run: npm run test:e2e:build-server
       - name: Cache livekit-server archive
-        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: Client/tests/e2e/.bin/livekit-cache
           key: livekit-archive-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Client/tests/e2e/scripts/install-livekit.mjs') }}
@@ -1897,7 +2062,7 @@ jobs:
           --project native-extra
           --output test-results/native-suites
       - name: Preserve native core and suite diagnostics before building installers
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: native-core-e2e-report
@@ -1921,7 +2086,7 @@ jobs:
           PLAYWRIGHT_HTML_OUTPUT_DIR: playwright-report/native-updater
           PLAYWRIGHT_JUNIT_OUTPUT_FILE: test-results/native-updater.xml
         run: node tests/e2e/scripts/run-native-updater.mjs
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
           name: native-e2e-report
@@ -1948,11 +2113,11 @@ jobs:
       run:
         working-directory: Client/
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
           cache: npm
@@ -2069,7 +2234,7 @@ jobs:
             echo "- \`tauri android build\`: ${BUILD_SECONDS} s"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: steps.signing.outputs.signed == 'true'
         with:
           name: owncord-android-${{ github.sha }}
@@ -2097,11 +2262,11 @@ jobs:
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.client == 'true') }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: "24" # deliberately NOT the supported major
 
@@ -2138,6 +2303,9 @@ jobs:
       - changes
       - server-fast-checks
       - server-build-test
+      - server-deadlock-tags
+      - server-race-shard
+      - server-coverage-floor
       - client-check
       - docs-consistency
       - hygiene

@@ -51,6 +51,7 @@ func seedChannelRawSQL(t *testing.T, database *db.DB, name string) int64 {
 // ─── CreateMessage ────────────────────────────────────────────────────────────
 
 func TestCreateMessage_ReturnsID(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "alice")
 	chID := seedChannel(t, database, "general")
@@ -62,6 +63,7 @@ func TestCreateMessage_ReturnsID(t *testing.T) {
 }
 
 func TestCreateMessage_WithReplyTo(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "alice")
 	chID := seedChannel(t, database, "general")
@@ -76,6 +78,7 @@ func TestCreateMessage_WithReplyTo(t *testing.T) {
 }
 
 func TestCreateMessage_ContentPreserved(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "bob")
 	chID := seedChannel(t, database, "ch")
@@ -90,6 +93,7 @@ func TestCreateMessage_ContentPreserved(t *testing.T) {
 // ─── GetMessage ───────────────────────────────────────────────────────────────
 
 func TestGetMessage_NotFound(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	msg, err := database.GetMessage(context.Background(), 9999)
@@ -100,6 +104,7 @@ func TestGetMessage_NotFound(t *testing.T) {
 }
 
 func TestGetMessage_Fields(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "carol")
 	chID := seedChannel(t, database, "ch")
@@ -131,6 +136,7 @@ func TestGetMessage_Fields(t *testing.T) {
 // ─── GetMessages ──────────────────────────────────────────────────────────────
 
 func TestGetMessages_EmptyChannel(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID := seedChannel(t, database, "empty")
 
@@ -142,6 +148,7 @@ func TestGetMessages_EmptyChannel(t *testing.T) {
 }
 
 func TestGetMessages_ReturnsMessages(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "dave")
 	chID := seedChannel(t, database, "ch")
@@ -161,6 +168,7 @@ func TestGetMessages_ReturnsMessages(t *testing.T) {
 }
 
 func TestGetMessages_LimitRespected(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "eve")
 	chID := seedChannel(t, database, "ch")
@@ -176,6 +184,7 @@ func TestGetMessages_LimitRespected(t *testing.T) {
 }
 
 func TestGetMessages_BeforePagination(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "frank")
 	chID := seedChannel(t, database, "ch")
@@ -194,6 +203,7 @@ func TestGetMessages_BeforePagination(t *testing.T) {
 }
 
 func TestGetMessages_IncludesUsername(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "grace")
 	chID := seedChannel(t, database, "ch")
@@ -212,6 +222,7 @@ func TestGetMessages_IncludesUsername(t *testing.T) {
 // ─── EditMessage ──────────────────────────────────────────────────────────────
 
 func TestEditMessage_OwnerCanEdit(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "henry")
 	chID := seedChannel(t, database, "ch")
@@ -238,6 +249,7 @@ func TestEditMessage_OwnerCanEdit(t *testing.T) {
 }
 
 func TestEditMessage_NonOwnerCannotEdit(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ownerID := seedUser(t, database, "ivan")
 	otherID := seedUser(t, database, "julia")
@@ -252,6 +264,7 @@ func TestEditMessage_NonOwnerCannotEdit(t *testing.T) {
 }
 
 func TestEditMessage_NotFound(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "kim")
 
@@ -264,6 +277,7 @@ func TestEditMessage_NotFound(t *testing.T) {
 // ─── DeleteMessage ────────────────────────────────────────────────────────────
 
 func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "larry")
 	chID := seedChannel(t, database, "ch")
@@ -282,6 +296,7 @@ func TestDeleteMessage_OwnerCanDelete(t *testing.T) {
 }
 
 func TestDeleteMessage_ContentPreservedAfterSoftDelete(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "mia")
 	chID := seedChannel(t, database, "ch")
@@ -297,6 +312,7 @@ func TestDeleteMessage_ContentPreservedAfterSoftDelete(t *testing.T) {
 }
 
 func TestDeleteMessage_NonOwnerBlockedWithoutMod(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ownerID := seedUser(t, database, "nate")
 	otherID := seedUser(t, database, "olivia")
@@ -311,6 +327,7 @@ func TestDeleteMessage_NonOwnerBlockedWithoutMod(t *testing.T) {
 }
 
 func TestDeleteMessage_ModCanDeleteAny(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ownerID := seedUser(t, database, "pete")
 	modID := seedUser(t, database, "quinn")
@@ -327,6 +344,7 @@ func TestDeleteMessage_ModCanDeleteAny(t *testing.T) {
 }
 
 func TestDeleteMessage_NotFound(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "rachel")
 
@@ -358,6 +376,7 @@ func purgeSeed(t *testing.T, n int) (*db.DB, int64, []int64) {
 }
 
 func TestPurgeChannelMessages_DeletesNewestFirst(t *testing.T) {
+	t.Parallel()
 	database, chID, ids := purgeSeed(t, 5)
 
 	got, err := database.PurgeChannelMessages(context.Background(), chID, 0, 2)
@@ -381,6 +400,7 @@ func TestPurgeChannelMessages_DeletesNewestFirst(t *testing.T) {
 }
 
 func TestPurgeChannelMessages_PreservesTombstones(t *testing.T) {
+	t.Parallel()
 	database, chID, ids := purgeSeed(t, 3)
 
 	if _, err := database.PurgeChannelMessages(context.Background(), chID, 0, 3); err != nil {
@@ -407,6 +427,7 @@ func TestPurgeChannelMessages_PreservesTombstones(t *testing.T) {
 }
 
 func TestPurgeChannelMessages_SkipsAlreadyDeleted(t *testing.T) {
+	t.Parallel()
 	database, chID, ids := purgeSeed(t, 4)
 	if _, err := database.PurgeChannelMessages(context.Background(), chID, 0, 1); err != nil {
 		t.Fatalf("first purge: %v", err)
@@ -421,6 +442,7 @@ func TestPurgeChannelMessages_SkipsAlreadyDeleted(t *testing.T) {
 }
 
 func TestPurgeChannelMessages_BeforeCursor(t *testing.T) {
+	t.Parallel()
 	database, chID, ids := purgeSeed(t, 5)
 
 	got, err := database.PurgeChannelMessages(context.Background(), chID, ids[2], 10)
@@ -438,6 +460,7 @@ func TestPurgeChannelMessages_BeforeCursor(t *testing.T) {
 }
 
 func TestPurgeChannelMessages_OtherChannelsUntouched(t *testing.T) {
+	t.Parallel()
 	database, chID, ids := purgeSeed(t, 2)
 	otherCh := seedChannel(t, database, "other")
 	otherID, _ := database.CreateMessage(context.Background(), otherCh, ids[0], "keep", nil)
@@ -453,6 +476,7 @@ func TestPurgeChannelMessages_OtherChannelsUntouched(t *testing.T) {
 }
 
 func TestPurgeChannelMessages_EmptyChannelAndZeroLimit(t *testing.T) {
+	t.Parallel()
 	database, chID, _ := purgeSeed(t, 1)
 
 	got, err := database.PurgeChannelMessages(context.Background(), chID, 0, 0)
@@ -472,6 +496,7 @@ func TestPurgeChannelMessages_EmptyChannelAndZeroLimit(t *testing.T) {
 // ─── Reactions ────────────────────────────────────────────────────────────────
 
 func TestAddReaction_Success(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "sam")
 	chID := seedChannel(t, database, "ch")
@@ -481,6 +506,7 @@ func TestAddReaction_Success(t *testing.T) {
 }
 
 func TestAddReaction_UniqueConstraint(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "tina")
 	chID := seedChannel(t, database, "ch")
@@ -494,6 +520,7 @@ func TestAddReaction_UniqueConstraint(t *testing.T) {
 }
 
 func TestRemoveReaction_Success(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "uma")
 	chID := seedChannel(t, database, "ch")
@@ -504,6 +531,7 @@ func TestRemoveReaction_Success(t *testing.T) {
 }
 
 func TestRemoveReaction_NotFound(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "victor")
 	chID := seedChannel(t, database, "ch")
@@ -516,6 +544,7 @@ func TestRemoveReaction_NotFound(t *testing.T) {
 }
 
 func TestGetReactions_Empty(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "wendy")
 	chID := seedChannel(t, database, "ch")
@@ -529,6 +558,7 @@ func TestGetReactions_Empty(t *testing.T) {
 }
 
 func TestGetReactions_Counts(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	u1 := seedUser(t, database, "xavier")
 	u2 := seedUser(t, database, "yvonne")
@@ -562,6 +592,7 @@ func TestGetReactions_Counts(t *testing.T) {
 // ─── GetReactionUsers ───────────────────────────────────────────────────────
 
 func TestGetReactionUsers_ReturnsReactorsInReactionOrder(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID := seedChannel(t, database, "reactusers")
 	author := seedUser(t, database, "reactauthor")
@@ -589,6 +620,7 @@ func TestGetReactionUsers_ReturnsReactorsInReactionOrder(t *testing.T) {
 }
 
 func TestGetReactionUsers_UnknownEmojiIsEmptyNotError(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID := seedChannel(t, database, "reactempty")
 	userID := seedUser(t, database, "reactnone")
@@ -602,6 +634,7 @@ func TestGetReactionUsers_UnknownEmojiIsEmptyNotError(t *testing.T) {
 }
 
 func TestGetReactionUsers_ClampsLimitToMax(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID := seedChannel(t, database, "reactclamp")
 	author := seedUser(t, database, "clampauthor")
@@ -631,6 +664,7 @@ func TestGetReactionUsers_ClampsLimitToMax(t *testing.T) {
 }
 
 func TestGetReactionUsers_RespectsSmallerLimit(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID := seedChannel(t, database, "reactsmall")
 	author := seedUser(t, database, "smallauthor")
@@ -656,6 +690,7 @@ func TestGetReactionUsers_RespectsSmallerLimit(t *testing.T) {
 // SQLite's ~32766 bound-parameter limit that fails every call permanently
 // ("too many SQL variables"). This pins the cap well below that ceiling.
 func TestGetPinnedMessages_Capped(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "pinner")
 	chID := seedChannel(t, database, "pins")
@@ -685,6 +720,7 @@ func TestGetPinnedMessages_Capped(t *testing.T) {
 // one and checks the newer pin sorts first (F5). Ordering by message id put the
 // newer pin at the bottom.
 func TestGetPinnedMessages_OrdersByPinRecency(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "pinorder")
 	chID := seedChannel(t, database, "pinsorder")

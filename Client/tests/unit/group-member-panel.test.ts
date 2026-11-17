@@ -208,6 +208,18 @@ describe("GroupDmMemberPanel", () => {
     expect(opts.onMakeOwner).not.toHaveBeenCalled();
   });
 
+  it("leads both member menu rows with an icon, Remove keeping its danger style", () => {
+    open();
+    q("group-member-actions-3")!.click();
+    const row = (id: string): HTMLElement =>
+      document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
+    const icon = (id: string): string | null | undefined =>
+      row(id).querySelector(":scope > .menu-item-icon svg")?.getAttribute("data-icon");
+    expect(icon("group-make-owner-3")).toBe("crown");
+    expect(icon("group-remove-3")).toBe("user-minus");
+    expect(row("group-remove-3").classList).toContain("danger");
+  });
+
   it("Make Group Owner confirms, then calls back", () => {
     open();
     q("group-member-actions-3")!.click();

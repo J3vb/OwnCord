@@ -52,10 +52,11 @@ type readyHead struct {
 }
 
 type readyTail struct {
-	MOTD       string               `json:"motd"`
-	Notices    []readyNoticePayload `json:"notices"`
-	Roles      []*db.Role           `json:"roles"`
-	ServerName string               `json:"server_name"`
+	MOTD         string               `json:"motd"`
+	Notices      []readyNoticePayload `json:"notices"`
+	Roles        []*db.Role           `json:"roles"`
+	ServerName   string               `json:"server_name"`
+	ServerTimeMS int64                `json:"server_time_ms"` // lets a client with a wrong clock stamp client_message_id
 	// Threads is the viewer's followed open threads, present whenever the server has the thread
 	// service (a pointer so an empty list encodes as []). Sorts between "server_name" and "voice_states".
 	Threads     *[]readyThreadPayload `json:"threads,omitempty"`

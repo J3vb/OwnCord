@@ -40,7 +40,6 @@ export function createChannelState(
     onContentGated,
     focusFallback,
     threadHost,
-    threadList: null,
     currentChannelId: null,
     channelAbort: null,
     pinsInFlight: new Set<string>(),

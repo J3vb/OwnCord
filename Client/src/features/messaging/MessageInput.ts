@@ -29,6 +29,7 @@ import {
   createComposerButtons,
   createComposerTextarea,
   registerControls,
+  trackTypingButtons,
   wirePlusMenu,
   wireVoiceMic,
 } from "./composer/inputWidgets";
@@ -169,6 +170,9 @@ export interface DraftUpload {
   /** Set while this upload refreshes a stale chip: the chip's old id and
    *  age, so a failed refresh keeps the chip even after a channel switch. */
   refreshing: { readonly id: string; readonly uploadedAt: number } | null;
+  /** A too-long draft being sent as a file: put back in the composer that
+   *  follows this upload if it fails. */
+  draftText?: string;
 }
 
 export type MessageInputComponent = MountableComponent & {
@@ -262,6 +266,8 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     attachHasActions: () => false,
     closeAttachMenu: null,
     togglePickerOf: null,
+    onTextChange: null,
+    typingButtonsHidden: false,
     mentionPopup: null,
     pickedMentions: [],
     pendingPick: null,
@@ -329,6 +335,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     refreshButtons();
     onPrefChange(COMPOSER_BUTTON_PREF_KEYS, refreshButtons, st.signal);
     onPhoneLayoutChange(refreshButtons, st.signal);
+    st.onTextChange = trackTypingButtons(st, refreshButtons);
     // The open menu belongs to the old layout; the next "+" opens the new one.
     onPhoneLayoutChange(() => st.closeAttachMenu?.(), st.signal);
     const slowNote = createElement("div", {
@@ -407,6 +414,7 @@ export function createMessageInput(options: MessageInputOptions): MessageInputCo
     st.openPicker = null;
     st.closeAttachMenu = null;
     st.togglePickerOf = null;
+    st.onTextChange = null;
   }
 
   return {

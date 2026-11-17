@@ -30,7 +30,7 @@ func (r *Runner) copyAttachment(ctx context.Context, ex Export, st *runState, a 
 	if err != nil {
 		return "", fmt.Errorf("opening attachment: %w", err)
 	}
-	defer media.Reader.Close() //nolint:errcheck
+	defer media.Reader.Close()
 
 	name := cleanFilename(a.FileName, a.URL)
 	if st.policy.Check(name) != nil {

@@ -50,6 +50,7 @@ export const threadsText = defineCatalog("threads", {
   "period.4320": "3 days",
   "period.10080": "1 week",
   "list.title": "Threads",
+  "list.close": "Close threads",
   "list.active": "Active threads",
   "list.archived": "Archived threads",
   "list.empty": "No threads yet",

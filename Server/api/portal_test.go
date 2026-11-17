@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,11 +29,13 @@ func portalBundle() fstest.MapFS {
 func portalRouter(bundle fstest.MapFS) http.Handler {
 	r := chi.NewRouter()
 	r.Use(api.SecurityHeadersWithTLS(""))
+	var ready <-chan struct{}
 	if bundle == nil {
-		api.MountPortal(r, nil)
+		ready = api.MountPortal(context.Background(), r, nil)
 	} else {
-		api.MountPortal(r, bundle)
+		ready = api.MountPortal(context.Background(), r, bundle)
 	}
+	<-ready
 	r.Get("/api/v1/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return r
 }
@@ -48,6 +51,7 @@ func getPortal(t *testing.T, h http.Handler, host, path string) *httptest.Respon
 }
 
 func TestPortal_IndexHeaders(t *testing.T) {
+	t.Parallel()
 	rec := getPortal(t, portalRouter(portalBundle()), "chat.example.org:8443", "/")
 	if rec.Code != http.StatusOK || rec.Body.String() != portalIndex {
 		t.Fatalf("GET / = %d %q, want 200 and the bundle's index", rec.Code, rec.Body.String())
@@ -73,6 +77,7 @@ func TestPortal_IndexHeaders(t *testing.T) {
 // A Host header that is not a plain host[:port] never reaches the policy; the
 // page keeps connect-src 'self', which still covers its own origin.
 func TestPortal_IndexCSPIgnoresOddHost(t *testing.T) {
+	t.Parallel()
 	for _, host := range []string{"evil.example; script-src *", "a b", "x'y"} {
 		rec := getPortal(t, portalRouter(portalBundle()), host, "/")
 		csp := rec.Header().Get("Content-Security-Policy")
@@ -90,6 +95,7 @@ func TestPortal_IndexCSPIgnoresOddHost(t *testing.T) {
 }
 
 func TestPortal_AssetImmutable(t *testing.T) {
+	t.Parallel()
 	h := portalRouter(portalBundle())
 	for path, ct := range map[string]string{
 		"/assets/index-abc123.js":  "text/javascript; charset=utf-8",
@@ -114,6 +120,7 @@ func TestPortal_AssetImmutable(t *testing.T) {
 }
 
 func TestPortal_AssetTraversal404(t *testing.T) {
+	t.Parallel()
 	h := portalRouter(portalBundle())
 	for _, path := range []string{
 		"/assets/",
@@ -140,6 +147,7 @@ func TestPortal_AssetTraversal404(t *testing.T) {
 }
 
 func TestPortal_PlaceholderBuild404(t *testing.T) {
+	t.Parallel()
 	for name, bundle := range map[string]fstest.MapFS{
 		"nil":         nil,
 		"placeholder": {"PLACEHOLDER.txt": {Data: []byte("x")}, "assets/a.js": {Data: []byte("x")}},
@@ -167,6 +175,7 @@ func TestPortal_PlaceholderBuild404(t *testing.T) {
 // The portal adds no fallback: an unknown API path or any other unclaimed
 // path answers the router's plain 404, never the client's HTML.
 func TestPortal_APIUnknownStays404(t *testing.T) {
+	t.Parallel()
 	h := portalRouter(portalBundle())
 	for _, path := range []string{"/api/v1/nope", "/api/v1/health/x", "/index.html", "/app", "/secret.txt", "/service-worker.js"} {
 		rec := getPortal(t, h, "", path)

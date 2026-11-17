@@ -23,7 +23,8 @@ const DEVICE_CHANGE_DEBOUNCE_MS = 500;
 /** A device list from the native host or the webview. */
 type ListedDevices = ReadonlyArray<{ deviceId: string; label: string; groupId?: string }>;
 
-/** True when a mute/deafen/server-mute means the mic must stay off
+/** True when a mute/deafen/server-mute, the AFK channel or a phone call's
+ *  hold means the mic must stay off
  *  regardless of a caller's own request to (re-)enable it. Push-to-talk is
  *  not part of it: a re-enabled microphone comes up behind its gate
  *  (AudioPipeline.setPttGated), which stays closed while the key is up.
@@ -42,7 +43,8 @@ export function isMicPolicyGated(): boolean {
     s.localMuted === true ||
     s.localDeafened === true ||
     s.localServerMuted === true ||
-    s.inAfkChannel === true
+    s.inAfkChannel === true ||
+    s.phoneCallHold === true
   );
 }
 

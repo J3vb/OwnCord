@@ -34,6 +34,7 @@ func countRows(t *testing.T, database *db.DB, query string, args ...any) int {
 // itself (the existing checkSendPermission gate), in either direction, before
 // the first-contact gate ever runs — no message, no request.
 func TestMessageRequest_BlockedSenderCreatesNoRequest(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name           string
 		blockerBlocked func(database *db.DB) (blocker, blocked int64)
@@ -68,6 +69,7 @@ func TestMessageRequest_BlockedSenderCreatesNoRequest(t *testing.T) {
 // no request row, no OpenDM, and does not appear in the delivery audience,
 // but the sender's send still succeeds (decision 5).
 func TestMessageRequest_BannedRecipientGetsNoRequest(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 	mustDo(t, "BanUser", database.BanUser(ctx, 2, "test", nil))
@@ -98,6 +100,7 @@ func TestMessageRequest_BannedRecipientGetsNoRequest(t *testing.T) {
 // active account gets no request row, no trust row and no frame, and the send
 // itself still succeeds for the sender.
 func TestFirstContact_NonActiveRecipientNoRequest(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{db.RegistrationPending, db.RegistrationDenied} {
 		t.Run(status, func(t *testing.T) {
 			database, svc := newMessageRequestFixture(t)
@@ -126,6 +129,7 @@ func TestFirstContact_NonActiveRecipientNoRequest(t *testing.T) {
 // the held message before the recipient ever accepts; acceptance opens the
 // channel but must not touch the messages table at all.
 func TestMessageRequest_AcceptDoesNotResurrectDeletedContent(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 
@@ -165,6 +169,7 @@ func TestMessageRequest_AcceptDoesNotResurrectDeletedContent(t *testing.T) {
 // original) rather than carrying the deleted text. beforeRequestPreviewLookup
 // fires in that exact window, with the message id about to be read.
 func TestMessageRequest_PreviewRaceWithDeleteReturnsNilNotStaleContent(t *testing.T) {
+	t.Parallel()
 	_, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 
@@ -190,6 +195,7 @@ func TestMessageRequest_PreviewRaceWithDeleteReturnsNilNotStaleContent(t *testin
 // (decision 5) — a second send while the request is ignored creates no
 // second request and no second notification.
 func TestMessageRequest_ResendAfterIgnoreCreatesNothing(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 
@@ -220,6 +226,7 @@ func TestMessageRequest_ResendAfterIgnoreCreatesNothing(t *testing.T) {
 // eventual reply is not staged as a first-contact request back, because the
 // original sender already trusts them (source "sent_first").
 func TestMessageRequest_SentFirstMeansTheReplyIsNotARequest(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 
@@ -272,6 +279,7 @@ var dmRequestWantState = map[string]string{
 // transitions succeeds exactly once from pending, and every transition
 // (including a repeat of the one that just won) is illegal afterward.
 func TestMessageRequest_OnlyPendingTransitions(t *testing.T) {
+	t.Parallel()
 	for name, action := range dmRequestActions {
 		t.Run(name, func(t *testing.T) {
 			_, svc := newMessageRequestFixture(t)
@@ -301,6 +309,7 @@ func TestMessageRequest_OnlyPendingTransitions(t *testing.T) {
 // TestMessageRequest_OnlyRecipientDecides: the sender, and an unrelated third
 // user, both get 404 on every transition — the row exists, just not for them.
 func TestMessageRequest_OnlyRecipientDecides(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
@@ -331,6 +340,7 @@ func TestMessageRequest_OnlyRecipientDecides(t *testing.T) {
 // run one after the other. CreateMessageRequest's INSERT OR IGNORE against
 // UNIQUE(sender_id, recipient_id) is what actually resolves the race.
 func TestMessageRequest_ConcurrentFirstSendsProduceOneRequest(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 
@@ -392,6 +402,7 @@ func TestMessageRequest_ConcurrentFirstSendsProduceOneRequest(t *testing.T) {
 // derives the delivery audience from the same read — no per-recipient trust
 // lookup, no DMAudience re-read, no OpenDM write.
 func TestMessageRequest_TrustedSendReusesParticipantAndTrustRead(t *testing.T) {
+	t.Parallel()
 	database, _ := newDMFixture(t)
 	ctx := context.Background()
 	mustDo(t, "TrustSender", database.TrustSender(ctx, 2, 1, "accepted"))
@@ -437,6 +448,7 @@ func TestMessageRequest_TrustedSendReusesParticipantAndTrustRead(t *testing.T) {
 // DP-51: an untrusted recipient is still staged as a request and still kept
 // out of the audience when the audience comes from the send's own read.
 func TestMessageRequest_UntrustedSendAudienceFromSameRead(t *testing.T) {
+	t.Parallel()
 	database, _ := newDMFixture(t)
 	spy := &dmSendSpyStore{DB: database}
 	svc := New(spy, nil)

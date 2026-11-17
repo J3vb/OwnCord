@@ -26,6 +26,9 @@ rejections and makes `dropBody` safe to call twice. But it still fails the
 boundary regressions: 28 of 34 fail against the unmodified release. So the
 patch stays, ported onto 2.7.0's entry points.
 
+Version 2.9.0 was re-tested unpatched in November 2026: the same 28 of 34
+boundary regressions fail. The pin stays on 2.7.0 until a release passes them.
+
 **What the patch changes.** It edits both published entry points
 (`dist-js/index.js` and `dist-js/index.cjs`). It:
 
@@ -61,7 +64,7 @@ those tests, and the native HTTP cancellation scenario, when you upgrade the
 plugin. Remove this patch when an upstream npm release passes both without
 local changes. Update the npm and Rust lockfiles together.
 
-## `livekit-client` 2.23.0
+## `livekit-client` 2.24.1
 
 **The problem.** The E2EE worker acknowledges every `enable` message. The
 manager then looks up the participant by identity to report its encryption
@@ -77,8 +80,13 @@ as before.
 
 Only `dist/livekit-client.esm.mjs` is patched. Vite and vitest resolve the
 package's `import` condition, and the `require` entry is not bundled. The
-package is pinned to 2.23.0 for the same install check described above. 2.23.0
-still throws there, so the patch was carried forward unchanged.
+package is pinned to 2.24.1 for the same install check described above. 2.23.0
+and 2.24.1 still throw there, so the patch was carried forward unchanged (only
+the line numbers moved).
+
+Since 2.24.0 the package also exports `livekit-client/core`, which ships its
+own unbundled copy of the E2EE manager. That copy is not patched, so import
+only the bare `livekit-client` specifier.
 
 **Regenerating.** After you edit the installed file, regenerate the patch from
 `Client/`:

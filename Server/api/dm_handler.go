@@ -55,7 +55,7 @@ func MountDMRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaste
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Post("/", handleCreateDM(svc, broadcaster))
 		r.Post("/group", handleCreateGroupDM(svc, broadcaster, limiter))
-		r.Get("/", handleListDMs(svc))
+		r.With(compressJSON).Get("/", handleListDMs(svc))
 		r.Patch("/{channelId}", handleRenameGroupDM(svc, broadcaster, limiter))
 		r.Delete("/{channelId}", handleCloseDM(svc, broadcaster))
 		r.Post("/{channelId}/members", handleAddGroupMembers(svc, broadcaster, limiter))

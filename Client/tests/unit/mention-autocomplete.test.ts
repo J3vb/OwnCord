@@ -303,6 +303,37 @@ describe("createMentionAutocomplete", () => {
     expect(popup.element.querySelector(".ma-detail")?.textContent).toBe("member");
   });
 
+  it("leads each member row with that member's avatar, lettered by the shown name", () => {
+    seedMemberEntries([{ username: "alice" }, { username: "bob_k", displayName: "Robert" }]);
+    popup.setQuery("");
+    const rows = Array.from(popup.element.querySelectorAll(".ma-item"));
+    expect(rows.map((row) => row.firstElementChild?.className)).toEqual(["ma-avatar", "ma-avatar"]);
+    expect(rows.map((row) => row.querySelector(".ma-avatar .avatar-initial")?.textContent)).toEqual(
+      ["A", "R"],
+    );
+    // The option keeps its role, and the avatar stays out of its accessible name.
+    expect(rows[1]?.getAttribute("role")).toBe("option");
+    expect(rows[1]?.querySelector(".ma-avatar")?.getAttribute("aria-hidden")).toBe("true");
+    expect(rows[1]?.querySelector(".ma-name")?.textContent).toBe("Robert");
+  });
+
+  it("gives @everyone, @here and role rows no avatar", () => {
+    signInAs("member", Permission.SEND_MESSAGES | Permission.MENTION_EVERYONE);
+    applyReadyCapabilities({ id_mentions: true });
+    setRoles([
+      { id: 1, name: "member", color: null, permissions: Permission.MENTION_EVERYONE },
+      { id: 2, name: "mods", color: null, permissions: 0, mentionable: true },
+    ]);
+    channelsStore.flush();
+    popup.setQuery("");
+    const avatarOf = (testId: string) =>
+      popup.element.querySelector(`[data-testid="${testId}"] .ma-avatar`);
+    expect(avatarOf("mention-option-everyone")).toBeNull();
+    expect(avatarOf("mention-option-here")).toBeNull();
+    expect(avatarOf("mention-option-mods")).toBeNull();
+    expect(avatarOf("mention-option-alice")).not.toBeNull();
+  });
+
   it("reports no match so the composer can close it", () => {
     expect(popup.setQuery("zzz")).toBe(false);
     expect(labels()).toEqual([]);

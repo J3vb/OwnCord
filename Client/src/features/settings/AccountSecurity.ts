@@ -37,6 +37,7 @@ export function buildPasswordSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
   tokensChanged?: EventTarget,
+  sessionsChanged?: EventTarget,
 ): HTMLLIElement {
   const { row, icon, result, body } = createStatusRow(
     t("password.sectionTitle"),
@@ -145,6 +146,7 @@ export function buildPasswordSection(
           oldPw.value = "";
           newPw.value = "";
           confirmPw.value = "";
+          sessionsChanged?.dispatchEvent(new Event("change"));
           if (revokeApiTokens) {
             if (tokensChanged === undefined) refreshTokenOption();
             else tokensChanged.dispatchEvent(new Event("change"));

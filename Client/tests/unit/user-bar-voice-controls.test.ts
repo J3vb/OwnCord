@@ -187,6 +187,24 @@ describe("UserBar mute and deafen", () => {
 
   // Moved from the voice widget: mute and deafen apply locally, so a dropped
   // chat socket does not freeze them (the reconnect restates the state).
+  it("locks the mic while a phone call holds the call, and unlocks when it ends", () => {
+    const { mute, deafen } = mount();
+    joinVoiceChannel(7);
+    setVoice({ phoneCallHold: true });
+    expect(mute.disabled).toBe(true);
+    expect(mute.getAttribute("aria-pressed")).toBe("true");
+    expect(mute.title).toBe("Muted while paused");
+    expect(icon(mute)).toBe("mic-off");
+    // Deafen is the user's own and stays theirs.
+    expect(deafen.disabled).toBe(false);
+
+    setVoice({ phoneCallHold: false });
+    expect(mute.disabled).toBe(false);
+    expect(mute.getAttribute("aria-pressed")).toBe("false");
+    expect(mute.title).toBe("Mute");
+    expect(icon(mute)).toBe("mic");
+  });
+
   it("keeps mute and deafen usable while the WS socket is down", () => {
     connection.status = "reconnecting";
     joinVoiceChannel(4);

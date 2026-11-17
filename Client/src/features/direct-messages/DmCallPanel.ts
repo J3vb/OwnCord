@@ -51,6 +51,7 @@ import { createDmCallRefresh } from "./dm-call/dmCallRefresh";
 import { createDmCallRebuild } from "./dm-call/dmCallRebuild";
 import { createDmCallResize } from "./dm-call/dmCallResize";
 import { createDmCallVerify, identitiesOf } from "./dm-call/dmCallVerify";
+import { createRouteSlot } from "../voice/routeSlot";
 import { createTalkSlot } from "../voice/talkSlot";
 
 export { absentMembers, deriveCallView } from "./DmCallViewModel";
@@ -93,15 +94,18 @@ export interface DmCallPanelComponent extends MountableComponent {
 }
 
 // The OS call notification, urgent attention request and missed-call
-// notice. Re-exported here so they ride in this panel's lazy chunk (the page
-// imports the panel at mount) instead of a second dynamic chunk in MainPage,
-// which would push its bundle budget over.
+// notice, and what the Android call notifications' buttons do. Re-exported
+// here so they ride in this panel's lazy chunk (the page imports the panel at
+// mount) instead of a second dynamic chunk in MainPage, which would push its
+// bundle budget over.
 export {
   alertIncomingCall,
   alertMissedCall,
+  alertRedial,
   alertSupersededCall,
   clearIncomingCall,
 } from "./callAlerts";
+export { followCallActions } from "./callNotificationActions";
 
 /** Outgoing and connected are the call view; the rest never collapse. */
 const isCallView = (kind: DmCallView["kind"]): boolean =>
@@ -131,6 +135,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     disposable,
     unsubs: [],
     talkSlot: createTalkSlot("bar"),
+    routeSlot: createRouteSlot("dm"),
     incoming: null,
     outgoing: null,
     collapsed: false,
@@ -178,6 +183,7 @@ export function createDmCallPanel(options: DmCallPanelOptions): DmCallPanelCompo
     focusedShield: null,
   };
   disposable.addCleanup(() => st.talkSlot.clear());
+  disposable.addCleanup(() => st.routeSlot.clear());
   const dc = {} as DmCallApi;
   Object.assign(dc, createDmCallRender(st, dc), createDmCallVerify(st, dc), { update });
 

@@ -5,6 +5,7 @@
 
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { appendToggleRows, loadPref, savePref, type ToggleItem } from "./helpers";
+import { buildSettingsSection } from "./settingsSection";
 import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/ui/osMotion";
 import { reclampRoleColors } from "@lib/prefs/themes";
 import {
@@ -91,11 +92,11 @@ const chatToggles = (): ReadonlyArray<ToggleItem> => [
   },
 ];
 
-/** A titled group of settings rows. */
-function group(title: string): HTMLDivElement {
-  const el = createElement("div", { class: "setting-group" });
-  el.appendChild(createElement("h3", { class: "setting-group-title" }, title));
-  return el;
+/** A titled section; its rows go in the returned card. */
+function group(title: string, into: HTMLElement): HTMLElement {
+  const { el, card } = buildSettingsSection({ label: title });
+  into.appendChild(el);
+  return card;
 }
 
 /** The Saturation row: a 0-100 % slider that writes the pref and re-applies it. */
@@ -142,7 +143,7 @@ export function buildAccessibilityTab(signal: AbortSignal): HTMLDivElement {
 
   // Motion: the OS row only affects motion, so it sits under Reduce Motion
   // and says what the system is asking for right now.
-  const motion = group(t("accessibility.group.motion"));
+  const motion = group(t("accessibility.group.motion"), section);
   const [, osRow] = appendToggleRows(motion, motionToggles(), signal);
   osRow!.classList.add("nested");
   const osDesc = osRow!.querySelector<HTMLElement>(".setting-desc")!;
@@ -159,7 +160,7 @@ export function buildAccessibilityTab(signal: AbortSignal): HTMLDivElement {
   osQuery?.addEventListener("change", paintOs, { signal });
 
   // Readability, with the text size Large Font raises (set in Appearance).
-  const readability = group(t("accessibility.group.readability"));
+  const readability = group(t("accessibility.group.readability"), section);
   const sizeValue = createElement("span", { class: "setting-value" });
   const paintSize = (): void => {
     setText(sizeValue, t("appearance.fontSize.value", { size: effectiveFontSize() }));
@@ -176,12 +177,11 @@ export function buildAccessibilityTab(signal: AbortSignal): HTMLDivElement {
   readability.appendChild(readout);
   paintSize();
 
-  const chat = group(t("accessibility.group.chat"));
-  appendToggleRows(chat, chatToggles(), signal);
-
-  const colors = group(t("accessibility.group.colors"));
+  const colors = group(t("accessibility.group.colors"), section);
   colors.appendChild(buildSaturationRow(signal));
 
-  appendChildren(section, motion, readability, colors, chat);
+  const chat = group(t("accessibility.group.chat"), section);
+  appendToggleRows(chat, chatToggles(), signal);
+
   return section;
 }

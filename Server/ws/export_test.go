@@ -316,6 +316,7 @@ func (h *Hub) LegacyReadyForTest(database ReadySnapshotReader, userID int64, rol
 		"roles":           f.tail.Roles,
 		"dm_channels":     f.head.DMChannels,
 		"server_name":     f.tail.ServerName,
+		"server_time_ms":  f.tail.ServerTimeMS,
 		"motd":            f.tail.MOTD,
 		"notices":         f.tail.Notices,
 	}
@@ -371,12 +372,6 @@ func PeekClientPendingModFlagsForTest(c *Client) (serverMuted, serverDeafened bo
 	c.voice.voiceMu.Lock()
 	defer c.voice.voiceMu.Unlock()
 	return c.voice.pendingModServerMuted, c.voice.pendingModServerDeafened
-}
-
-// ExpireSettingsCacheForTest forces the settings cache to appear stale so that
-// the next call to getCachedSettings triggers a DB refresh.
-func (h *Hub) ExpireSettingsCacheForTest() {
-	h.settings.cache.Expire()
 }
 
 // BuildJSONForTest exposes buildJSON for external tests.
@@ -447,12 +442,18 @@ func (h *Hub) HandleWebhookParticipantLeftForTest(userID int64, channelID int64,
 // (e.g. already-cancelled, as it would be after the webhook sender hangs up)
 // instead of always running with context.Background().
 func (h *Hub) HandleWebhookParticipantLeftWithContextForTest(ctx context.Context, userID int64, channelID int64, joinToken string) {
+	h.HandleWebhookParticipantLeftWithSIDForTest(ctx, userID, channelID, joinToken, "")
+}
+
+// HandleWebhookParticipantLeftWithSIDForTest is the left webhook carrying the departing session's id.
+func (h *Hub) HandleWebhookParticipantLeftWithSIDForTest(ctx context.Context, userID int64, channelID int64, joinToken, sid string) {
 	identity := fmt.Sprintf("user-%d:%s", userID, joinToken)
 	roomName := fmt.Sprintf("channel-%d", channelID)
 	event := &livekit.WebhookEvent{
 		Event: "participant_left",
 		Participant: &livekit.ParticipantInfo{
 			Identity: identity,
+			Sid:      sid,
 		},
 		Room: &livekit.Room{
 			Name: roomName,

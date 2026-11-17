@@ -17,6 +17,7 @@ import (
 // eligibleFor call re-resolves NSFWAcknowledged live, so it is not trusted
 // from the round's start.
 func TestPushDispatch_RecheckBeforeEachAttempt_NSFWAckRevoked(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedLabelledChannel(t)
 	seedUserRole(t, f.database, 1, 4)
@@ -45,6 +46,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_NSFWAckRevoked(t *testing.T) {
 // and the retry — blocked, or their acceptance somehow undone — gets no
 // retry.
 func TestPushDispatch_RecheckBeforeEachAttempt_TrustRevoked(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedDirectMessage(t)
 	mustDo(t, "TrustSender", f.database.TrustSender(context.Background(), 2, 1, "accepted"))
@@ -71,6 +73,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_TrustRevoked(t *testing.T) {
 // retry must receive nothing on the retry -- stillEligible has to run again
 // immediately before every attempt, not just once for the whole dispatch.
 func TestPushDispatch_RecheckBeforeEachAttempt_ComesOnline(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/goes-online")
@@ -96,6 +99,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_ComesOnline(t *testing.T) {
 // (transiently failing) attempt and the retry must receive nothing on the
 // retry.
 func TestPushDispatch_RecheckBeforeEachAttempt_LosesAccess(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	seedRole(t, f.database, &db.Role{ID: 5, Name: "Restricted", Permissions: 0, Position: 0})
@@ -183,6 +187,7 @@ func (s *revokeAfterListingStore) ListPushSubscriptionsForDispatch(ctx context.C
 // The whole set is not re-read per round, so this asks the one
 // (recipient, author) pair instead -- see stillEligible.
 func TestPushDispatch_RecheckBeforeEachAttempt_BlockedAfterFirst503(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	const endpoint = "https://push.example.net/block-after-503"
@@ -209,6 +214,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_BlockedAfterFirst503(t *testing.T
 // trustsAuthor re-checks only the trust half -- a block is a separate relation
 // and would otherwise ride through on a still-valid trusted_senders row.
 func TestPushDispatch_RecheckBeforeEachAttempt_BlockedAfterFirst503_DM(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedDirectMessage(t)
 	mustDo(t, "TrustSender", f.database.TrustSender(context.Background(), 2, 1, "accepted"))
@@ -232,6 +238,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_BlockedAfterFirst503_DM(t *testin
 // revocation, still receives its notification. A guard that keyed off the
 // user rather than the row would pass the first half and fail this one.
 func TestPushDispatch_RecheckBeforeEachAttempt_SubscriptionRevoked(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	const revoked = "https://push.example.net/revoked-device"
@@ -281,6 +288,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_SubscriptionRevoked(t *testing.T)
 // an id check would wave this through -- re-sending bytes encrypted to a key
 // the device has already replaced.
 func TestPushDispatch_RecheckBeforeEachAttempt_CredentialRotated(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	const endpoint = "https://push.example.net/credential-rotated"
@@ -294,7 +302,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_CredentialRotated(t *testing.T) {
 			t.Error("a second attempt re-sent a request encrypted to the replaced credential")
 			return &safefetch.Response{StatusCode: 201}, nil
 		}
-		if _, err := f.database.UpsertPushSubscription(ctx, 2, endpoint,
+		if _, err := f.database.UpsertPushSubscription(ctx, 2, nil, endpoint,
 			replacement.p256dhB64, replacement.authB64, "d2", f.keyID, 10); err != nil {
 			t.Fatal(err)
 		}
@@ -314,6 +322,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_CredentialRotated(t *testing.T) {
 // revalidation must read it that way rather than falling back to "not found,
 // so carry on".
 func TestPushDispatch_RecheckBeforeEachAttempt_VAPIDKeyRotated(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	const endpoint = "https://push.example.net/key-rotated"
@@ -343,6 +352,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_VAPIDKeyRotated(t *testing.T) {
 // TestPushDispatch_BlockerLookupFailureFailsClosed; this is the same posture
 // for the narrow per-pair lookup.
 func TestPushDispatch_RecheckBeforeEachAttempt_BlockLookupFailureFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/per-attempt-block-error")
@@ -360,6 +370,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_BlockLookupFailureFailsClosed(t *
 // same posture for the subscription revalidation -- an unresolvable row is
 // never permission to re-send the saved request.
 func TestPushDispatch_RecheckBeforeEachAttempt_SubscriptionLookupFailureFailsClosed(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/per-attempt-sub-error")
@@ -383,6 +394,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_SubscriptionLookupFailureFailsClo
 // fetches, not one -- a worker pool that is already saturated can hold that
 // first attempt for a whole round.
 func TestPushDispatch_RecheckBeforeEachAttempt_RevokedBeforeFirstAttempt(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	f.subscribe(t, 2, "https://push.example.net/revoked-before-first-attempt")
@@ -402,6 +414,7 @@ func TestPushDispatch_RecheckBeforeEachAttempt_RevokedBeforeFirstAttempt(t *test
 // relation that have NOT changed must still get the ordinary bounded retry.
 // Without this, refusing every retry would satisfy every test above.
 func TestPushDispatch_RecheckBeforeEachAttempt_ValidWorkStillRetries(t *testing.T) {
+	t.Parallel()
 	f := newPushDispatchFixture(t)
 	f.seedGeneralChannel(t)
 	const endpoint = "https://push.example.net/unchanged-still-retries"

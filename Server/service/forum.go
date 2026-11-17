@@ -256,6 +256,7 @@ func (s *MessageService) forumPostResult(ctx context.Context, sp SendMessagePara
 	send := &SendMessageResult{
 		MessageID: msg.ID, Timestamp: msg.Timestamp, Content: content, Channel: postCh,
 		Attachments: attachments, SkippedAttachmentIDs: skippedAttachmentIDs(sp.AttachmentIDs, saved.LinkedAttachmentIDs),
+		LinkJob: newLinkJob(msg.ID, thread.ID, sp.UserID, content, msg.Timestamp, false),
 	}
 	mentions.fill(send)
 	threadID, authorID := thread.ID, sp.UserID

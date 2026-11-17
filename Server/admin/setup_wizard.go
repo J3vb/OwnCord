@@ -405,6 +405,8 @@ func computeRestartURL(host string, wr *setupWizardRequest, running *config.Conf
 	h := host
 	if hh, _, err := net.SplitHostPort(host); err == nil {
 		h = hh
+	} else if len(h) > 1 && h[0] == '[' && h[len(h)-1] == ']' {
+		h = h[1 : len(h)-1]
 	}
 	effPort := running.Server.Port
 	if wr.Port != nil {

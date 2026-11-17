@@ -16,8 +16,11 @@ func (s *ChannelService) AdmitThreadFocus(ctx context.Context, userID, threadID 
 	if threadID <= 0 {
 		return nil, fmt.Errorf("%w: thread_id must be positive", ErrBadRequest)
 	}
-	ch, err := s.st.GetChannel(ctx, threadID)
-	if err != nil || ch == nil || !ch.IsThread() {
+	ch, err := lookupChannel(ctx, s.st, threadID)
+	if err != nil {
+		return nil, err
+	}
+	if !ch.IsThread() {
 		return nil, fmt.Errorf("%w: thread not found", ErrNotFound)
 	}
 	sub, subErr := channelSubject(ctx, s.st, s.perms, userID, ch, false)

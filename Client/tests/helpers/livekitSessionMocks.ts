@@ -15,6 +15,9 @@ export const mockVoiceState = {
   pttGated: false,
   // The AFK channel is listen-only: no microphone is published there.
   inAfkChannel: false,
+  // A phone call's hold keeps the microphone closed until it ends.
+  phoneCallHold: false,
+  listenOnly: false,
   // OC-0009: the real store's currentChannelId is set by joinVoiceChannel()
   // before the voice_join/voice_token round trip that produces the token a
   // test then hands to handleVoiceToken — default it to the channel id used
@@ -107,6 +110,7 @@ export function livekitClientMock() {
       AudioPlaybackStatusChanged: "audioPlaybackStatusChanged",
       EncryptionError: "encryptionError",
       LocalTrackPublished: "localTrackPublished",
+      LocalTrackUnpublished: "localTrackUnpublished",
       ParticipantPermissionsChanged: "participantPermissionsChanged",
     },
     Track: {
@@ -131,6 +135,7 @@ export function livekitClientMock() {
       h1080fps30: { resolution: { width: 1920, height: 1080 } },
     },
     VideoPreset: vi.fn(),
+    LocalAudioTrack: vi.fn(),
     DisconnectReason: { CLIENT_INITIATED: 0 },
     // vitest 4 mocks honor construct semantics — `new` needs a real function, not an arrow.
     ExternalE2EEKeyProvider: vi.fn(function () {
@@ -173,6 +178,9 @@ export function voiceStoreActionStubs() {
     setLocalSafetyNumber: vi.fn(),
     setEncryptionDegraded: vi.fn(),
     setSwitchingTo: vi.fn(),
+    setMusicSharer: vi.fn(),
+    replaceRemoteMusicSharers: vi.fn(),
+    setLocalMusic: vi.fn(),
   };
 }
 

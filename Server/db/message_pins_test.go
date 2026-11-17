@@ -43,6 +43,7 @@ func (f pinFixture) pinRows(t *testing.T) int {
 }
 
 func TestSetMessagePinned_WritesOneRowAtomically(t *testing.T) {
+	t.Parallel()
 	f := newPinFixture(t)
 	row := f.pin(t, true, time.Time{})
 	if row == nil {
@@ -76,6 +77,7 @@ func TestSetMessagePinned_WritesOneRowAtomically(t *testing.T) {
 }
 
 func TestSetMessagePinned_RepinAndFlapWriteOneRow(t *testing.T) {
+	t.Parallel()
 	f := newPinFixture(t)
 	t0 := time.Now().UTC()
 	if f.pin(t, true, t0) == nil {
@@ -107,6 +109,7 @@ func TestSetMessagePinned_RepinAndFlapWriteOneRow(t *testing.T) {
 }
 
 func TestSetMessagePinned_ConcurrentPinsWriteOneRow(t *testing.T) {
+	t.Parallel()
 	f := newPinFixture(t)
 	const n = 8
 	errs := make(chan error, n)
@@ -127,6 +130,7 @@ func TestSetMessagePinned_ConcurrentPinsWriteOneRow(t *testing.T) {
 }
 
 func TestSetMessagePinned_RowInsertFailureRollsBackPin(t *testing.T) {
+	t.Parallel()
 	f := newPinFixture(t)
 	// An author that does not exist fails the foreign key on the row insert.
 	_, err := f.database.SetMessagePinned(context.Background(), db.SetPinnedParams{
@@ -147,6 +151,7 @@ func TestSetMessagePinned_RowInsertFailureRollsBackPin(t *testing.T) {
 }
 
 func TestPinRow_TargetDeletedOrPurged(t *testing.T) {
+	t.Parallel()
 	t.Run("soft deleted", func(t *testing.T) {
 		f := newPinFixture(t)
 		row := f.pin(t, true, time.Time{})
@@ -206,6 +211,7 @@ func (f pinFixture) insertKindRow(t *testing.T, kind int64) int64 {
 }
 
 func TestSoftDelete_PinRowDeletableCallAndGroupRowsNot(t *testing.T) {
+	t.Parallel()
 	f := newPinFixture(t)
 	pinRow := f.pin(t, true, time.Time{})
 	call := f.insertKindRow(t, db.MessageKindCall)
@@ -226,6 +232,7 @@ func TestSoftDelete_PinRowDeletableCallAndGroupRowsNot(t *testing.T) {
 }
 
 func TestPurge_TakesPinRowsNotCallOrGroupRows(t *testing.T) {
+	t.Parallel()
 	t.Run("channel purge", func(t *testing.T) {
 		f := newPinFixture(t)
 		pinRow := f.pin(t, true, time.Time{})
@@ -254,6 +261,7 @@ func TestPurge_TakesPinRowsNotCallOrGroupRows(t *testing.T) {
 // A deleted pin row still holds its window: pinning again inside it writes no
 // new row, and the same pin after the window writes one.
 func TestSetMessagePinned_DeletedRowHoldsWindow(t *testing.T) {
+	t.Parallel()
 	f := newPinFixture(t)
 	t0 := time.Now().UTC()
 	row := f.pin(t, true, t0)

@@ -9,8 +9,11 @@
 
 import { createConfirmModal } from "../dialogs/confirmModal";
 import { settingsText as t } from "../../i18n/settings";
+import type { UnsavedTopic } from "./settingsGuards";
 
 export interface UnsavedConfirmOptions {
+  /** What would be lost; picks the wording. Profile edits by default. */
+  topic?: UnsavedTopic;
   /** Runs once, only when the user chooses to discard. */
   onDiscard(): void;
   /** Called when the prompt goes away, however it ended. */
@@ -21,15 +24,21 @@ export interface UnsavedConfirmOptions {
   container?: Element;
 }
 
+const BODY = {
+  profile: "unsaved.body",
+  theme: "unsaved.themeBody",
+  secret: "unsaved.secretBody",
+} as const;
+
 /** Open the prompt and return a function that closes it without discarding. */
 export function confirmDiscardUnsaved(options: UnsavedConfirmOptions): () => void {
   const modal = createConfirmModal(
     {
       title: t("unsaved.title"),
       titleId: "settings-unsaved-title",
-      body: t("unsaved.body"),
+      body: t(BODY[options.topic ?? "profile"]),
       confirmLabel: t("unsaved.discard"),
-      cancelLabel: t("unsaved.keep"),
+      cancelLabel: t(options.topic === "secret" ? "unsaved.keepSecret" : "unsaved.keep"),
       testId: "unsaved-confirm-dialog",
       confirmTestId: "unsaved-discard",
       cancelTestId: "unsaved-keep",

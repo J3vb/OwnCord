@@ -72,6 +72,31 @@ func (rb *EventRingBuffer) RemoveWhere(drop func(data []byte) bool) int {
 	return removed
 }
 
+// MessageIDs returns the message ids the buffered message-family frames name (payload id,
+// message_id, ids[] and the replied-to message), for a purge that asks the database which of
+// them still exist.
+func (rb *EventRingBuffer) MessageIDs() []int64 {
+	rb.mu.RLock()
+	frames := make([][]byte, 0, rb.count)
+	for i := range rb.count {
+		if data := rb.entries[(rb.pos-rb.count+rb.size+i)%rb.size].data; data != nil {
+			frames = append(frames, data)
+		}
+	}
+	rb.mu.RUnlock()
+	seen := map[int64]struct{}{}
+	for _, data := range frames {
+		if refs, ok := parseFrameRefs(data); ok {
+			refs.addMessageIDs(seen)
+		}
+	}
+	ids := make([]int64, 0, len(seen))
+	for id := range seen {
+		ids = append(ids, id)
+	}
+	return ids
+}
+
 // newestSeqLocked returns the highest seq in the buffer; callers hold rb.mu and checked rb.count > 0.
 func (rb *EventRingBuffer) newestSeqLocked() uint64 {
 	return rb.entries[(rb.pos-1+rb.size)%rb.size].seq

@@ -244,7 +244,7 @@ func (d *DB) AssignAppealTx(ctx context.Context, id, assigneeID, observedAssigne
 	if err != nil {
 		return false, fmt.Errorf("AssignAppealTx begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := dbgen.New(tx)
 
 	if appealAssignInTxHook != nil {

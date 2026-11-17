@@ -92,7 +92,7 @@ You should see:
 - You hear them.
 - They hear you.
 - Your speaking ring lights up when you talk.
-- In Settings, Voice & Video, the level bar moves with your voice.
+- In Settings, Voice & video, the level bar moves with your voice.
 
 ## 5. Mute and deafen in the app
 
@@ -128,7 +128,7 @@ older, and on Sway.
 
 ## 7. Push to talk
 
-Do: Settings, Voice & Video, set Input Mode to Push to Talk. In Keybinds, set a
+Do: Settings, Voice & video, set Input mode to Push to talk. In Keybinds, set a
 key. Join voice. Put another app in front.
 
 On X11:
@@ -183,7 +183,7 @@ You should see:
 
 On a machine with an NVIDIA graphics card:
 
-- Set Settings → Voice & Video → Video Codec to **H.264** and start a share.
+- Set Settings → Voice & video → Video codec to **H.264** and start a share.
   The encoder field of the stream's info readout should say
   `NVIDIA H264 Encoder`, not `OpenH264`, and the other person sees the share.
   On a machine without NVIDIA, `OpenH264` is expected and H.264 still works.
@@ -205,7 +205,7 @@ You should see:
 
 ## 11. Desktop notifications and sounds
 
-Do: in Settings, Voice & Video, pick a speaker that is not the default. Ask the
+Do: in Settings, Voice & video, pick a speaker that is not the default. Ask the
 other person to send you a message and mention you, while the window is in the
 background. Then ask them to call you or join your channel.
 
@@ -243,7 +243,7 @@ You should see:
 ## 14. Close to tray with a tray
 
 Do: use a desktop that shows a tray. On GNOME, turn on the AppIndicator
-extension. Make sure Settings, Advanced, **Close to Tray** is on. Close the
+extension. Make sure Settings, Advanced, **Close to tray** is on. Close the
 window.
 
 You should see:
@@ -256,7 +256,7 @@ You should see:
 
 ## 15. Close with no tray
 
-Do: use stock GNOME with no AppIndicator extension. Make sure **Close to Tray**
+Do: use stock GNOME with no AppIndicator extension. Make sure **Close to tray**
 is on. Close the window.
 
 You should see:
@@ -298,7 +298,7 @@ previous release's .deb, then update to this release candidate.
 
 Run this on X11 only. Mark it **Not applicable** on the Wayland sessions.
 
-Do: Settings, Voice & Video, set Input Mode to Push to Talk. In Keybinds, bind
+Do: Settings, Voice & video, set Input mode to Push to talk. In Keybinds, bind
 F13. Join voice. Put another app in front. Repeat with F24 and one key between
 them. If your keyboard has no such keys, use a remapping tool to send them.
 
@@ -311,7 +311,7 @@ You should see:
 
 ## 19. Mic level bar outside a call
 
-Do: open Settings, Voice & Video. Do not be in a call. Talk. Then join a voice
+Do: open Settings, Voice & video. Do not be in a call. Talk. Then join a voice
 channel, leave it, and look at the bar again.
 
 You should see:
@@ -335,7 +335,7 @@ You should see:
 ## 21. Open Log Folder with no tray
 
 Do: use stock GNOME with no AppIndicator extension, so there is no tray. Open
-Settings, Diagnostics & logs. In **Get help**, click **Open Log Folder**.
+Settings, Diagnostics & logs. In **Get help**, click **Open log folder**.
 
 You should see:
 

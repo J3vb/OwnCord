@@ -1,8 +1,6 @@
 /** The DM call panel's view model (which call state to draw) and the small helpers its renderers share. */
 
 import { createElement } from "@lib/dom";
-import { createIcon } from "@lib/icons";
-import type { IconName } from "@lib/icons";
 import type { AvatarSubject } from "@lib/ui/avatar";
 import type { RingState, OutgoingCallState } from "@lib/voice/callRing";
 import { voiceStore } from "@stores/voice.store";
@@ -192,13 +190,6 @@ export function voiceUser(
   userId: number,
 ): VoiceUser | undefined {
   return voice.voiceUsers.get(channelId)?.get(userId);
-}
-
-export function swapIcon(btn: HTMLElement, name: IconName, size: number): void {
-  const current = btn.querySelector("svg");
-  if (current?.getAttribute("data-icon") === name) return;
-  current?.remove();
-  btn.insertBefore(createIcon(name, size), btn.firstChild);
 }
 
 export function currentUserId(): number {

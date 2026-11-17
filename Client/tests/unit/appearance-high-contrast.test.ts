@@ -6,7 +6,7 @@
 // including --text-normal -- as an *inline* style on document.documentElement.
 // An inline declaration always beats a plain class rule on the same element,
 // so `.high-contrast { --text-normal: ... }` can never win against it: the
-// High Contrast toggle's headline promise (pure-white body text) is a no-op
+// High contrast toggle's headline promise (pure-white body text) is a no-op
 // unless the override is `!important`.
 //
 // applyThemeByName() (lib/prefs/themes.ts) does the same thing for custom themes,

@@ -108,6 +108,7 @@ function setup(initial: SessionState = { type: "idle" }) {
     getEffectiveVolume: () => 1,
     getScreenshareGain: () => 1,
     setScreenshareGainListener: vi.fn(),
+    setMusicGainListener: vi.fn(),
   };
   const deviceManager = {
     setRoom: vi.fn(),
@@ -269,7 +270,7 @@ describe("the microphone processor", () => {
 });
 
 describe("the native room's capture settings", () => {
-  it("applies the saved processing switches with Noise Suppression as the master", async () => {
+  it("applies the saved processing switches with Noise suppression as the master", async () => {
     env.linux = true;
     env.prefs.set("echoCancellation", false);
     env.prefs.set("noiseSuppression", false);

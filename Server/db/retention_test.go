@@ -32,6 +32,7 @@ func seedAgedMessage(t *testing.T, database *db.DB, chID, uid int64, content str
 // committed atomically with deletion, and a no-op lazy batch must not create
 // an empty run.
 func TestSweepRetentionJournaled_IsAtomicWithDeletion(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "retention-atomic-owner")
@@ -74,6 +75,7 @@ func TestSweepRetentionJournaled_IsAtomicWithDeletion(t *testing.T) {
 }
 
 func TestRetentionWindows_ServerAndChannelPrecedence(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	owner := seedUser(t, database, "ret-owner")
@@ -147,6 +149,7 @@ func TestRetentionWindows_ServerAndChannelPrecedence(t *testing.T) {
 // (-time.Duration(days)*24*time.Hour) overflows and lands in the future,
 // which would match every unpinned message as "old".
 func TestServerRetentionDays_OutOfRangeKeepsForever(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	mustDo(t, "ApplySettings", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "106752"}))
@@ -162,6 +165,7 @@ func TestServerRetentionDays_OutOfRangeKeepsForever(t *testing.T) {
 // effective windows, not applied raw and not fallen back to the server
 // window.
 func TestRetentionWindows_OutOfRangeOverrideKeepsForever(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	owner := seedUser(t, database, "ret-owner-huge")
@@ -181,6 +185,7 @@ func TestRetentionWindows_OutOfRangeOverrideKeepsForever(t *testing.T) {
 }
 
 func TestSweepRetention_RemovesOnlyPastWindowUnpinned(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice := seedUser(t, database, "sweep-alice")
@@ -217,6 +222,9 @@ func TestSweepRetention_RemovesOnlyPastWindowUnpinned(t *testing.T) {
 	if n, err := database.CountRetentionCandidates(ctx, ch, cutoff); err != nil || n != 2 {
 		t.Fatalf("candidates = %d, %v; want 2 (the two past the window; pinned and at-boundary stay)", n, err)
 	}
+	if has, err := database.HasRetentionCandidates(ctx, ch, cutoff); err != nil || !has {
+		t.Fatalf("HasRetentionCandidates before the sweep = %v, %v; want true", has, err)
+	}
 
 	// Bounded: one per call, then the rest.
 	ids, files, err := database.SweepRetention(ctx, ch, cutoff, 1)
@@ -229,6 +237,9 @@ func TestSweepRetention_RemovesOnlyPastWindowUnpinned(t *testing.T) {
 	}
 	if ids, _, err := database.SweepRetention(ctx, ch, cutoff, 100); err != nil || len(ids) != 0 {
 		t.Fatalf("third sweep = %v, %v; want none", ids, err)
+	}
+	if has, err := database.HasRetentionCandidates(ctx, ch, cutoff); err != nil || has {
+		t.Fatalf("HasRetentionCandidates after the sweep = %v, %v; want false", has, err)
 	}
 
 	left := map[int64]bool{}
@@ -270,6 +281,7 @@ func TestSweepRetention_RemovesOnlyPastWindowUnpinned(t *testing.T) {
 }
 
 func TestRetentionRuns_Journal(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	id, err := database.StartRetentionRun(ctx)
@@ -308,6 +320,7 @@ func TestRetentionRuns_Journal(t *testing.T) {
 // The record holds the last sweep the database finished, and a channel that is
 // gone records nothing.
 func TestRetentionSwept_HoldsTheLastFinishedSweep(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	ch := seedChannel(t, database, "swept-chan")

@@ -140,6 +140,7 @@ func runD1(t *testing.T, database *DB, uid int64, uname string, before map[strin
 // D1 — the B4-9 lineage checklist: erasure of a member with everything
 // leaves zero in every class, and journals one file per attachment row.
 func TestHP4_D1_ErasureLeavesNoClass(t *testing.T) {
+	t.Parallel()
 	database, _ := drillCopy(t)
 	uid, uname := pickSubject(t, database)
 	seedDrillMessageReceipt(t, database, uid)
@@ -193,6 +194,7 @@ func backupTo(t *testing.T, database *DB, name string) string {
 // and replaying the deletion markers erases it again before anything
 // serves, so the lineage checklist finds zero subject data afterwards.
 func TestHP4_D2_RestoreResurrectsAndTheMarkersReapplyTheErasure(t *testing.T) {
+	t.Parallel()
 	database, dbPath := drillCopy(t)
 	ctx := context.Background()
 	uid, uname := pickSubject(t, database)
@@ -256,6 +258,7 @@ func TestHP4_D2_RestoreResurrectsAndTheMarkersReapplyTheErasure(t *testing.T) {
 // D3 — Restore over newer data: what arrived after the backup is gone, and
 // the schema is HEAD's again on the next open.
 func TestHP4_D3_RestoreDropsNewerData(t *testing.T) {
+	t.Parallel()
 	database, dbPath := drillCopy(t)
 	ctx := context.Background()
 	schemaBefore := countQ(t, database, `SELECT COUNT(*) FROM schema_versions`)
@@ -291,6 +294,7 @@ func TestHP4_D3_RestoreDropsNewerData(t *testing.T) {
 // D4 — The replay window: the erasure purges the subject's events (HP-4
 // decision 1) and leaves everyone else's for the pruner.
 func TestHP4_D4_ErasurePurgesTheSubjectsReplayEvents(t *testing.T) {
+	t.Parallel()
 	database, _ := drillCopy(t)
 	ctx := context.Background()
 	uid, uname := pickSubject(t, database)
@@ -327,6 +331,7 @@ func TestHP4_D4_ErasurePurgesTheSubjectsReplayEvents(t *testing.T) {
 // D5 — Stranded files: the sweep deletes rows first and removes files
 // after, so a stop between the two leaves a file with no row.
 func TestHP4_D5_OrphanSweepCanStrandAFile(t *testing.T) {
+	t.Parallel()
 	database, _ := drillCopy(t)
 	ctx := context.Background()
 	rows, err := database.QueryContext(ctx, `

@@ -29,6 +29,8 @@ const mockVoiceState = vi.hoisted(() => ({
   localDeafened: false,
   localServerMuted: false,
   pttGated: false,
+  inAfkChannel: false,
+  phoneCallHold: false,
 }));
 
 vi.mock("@stores/voice.store", () => ({
@@ -73,6 +75,8 @@ describe("isMicPolicyGated", () => {
     mockVoiceState.localDeafened = false;
     mockVoiceState.localServerMuted = false;
     mockVoiceState.pttGated = false;
+    mockVoiceState.inAfkChannel = false;
+    mockVoiceState.phoneCallHold = false;
   });
 
   it("is false when nothing gates the mic", () => {
@@ -91,6 +95,16 @@ describe("isMicPolicyGated", () => {
 
   it("is true when localServerMuted", () => {
     mockVoiceState.localServerMuted = true;
+    expect(isMicPolicyGated()).toBe(true);
+  });
+
+  it("is true in the AFK channel", () => {
+    mockVoiceState.inAfkChannel = true;
+    expect(isMicPolicyGated()).toBe(true);
+  });
+
+  it("is true while a phone call holds the call", () => {
+    mockVoiceState.phoneCallHold = true;
     expect(isMicPolicyGated()).toBe(true);
   });
 

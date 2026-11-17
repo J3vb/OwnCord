@@ -33,7 +33,7 @@ const EAGER_SITES = [
   "pages/main-page/sidebar-area/sidebarHeader.ts",
   "pages/main-page/sidebar-area/sidebarShared.ts",
   "pages/main-page/sidebar-area/sidebarVoiceSwitch.ts",
-  "pages/main-page/ReactionController.ts",
+  "features/messaging/ReactionController.ts",
   "features/messaging/MessageInput.ts",
   "features/messaging/composer/inputAttachments.ts",
   "features/messaging/composer/inputAutocomplete.ts",

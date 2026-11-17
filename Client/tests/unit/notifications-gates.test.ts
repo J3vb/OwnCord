@@ -20,6 +20,8 @@ import { setBlockedByMe } from "../../src/stores/blocks.store";
 import { addLogListener, setLogLevel, type LogEntry } from "../../src/lib/logger";
 import type { ChannelActivityEntry, ChatMessagePayload } from "../../src/lib/types";
 import {
+  MENTION_NOTES,
+  MESSAGE_NOTES,
   mockOscillator,
   testPrefs,
   shouldTauriNotifThrow,
@@ -62,6 +64,8 @@ const message = (overrides: Partial<ChatMessagePayload> = {}): ChatMessagePayloa
 interface Alerts {
   readonly popups: number;
   readonly flashes: number;
+  /** Oscillators the chimes started: one per note, so a message chime counts
+   *  MESSAGE_NOTES and a mention's MENTION_NOTES. */
   readonly chimes: number;
 }
 
@@ -75,13 +79,15 @@ async function alerts(): Promise<Alerts> {
   };
 }
 
-const ALL: Alerts = { popups: 1, flashes: 1, chimes: 1 };
+/** One popup, one flash and one chime of `notes` notes. */
+const all = (notes: number): Alerts => ({ popups: 1, flashes: 1, chimes: notes });
 const NONE: Alerts = { popups: 0, flashes: 0, chimes: 0 };
 
-type EntryPoint = readonly [string, () => void];
+/** An entry point, and how many notes its chime has. */
+type EntryPoint = readonly [string, () => void, number];
 const ENTRY_POINTS: readonly EntryPoint[] = [
-  ["a mention in an unwatched channel", () => notifyMention(1)],
-  ["a channel activity entry", () => notifyChannelActivity(activity())],
+  ["a mention in an unwatched channel", () => notifyMention(1), MENTION_NOTES],
+  ["a channel activity entry", () => notifyChannelActivity(activity()), MESSAGE_NOTES],
 ];
 
 function dmChannel(channelId: number) {
@@ -107,22 +113,22 @@ afterEach(() => {
   setLogLevel("warn");
 });
 
-describe.each(ENTRY_POINTS)("%s", (_name, fire) => {
+describe.each(ENTRY_POINTS)("%s", (_name, fire, notes) => {
   it("raises the popup, the flash and the chime when no preference is set", async () => {
     fire();
-    expect(await alerts()).toEqual(ALL);
+    expect(await alerts()).toEqual(all(notes));
   });
 
   it("drops only the popup when desktop notifications are off", async () => {
     testPrefs.set("desktopNotifications", false);
     fire();
-    expect(await alerts()).toEqual({ popups: 0, flashes: 1, chimes: 1 });
+    expect(await alerts()).toEqual({ popups: 0, flashes: 1, chimes: notes });
   });
 
   it("drops only the flash when the taskbar flash is off", async () => {
     testPrefs.set("flashTaskbar", false);
     fire();
-    expect(await alerts()).toEqual({ popups: 1, flashes: 0, chimes: 1 });
+    expect(await alerts()).toEqual({ popups: 1, flashes: 0, chimes: notes });
   });
 
   it("drops only the chime when notification sounds are off", async () => {
@@ -157,7 +163,7 @@ describe.each(ENTRY_POINTS)("%s", (_name, fire) => {
     hasFocus.mockReturnValue(true);
     channelsStore.setState((prev) => ({ ...prev, activeChannelId: 99 }));
     fire();
-    expect(await alerts()).toEqual({ popups: 0, flashes: 0, chimes: 1 });
+    expect(await alerts()).toEqual({ popups: 0, flashes: 0, chimes: notes });
   });
 
   it("raises nothing for the channel the focused window is showing", async () => {
@@ -170,7 +176,7 @@ describe.each(ENTRY_POINTS)("%s", (_name, fire) => {
     hasFocus.mockReturnValue(true);
     messagesStore.setState((prev) => ({ ...prev, detachedChannels: new Set([1]) }));
     fire();
-    expect(await alerts()).toEqual(ALL);
+    expect(await alerts()).toEqual(all(notes));
   });
 
   it("raises nothing under Do Not Disturb", async () => {
@@ -201,12 +207,12 @@ describe("a followed thread", () => {
   it("only chimes while the reader has a different thread open", async () => {
     hasFocus.mockReturnValue(true);
     notifyChannelActivity(threadEntry(), thread);
-    expect(await alerts()).toEqual({ popups: 0, flashes: 0, chimes: 1 });
+    expect(await alerts()).toEqual({ popups: 0, flashes: 0, chimes: MESSAGE_NOTES });
   });
 
   it("alerts fully when nothing is focused", async () => {
     notifyChannelActivity(threadEntry(), thread);
-    expect(await alerts()).toEqual(ALL);
+    expect(await alerts()).toEqual(all(MESSAGE_NOTES));
   });
 });
 
@@ -214,12 +220,12 @@ describe("notifyChannelActivity filters", () => {
   it("still alerts for a plain message while Suppress @everyone is on", async () => {
     testPrefs.set("suppressEveryone", true);
     notifyChannelActivity(activity());
-    expect(await alerts()).toEqual(ALL);
+    expect(await alerts()).toEqual(all(MESSAGE_NOTES));
   });
 
   it("alerts for an @everyone message when Suppress @everyone is not set", async () => {
     notifyChannelActivity(activity({ mentions_everyone: true }));
-    expect(await alerts()).toEqual(ALL);
+    expect(await alerts()).toEqual(all(MENTION_NOTES));
   });
 
   it("drops an @everyone message when Suppress @everyone is on", async () => {
@@ -231,10 +237,14 @@ describe("notifyChannelActivity filters", () => {
   it("folds a second plain message into the first alert but always announces a mention", async () => {
     notifyChannelActivity(activity());
     notifyChannelActivity(activity({ message_id: 43 }));
-    expect(await alerts()).toEqual(ALL);
+    expect(await alerts()).toEqual(all(MESSAGE_NOTES));
 
     notifyChannelActivity(activity({ message_id: 44, mentions_you: true }));
-    expect(await alerts()).toEqual({ popups: 2, flashes: 2, chimes: 2 });
+    expect(await alerts()).toEqual({
+      popups: 2,
+      flashes: 2,
+      chimes: MESSAGE_NOTES + MENTION_NOTES,
+    });
   });
 
   it("does not let a muted-out popup that was never shown start a coalescing window", async () => {
@@ -247,7 +257,7 @@ describe("notifyChannelActivity filters", () => {
     testPrefs.clear();
     testPrefs.set("notificationLevel", "all");
     notifyChannelActivity(activity({ message_id: 43 }));
-    expect(await alerts()).toEqual(ALL);
+    expect(await alerts()).toEqual(all(MESSAGE_NOTES));
   });
 });
 
@@ -286,7 +296,7 @@ describe("notification coalescing window", () => {
 describe("notifyIncomingMessage defaults", () => {
   it("flashes the taskbar when the preference was never set", async () => {
     notifyIncomingMessage(message());
-    expect(await alerts()).toEqual(ALL);
+    expect(await alerts()).toEqual(all(MESSAGE_NOTES));
   });
 });
 

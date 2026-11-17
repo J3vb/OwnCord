@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { closeBottomSheet } from "../../lib/ui/bottomSheet";
+import { createIcon } from "../../lib/icons";
 import { createChatHeaderOverflow, type ChatHeaderOverflow } from "./chatHeaderOverflow";
 
 const SHEET = '[data-testid="chat-header-more-sheet"]';
@@ -55,6 +56,20 @@ describe("chat header More button", () => {
     const pinsRow = sheet()!.querySelector('[data-testid="chat-header-more-pin-btn"]')!;
     expect(profileRow.getAttribute("aria-checked")).toBe("true");
     expect(pinsRow.hasAttribute("aria-checked")).toBe(false);
+  });
+
+  it("leads each row with its button's icon, keeping the column for a button without one", () => {
+    const pins = toolButton("pin-btn", "Pins");
+    pins.appendChild(createIcon("pin", 18));
+    const bare = toolButton("media-btn", "Media and files");
+    mount([pins, bare]).click();
+
+    const pinsRow = sheet()!.querySelector('[data-testid="chat-header-more-pin-btn"]')!;
+    const bareRow = sheet()!.querySelector('[data-testid="chat-header-more-media-btn"]')!;
+    expect(pinsRow.querySelector(".menu-item-icon svg")?.getAttribute("data-icon")).toBe("pin");
+    expect(pinsRow.querySelector(".menu-item-icon")?.getAttribute("aria-hidden")).toBe("true");
+    expect(bareRow.querySelector(".menu-item-icon")?.childElementCount).toBe(0);
+    expect(labels()).toEqual(["Pins", "Media and files"]);
   });
 
   it("a row clicks its button and closes the sheet", () => {

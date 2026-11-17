@@ -11,6 +11,7 @@ import (
 // redaction: logging a db.User / db.Session (by value or by pointer) must never
 // emit the password hash, TOTP secret, or session token hash.
 func TestUserSessionRedactedInLogs(t *testing.T) {
+	t.Parallel()
 	const (
 		pwHash = "PWHASH_should_not_appear"
 		totp   = "TOTP_SECRET_should_not_appear"

@@ -152,6 +152,12 @@
       "ts": "POLL_UPDATE",
       "note": "a poll's full counts and version after a vote or its end (WP 6.9b)"
     },
+    {
+      "wire": "message_link_previews",
+      "go": "MsgTypeMessageLinkPreviews",
+      "ts": "MESSAGE_LINK_PREVIEWS",
+      "note": "the link preview cards the server built for a message after it was sent or edited; an empty list removes them"
+    },
     { "wire": "typing", "go": "MsgTypeTyping", "ts": "TYPING" },
     { "wire": "presence", "go": "MsgTypePresence", "ts": "PRESENCE" },
     {
@@ -476,6 +482,18 @@
       { "wire": "PLUGINS_DISABLED", "go": "CodePluginsDisabled", "ts": "PLUGINS_DISABLED" },
       { "wire": "PREVIEW_EXPIRED", "go": "CodePreviewExpired", "ts": "PREVIEW_EXPIRED" },
       { "wire": "PUSH_DISABLED", "go": "CodePushDisabled", "ts": "PUSH_DISABLED" },
+      {
+        "wire": "PUSH_SERVER_NOT_PUBLIC",
+        "go": "CodePushServerNotPublic",
+        "ts": "PUSH_SERVER_NOT_PUBLIC",
+        "note": "The push server a device registered is on a private, loopback or otherwise non-public address; OwnCord only sends to public push servers."
+      },
+      {
+        "wire": "PUSH_SERVER_PORT_NOT_SUPPORTED",
+        "go": "CodePushServerPortNotSupported",
+        "ts": "PUSH_SERVER_PORT_NOT_SUPPORTED",
+        "note": "The push server a device registered uses a port other than 443; OwnCord only sends to push servers on the standard HTTPS port."
+      },
       { "wire": "RATE_LIMITED", "go": "CodeRateLimited", "ts": "RATE_LIMITED" },
       {
         "wire": "RECOVERED_SIGN_IN_REQUIRED",

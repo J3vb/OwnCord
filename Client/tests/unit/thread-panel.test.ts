@@ -412,6 +412,13 @@ describe("a locked or archived thread", () => {
       "thread-sheet-lock",
       "thread-sheet-delete",
     ]);
+    // Each row leads with the icon its header button draws; Delete stays red.
+    expect(
+      rows.map((r) => r.querySelector(":scope > .menu-item-icon svg")?.getAttribute("data-icon")),
+    ).toEqual(["bell", "pencil", "archive", "lock", "trash-2"]);
+    expect(sheet.querySelector('[data-testid="thread-sheet-delete"]')!.classList).toContain(
+      "danger",
+    );
     sheet.querySelector<HTMLButtonElement>('[data-testid="thread-sheet-lock"]')!.click();
     expect(document.querySelector('[data-testid="thread-actions-sheet"]')).toBeNull();
     expect(more.getAttribute("aria-expanded")).toBe("false");

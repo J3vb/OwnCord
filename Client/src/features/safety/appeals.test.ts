@@ -464,17 +464,17 @@ describe("appeals section markup", () => {
     const { pane, ac } = await mount([row({ id: 7 })], [appeal({ id: "O" })]);
     const section = q(pane, "section.safety-appeals");
     expect(attrsOf(section)).toMatchObject({
-      class: "safety-appeals",
+      class: "settings-section safety-appeals",
       "aria-labelledby": "safety-appeals-heading",
     });
-    expect(attrsOf(q(section, "h3"))).toMatchObject({
-      class: "safety-heading",
+    expect(attrsOf(q(section, "h2"))).toMatchObject({
+      class: "settings-section-label",
       id: "safety-appeals-heading",
       tabindex: "-1",
     });
-    const status = q(section, ":scope > p.setting-desc");
+    const status = q(section, ":scope > .settings-card > p.setting-desc");
     expect(attrsOf(status)).toEqual({ class: "setting-desc", role: "status" });
-    const failure = q(section, ":scope > div.inline-error");
+    const failure = q(section, ":scope > .settings-card > div.inline-error");
     expect(attrsOf(q(failure, "p"))).toEqual({
       class: "inline-error-text",
       role: "alert",
@@ -485,11 +485,11 @@ describe("appeals section markup", () => {
       class: "ac-btn secondary inline-error-retry",
       "data-testid": "appeals-load-error-retry",
     });
-    expect(attrsOf(q(section, ":scope > ul"))).toEqual({
+    expect(attrsOf(q(section, ":scope > .settings-card > ul"))).toEqual({
       class: "safety-history safety-appeals-list",
       "aria-label": "Your appeals",
     });
-    expect(attrsOf(q(section, ":scope > div.sr-only"))).toEqual({
+    expect(attrsOf(q(section, ":scope > .settings-card > div.sr-only"))).toEqual({
       class: "sr-only",
       role: "status",
     });
@@ -632,7 +632,9 @@ describe("appeals section markup", () => {
     renderSafetyTab(pane, ac.signal, null);
     expect(pane.querySelector("[data-testid='safety-appeal-P']")).not.toBeNull();
     // Listed appeals leave the status line empty.
-    expect(q(pane, "section.safety-appeals > p[role='status']").textContent).toBe("");
+    expect(q(pane, "section.safety-appeals > .settings-card > p[role='status']").textContent).toBe(
+      "",
+    );
     ac.abort();
   });
 

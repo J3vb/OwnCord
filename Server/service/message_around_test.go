@@ -21,6 +21,7 @@ func seedAroundHistory(t *testing.T, database *db.DB, channelID int64, n int) []
 }
 
 func TestGetMessagesAround_SplitsTheLimitAroundTheCentre(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ids := seedAroundHistory(t, database, 10, 40)
 
@@ -40,6 +41,7 @@ func TestGetMessagesAround_SplitsTheLimitAroundTheCentre(t *testing.T) {
 }
 
 func TestGetMessagesAround_EdgesReportNoMore(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ids := seedAroundHistory(t, database, 10, 30)
 
@@ -63,6 +65,7 @@ func TestGetMessagesAround_EdgesReportNoMore(t *testing.T) {
 }
 
 func TestGetMessagesAround_ExactFitReportsNoMore(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	// limit 5 → 2 older + centre + 2 newer, and the channel holds exactly that.
 	ids := seedAroundHistory(t, database, 10, 5)
@@ -79,6 +82,7 @@ func TestGetMessagesAround_ExactFitReportsNoMore(t *testing.T) {
 }
 
 func TestGetMessagesAround_ClampsLimit(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ids := seedAroundHistory(t, database, 10, 150)
 
@@ -98,6 +102,7 @@ func TestGetMessagesAround_ClampsLimit(t *testing.T) {
 }
 
 func TestGetMessagesAround_RejectsBadIDs(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ids := seedAroundHistory(t, database, 10, 3)
 
@@ -113,6 +118,7 @@ func TestGetMessagesAround_RejectsBadIDs(t *testing.T) {
 }
 
 func TestGetMessagesAround_MessageFromAnotherChannelIsNotFound(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	seedChannel(t, database, &db.Channel{ID: 12, Name: "other", Type: "text"})
 	otherIDs := seedAroundHistory(t, database, 12, 2)
@@ -124,6 +130,7 @@ func TestGetMessagesAround_MessageFromAnotherChannelIsNotFound(t *testing.T) {
 }
 
 func TestGetMessagesAround_DeletedCentreIsNotFound(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ids := seedAroundHistory(t, database, 10, 3)
 	mustDo(t, "DeleteMessage", database.DeleteMessage(context.Background(), ids[1], 1, false))
@@ -137,6 +144,7 @@ func TestGetMessagesAround_DeletedCentreIsNotFound(t *testing.T) {
 }
 
 func TestGetMessagesAround_DMNonParticipantIsNotFound(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: "online"})
 	seedUser(t, database, &db.User{ID: 3, Username: "outsider", Status: "offline"})

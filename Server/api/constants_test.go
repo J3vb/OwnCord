@@ -8,6 +8,7 @@ import (
 
 // I-7: loginRateLimitPerMinute must be 5 (not 60).
 func TestLoginRateLimit_Value(t *testing.T) {
+	t.Parallel()
 	if loginRateLimitPerMinute != 5 {
 		t.Errorf("loginRateLimitPerMinute = %d, want 5", loginRateLimitPerMinute)
 	}
@@ -93,6 +94,7 @@ func TestScaledAuthLimit_NeverBelowOne(t *testing.T) {
 // Those caps are only observable through a limiter key inside the service, so
 // this pins the call site instead.
 func TestPerUserFailureCapsStayUnscaled(t *testing.T) {
+	t.Parallel()
 	for file, constants := range map[string][]string{
 		"../service/auth.go": {"totpFailureRateLimit", "loginUserFailureThreshold"},
 	} {

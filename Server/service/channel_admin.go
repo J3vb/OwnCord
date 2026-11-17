@@ -101,20 +101,14 @@ type AdminChannelCreate struct {
 	Position int
 }
 
-// AdminListChannels lists guild channels only: DM rows share the table and listing them would expose ids and
-// group names to any MANAGE_CHANNELS holder.
+// AdminListChannels lists guild channels only (ListChannels leaves DM rows out, so ids and group names never
+// reach a MANAGE_CHANNELS holder).
 func (s *ChannelService) AdminListChannels(ctx context.Context) ([]db.Channel, error) {
 	channels, err := s.st.ListChannels(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to list channels: %w", ErrInternal, err)
 	}
-	guildChannels := make([]db.Channel, 0, len(channels))
-	for i := range channels {
-		if channels[i].Type != "dm" {
-			guildChannels = append(guildChannels, channels[i])
-		}
-	}
-	return guildChannels, nil
+	return channels, nil
 }
 
 // AdminCreateChannel validates, persists, audits and returns the committed row, re-read on

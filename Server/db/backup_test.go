@@ -40,6 +40,7 @@ func newBackupFileDB(t *testing.T) (*db.DB, string) {
 
 // TestBackupToSafe_ValidPath verifies a properly-named backup file is created.
 func TestBackupToSafe_ValidPath(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
@@ -57,6 +58,7 @@ func TestBackupToSafe_ValidPath(t *testing.T) {
 // TestBackupToSafe_RejectsPathOutsideRoot ensures a path outside the safe root
 // is rejected.
 func TestBackupToSafe_RejectsPathOutsideRoot(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
@@ -74,6 +76,7 @@ func TestBackupToSafe_RejectsPathOutsideRoot(t *testing.T) {
 // accented user name, brackets, an apostrophe or a double hyphen. Each such
 // path must produce a restorable backup at exactly that name, and nothing else.
 func TestBackupToSafe_AcceptsAnyNameTheFilesystemAllows(t *testing.T) {
+	t.Parallel()
 	names := []string{"o'neil", "a;b", "a--b", "Jörg (x86) +@&!", "100% #1 [new] {x}=$,"}
 	if runtime.GOOS != "windows" {
 		names = append(names, `say "hi"`, "what?", "a*b|c<d>")
@@ -100,6 +103,7 @@ func TestBackupToSafe_AcceptsAnyNameTheFilesystemAllows(t *testing.T) {
 // TestBackupToSafe_QuotedNameCannotRunSQL: a destination that reads like the
 // end of a string followed by a statement is only ever a file name.
 func TestBackupToSafe_QuotedNameCannotRunSQL(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 	_, err := database.ExecContext(context.Background(), `CREATE TABLE backup_canary (id INTEGER PRIMARY KEY)`)
 	mustDo(t, "create canary table", err)
@@ -119,6 +123,7 @@ func TestBackupToSafe_QuotedNameCannotRunSQL(t *testing.T) {
 
 // TestBackupToSafe_RejectsNullByte ensures a path containing a null byte is rejected.
 func TestBackupToSafe_RejectsNullByte(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
@@ -134,6 +139,7 @@ func TestBackupToSafe_RejectsNullByte(t *testing.T) {
 // failed VACUUM INTO removes a partial file it created, but an error caused
 // by the destination already existing must never delete the operator's file.
 func TestBackupToSafe_ErrorKeepsPreexistingFile(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
@@ -154,6 +160,7 @@ func TestBackupToSafe_ErrorKeepsPreexistingFile(t *testing.T) {
 // TestCheckBackupIntegrity_ValidAndCorrupt verifies the integrity gate both
 // accepts a real backup and rejects a non-database file.
 func TestCheckBackupIntegrity_ValidAndCorrupt(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
@@ -178,6 +185,7 @@ func TestCheckBackupIntegrity_ValidAndCorrupt(t *testing.T) {
 // the name must still check that very file — not open (and create) a
 // different one and report it "ok".
 func TestBackupChecks_URIMetacharactersInPath(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 	backupDir := filepath.Join(tmpDir, "backups")
 	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
@@ -223,6 +231,7 @@ func TestBackupChecks_URIMetacharactersInPath(t *testing.T) {
 // its safe root to data/backups, so a destination anywhere else is refused
 // before a byte is written.
 func TestBackupTo_RejectsPathOutsideDataBackups(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	outside := filepath.Join(tmpDir, "outside.db")
@@ -237,6 +246,7 @@ func TestBackupTo_RejectsPathOutsideDataBackups(t *testing.T) {
 // TestBackupToSafe_MissingDirectoryFails: a destination directory that does
 // not exist is an error, not a silently created tree.
 func TestBackupToSafe_MissingDirectoryFails(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")
@@ -253,6 +263,7 @@ func TestBackupToSafe_MissingDirectoryFails(t *testing.T) {
 // file cannot be checked for existence, so it is refused and the file that is
 // in the way is left alone.
 func TestBackupToSafe_ParentIsAFileFails(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 
 	backupDir := filepath.Join(tmpDir, "backups")

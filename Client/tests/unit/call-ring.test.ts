@@ -36,6 +36,7 @@ function harness() {
   const accepted: number[] = [];
   const declined: number[] = [];
   const started: RingState[] = [];
+  const redialed: RingState[] = [];
   const missed: RingState[] = [];
   const ended: RingState[] = [];
   const endReasons: Array<RingEndReason | undefined> = [];
@@ -47,6 +48,7 @@ function harness() {
     onAccept: (id) => accepted.push(id),
     onDecline: (id) => declined.push(id),
     onRingStart: (s) => started.push(s),
+    onRedial: (s) => redialed.push(s),
     onMissed: (s) => missed.push(s),
     onRingEnd: (s, reason) => {
       ended.push(s);
@@ -63,6 +65,7 @@ function harness() {
     accepted,
     declined,
     started,
+    redialed,
     missed,
     ended,
     endReasons,
@@ -280,6 +283,26 @@ describe("ring controller — ring start", () => {
     h.ctrl.incoming(ring(5));
     h.ctrl.incoming(ring(5));
     expect(h.started).toEqual([ring(5)]);
+  });
+
+  // Whatever shows the ring for a set time starts that time over with it.
+  it("reports each redial of the ring on screen, after its 30s started over", () => {
+    const h = harness();
+    h.ctrl.incoming(ring(5));
+    expect(h.redialed).toEqual([]);
+    h.ctrl.incoming(ring(5, 4));
+    h.ctrl.incoming(ring(5, 4));
+    expect(h.redialed).toEqual([ring(5, 4), ring(5, 4)]);
+    expect(h.clearedCount()).toBe(2);
+  });
+
+  it("a ring from another channel, or one after the last ended, is no redial", () => {
+    const h = harness();
+    h.ctrl.incoming(ring(5));
+    h.ctrl.incoming(ring(6));
+    h.ctrl.cancel(6);
+    h.ctrl.incoming(ring(6));
+    expect(h.redialed).toEqual([]);
   });
 
   it("reports a ring that supersedes another, and a ring after the last one ended", () => {

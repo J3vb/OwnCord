@@ -10,6 +10,7 @@ import { createStatusRow, createRevealToggle, setStatusIcon, createDisclosure } 
 import { accountText as t } from "../../i18n/account";
 import { buildSessionRow, buildApiTokensBlock } from "./AccountDevices";
 import { createLogger } from "@lib/logger";
+import { buildSettingsSection } from "./settingsSection";
 
 const log = createLogger("AccountTab");
 
@@ -30,8 +31,8 @@ const STATUS_OPTIONS: readonly { readonly value: UserStatus; readonly label: str
 export function buildStatusSelector(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
-): HTMLDivElement {
-  const wrapper = createElement("div", {});
+): HTMLElement {
+  const { el, card } = buildSettingsSection({ label: t("status.sectionTitle") });
   const row = createElement("div", { class: "setting-row" });
   const info = createElement("div", {});
   appendChildren(
@@ -62,22 +63,34 @@ export function buildStatusSelector(
     { signal },
   );
   appendChildren(row, info, select);
-  appendChildren(
-    wrapper,
-    createElement("div", { class: "settings-section-title" }, t("status.sectionTitle")),
-    row,
-  );
-  return wrapper;
+  card.appendChild(row);
+  return el;
 }
 
 // ---------------------------------------------------------------------------
 // Devices (sessions) section
 // ---------------------------------------------------------------------------
 
+/** Asks a devices section for a fresh listing, superseding one in flight. */
+const SESSIONS_RELOAD = "sessions-reload";
+
+/** Show the signed-in devices list (the sign-in alert's Review devices): open
+ *  it, list it afresh when `reload`, bring it into view and focus its toggle. */
+export function revealSessions(root: ParentNode, reload: boolean): void {
+  const toggle = root.querySelector<HTMLButtonElement>("[data-testid='sessions-manage']");
+  if (toggle === null) return;
+  if (toggle.getAttribute("aria-expanded") !== "true") toggle.click();
+  const row = toggle.closest("li");
+  if (reload) row?.dispatchEvent(new Event(SESSIONS_RELOAD));
+  row?.scrollIntoView?.({ block: "start" });
+  toggle.focus();
+}
+
 export function buildSessionsSection(
   options: SettingsOverlayOptions,
   signal: AbortSignal,
   tokensChanged?: EventTarget,
+  sessionsChanged?: EventTarget,
 ): HTMLLIElement {
   const { row, icon, result, body } = createStatusRow(
     t("devices.sectionTitle"),
@@ -98,7 +111,10 @@ export function buildSessionsSection(
     setText(result, t("devices.count", { count: list.childElementCount }));
   };
 
+  /** Only the latest listing is applied: an older reply that lands late is dropped. */
+  let latest = 0;
   function load(): void {
+    const request = ++latest;
     list.replaceChildren(status);
     setText(status, t("devices.loading"));
     setText(result, t("devices.loading"));
@@ -106,19 +122,22 @@ export function buildSessionsSection(
     void options
       .onListSessions()
       .then((sessions) => {
-        if (signal.aborted) return;
+        if (signal.aborted || request !== latest) return;
         list.replaceChildren(...sessions.map((s) => buildSessionRow(s, options, signal, recount)));
         recount();
         setStatusIcon(icon, "ok");
       })
       .catch((err: unknown) => {
-        if (signal.aborted) return;
+        if (signal.aborted || request !== latest) return;
         log.warn("Failed to list sessions", err);
         setText(status, t("devices.loadFailed"));
         setText(result, t("devices.loadFailed"));
         setStatusIcon(icon, "warn");
       });
   }
+
+  sessionsChanged?.addEventListener("change", load, { signal });
+  row.addEventListener(SESSIONS_RELOAD, load, { signal });
 
   const revokeAllBtn = createElement(
     "button",
@@ -207,15 +226,15 @@ export function buildSessionsSection(
 // ---------------------------------------------------------------------------
 
 /** The server-default retention window, when the server reported one. */
-export function buildRetentionSection(notice: string): HTMLDivElement {
-  const wrapper = createElement("div", { "data-testid": "account-retention" });
-  appendChildren(
-    wrapper,
-    createElement("div", { class: "settings-separator" }),
-    createElement("div", { class: "settings-section-title" }, t("retention.sectionTitle")),
+export function buildRetentionSection(notice: string): HTMLElement {
+  const { el, card } = buildSettingsSection({
+    label: t("retention.sectionTitle"),
+    attrs: { "data-testid": "account-retention" },
+  });
+  card.appendChild(
     createElement("div", { style: "color:var(--text-muted);font-size:13px" }, notice),
   );
-  return wrapper;
+  return el;
 }
 
 // ---------------------------------------------------------------------------

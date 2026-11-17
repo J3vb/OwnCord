@@ -77,6 +77,7 @@ func dialLiveKitProxy(t *testing.T, backend, path string, opts *websocket.DialOp
 }
 
 func TestLiveKitProxy_WebSocket_RoundTrip(t *testing.T) {
+	t.Parallel()
 	backend := echoWSBackend(t)
 
 	ctx, conn := dialLiveKitProxy(t, backend, "/rtc?access_token=client", nil)
@@ -95,6 +96,7 @@ func TestLiveKitProxy_WebSocket_RoundTrip(t *testing.T) {
 }
 
 func TestLiveKitProxy_WebSocket_ForwardsBinary(t *testing.T) {
+	t.Parallel()
 	backend := echoWSBackend(t)
 	ctx, conn := dialLiveKitProxy(t, backend, "/rtc?access_token=client", nil)
 
@@ -116,6 +118,7 @@ func TestLiveKitProxy_WebSocket_ForwardsBinary(t *testing.T) {
 // is dropped (a native client's loopback proxy can add a second one) and the
 // rest is kept, so LiveKit has exactly one credential to read, the header.
 func TestLiveKitProxy_WebSocket_ForwardsQueryWithoutClientCredential(t *testing.T) {
+	t.Parallel()
 	var gotQuery, gotAuthz string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotQuery = r.URL.RawQuery
@@ -148,6 +151,7 @@ func TestLiveKitProxy_WebSocket_ForwardsQueryWithoutClientCredential(t *testing.
 // header, not the access_token query parameter. The gate is asked about that
 // token, LiveKit gets the issued one, and no other client header is forwarded.
 func TestLiveKitProxy_WebSocket_HeaderCredential(t *testing.T) {
+	t.Parallel()
 	const presented = "eyJhbGciOiJIUzI1NiJ9.native.sig"
 	var gotAuthz, gotCookie string
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -192,6 +196,7 @@ func TestLiveKitProxy_WebSocket_HeaderCredential(t *testing.T) {
 }
 
 func TestLiveKitProxy_WebSocket_BackendUnavailable(t *testing.T) {
+	t.Parallel()
 	// Nothing is listening on this port, so the backend dial must fail.
 	proxy := httptest.NewServer(api.NewLiveKitProxy("ws://127.0.0.1:1", []string{"*"}, api.AdmitAllVoiceSessionsForTest))
 	t.Cleanup(proxy.Close)
@@ -213,6 +218,7 @@ func TestLiveKitProxy_WebSocket_BackendUnavailable(t *testing.T) {
 }
 
 func TestLiveKitProxy_WebSocket_BlockedPathNotUpgraded(t *testing.T) {
+	t.Parallel()
 	backend := echoWSBackend(t)
 	proxy := httptest.NewServer(api.NewLiveKitProxy(backend, []string{"*"}, api.AdmitAllVoiceSessionsForTest))
 	t.Cleanup(proxy.Close)
@@ -236,6 +242,7 @@ func TestLiveKitProxy_WebSocket_BlockedPathNotUpgraded(t *testing.T) {
 }
 
 func TestLiveKitProxy_WebSocket_CrossOriginRejected(t *testing.T) {
+	t.Parallel()
 	backend := echoWSBackend(t)
 	proxy := httptest.NewServer(api.NewLiveKitProxy(backend, []string{"https://allowed.example"}, api.AdmitAllVoiceSessionsForTest))
 	t.Cleanup(proxy.Close)
@@ -263,6 +270,7 @@ func TestLiveKitProxy_WebSocket_CrossOriginRejected(t *testing.T) {
 // origin, so the upgrade must succeed rather than pass the pre-check and then
 // be refused by websocket.Accept's own literal host comparison.
 func TestLiveKitProxy_WebSocket_DefaultPortOriginBehindProxy(t *testing.T) {
+	t.Parallel()
 	backend := echoWSBackend(t)
 	proxy := httptest.NewServer(api.NewLiveKitProxy(backend, nil, api.AdmitAllVoiceSessionsForTest))
 	t.Cleanup(proxy.Close)
@@ -341,6 +349,7 @@ func newBareHub(t *testing.T, lk *ws.LiveKitClient) *ws.Hub {
 }
 
 func TestHandleLiveKitHealth_Healthy(t *testing.T) {
+	t.Parallel()
 	handler := api.LiveKitHealthHandlerForTest(hubWithLiveKit(t, http.StatusOK))
 
 	rr := httptest.NewRecorder()
@@ -361,6 +370,7 @@ func TestHandleLiveKitHealth_Healthy(t *testing.T) {
 }
 
 func TestHandleLiveKitHealth_Degraded(t *testing.T) {
+	t.Parallel()
 	handler := api.LiveKitHealthHandlerForTest(hubWithLiveKit(t, http.StatusInternalServerError))
 
 	rr := httptest.NewRecorder()
@@ -381,6 +391,7 @@ func TestHandleLiveKitHealth_Degraded(t *testing.T) {
 }
 
 func TestHandleLiveKitHealth_NotConfigured(t *testing.T) {
+	t.Parallel()
 	// A hub with no LiveKit client at all — the common case when voice is off.
 	handler := api.LiveKitHealthHandlerForTest(newBareHub(t, nil))
 
@@ -396,6 +407,7 @@ func TestHandleLiveKitHealth_NotConfigured(t *testing.T) {
 // The proxy documents a 256 KiB signaling limit, but the websocket library's
 // own 32 KiB default read limit used to close both legs first.
 func TestLiveKitProxy_WebSocket_LargeFrameLimit(t *testing.T) {
+	t.Parallel()
 	const kib = 1024
 	cases := []struct {
 		name    string

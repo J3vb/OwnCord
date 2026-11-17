@@ -62,11 +62,36 @@ func advanceMessageDeliveryFloor(dbPath string, now time.Time) error {
 	return nil
 }
 
+// readMessageDeliveryFloor takes the higher of the cutoff beside the real database and
+// one an older binary left beside a symlinked database path.
 func readMessageDeliveryFloor(dbPath string) (int64, error) {
 	path, err := messageDeliveryFloorPath(dbPath)
 	if err != nil {
 		return 0, err
 	}
+	floor, err := readMessageDeliveryFloorFile(path)
+	if err != nil {
+		return 0, err
+	}
+	if legacy, err := dbFilePath(dbPath); err == nil && legacy+messageDeliveryFloorSuffix != path {
+		old, err := readMessageDeliveryFloorFile(legacy + messageDeliveryFloorSuffix)
+		if err != nil {
+			return 0, err
+		}
+		floor = max(floor, old)
+	}
+	return floor, nil
+}
+
+func readMessageDeliveryFloorFile(path string) (int64, error) {
+	floor, err := parseMessageDeliveryFloorFile(path)
+	if err != nil {
+		return 0, fmt.Errorf("%s: %w", path, err)
+	}
+	return floor, nil
+}
+
+func parseMessageDeliveryFloorFile(path string) (int64, error) {
 	f, err := os.Open(path)
 	if errors.Is(err, os.ErrNotExist) {
 		return 0, nil // Existing installations have not restored through this gate.
@@ -91,12 +116,21 @@ func readMessageDeliveryFloor(dbPath string) (int64, error) {
 	return floor, nil
 }
 
+const messageDeliveryFloorSuffix = ".message-retry-floor"
+
+// messageDeliveryFloorPath sits beside the real database a symlinked path points at, where
+// a restore replaces the file, so the panel and the restore CLI agree on it.
 func messageDeliveryFloorPath(dbPath string) (string, error) {
 	p, err := dbFilePath(dbPath)
 	if err != nil {
 		return "", err
 	}
-	return p + ".message-retry-floor", nil
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		p = resolved
+	} else {
+		p = resolveDangling(p)
+	}
+	return p + messageDeliveryFloorSuffix, nil
 }
 
 // dbFilePath is the on-disk file behind a database path or "file:" URI, for

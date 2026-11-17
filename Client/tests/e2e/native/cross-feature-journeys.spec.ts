@@ -78,7 +78,8 @@ const state = (page: Page) => page.evaluate(() => window.__ipc ?? { http: [], br
 
 // eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
 test("native privacy journey: consent gates the broker, a warm re-entry does not refetch, and logout keeps destination confinement", async ({}, info) => {
-  const server = await startTestServer({ tls: true });
+  // The legacy path: a server that builds link previews never asks the broker.
+  const server = await startTestServer({ tls: true, linkPreviews: false });
   let app: Awaited<ReturnType<typeof startNativeApp>> | undefined;
   const serverHost = new URL(server.origin).host;
   try {
@@ -182,7 +183,7 @@ test("native privacy journey: consent gates the broker, a warm re-entry does not
         await page.locator("button[aria-label='Settings']").click();
         await expect(page.locator("[data-testid='settings-overlay']")).toHaveClass(/open/);
         await page.locator(".settings-nav-item.danger").click();
-        // Log Out asks first.
+        // Log out asks first.
         await page.locator("[data-testid='logout-confirm']").click();
         await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
         await page.waitForTimeout(1_500);

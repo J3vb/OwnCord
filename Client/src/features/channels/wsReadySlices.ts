@@ -26,6 +26,7 @@ import {
   readPointerEnabled,
   stickersEnabled,
 } from "../../lib/net/serverCapabilities";
+import { applyServerTime } from "../../lib/net/serverClock";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 
@@ -125,13 +126,14 @@ export function markReadyActiveChannelRead(currentActive: number | null): void {
 }
 
 /**
- * The capabilities slice of a full `ready`, applied first. A new `ready`
+ * The capabilities and server clock slice of a full `ready`, applied first. A new `ready`
  * restates every pointer, so a Mark Unread still waiting for its answer from
  * the previous connection is forgotten rather than restored or toasted against
  * the new one.
  */
 export function applyReadyReadPointer(payload: Payload<"ready">): void {
   applyReadyCapabilities(payload.capabilities);
+  applyServerTime(payload.server_time_ms);
   forgetPendingMarkUnread();
 }
 

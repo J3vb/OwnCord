@@ -120,7 +120,10 @@ func (s *messageReads) searchScope(ctx context.Context, userID int64, channelID 
 		}
 		scope = ids
 	}
-	if len(scope) == 0 || len(inNames) == 0 {
+	if len(scope) == 0 {
+		return scope, nil
+	}
+	if len(inNames) == 0 {
 		return scope, nil
 	}
 
@@ -133,16 +136,36 @@ func (s *messageReads) searchScope(ctx context.Context, userID int64, channelID 
 		inScope[id] = true
 	}
 	narrowed := make([]int64, 0, len(inNames))
+	matches := func(chName string) bool {
+		return slices.ContainsFunc(inNames, func(name string) bool {
+			return strings.EqualFold(strings.TrimSpace(chName), name)
+		})
+	}
+	guild := make(map[int64]bool, len(channels))
 	for i := range channels {
 		ch := &channels[i]
-		if !inScope[ch.ID] {
-			continue
+		guild[ch.ID] = true
+		if inScope[ch.ID] && matches(ch.Name) {
+			narrowed = append(narrowed, ch.ID)
 		}
-		for _, name := range inNames {
-			if strings.EqualFold(strings.TrimSpace(ch.Name), name) {
-				narrowed = append(narrowed, ch.ID)
-				break
-			}
+	}
+	// ListChannels carries guild channels only; group DMs in scope are matched by their own name, read in one go.
+	var nonGuild []int64
+	for _, id := range scope {
+		if !guild[id] {
+			nonGuild = append(nonGuild, id)
+		}
+	}
+	if len(nonGuild) == 0 {
+		return narrowed, nil
+	}
+	dmNames, err := s.st.ListDMChannelNamesAmong(ctx, nonGuild)
+	if err != nil {
+		return nil, fmt.Errorf("%w: failed to read DM channels: %w", ErrInternal, err)
+	}
+	for _, id := range nonGuild {
+		if name, ok := dmNames[id]; ok && matches(name) {
+			narrowed = append(narrowed, id)
 		}
 	}
 	return narrowed, nil

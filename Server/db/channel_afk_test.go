@@ -12,6 +12,7 @@ import (
 // one AFK channel": a second flagged row is refused, the flag only accepts 0
 // and 1, and a channel starts unflagged.
 func TestMigration068_AFKUniqueIndex(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 
@@ -42,6 +43,7 @@ func TestMigration068_AFKUniqueIndex(t *testing.T) {
 // SetAFKChannel clears the previous flag and sets the new one in one
 // transaction, reports the channel it replaced, and a nil id clears.
 func TestDBSetAFKChannel_SwapsAndReportsPrevious(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	a, _ := database.CreateChannel(ctx, "afk-a", "voice", "", "", 0)
@@ -74,6 +76,7 @@ func TestDBSetAFKChannel_SwapsAndReportsPrevious(t *testing.T) {
 // A target that was archived or deleted after the caller validated it commits
 // nothing: the previous flag survives and ErrNotFound comes back.
 func TestDBSetAFKChannel_GoneTargetKeepsPreviousFlag(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	a, _ := database.CreateChannel(ctx, "afk-a", "voice", "", "", 0)
@@ -97,6 +100,7 @@ func TestDBSetAFKChannel_GoneTargetKeepsPreviousFlag(t *testing.T) {
 // Archiving the flagged channel clears the flag, so GetAFKChannel never hands
 // back a hidden channel (trigger trg_channels_archive_clears_afk).
 func TestMigration068_ArchivingClearsAFK(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	a, _ := database.CreateChannel(ctx, "afk-a", "voice", "", "", 0)

@@ -38,6 +38,10 @@ type routeDeps struct {
 	// mount-time nil checks.
 	files      FileStore
 	slowRoutes *metrics.SlowRoutes
+	// bgCtx bounds background work a mount starts; NewRouter's cleanup cancels it.
+	bgCtx context.Context
+	// portalReady closes when the portal's background encoding has stopped; nil without a portal.
+	portalReady <-chan struct{}
 }
 
 func newRouteDeps(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer, plugins *plugin.Registry, rt Runtime, slowRoutes *metrics.SlowRoutes) *routeDeps {
@@ -58,16 +62,22 @@ type routeGroup struct {
 
 // routeGroups is every feature's routes, mounted in this order after the middleware and health routes.
 var routeGroups = []routeGroup{
-	{"invites", func(r chi.Router, d *routeDeps) { MountInviteRoutes(r, d.svc) }},
+	{"invites", func(r chi.Router, d *routeDeps) { MountInviteRoutes(r, d.svc, d.limiter) }},
 	{"gif", func(r chi.Router, d *routeDeps) { mountGIF(r, d.cfg, d.svc, d.limiter) }},
 	// Link previews and outside images for the browser client; only mounted when the browser client is.
 	{"externalContent", func(r chi.Router, d *routeDeps) {
 		mountExternalContent(r, d.cfg, d.svc.Sessions, d.limiter)
 	}},
+	// Needs the shared link preview store; without it the thumbnail route is not mounted.
+	{"linkPreviews", func(r chi.Router, d *routeDeps) {
+		if d.rt.LinkPreviews != nil {
+			MountLinkPreviewImageRoute(r, d.svc.Sessions, d.limiter, d.cfg.Server.TrustedProxies, d.rt.LinkPreviews, d.svc.Messages.NoteLinkImageShown)
+		}
+	}},
 	// Mounted unconditionally; with push.enabled false every route answers 503 PUSH_DISABLED after
 	// authentication.
 	{"push", func(r chi.Router, d *routeDeps) {
-		MountPushRoutes(r, d.svc.Sessions, d.svc.Push, d.cfg.Push.Enabled)
+		MountPushRoutes(r, d.svc.Sessions, d.svc.Push, d.limiter, d.cfg.Push.Enabled)
 	}},
 	{"uploads", func(r chi.Router, d *routeDeps) {
 		routerUploadRoutes(r, d.svc.Sessions, d.limiter, d.cfg, d.svc.Uploads, d.store)
@@ -138,7 +148,7 @@ func mountAdminRoutes(r chi.Router, d *routeDeps) {
 	// gate: they accept only a session or API token issued by this server, plus permission and rank checks.
 	r.Mount("/api/v1/moderation/members", admin.NewMemberAPI(svc, hub, svc.Permissions))
 	r.Mount("/api/v1/moderation/channels", admin.NewChannelAPI(svc, hub))
-	mountBrowserClient(r, cfg, d.rt.WebClient)
+	d.portalReady = mountBrowserClient(d.bgCtx, r, cfg, d.rt.WebClient)
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)

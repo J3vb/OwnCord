@@ -4,6 +4,7 @@
 //
 // The plugin stays a dynamic `import()`: it is not part of the startup chunk
 // today, and this registry is statically reachable from the entry.
+import { isAndroidHost } from "@lib/hostPlatform";
 import { createLogger } from "@lib/logger";
 import { parseChannelLink, parseInviteLink, parseMessageLink } from "@lib/nav/deepLink";
 import type { DeepLinks } from "../contracts/deepLinks";
@@ -13,7 +14,7 @@ const log = createLogger("deep-link");
 const SCHEME = "owncord";
 
 /**
- * Wire owncord:// deep links. No-op outside Tauri. `onInvite` is called once per
+ * Wire owncord:// deep links on desktop and Android. No-op outside Tauri. `onInvite` is called once per
  * recognized invite link and `onMessage` once per message permalink, or per
  * channel link with no message id, on both cold start and warm launches.
  */
@@ -55,10 +56,13 @@ async function init(
   try {
     // Runtime registration is idempotent and needed for dev + some Linux/Windows
     // setups; the installer also registers the scheme from tauri.conf.json.
-    try {
-      await plugin.register(SCHEME);
-    } catch {
-      // Already registered, or not permitted on this platform — ignore.
+    // Android has no runtime registration: the manifest's intent filter is it.
+    if (!isAndroidHost()) {
+      try {
+        await plugin.register(SCHEME);
+      } catch {
+        // Already registered, or not permitted on this platform — ignore.
+      }
     }
     dispatch(await plugin.getCurrent());
     await plugin.onOpenUrl((urls) => dispatch(urls));

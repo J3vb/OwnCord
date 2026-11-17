@@ -32,7 +32,7 @@ func RunHealthcheckCLI() int {
 		fmt.Fprintln(os.Stderr, "healthcheck: unreachable:", err)
 		return 1
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 512))
 		fmt.Fprintf(os.Stderr, "healthcheck: status %d: %s\n", resp.StatusCode, body)

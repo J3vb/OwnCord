@@ -12,6 +12,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net"
 	"net/netip"
 	"net/url"
 	"strconv"
@@ -23,6 +24,7 @@ import (
 	"golang.org/x/net/idna"
 
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/safefetch"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 )
 
@@ -41,16 +43,42 @@ const (
 // ErrInvalidSubscription wraps every reason Subscribe refuses an input; handlers answer 400 INVALID_INPUT.
 var ErrInvalidSubscription = errors.New("invalid push subscription")
 
+// ErrPushServerNotPublic is returned by Subscribe when the endpoint host is an IP literal, or resolves to an
+// address, that is not publicly routable. Dispatch refuses such a host at send time (safefetch), so storing it
+// would only ever fail silently; handlers answer 400 PUSH_SERVER_NOT_PUBLIC.
+var ErrPushServerNotPublic = errors.New("push server is not on a public address")
+
+// ErrPushServerPortNotSupported is returned by Subscribe when the endpoint names a port other than 443, the only
+// one dispatch sends to; handlers answer 400 PUSH_SERVER_PORT_NOT_SUPPORTED.
+var ErrPushServerPortNotSupported = errors.New("push server port is not supported")
+
+// pushResolveTimeout bounds the sign-up DNS lookup so a slow resolver cannot hold a request open.
+const pushResolveTimeout = 3 * time.Second
+
+// PushResolver returns every address host resolves to.
+type PushResolver func(ctx context.Context, host string) ([]netip.Addr, error)
+
+func defaultPushResolver(ctx context.Context, host string) ([]netip.Addr, error) {
+	addrs, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+	if err != nil {
+		return nil, fmt.Errorf("lookup %s: %w", host, err)
+	}
+	return addrs, nil
+}
+
 // PushSubscribeInput is the shape Subscribe validates.
 type PushSubscribeInput struct {
 	Endpoint   string
 	P256dh     string
 	Auth       string
 	DeviceName string
+	// SessionID is the subscribing session; the subscription is deleted with
+	// it. Nil for an API-token principal, whose row keeps the sweep lifetime.
+	SessionID *int64
 }
 
 type pushStore interface {
-	UpsertPushSubscription(ctx context.Context, userID int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error)
+	UpsertPushSubscription(ctx context.Context, userID int64, sessionID *int64, endpoint, p256dh, auth, deviceName, keyID string, keep int) (int64, error)
 	ListPushSubscriptions(ctx context.Context, userID int64, keyID string) ([]db.PushSubscription, error)
 	DeletePushSubscription(ctx context.Context, userID, id int64) (bool, error)
 	SweepPushSubscriptions(ctx context.Context, cutoff time.Time, keyID string) (int64, error)
@@ -67,12 +95,64 @@ type PushService struct {
 	keyID   string
 	ttl     time.Duration
 	contact string
+	resolve PushResolver
 }
 
 // NewPushService constructs a PushService with no key installed (PublicKey reports ok=false) and
 // the default 90-day staleness window.
 func NewPushService(st pushStore) *PushService {
-	return &PushService{st: st, ttl: pushDefaultTTL}
+	return &PushService{st: st, ttl: pushDefaultTTL, resolve: defaultPushResolver}
+}
+
+// SetEndpointResolver replaces the DNS resolver Subscribe uses to vet a push server's address; nil restores the
+// system resolver. A test seam: production never sets it.
+func (s *PushService) SetEndpointResolver(r PushResolver) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if r == nil {
+		r = defaultPushResolver
+	}
+	s.resolve = r
+}
+
+func (s *PushService) currentResolver() PushResolver {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.resolve
+}
+
+// checkEndpointPublic refuses an endpoint on a port dispatch does not send to, and one whose host is, or resolves to, any address safefetch would refuse to
+// dial, using the same classifier so sign-up and sending never disagree. A failed or timed-out lookup passes:
+// a flaky resolver must not block a phone, and safefetch still guards every send.
+func (s *PushService) checkEndpointPublic(ctx context.Context, endpoint string) error {
+	u, err := url.Parse(endpoint)
+	if err != nil {
+		return fmt.Errorf("%w: endpoint must be an https URL with a host", ErrInvalidSubscription)
+	}
+	if port := u.Port(); port != "" && port != "443" {
+		return fmt.Errorf("%w: %s", ErrPushServerPortNotSupported, port)
+	}
+	host := u.Hostname()
+	if literal, perr := netip.ParseAddr(host); perr == nil {
+		if cerr := safefetch.ClassifyAddr(literal); cerr != nil {
+			return fmt.Errorf("%w: %s", ErrPushServerNotPublic, host)
+		}
+		return nil
+	}
+	lctx, cancel := context.WithTimeout(ctx, pushResolveTimeout)
+	defer cancel()
+	addrs, lerr := s.currentResolver()(lctx, host)
+	if lerr != nil {
+		return nil
+	}
+	// An empty answer with no error is accepted on purpose, like a failed lookup: sign-up fails open and
+	// send time refuses a host with no addresses.
+	for _, a := range addrs {
+		if cerr := safefetch.ClassifyAddr(a); cerr != nil {
+			return fmt.Errorf("%w: %s", ErrPushServerNotPublic, host)
+		}
+	}
+	return nil
 }
 
 // SetVAPIDKey installs the running VAPID key, called once at start-up regardless of push.enabled: the sweep
@@ -137,7 +217,10 @@ func (s *PushService) Subscribe(ctx context.Context, userID int64, in PushSubscr
 	if err != nil {
 		return 0, err
 	}
-	id, err := s.st.UpsertPushSubscription(ctx, userID, in.Endpoint, p256dh, auth, deviceName, s.currentKeyID(), maxPushSubscriptionsPerUser)
+	if err := s.checkEndpointPublic(ctx, in.Endpoint); err != nil {
+		return 0, err
+	}
+	id, err := s.st.UpsertPushSubscription(ctx, userID, in.SessionID, in.Endpoint, p256dh, auth, deviceName, s.currentKeyID(), maxPushSubscriptionsPerUser)
 	if err != nil {
 		return 0, fmt.Errorf("%w: %w", ErrInternal, err)
 	}

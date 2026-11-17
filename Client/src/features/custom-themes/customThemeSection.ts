@@ -5,6 +5,7 @@
  */
 
 import { createElement, appendChildren, setText } from "../../lib/dom";
+import { buildSettingsSection } from "../settings/settingsSection";
 import { copyThenToast } from "../../lib/ui/clipboard";
 import { createLogger } from "../../lib/logger";
 import { showToast } from "../../lib/ui/toast";
@@ -16,17 +17,21 @@ import {
   cleanThemeName,
   getActiveCustomThemeId,
   loadCustomThemes,
+  loadThemeBackground,
   newCustomThemeId,
   onCustomThemeChange,
   saveCustomThemes,
+  saveThemeBackground,
   setActiveCustomTheme,
   type CustomTheme,
+  type ThemeBackground,
   type ThemeCssProblem,
 } from "./customTheme";
 import { createConfirmModal } from "../dialogs/confirmModal";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
 import { isAndroidApp } from "../voice/native/platform";
+import { buildBackgroundEditor } from "./themeBackgroundEditor";
 
 const log = createLogger("custom-theme");
 
@@ -37,6 +42,11 @@ export function problemText(problem: ThemeCssProblem): string {
   return problem.line === null
     ? t("appearance.customThemes.outsideLinkNoLine", { found: problem.found })
     : t("appearance.customThemes.outsideLink", { found: problem.found, line: problem.line });
+}
+
+function sameBackground(a: ThemeBackground | null, b: ThemeBackground | null): boolean {
+  if (a === null || b === null) return a === b;
+  return a.image === b.image && a.dim === b.dim && a.blur === b.blur;
 }
 
 /** A file name for `name`: letters, digits and dashes, never empty. */
@@ -101,9 +111,14 @@ async function exportTheme(theme: CustomTheme): Promise<void> {
   }
 }
 
-export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
-  const section = createElement("div", { class: "custom-themes" });
-  const header = createElement("h3", {}, t("appearance.customThemes"));
+export function buildCustomThemeSection(
+  signal: AbortSignal,
+  onDirtyCheck?: (isDirty: () => boolean) => void,
+): HTMLElement {
+  const { el: section, card } = buildSettingsSection({
+    label: t("appearance.customThemes"),
+    attrs: { class: "custom-themes" },
+  });
   const desc = createElement(
     "p",
     { class: "setting-desc" },
@@ -173,7 +188,8 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
     t("appearance.customThemes.cancel"),
   );
   appendChildren(editorButtons, saveBtn, cancelBtn);
-  appendChildren(editor, nameLabel, cssLabel, error, editorButtons);
+  const background = buildBackgroundEditor(signal);
+  appendChildren(editor, nameLabel, cssLabel, background.el, error, editorButtons);
 
   /** The id being edited; null for a new theme. */
   let editing: string | null = null;
@@ -182,13 +198,28 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
     editing = theme?.id ?? null;
     nameInput.value = theme?.name ?? "";
     cssInput.value = theme?.css ?? "";
+    background.reset(theme === null ? null : loadThemeBackground(theme.id));
     setText(error, "");
     editor.hidden = false;
     nameInput.focus();
   }
 
+  // Settings asks before a close or tab switch throws away a half-written theme.
+  onDirtyCheck?.(() => {
+    if (editor.hidden) return false;
+    const stored = editing === null ? null : loadCustomThemes().find((th) => th.id === editing);
+    const storedBackground = editing === null ? null : loadThemeBackground(editing);
+    return (
+      nameInput.value !== (stored?.name ?? "") ||
+      cssInput.value !== (stored?.css ?? "") ||
+      background.busy() ||
+      !sameBackground(background.value(), storedBackground)
+    );
+  });
+
   function closeEditor(): void {
     editing = null;
+    background.reset(null);
     editor.hidden = true;
     newBtn.focus();
   }
@@ -197,6 +228,10 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
     const name = cleanThemeName(nameInput.value);
     if (name === "") {
       setText(error, t("appearance.customThemes.nameMissing"));
+      return;
+    }
+    if (background.busy()) {
+      setText(error, t("appearance.customThemes.background.working"));
       return;
     }
     const css = cssInput.value;
@@ -217,7 +252,15 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
       return;
     }
     const next = at === -1 ? [...themes, { id, name, css }] : themes.with(at, { id, name, css });
+    // The picture first: a theme row never points at a half-saved picture,
+    // and a failed list save puts the old picture back.
+    const previous = at === -1 ? null : loadThemeBackground(id);
+    if (!saveThemeBackground(id, background.value())) {
+      setText(error, t("appearance.customThemes.saveFailed"));
+      return;
+    }
     if (!saveCustomThemes(next)) {
+      saveThemeBackground(id, previous);
       setText(error, t("appearance.customThemes.saveFailed"));
       return;
     }
@@ -244,6 +287,7 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
             showToast(t("appearance.customThemes.saveFailed"), "error");
             return;
           }
+          saveThemeBackground(theme.id, null);
           if (getActiveCustomThemeId() === theme.id) setActiveCustomTheme(null);
           if (editing === theme.id) closeEditor();
           render();
@@ -389,6 +433,6 @@ export function buildCustomThemeSection(signal: AbortSignal): HTMLElement {
   onCustomThemeChange(render, signal);
 
   render();
-  appendChildren(section, header, desc, list, actions, editor);
+  appendChildren(card, desc, list, actions, editor);
   return section;
 }

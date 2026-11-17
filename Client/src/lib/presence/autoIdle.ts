@@ -32,6 +32,11 @@
  * being away. The DOM listeners stay: they are the fallback whenever the OS
  * cannot say, and they still bring the status back the instant the user
  * touches the window rather than at the next poll.
+ *
+ * A platform that knows when its idle time matters says so between polls
+ * (`followSystemIdle`), and the watcher reads it at once. The Android app
+ * needs that: its idle time is how long the app has been out of view, and a
+ * phone that sleeps runs neither the poll nor the timer.
  */
 
 import { Disposable } from "../disposable";
@@ -64,6 +69,10 @@ export interface AutoIdleOptions {
    *  system, or null where the OS cannot say. Omitted, or answering null,
    *  leaves the DOM listeners in sole charge. */
   readonly systemIdleMs?: () => Promise<number | null>;
+  /** Where the platform can tell when `systemIdleMs` is worth reading again
+   *  without waiting for the poll (it reached `thresholdMs`, or dropped back
+   *  to 0), it calls `ask` then, until `signal` aborts. The poll stays on. */
+  readonly followSystemIdle?: (signal: AbortSignal, thresholdMs: number, ask: () => void) => void;
 }
 
 export interface AutoIdleController {
@@ -105,6 +114,8 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
   let timer: ReturnType<typeof setTimeout> | null = null;
   let poll: ReturnType<typeof setInterval> | null = null;
   let polling = false;
+  /** The platform asked for a read while one was out (see `readIdle`). */
+  let askedAgain = false;
   /** True while the last poll got an answer from the OS: the OS, not the
    *  DOM timer, then decides when the status goes idle. */
   let osKnowsIdle = false;
@@ -174,6 +185,14 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
     arm();
   }
 
+  /** One read of the idle time. An answer the platform asked about again
+   *  while it was out is from before that ask, so it is read once more. */
+  async function readIdle(source: () => Promise<number | null>): Promise<number | null> {
+    askedAgain = false;
+    const idleMs = await source();
+    return askedAgain && !destroyed ? readIdle(source) : idleMs;
+  }
+
   async function pollSystemIdle(source: () => Promise<number | null>): Promise<void> {
     // One query at a time: a slow D-Bus answer must not stack up behind the
     // interval.
@@ -181,7 +200,7 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
     polling = true;
     let idleMs: number | null;
     try {
-      idleMs = await source();
+      idleMs = await readIdle(source);
     } catch {
       idleMs = null;
     } finally {
@@ -212,6 +231,11 @@ export function startAutoIdle(options: AutoIdleOptions): AutoIdleController {
   if (options.systemIdleMs !== undefined) {
     const source = options.systemIdleMs;
     poll = setInterval(() => void pollSystemIdle(source), SYSTEM_IDLE_POLL_MS);
+    options.followSystemIdle?.(disposable.signal, delayMs, () => {
+      if (destroyed) return;
+      if (polling) askedAgain = true;
+      else void pollSystemIdle(source);
+    });
   }
 
   for (const evt of ACTIVITY_EVENTS) {

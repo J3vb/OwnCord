@@ -560,6 +560,11 @@
   color: var(--text-muted);
   margin-top: 4px;
 }
+/* One brand block: the server panel already shows the logo and name. */
+.connect-page:has(.server-panel) .form-logo .oc-logo-stack,
+.connect-page:has(.server-panel) .form-logo h1 {
+  display: none;
+}
 
 /* Banners */
 .error-banner {
@@ -570,6 +575,7 @@
   display: none;
   align-items: flex-start;
   gap: 8px;
+  white-space: pre-line;
   animation: shakeX 0.4s ease-in-out;
 }
 .error-banner.visible {
@@ -726,6 +732,7 @@
   color: var(--text-danger);
   font-size: var(--font-size-sm);
   margin-top: 6px;
+  white-space: pre-line;
 }
 .form-status {
   color: var(--text-positive);
@@ -1141,7 +1148,11 @@
 .modal-overlay.visible {
   display: flex;
 }
+/* A tall dialog never outgrows the window: the body scrolls between a fixed
+   header and footer, so the actions stay in view. */
 .modal {
+  display: flex;
+  flex-direction: column;
   background: var(--bg-primary);
   border-radius: var(--radius-md);
   width: 440px;
@@ -1149,6 +1160,10 @@
   overflow-y: auto;
   box-shadow: var(--shadow-lg);
   animation: modalSlideIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.modal-header,
+.modal-footer {
+  flex: none;
 }
 .modal-header {
   padding: 20px 24px 0;
@@ -1176,6 +1191,9 @@
   color: var(--text-normal);
 }
 .modal-body {
+  flex: 0 1 auto;
+  min-height: 0;
+  overflow-y: auto;
   padding: 20px 24px;
 }
 .modal-footer {
@@ -1546,10 +1564,6 @@
     margin-bottom: 12px;
     padding-right: 52px;
     text-align: left;
-  }
-  .connect-page:has(.server-panel) .form-logo .oc-logo-stack,
-  .connect-page:has(.server-panel) .form-logo h1 {
-    display: none;
   }
   .connect-page:has(.server-panel) .form-logo p {
     margin-top: 0;

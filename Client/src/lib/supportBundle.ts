@@ -155,6 +155,7 @@ const SETTINGS_ALLOWLIST = [
   "notificationSounds",
   "callSounds",
   "voiceSounds",
+  "soundStyle",
   "echoCancellation",
   "noiseSuppression",
   "autoGainControl",

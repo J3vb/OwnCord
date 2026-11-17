@@ -50,6 +50,7 @@ func sealTestKey() []byte {
 // codes, a sealed secret and a user without one are untouched, a value that is
 // neither is counted and left as it is, and a second run changes nothing.
 func TestSealLegacyTOTPSecrets_ConvertsOnlyUnsealedSecrets(t *testing.T) {
+	t.Parallel()
 	database := openSealTestDB(t)
 	key := sealTestKey()
 	ctx := context.Background()
@@ -117,6 +118,7 @@ func (r racingStore) ReplaceUserTOTPSecret(ctx context.Context, userID int64, ol
 // a row whose secret changed after it was read is not overwritten with the
 // sealed form of the old secret, and is not counted as sealed.
 func TestSealLegacyTOTPSecrets_YieldsToAConcurrentChange(t *testing.T) {
+	t.Parallel()
 	database := openSealTestDB(t)
 	legacy := "JBSWY3DPEHPK3PXP"
 	uid := sealTestUser(t, database, "racer", &legacy)

@@ -42,7 +42,7 @@ func channelPasswordChange(existing *db.Channel, requested *string) (*db.Channel
 	if err := auth.ValidateChannelPassword(*requested); err != nil {
 		return nil, fmt.Errorf("%s%.0w", err.Error(), ErrBadRequest)
 	}
-	hash, err := auth.HashPassword(*requested)
+	hash, err := auth.HashChannelPassword(*requested)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to hash channel password: %w", ErrInternal, err)
 	}

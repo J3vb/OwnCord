@@ -333,6 +333,14 @@ function isMissingPathError(err: unknown): boolean {
   return /not found|no such file|cannot find the path|os error 2|enoent/i.test(message);
 }
 
+/** Count from zero again: the files the counters describe are gone. */
+function resetWriteCounters(): void {
+  dayChars = 0;
+  dayCapped = false;
+  eventFile = null;
+  eventBytes = 0;
+}
+
 /** Delete every persisted log file from disk. */
 async function clearAll(): Promise<void> {
   try {
@@ -346,8 +354,10 @@ async function clearAll(): Promise<void> {
         await remove(`${dir}/${entry.name}`);
       }
     }
+    resetWriteCounters();
   } catch (err) {
     if (isMissingPathError(err)) {
+      resetWriteCounters();
       return;
     }
     throw err;

@@ -13,7 +13,7 @@ vi.mock("../../src/features/messaging/ChannelMediaGallery", () => ({ createChann
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("@lib/logger", () => loggerMock());
 
-import { createMediaGalleryController } from "../../src/pages/main-page/MediaGalleryController";
+import { createMediaGalleryController } from "../../src/features/messaging/MediaGalleryController";
 import type { ChannelMediaGalleryOptions } from "../../src/features/messaging/ChannelMediaGallery";
 import type { ApiClient } from "@lib/api";
 import { closeSettings, uiStore } from "@stores/ui.store";
@@ -182,6 +182,28 @@ describe("createMediaGalleryController", () => {
     removeChannel(5);
     channelsStore.flush();
     expect(panel.destroy).toHaveBeenCalledTimes(2);
+  });
+
+  it("never mounts a gallery whose code lands after the viewer left the channel", async () => {
+    const ctrl = make();
+    const opening = ctrl.open();
+    setActiveChannel(6);
+    await opening;
+    expect(createChannelMediaGallery).not.toHaveBeenCalled();
+    expect(ctrl.isOpen()).toBe(false);
+  });
+
+  it("opens for the new channel when asked again after a switch while loading", async () => {
+    const ctrl = make();
+    const first = ctrl.open();
+    expect(ctrl.isPending()).toBe(true);
+    setActiveChannel(6);
+    expect(ctrl.isPending()).toBe(false);
+    await ctrl.open();
+    await first;
+    expect(createChannelMediaGallery).toHaveBeenCalledOnce();
+    expect(lastOptions().channelName).toBe("other");
+    ctrl.cleanup();
   });
 
   it("does not open on a channel gated behind the NSFW check", async () => {

@@ -267,6 +267,20 @@ CREATE TABLE IF NOT EXISTS dm_open_state (
     PRIMARY KEY (user_id, channel_id)
 );
 
+CREATE TABLE IF NOT EXISTS voice_states (
+    user_id     INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    channel_id  INTEGER NOT NULL REFERENCES channels(id) ON DELETE CASCADE,
+    muted       INTEGER NOT NULL DEFAULT 0,
+    deafened    INTEGER NOT NULL DEFAULT 0,
+    speaking    INTEGER NOT NULL DEFAULT 0,
+    camera      INTEGER NOT NULL DEFAULT 0,
+    screenshare INTEGER NOT NULL DEFAULT 0,
+    server_muted    INTEGER NOT NULL DEFAULT 0,
+    server_muted_by INTEGER,
+    server_deafened INTEGER NOT NULL DEFAULT 0,
+    joined_at   TEXT    NOT NULL DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS user_blocks (
     blocker_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     blocked_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,

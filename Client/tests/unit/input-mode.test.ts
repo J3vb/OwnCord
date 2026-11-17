@@ -23,11 +23,11 @@ const get = (key: string): unknown => {
 describe("inputMode", () => {
   beforeEach(() => localStorage.clear());
 
-  it("defaults to Voice Activity on a fresh profile", () => {
+  it("defaults to Voice activity on a fresh profile", () => {
     expect(inputMode()).toBe("vad");
   });
 
-  it("reads Push to Talk for a profile from before Input Mode with a bound key", () => {
+  it("reads Push to talk for a profile from before Input mode with a bound key", () => {
     set("pttVk", 0x41);
     expect(inputMode()).toBe("ptt");
   });
@@ -47,13 +47,13 @@ describe("inputMode", () => {
 describe("migrateInputMode", () => {
   beforeEach(() => localStorage.clear());
 
-  it("saves Push to Talk for an existing bound key, so the setup does not change", () => {
+  it("saves Push to talk for an existing bound key, so the setup does not change", () => {
     set("pttVk", 0x41);
     migrateInputMode();
     expect(get("inputMode")).toBe("ptt");
   });
 
-  it("saves Voice Activity when no key is bound, so a later binding does not switch modes", () => {
+  it("saves Voice activity when no key is bound, so a later binding does not switch modes", () => {
     migrateInputMode();
     set("pttVk", 0x41);
     expect(get("inputMode")).toBe("vad");
@@ -71,21 +71,21 @@ describe("migrateInputMode", () => {
 describe("effectiveVoiceSensitivity", () => {
   beforeEach(() => localStorage.clear());
 
-  it("is the saved sensitivity in Voice Activity mode, even with a live key", () => {
+  it("is the saved sensitivity in Voice activity mode, even with a live key", () => {
     set("voiceSensitivity", 30);
     set("inputMode", "vad");
     set("pttVk", 0x41);
     expect(effectiveVoiceSensitivity(true)).toBe(30);
   });
 
-  it("runs no sensitivity gate while a bound Push to Talk key is live", () => {
+  it("runs no sensitivity gate while a bound Push to talk key is live", () => {
     set("voiceSensitivity", 30);
     set("inputMode", "ptt");
     set("pttVk", 0x41);
     expect(effectiveVoiceSensitivity(true)).toBe(100);
   });
 
-  it("keeps the sensitivity gate in Push to Talk mode with no key or no live poller", () => {
+  it("keeps the sensitivity gate in Push to talk mode with no key or no live poller", () => {
     set("voiceSensitivity", 30);
     set("inputMode", "ptt");
     expect(effectiveVoiceSensitivity(true)).toBe(30);
@@ -153,7 +153,7 @@ describe("migrateAutoInputSensitivity", () => {
 describe("effectiveVoiceGate", () => {
   beforeEach(() => localStorage.clear());
 
-  it("is automatic in Voice Activity mode when automatic sensitivity is on", () => {
+  it("is automatic in Voice activity mode when automatic sensitivity is on", () => {
     set("autoInputSensitivity", true);
     set("voiceSensitivity", 30);
     expect(effectiveVoiceGate(false)).toBe("auto");
@@ -167,7 +167,7 @@ describe("effectiveVoiceGate", () => {
     expect(effectiveVoiceGate(false)).toBe("off");
   });
 
-  it("runs no gate while a bound Push to Talk key is live, even with automatic on", () => {
+  it("runs no gate while a bound Push to talk key is live, even with automatic on", () => {
     set("autoInputSensitivity", true);
     set("inputMode", "ptt");
     set("pttVk", 0x41);
@@ -181,7 +181,7 @@ describe("pttGates with the talk button", () => {
   beforeEach(() => localStorage.clear());
   afterEach(() => setTalkButton(false));
 
-  it("gates in Push to Talk mode with no key bound once the talk button is the trigger", () => {
+  it("gates in Push to talk mode with no key bound once the talk button is the trigger", () => {
     set("inputMode", "ptt");
     expect(pttGates(true)).toBe(false);
     setTalkButton(true);
@@ -189,7 +189,7 @@ describe("pttGates with the talk button", () => {
     expect(effectiveVoiceGate(true)).toBe("off");
   });
 
-  it("does not gate in Voice Activity mode or with no live press source", () => {
+  it("does not gate in Voice activity mode or with no live press source", () => {
     setTalkButton(true);
     set("inputMode", "vad");
     expect(pttGates(true)).toBe(false);

@@ -7,6 +7,7 @@ import {
   addMessage,
   updateReaction,
   updatePoll,
+  updateLinkPreviews,
   applyPollVoteOk,
   rollbackReaction,
   confirmSend,
@@ -38,6 +39,7 @@ import {
   notifyLiveMessage,
 } from "./chatNotify";
 import { hasDmPreviewRefetch, reviseDmPreviewAfterDelete } from "./dmPreview";
+import { clearRequestPending } from "../direct-messages/pendingRequests";
 
 export { activateReadyPendingMessages, applyReadyMessageResync } from "./readyResync";
 export { handleMessagingError } from "./sendErrors";
@@ -81,6 +83,9 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
 
   noteChannelUnread(payload, activeId, isOwnMessage, isMention, isAway);
   if (isDm) noteDmMessage(payload, activeId, isOwnMessage, isMention, isAway);
+  // A message from the other person hints that they accepted: it clears the
+  // waiting notice, and a refused call brings it back.
+  if (isDm && !isOwnMessage) clearRequestPending(payload.channel_id);
   if (!isReplayFrame) notifyLiveMessage(clock, payload);
 }
 
@@ -181,6 +186,12 @@ export function handlePollUpdate(payload: Payload<"poll_update">): void {
   updatePoll(payload, authStore.getState().user?.id ?? 0);
 }
 
+/** The cards the server built for a message: kept on its row in content-version order, and a
+ *  frame for a message that is not loaded is dropped. */
+export function handleMessageLinkPreviews(payload: Payload<"message_link_previews">): void {
+  updateLinkPreviews(payload);
+}
+
 /** The sender's stored selection, so the card shows it before the poll_update that carries the counts. */
 export function handlePollVoteOk(payload: Payload<"poll_vote_ok">): void {
   applyPollVoteOk(payload);
@@ -233,6 +244,7 @@ export const wsRoutes: readonly WsRoute[] = [
   route(S.CHAT_SEND_OK, (c) => (p, id) => handleChatSendOk(c.api, p, id)),
   route(S.REACTION_UPDATE, () => handleReactionUpdate),
   route(S.POLL_UPDATE, () => handlePollUpdate),
+  route(S.MESSAGE_LINK_PREVIEWS, () => handleMessageLinkPreviews),
   route(S.POLL_VOTE_OK, () => handlePollVoteOk),
   route(S.TYPING, () => handleTyping),
 ];

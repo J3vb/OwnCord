@@ -235,12 +235,13 @@ describe("VoiceWidget connection panel (Option C)", () => {
     widget.destroy?.();
   });
 
-  it("keeps three equal controls with the screen-share state on the button, no text label", () => {
+  it("keeps four equal controls with the screen-share state on the button, no text label", () => {
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
     const { widget, container } = mount();
 
     // Mute and deafen moved to the user panel (WP 1D-1).
-    expect(container.querySelectorAll(".vw-controls button")).toHaveLength(3);
+    // Camera, screen share, Share music and Disconnect.
+    expect(container.querySelectorAll(".vw-controls button")).toHaveLength(4);
     const shareBtn = container.querySelector('[aria-label="Screenshare"]')!;
     expect(shareBtn.getAttribute("aria-pressed")).toBe("true");
     expect(shareBtn.classList.contains("active-ctrl")).toBe(true);

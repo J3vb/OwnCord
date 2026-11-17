@@ -24,11 +24,11 @@ describe("confirmLogout", () => {
 
   const open = () => confirmLogout({ signal: owner.signal, onConfirm, onClosed });
 
-  it("asks with the Log Out wording and focuses Cancel", () => {
+  it("asks with the Log out wording and focuses Cancel", () => {
     open();
     expect(dialog()?.textContent).toContain("Are you sure you want to log out?");
-    expect(document.querySelector("h3")?.textContent).toBe("Log Out");
-    expect(document.querySelector("[data-testid='logout-confirm']")?.textContent).toBe("Log Out");
+    expect(document.querySelector("h3")?.textContent).toBe("Log out");
+    expect(document.querySelector("[data-testid='logout-confirm']")?.textContent).toBe("Log out");
     expect(document.activeElement).toBe(document.querySelector("[data-testid='logout-cancel']"));
     expect(onConfirm).not.toHaveBeenCalled();
   });
@@ -38,7 +38,7 @@ describe("confirmLogout", () => {
     const modal = dialog()!.querySelector(".modal")!;
     const heading = document.getElementById(modal.getAttribute("aria-labelledby") ?? "");
     expect(heading?.id).toBe("settings-logout-title");
-    expect(heading?.textContent).toBe("Log Out");
+    expect(heading?.textContent).toBe("Log out");
   });
 
   it("confirm closes the prompt and logs out once", () => {

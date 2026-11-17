@@ -14,7 +14,11 @@
  * on the second page goes back one page first.
  */
 
-import type { ContextMenuItem, ContextMenuSeparator } from "../../lib/ui/contextMenu";
+import {
+  menuIconSlot,
+  type ContextMenuItem,
+  type ContextMenuSeparator,
+} from "../../lib/ui/contextMenu";
 import { openBottomSheet, type BottomSheet } from "../../lib/ui/bottomSheet";
 import { isImeCommit } from "../../lib/text/ime";
 import { createElement } from "../../lib/dom";
@@ -44,6 +48,14 @@ export interface MenuSheetRequest {
 
 function isSeparator(row: MenuRow): row is ContextMenuSeparator {
   return "separator" in row;
+}
+
+/** The icon size of a sheet row, larger than a popover menu's for a finger. */
+const SHEET_ICON_SIZE = 20;
+
+/** Whether any row on a page has an icon, so every row reserves the column. */
+function hasIcons(rows: readonly MenuRow[]): boolean {
+  return rows.some((row) => !isSeparator(row) && row.icon !== undefined);
 }
 
 /** The cards of one page: rows between separators, in order. */
@@ -81,13 +93,18 @@ export function openMenuSheet(req: MenuSheetRequest): BottomSheet {
   const rowButtons = new Map<ContextMenuItem, HTMLElement>();
   let onSecondPage = false;
 
-  function actionButton(item: ContextMenuItem, inRadioGroup: boolean): HTMLElement {
+  function actionButton(
+    item: ContextMenuItem,
+    inRadioGroup: boolean,
+    iconed: boolean,
+  ): HTMLElement {
     const btn = createElement("button", {
       type: "button",
       class: "msg-sheet-action menu-sheet-row",
       ...(item.testId !== undefined ? { "data-testid": item.testId } : {}),
       ...(item.title !== undefined ? { title: item.title } : {}),
     });
+    if (iconed) btn.appendChild(menuIconSlot(item.icon, SHEET_ICON_SIZE));
     btn.appendChild(createElement("span", { class: "menu-sheet-label" }, item.label));
     if (item.detail !== undefined) {
       btn.appendChild(createElement("span", { class: "menu-sheet-detail" }, item.detail));
@@ -121,10 +138,11 @@ export function openMenuSheet(req: MenuSheetRequest): BottomSheet {
   }
 
   function cards(rows: readonly MenuRow[], radio: boolean): HTMLElement[] {
+    const iconed = hasIcons(rows);
     return sectionsOf(rows).map((section) => {
       const card = createElement("div", { class: "msg-sheet-section" });
       if (radio) card.setAttribute("role", "radiogroup");
-      for (const item of section) card.appendChild(actionButton(item, radio));
+      for (const item of section) card.appendChild(actionButton(item, radio, iconed));
       return card;
     });
   }

@@ -8,6 +8,8 @@ export const navigationText = defineCatalog("navigation", {
     one: "{count} pending message request",
     other: "{count} pending message requests",
   },
+  "requests.row": "Message requests",
+  "requests.rowWaiting": "Message requests, {count} waiting",
   "moderation.title": "Moderation",
   "moderation.entryHint": "Open the Moderation Center",
   "people.title": "People",

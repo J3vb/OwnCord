@@ -2,10 +2,16 @@ mod active_session;
 #[cfg(target_os = "android")]
 mod android_notifications;
 #[cfg(target_os = "android")]
+mod android_secrets;
+#[cfg(target_os = "android")]
 mod call_service;
 mod commands;
 #[cfg(target_os = "android")]
 mod metered_network;
+#[cfg(target_os = "android")]
+mod mobile_audio;
+#[cfg(target_os = "android")]
+mod push;
 // Test-only: gates over tauri.conf.json and the source text itself.
 #[cfg(test)]
 mod config_gates;
@@ -40,6 +46,8 @@ mod gpu_adapter;
 mod http_pool;
 mod http_proxy;
 mod idle;
+#[cfg(target_os = "android")]
+mod idle_android;
 #[cfg(target_os = "linux")]
 mod idle_wayland;
 mod json_store;
@@ -227,6 +235,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_deep_link::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init());
 
@@ -235,14 +244,18 @@ pub fn run() {
         .plugin(update_commands::android::init())
         .plugin(call_service::init())
         .plugin(metered_network::init())
+        .plugin(mobile_audio::init())
+        .plugin(idle_android::init())
+        .plugin(push::init())
         .plugin(exit_info::init())
         .plugin(files::init())
         .plugin(share_in::init())
+        .plugin(android_secrets::init())
         .plugin(android_notifications::init());
 
     // Desktop-only convenience plugins. window-state auto-saves/restores window
     // geometry (off-screen correction lives in the frontend); autostart backs
-    // the "launch on login" toggle; deep-link registers the owncord:// scheme.
+    // the "launch on login" toggle.
     #[cfg(desktop)]
     let builder = builder
         .plugin(
@@ -264,8 +277,7 @@ pub fn run() {
             // A login launch carries the flag; `startMinimized` decides what it
             // does (window_prefs.rs).
             Some(vec![window_prefs::MINIMIZED_ARG]),
-        ))
-        .plugin(tauri_plugin_deep_link::init());
+        ));
 
     match builder
         .manage(json_store::JsonStores::default())
@@ -278,6 +290,7 @@ pub fn run() {
         .manage(native_voice_state())
         .manage(app_sounds_state())
         .manage(windows_app_audio::AppAudioState::new())
+        .manage(windows_app_audio::MusicAudioState::new())
         .invoke_handler(tauri::generate_handler![
             diagnostics::frontend_ready,
             #[cfg(desktop)]
@@ -324,7 +337,25 @@ pub fn run() {
             #[cfg(target_os = "android")]
             call_service::set_call_service,
             #[cfg(target_os = "android")]
+            call_service::show_call_ring,
+            #[cfg(target_os = "android")]
+            call_service::clear_call_ring,
+            #[cfg(target_os = "android")]
             metered_network::is_metered,
+            #[cfg(target_os = "android")]
+            push::push_status,
+            #[cfg(target_os = "android")]
+            push::push_choose,
+            #[cfg(target_os = "android")]
+            push::push_register,
+            #[cfg(target_os = "android")]
+            push::push_unregister,
+            #[cfg(target_os = "android")]
+            mobile_audio::mobile_audio_set_session,
+            #[cfg(target_os = "android")]
+            mobile_audio::mobile_audio_set_route,
+            #[cfg(target_os = "android")]
+            mobile_audio::mobile_audio_state,
             #[cfg(target_os = "android")]
             android_notifications::android_notification_channels,
             #[cfg(target_os = "android")]
@@ -358,7 +389,12 @@ pub fn run() {
             http_proxy::stop_http_proxy,
             external_content::external_preview,
             external_content::external_image,
+            #[cfg(not(target_os = "android"))]
             idle::system_idle_ms,
+            #[cfg(target_os = "android")]
+            idle_android::system_idle_ms,
+            #[cfg(target_os = "android")]
+            idle_android::system_idle_follow,
             region::system_region_locale,
             game_activity::detect_game,
             game_activity::list_running_programs,
@@ -366,6 +402,9 @@ pub fn run() {
             windows_app_audio::app_audio_available,
             windows_app_audio::start_app_audio,
             windows_app_audio::stop_app_audio,
+            windows_app_audio::music::list_audio_apps,
+            windows_app_audio::music::start_music_audio,
+            windows_app_audio::music::stop_music_audio,
             #[cfg(desktop)]
             tray::open_log_folder,
             external_open::open_external_url,
@@ -402,9 +441,17 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             native_voice::native_voice_set_video_view,
             #[cfg(target_os = "linux")]
-            native_voice::native_voice_set_volume,
+            native_voice::volume::native_voice_set_volume,
             #[cfg(target_os = "linux")]
-            native_voice::native_voice_set_screenshare_volume,
+            native_voice::volume::native_voice_set_screenshare_volume,
+            #[cfg(target_os = "linux")]
+            native_voice::volume::native_voice_set_music_volume,
+            #[cfg(target_os = "linux")]
+            native_voice::music::native_voice_list_audio_apps,
+            #[cfg(target_os = "linux")]
+            native_voice::music::native_voice_start_music,
+            #[cfg(target_os = "linux")]
+            native_voice::music::native_voice_stop_music,
             #[cfg(target_os = "linux")]
             native_voice::native_voice_debug_info,
             #[cfg(target_os = "linux")]

@@ -7,6 +7,7 @@
  */
 
 import type { OwnModerationAction } from "@lib/api";
+import { buildSettingsSection } from "../settings/settingsSection";
 import { createElement, setText } from "@lib/dom";
 import { createInlineError } from "@lib/ui/inlineError";
 import { formatUntil, formatWhen, safetyText as t } from "../../i18n/safety";
@@ -92,25 +93,19 @@ export function renderSafetyTab(
     testId: "moderation-history-error",
   });
   const list = createElement("ul", { class: "safety-history", "aria-label": t("tab.history") });
-  const historyHeading = createElement(
-    "h3",
-    { class: "safety-heading", tabindex: "-1" },
-    t("tab.history"),
-  );
+  const standingSection = buildSettingsSection({ label: t("tab.standing") });
+  const historySection = buildSettingsSection({
+    label: t("tab.history"),
+    headingAttrs: { tabindex: "-1" },
+  });
+  const historyHeading = historySection.heading;
   const appeals = createAppealsSection(api, signal);
 
   const historyHint = createElement("p", { class: "setting-desc" }, t("tab.historyHint"));
 
-  pane.append(
-    standing,
-    restrictions,
-    historyHeading,
-    historyHint,
-    historyStatusEl,
-    failure.el,
-    list,
-    appeals.root,
-  );
+  standingSection.card.append(standing, restrictions);
+  historySection.card.append(historyHint, historyStatusEl, failure.el, list);
+  pane.append(standingSection.el, historySection.el, appeals.root);
 
   function render(): void {
     const { timeout, history, historyFailed } = safetyStore.getState();

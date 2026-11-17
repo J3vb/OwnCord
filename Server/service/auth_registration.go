@@ -163,14 +163,17 @@ func (s *AuthService) Register(ctx context.Context, in RegisterInput) (*AuthResu
 	slog.Info("user registered", "username", in.Username, "user_id", uid, "ip", in.IP, "mode", string(mode))
 	db.WriteAudit(context.WithoutCancel(ctx), s.st, uid, "user_register", "user", uid,
 		"new account created ("+string(mode)+" registration)")
-	// Greet is best effort on a detached context: a failure never fails the registration.
-	s.welcome.Greet(ctx, uid)
-
-	user, err := s.st.GetUserByID(ctx, uid)
+	// The account is committed: read it back before the greeting (which can wait seconds) and
+	// off the request deadline, so a slow request still reports the sign-up it completed.
+	readCtx, cancel := postCommitContext(ctx)
+	defer cancel()
+	user, err := s.st.GetUserByID(readCtx, uid)
 	if err != nil || user == nil {
 		slog.Error("failed to fetch user after registration", "user_id", uid, "error", err)
 		return nil, ErrRegisteredUserFetch
 	}
+	// Greet is best effort on a detached context: a failure never fails the registration.
+	s.welcome.Greet(ctx, uid)
 	return &AuthResult{Token: token, User: user}, nil
 }
 

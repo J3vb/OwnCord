@@ -205,7 +205,7 @@ test("a mouse click does not open the voice gate, before or after the SDK republ
   expect(afterRepublish, "click heard after the microphone was republished").toBeLessThan(-60);
 });
 
-test("Enhanced Noise Suppression removes the click with the gate off", async ({
+test("Enhanced noise suppression removes the click with the gate off", async ({
   alice,
   bob,
 }, info) => {
@@ -241,7 +241,7 @@ test("Enhanced Noise Suppression removes the click with the gate off", async ({
   // what every run clears, measured against the same click unprocessed.
   expect(
     heard.off! - heard.enhanced!,
-    "dB that Enhanced Noise Suppression takes off the click",
+    "dB that Enhanced noise suppression takes off the click",
   ).toBeGreaterThan(18);
 });
 
@@ -250,8 +250,8 @@ test("a processing toggle applies to the live microphone and keeps the chosen in
 }) => {
   await joinVoice(alice);
   await openSettings(alice);
-  await switchSettingsTab(alice, "Voice & Video");
-  const input = alice.locator("select[aria-label='Input Device']");
+  await switchSettingsTab(alice, "Voice & video");
+  const input = alice.locator("select[aria-label='Input device']");
   await expect(input.locator("option", { hasText: "Fake Audio Input 1" })).toHaveCount(1);
   await input.selectOption({ label: "Fake Audio Input 1" });
   // The call's microphone and the settings meter's, both on the chosen device.
@@ -259,7 +259,7 @@ test("a processing toggle applies to the live microphone and keeps the chosen in
     (await liveCapture(alice)).map((track) => track.label).join(", ");
   await expect.poll(onChosenDevice).toBe("Fake Audio Input 1, Fake Audio Input 1");
 
-  await alice.locator("[role='switch'][aria-label='Noise Suppression']").click();
+  await alice.locator("[role='switch'][aria-label='Noise suppression']").click();
 
   // Restarting the track for the toggle used to reopen the system default.
   await expect

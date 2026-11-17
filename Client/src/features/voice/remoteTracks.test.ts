@@ -48,6 +48,42 @@ function roomWithSources(identity: string, sources: string[]) {
   return { room, pub: (source: string) => pubs.get(source)!.setSubscribed };
 }
 
+/** A room whose user publishes a music track and, maybe, a screen share's sound,
+ *  both on the screen-share-audio source. */
+function roomWithMusicAndStreamAudio(withStreamAudio: boolean) {
+  const music = { source: "screen_share_audio", trackName: "music", setSubscribed: vi.fn() };
+  const stream = { source: "screen_share_audio", setSubscribed: vi.fn() };
+  const all = withStreamAudio ? [music, stream] : [music];
+  const room = {
+    remoteParticipants: new Map([
+      [
+        "user-7",
+        {
+          identity: "user-7",
+          getTrackPublication: () => music,
+          trackPublications: new Map(all.map((p, i) => [String(i), p])),
+        },
+      ],
+    ]),
+  } as unknown as Room;
+  return { room, music: music.setSubscribed, stream: stream.setSubscribed };
+}
+
+describe("RemoteTracks with music running", () => {
+  it("subscribes the screen share's sound, not the music track, on a watch", () => {
+    const { room, music, stream } = roomWithMusicAndStreamAudio(true);
+    new RemoteTracks(() => room).watch(7, "screenshare", true);
+    expect(stream).toHaveBeenLastCalledWith(true);
+    expect(music).not.toHaveBeenCalled();
+  });
+
+  it("finds no screen share sound when only the music track is published", () => {
+    const { room, music } = roomWithMusicAndStreamAudio(false);
+    new RemoteTracks(() => room).watch(7, "screenshare", true);
+    expect(music).not.toHaveBeenCalled();
+  });
+});
+
 describe("RemoteTracks", () => {
   it("stores and clears both remote-video callbacks", () => {
     const tracks = new RemoteTracks(() => null);

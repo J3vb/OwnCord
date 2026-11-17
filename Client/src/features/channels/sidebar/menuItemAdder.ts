@@ -6,12 +6,14 @@
  */
 
 import { createMenuItem } from "@lib/ui/contextMenu";
+import type { IconName } from "@lib/icons";
 
 export type AddMenuItem = (
   label: string,
   className: string,
   testId: string,
   onClick: (() => void) | null,
+  icon?: IconName,
 ) => HTMLElement;
 
 export function menuItemAdder(
@@ -19,8 +21,11 @@ export function menuItemAdder(
   closeMenu: () => void,
   lifetimeSignal: AbortSignal,
 ): AddMenuItem {
-  return (label, className, testId, onClick) => {
-    const item = createMenuItem(label, className, { testId });
+  return (label, className, testId, onClick, icon) => {
+    const item = createMenuItem(label, className, {
+      testId,
+      ...(icon !== undefined ? { icon } : {}),
+    });
     if (onClick === null) {
       item.setAttribute("aria-disabled", "true");
       item.classList.add("disabled");

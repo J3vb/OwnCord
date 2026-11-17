@@ -27,6 +27,8 @@ export function useLiveKitSessionHarness(binding: LiveKitSessionHarnessBinding):
     mockVoiceState.localScreenshare = false;
     mockVoiceState.pttGated = false;
     mockVoiceState.inAfkChannel = false;
+    mockVoiceState.phoneCallHold = false;
+    mockVoiceState.listenOnly = false;
     mockVoiceState.currentChannelId = 1;
     mockVoiceState.voiceConfigs = new Map();
     mockVoiceState.voiceStatus = "idle";

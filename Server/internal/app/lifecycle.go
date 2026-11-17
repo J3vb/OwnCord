@@ -10,10 +10,12 @@ import (
 	"fmt"
 	"io"
 	stdlog "log"
+	"log/slog"
 	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -21,6 +23,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/api"
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/config"
+	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/service"
 )
 
@@ -152,6 +155,7 @@ func (a *App) startErasureMarkers() error {
 	// Opened here because the replay removes erased accounts' files;
 	// StartRuntime shares it with the router and maintenance loop.
 	a.storage = OpenStorage(a.log, a.cfg)
+	a.linkPreviews = OpenLinkPreviews(a.log, a.cfg, a.database)
 	markers, err := openMarkers(context.Background(), a.log, a.cfg, a.database, a.storage)
 	if err != nil {
 		return err
@@ -194,11 +198,10 @@ func (a *App) startPlugins() error {
 	return nil
 }
 
-// pushDispatchEnabled requires both push.enabled and push.dispatch_enabled:
-// storage on with dispatch off (what an upgraded install starts in) must never
-// dispatch. TestPushDispatchGate_RequiresBothKeys pins the "&&".
+// pushDispatchEnabled is push.enabled alone: one switch turns on device
+// registration and sending. The deprecated push.dispatch_enabled is ignored.
 func pushDispatchEnabled(cfg *config.Config) bool {
-	return cfg.Push.Enabled && cfg.Push.DispatchEnabled
+	return cfg.Push.Enabled
 }
 
 // startHub builds the hub and the collaborators it shares with the router, here
@@ -208,7 +211,7 @@ func pushDispatchEnabled(cfg *config.Config) bool {
 // a supervised livekit-server is never orphaned.
 func (a *App) startHub() error {
 	rt, err := StartRuntime(a.cfg, a.database, a.plugins,
-		RuntimeInputs{Version: a.deps.Version, TOTPKey: a.totpKey, Storage: a.storage})
+		RuntimeInputs{Version: a.deps.Version, TOTPKey: a.totpKey, Storage: a.storage, LinkPreviews: a.linkPreviews})
 	if err != nil {
 		return err
 	}
@@ -232,12 +235,19 @@ func (a *App) startHub() error {
 		rt.Services.Push.SetSubscriptionTTL(time.Duration(a.cfg.Push.SubscriptionTTLDays) * 24 * time.Hour)
 		rt.Services.Push.SetContact(a.cfg.Push.Contact)
 	}
-	// Second opt-in on top of push.enabled, so an upgraded install does not acquire dispatch.
+	// push.enabled alone builds the dispatcher.
 	if pushDispatchEnabled(a.cfg) &&
 		rt.Services != nil && rt.Services.Messages != nil && rt.Services.Push != nil && rt.Services.Permissions != nil {
 		dispatcher := service.NewPushDispatcher(a.database, rt.Services.Permissions, rt.Services.Push, a.hub.IsUserConnected, nil)
 		rt.Services.Messages.SetPushNotifier(dispatcher)
+		a.hub.SetRingPusher(dispatcher)
 		rt.Services.PushDispatch = dispatcher
+		if rt.Services.Attention != nil {
+			// The group is created by startBackgroundJobs below and is read when a sample first turns critical.
+			rt.Services.Attention.SetCriticalNotifier(func(ctx context.Context) {
+				a.background.Go(ctx, dispatcher.SendAttention)
+			})
+		}
 	}
 	a.onClose("hub", func(ctx context.Context) error {
 		return stopHub(ctx, a.runtime.Hub, a.deps.Restart.noticeReason())
@@ -316,7 +326,7 @@ func (a *App) startAuditWriter() error {
 // startMaintenance starts the periodic purge of expired sessions, scheduled
 // backups and orphaned attachments.
 func (a *App) startMaintenance() error {
-	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services, a.runtime.Storage)
+	stop := startMaintenanceLoop(a.bgCtx, a.log, a.cfg, a.database, a.runtime.Services, a.runtime.Storage, a.linkPreviews)
 	a.onClose("maintenance", func(context.Context) error {
 		stop()
 		return nil
@@ -391,4 +401,19 @@ func (a *App) startSignals() error {
 		return nil
 	})
 	return nil
+}
+
+// OpenLinkPreviews opens the link preview store under server.data_dir, logging a failure once
+// and returning nil so callers degrade rather than stop. Build one and share it: its mutex
+// orders a thumbnail write against the sweep.
+func OpenLinkPreviews(log *slog.Logger, cfg *config.Config, database linkpreview.Repo) *linkpreview.Store {
+	if cfg.Server.DataDir == "" {
+		return nil
+	}
+	store, err := linkpreview.NewStore(database, filepath.Join(cfg.Server.DataDir, linkpreview.DirName))
+	if err != nil {
+		log.Warn("failed to open link preview store; thumbnail sweep disabled", "error", err)
+		return nil
+	}
+	return store
 }

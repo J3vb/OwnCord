@@ -5,8 +5,13 @@
 import type { ReplyTarget } from "../../../features/messaging/MessageInput";
 import type { ImportedAuthor } from "@lib/types";
 import { importedName } from "../../../features/messaging/importedAuthor";
-import { messagingText } from "../../../i18n/messaging";
-import { TRACKED_ACTION_EXPIRY_MS, type TrackedEdit } from "./channelShared";
+import {
+  restoreFailedEdits,
+  trackEntry,
+  untrackEntry,
+  userIsBusyElsewhere as busyElsewhere,
+  type TrackedEdit,
+} from "../../../features/messaging/trackedActions";
 import type { ChannelState, ChannelApi } from "./channelState";
 
 export function createChannelSends(st: ChannelState, _cc: ChannelApi) {
@@ -27,66 +32,29 @@ export function createChannelSends(st: ChannelState, _cc: ChannelApi) {
     return entry === undefined || Date.now() >= entry.sentAt + entry.window * 1000;
   };
 
-  function track<T>(pending: Map<string, T>, id: string, entry: T): void {
-    pending.set(id, entry);
-    st.trackTimers.set(
-      id,
-      window.setTimeout(() => untrack(pending, id), TRACKED_ACTION_EXPIRY_MS),
-    );
-  }
+  const store = {
+    pendingEdits: st.pendingEdits,
+    pendingDeletes: st.pendingDeletes,
+    trackTimers: st.trackTimers,
+  };
 
-  /** Remove a tracked entry and its expiry timer; returns the entry, if any. */
-  function untrack<T>(pending: Map<string, T>, id: string): T | undefined {
-    const entry = pending.get(id);
-    pending.delete(id);
-    window.clearTimeout(st.trackTimers.get(id));
-    st.trackTimers.delete(id);
-    return entry;
-  }
+  const track = <T>(pending: Map<string, T>, id: string, entry: T): void =>
+    trackEntry(store, pending, id, entry);
 
-  /** A failure can land long after the save: if the user has moved on to the
-   *  composer or another text field, the restored editor must not take focus. */
-  function userIsBusyElsewhere(): boolean {
-    if (st.messageInput !== null && !st.messageInput.isIdle()) return true;
-    const active = document.activeElement;
-    // The idle composer is where a just-saved edit hands focus back.
-    if (active instanceof HTMLElement && active.classList.contains("msg-textarea")) return false;
-    return (
-      active instanceof HTMLElement &&
-      (active instanceof HTMLInputElement ||
-        active instanceof HTMLTextAreaElement ||
-        active.isContentEditable)
-    );
-  }
+  const untrack = <T>(pending: Map<string, T>, id: string): T | undefined =>
+    untrackEntry(store, pending, id);
 
-  /** Put a failed edit's text back in its row's inline editor, but only while
-   *  its own channel is the mounted one and no other edit is open — the row it
-   *  belongs to may be gone by now (startEdit refuses a message that is not
-   *  loaded, not yours or not sent), and a list for another channel would
-   *  target the wrong message id. At most one edit lands, the newest; the error
-   *  toast (when asked for) says the text is back only if it is. */
-  function failEdits(edits: readonly TrackedEdit[], toast: boolean): void {
-    queueMicrotask(() => {
-      const newest = edits.findLast((edit) => edit.channelId === st.currentChannelId);
-      let restored = false;
-      if (
-        newest !== undefined &&
-        st.messageList !== null &&
-        !st.messageList.isEditing() &&
-        st.messageList.startEdit(newest.messageId, newest.content, {
-          focus: !userIsBusyElsewhere(),
-        })
-      ) {
-        restored = true;
-      }
-      if (toast) {
-        st.showToast(
-          messagingText(restored ? "toast.editFailedRestored" : "toast.editFailed"),
-          "error",
-        );
-      }
-    });
-  }
+  const view = {
+    currentChannelId: () => st.currentChannelId,
+    messageList: () => st.messageList,
+    messageInput: () => st.messageInput,
+    showToast: st.showToast,
+  };
+
+  const userIsBusyElsewhere = (): boolean => busyElsewhere(st.messageInput);
+
+  const failEdits = (edits: readonly TrackedEdit[], toast: boolean): void =>
+    restoreFailedEdits(view, edits, toast);
 
   function clearSendTimer(id: string): void {
     const owned = st.sendTimers.get(id);

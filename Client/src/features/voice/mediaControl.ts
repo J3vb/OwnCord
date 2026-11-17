@@ -59,6 +59,8 @@ export interface MediaControlHost {
   configuredAudioOptions(
     channelId: number | null,
   ): { audioPreset: { maxBitrate: number } } | undefined;
+  /** End a running music share (the grant no longer allows it). */
+  stopMusic(): void;
 }
 
 export class MediaControl {
@@ -342,6 +344,11 @@ export class MediaControl {
     if (localCamera && !publishAllowed(room, Track.Source.Camera)) void this.disableCamera();
     if (localScreenshare && !publishAllowed(room, Track.Source.ScreenShare))
       void this.disableScreenshare();
+    if (
+      voiceStore.getState().localMusic === true &&
+      !publishAllowed(room, Track.Source.ScreenShareAudio)
+    )
+      this.host.stopMusic();
   }
 
   /** Share another window or screen without stopping (the web path swaps the

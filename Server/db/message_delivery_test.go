@@ -20,6 +20,7 @@ func storageDeliveryParams(userID, channelID int64) db.MessageDeliveryParams {
 }
 
 func TestMessageDelivery_ReceiptSurvivesDatabaseReopen(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "delivery.sqlite")
 	open := func() *db.DB {
 		t.Helper()
@@ -55,6 +56,7 @@ func TestMessageDelivery_ReceiptSurvivesDatabaseReopen(t *testing.T) {
 }
 
 func TestMessageDelivery_ExpiredReceiptsPrunedWithoutRecreatingMessage(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	p := storageDeliveryParams(seedUser(t, database, "alice"), seedChannel(t, database, "general"))
@@ -81,6 +83,7 @@ func TestMessageDelivery_ExpiredReceiptsPrunedWithoutRecreatingMessage(t *testin
 }
 
 func TestMessageDelivery_ErasureRemovesOnlySubjectsReceipts(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	subject := seedUser(t, database, "alice")
@@ -106,6 +109,7 @@ func TestMessageDelivery_ErasureRemovesOnlySubjectsReceipts(t *testing.T) {
 }
 
 func TestMessageDelivery_FailedReceiptInsertRollsBackMessageMentionsAndAttachments(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	userID := seedUser(t, database, "alice")
@@ -143,6 +147,7 @@ func TestMessageDelivery_FailedReceiptInsertRollsBackMessageMentionsAndAttachmen
 // which requested uploads it attached, and an attachment-only send with none
 // linked is ErrMessageDeliveryEmpty.
 func TestCreateMessageDelivery_ReportsLinkedAttachmentIDs(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	userID := seedUser(t, database, "alice")

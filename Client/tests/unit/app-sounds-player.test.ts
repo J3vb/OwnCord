@@ -1,7 +1,7 @@
 /**
  * WP M-8: the "App sounds volume" master gain and the per-sound switches on the
- * player side. The sounds themselves are unchanged: at 100% every note keeps
- * the gain it always had and a master gain of exactly 1 sits in front of them.
+ * player side. At 100% every note keeps the gain its spec gives it and a
+ * master gain of exactly 1 sits in front of them.
  *
  * Preferences are the real ones (jsdom localStorage), so what the settings
  * slider saves is what the player reads. Where each trigger consults its
@@ -20,53 +20,15 @@ import {
 } from "@lib/media/notificationSound";
 import { loadAppSoundsGain, soundSwitchOn } from "@lib/prefs/soundPrefs";
 import { savePref } from "@lib/prefs/preferences";
+import { soundSpec } from "@lib/media/soundTables";
+import { RecordingAudioContext, type RecordedGain } from "../helpers/audioContextMock";
 
-interface FakeGain {
-  readonly connect: ReturnType<typeof vi.fn>;
-  readonly gain: {
-    value: number;
-    setValueAtTime: ReturnType<typeof vi.fn>;
-    exponentialRampToValueAtTime: ReturnType<typeof vi.fn>;
-  };
-}
-
-class RecordingAudioContext {
-  static instances: RecordingAudioContext[] = [];
-  readonly currentTime = 0;
-  readonly destination = { kind: "destination" };
-  readonly oscillators: Array<{ hz: number[]; stop: ReturnType<typeof vi.fn> }> = [];
-  readonly gains: FakeGain[] = [];
-  readonly close = vi.fn(async () => {});
-
-  constructor() {
-    RecordingAudioContext.instances.push(this);
-  }
-
-  createOscillator() {
-    const osc = {
-      hz: [] as number[],
-      connect: vi.fn(),
-      start: vi.fn(),
-      stop: vi.fn(),
-      frequency: { setValueAtTime: (hz: number) => osc.hz.push(hz) },
-    };
-    this.oscillators.push(osc);
-    return osc;
-  }
-
-  createGain(): FakeGain {
-    const node: FakeGain = {
-      connect: vi.fn(),
-      gain: { value: 1, setValueAtTime: vi.fn(), exponentialRampToValueAtTime: vi.fn() },
-    };
-    this.gains.push(node);
-    return node;
-  }
-}
+const RING = soundSpec("modern", "ring");
+const RINGBACK = soundSpec("modern", "ringback");
 
 /** The one context's master gain: the first gain node, which connects to the
  *  destination (every per-note gain connects to it instead). */
-function master(ctx: RecordingAudioContext): FakeGain {
+function master(ctx: RecordingAudioContext): RecordedGain {
   const node = ctx.gains.find((g) => g.connect.mock.calls.some(([to]) => to === ctx.destination));
   if (node === undefined) throw new Error("no master gain connected to the destination");
   return node;
@@ -128,7 +90,21 @@ describe("app sounds volume prefs", () => {
 });
 
 describe("the master gain", () => {
-  it("leaves today's notes alone at 100%", () => {
+  it("leaves each note at its spec's gain at 100%", () => {
+    playNotificationSound();
+    const ctx = RecordingAudioContext.instances[0]!;
+
+    expect(master(ctx).gain.value).toBe(1);
+    const notes = ctx.gains.filter((g) => g !== master(ctx));
+    const spec = soundSpec("modern", "message");
+    expect(notes).toHaveLength(spec.length);
+    notes.forEach((n, i) => {
+      expect(n.gain.linearRampToValueAtTime).toHaveBeenCalledWith(spec[i]!.gain, spec[i]!.attack);
+    });
+  });
+
+  it("leaves the classic notes as they always were at 100%", () => {
+    savePref("soundStyle", "classic");
     playNotificationSound();
     const ctx = RecordingAudioContext.instances[0]!;
 
@@ -159,9 +135,12 @@ describe("the master gain", () => {
 
     expect(master(ctx).gain.value).toBeCloseTo(0.35);
     const notes = ctx.gains.filter((g) => g !== master(ctx));
-    expect(notes).toHaveLength(3);
-    for (const n of notes)
-      expect(n.gain.setValueAtTime).toHaveBeenCalledWith(0.2, expect.any(Number));
+    const spec = soundSpec("modern", "streamStart");
+    expect(notes).toHaveLength(spec.length);
+    notes.forEach((n, i) => {
+      const { at, attack, gain } = spec[i]!;
+      expect(n.gain.linearRampToValueAtTime).toHaveBeenCalledWith(gain, at + attack!);
+    });
   });
 
   it("is silent at 0%", () => {
@@ -225,22 +204,25 @@ describe("the call sounds' own switches", () => {
   it("still rings with the ring switch on", () => {
     startRingChime();
 
-    expect(RecordingAudioContext.instances[0]!.oscillators).toHaveLength(2);
+    expect(RecordingAudioContext.instances[0]!.oscillators).toHaveLength(RING.length);
   });
 
   it("stops a ring in flight when its switch is turned off mid-ring", () => {
     vi.useFakeTimers();
     startRingChime();
     const ctx = RecordingAudioContext.instances[0]!;
-    vi.advanceTimersByTime(2000);
-    expect(ctx.oscillators).toHaveLength(4);
+    vi.advanceTimersByTime(2800);
+    expect(ctx.oscillators).toHaveLength(RING.length * 2);
 
     savePref("soundRing", false);
-    vi.advanceTimersByTime(2000);
-    expect(ctx.oscillators).toHaveLength(4);
-    expect(ctx.oscillators[3]!.stop).toHaveBeenCalledTimes(2);
+    vi.advanceTimersByTime(2800);
+    expect(ctx.oscillators).toHaveLength(RING.length * 2);
+    // Every partial of the second burst was cut, not only scheduled to end.
+    for (const osc of ctx.oscillators.slice(RING.length)) {
+      expect(osc.stop).toHaveBeenCalledTimes(2);
+    }
     vi.advanceTimersByTime(10_000);
-    expect(ctx.oscillators).toHaveLength(4);
+    expect(ctx.oscillators).toHaveLength(RING.length * 2);
   });
 
   it("keeps the ringback off while its own switch is off, ring switch notwithstanding", () => {
@@ -269,14 +251,14 @@ describe("the call sounds' own switches", () => {
     vi.useFakeTimers();
     startRingback();
     const ctx = RecordingAudioContext.instances[0]!;
-    expect(ctx.oscillators).toHaveLength(1);
+    expect(ctx.oscillators).toHaveLength(RINGBACK.length);
 
     savePref("soundRingback", false);
-    expect(ctx.oscillators[0]!.stop).toHaveBeenCalledTimes(2);
+    for (const osc of ctx.oscillators) expect(osc.stop).toHaveBeenCalledTimes(2);
     vi.advanceTimersByTime(10_000);
-    expect(ctx.oscillators).toHaveLength(1);
+    expect(ctx.oscillators).toHaveLength(RINGBACK.length);
 
     savePref("soundRingback", true);
-    expect(ctx.oscillators).toHaveLength(2);
+    expect(ctx.oscillators).toHaveLength(RINGBACK.length * 2);
   });
 });

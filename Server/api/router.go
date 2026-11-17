@@ -2,7 +2,7 @@
 package api
 
 import (
-	"encoding/json"
+	"context"
 	"errors"
 	"log/slog"
 	"net"
@@ -15,6 +15,7 @@ import (
 	"github.com/J3vb/OwnCord/Server/clientip"
 	"github.com/J3vb/OwnCord/Server/config"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/metrics"
 	"github.com/J3vb/OwnCord/Server/netclass"
 	"github.com/J3vb/OwnCord/Server/plugin"
@@ -89,14 +90,21 @@ func NewRouter(cfg *config.Config, database *db.DB, ver string, logBuf *admin.Ri
 	getOnlineUsers = func() int { return hub.UserCount() }
 	hubAlive = func() bool { return hub.DispatchAlive() }
 
+	bgCtx, cancelBg := context.WithCancel(context.Background())
 	d := newRouteDeps(cfg, database, ver, logBuf, pluginRegistry, rt, slowRoutes)
+	d.bgCtx = bgCtx
 	for _, g := range routeGroups {
 		g.mount(r, d)
 	}
 
 	warnOnServerConfig(cfg)
 
-	return r, func() {}
+	return r, func() {
+		cancelBg()
+		if d.portalReady != nil {
+			<-d.portalReady
+		}
+	}
 }
 
 // routerMiddleware installs the global middleware stack. The order is a security property (request-id
@@ -249,9 +257,5 @@ func requestLogger(proxyNets []*net.IPNet, slow *metrics.SlowRoutes) func(http.H
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json; charset=utf-8")
-	w.WriteHeader(status)
-	if err := json.NewEncoder(w).Encode(v); err != nil {
-		slog.Error("writeJSON: failed to encode response", "error", err)
-	}
+	httperr.WriteJSON(w, status, v)
 }

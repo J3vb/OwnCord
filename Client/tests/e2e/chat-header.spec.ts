@@ -59,7 +59,7 @@ test.describe("Chat Header", () => {
     await expect(pinnedPanel).toBeVisible({ timeout: 3000 });
 
     // Close it
-    const closeBtn = pinnedPanel.locator(".pinned-panel__close");
+    const closeBtn = pinnedPanel.locator(".side-panel__close");
     await closeBtn.click();
     await expect(pinnedPanel).not.toBeAttached({ timeout: 3000 });
   });

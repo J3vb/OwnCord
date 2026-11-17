@@ -30,6 +30,7 @@ func reactionRows(t *testing.T, database *db.DB, msgID int64) int {
 }
 
 func TestReaction_UnreadableChannelIsNotFoundAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	svc, database, msgID := reactionReadFixture(t)
 	ctx := context.Background()
 
@@ -51,6 +52,7 @@ func TestReaction_UnreadableChannelIsNotFoundAndWritesNothing(t *testing.T) {
 }
 
 func TestReaction_UnacknowledgedAgeRestrictedChannelIsNotFound(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ctx := context.Background()
 	if _, err := database.ExecContext(ctx, `UPDATE channels SET nsfw = 1 WHERE id = ?`, int64(10)); err != nil {
@@ -77,6 +79,7 @@ func TestReaction_UnacknowledgedAgeRestrictedChannelIsNotFound(t *testing.T) {
 }
 
 func TestReaction_MissingDeletedAndUnreadableShareOneAnswer(t *testing.T) {
+	t.Parallel()
 	svc, database, hiddenID := reactionReadFixture(t)
 	ctx := context.Background()
 
@@ -109,6 +112,7 @@ func TestReaction_MissingDeletedAndUnreadableShareOneAnswer(t *testing.T) {
 }
 
 func TestReaction_DMNonParticipantIsNotFound(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})

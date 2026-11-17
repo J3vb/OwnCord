@@ -38,12 +38,17 @@ import {
   withPeerKeySlots,
   withPeerBoundOffers,
   withPeerWatching,
+  withMusicSharer,
+  withRemoteMusicSharers,
+  withLocalMusic,
   withPeerVerification,
   withoutPeerVerification,
   withVoiceConfig,
   viewersOfShare,
   selfVoiceFrames,
 } from "./voicePeers";
+
+export { setPttPollingLive, onPttPollingLiveChange, isPttPollingLive } from "./voicePttLive";
 
 export type {
   VoiceUser,
@@ -144,9 +149,8 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
  *  describes the signed-in user it also mirrors the moderator-imposed flags
  *  into localServerMuted/localServerDeafened, which gate the widget controls. */
 export function updateVoiceState(payload: VoiceStatePayload): void {
-  const currentUserId = authStore.getState().user?.id ?? 0;
   voiceRosterRevision++;
-  voiceStore.setState((prev) => withVoiceState(prev, payload, currentUserId));
+  voiceStore.setState((prev) => withVoiceState(prev, payload, ownUserId()));
 }
 
 /** Patch a user's username in every voice channel they currently occupy.
@@ -195,8 +199,7 @@ export function setSwitchingTo(channelId: number | null): void {
 
 /** Clear the current voice channel and remove current user from voice users. */
 export function leaveVoiceChannel(): void {
-  const currentUserId = authStore.getState().user?.id ?? 0;
-  voiceStore.setState((prev) => withLeftChannel(prev, currentUserId));
+  voiceStore.setState((prev) => withLeftChannel(prev, ownUserId()));
 }
 
 /** Set the voice-session lifecycle status. Single-writer from livekitSession.ts
@@ -274,41 +277,18 @@ export function setPttGated(gated: boolean): void {
   );
 }
 
+/** A phone call began or ended holding the call (see VoiceState.phoneCallHold). */
+export function setPhoneCallHold(held: boolean): void {
+  voiceStore.setState((prev) =>
+    (prev.phoneCallHold === true) === held ? prev : { ...prev, phoneCallHold: held },
+  );
+}
+
 /** Whether the user's own mute is in effect. Push-to-talk never writes
  *  localMuted (its gate closes inside the mic processor), so this is the
  *  mute the user asked for: what the mic controls show. */
 export function isSelfMuted(state: VoiceState): boolean {
   return state.localMuted;
-}
-
-/** Whether the Rust-side PTT key poller can report key state on this platform.
- *  A process-wide platform capability, not per-session state, so
- *  `resetVoiceStore()` must NOT clear it. It lives here, not in
- *  livekitSession.ts, so `ptt.ts` can write it at startup without pulling in
- *  the livekit-client SDK. Defaults to false so an unsupported poller never
- *  causes a join-time mute that nothing can later lift. */
-let pttPollingLive = false;
-const pttPollingListeners = new Set<() => void>();
-
-/** Report whether the PTT key-polling backend can actually observe key state
- *  (the `ptt_polling_supported` command), not merely whether a key is bound:
- *  without a live backend no `ptt-state` event arrives to lift a join-time mute. */
-export function setPttPollingLive(live: boolean): void {
-  if (pttPollingLive === live) return;
-  pttPollingLive = live;
-  for (const listener of pttPollingListeners) listener();
-}
-
-/** Run `listener` whenever the poller goes live or stops, so the sensitivity
- *  gate can hand over to Push to Talk only once a key can actually gate. */
-export function onPttPollingLiveChange(listener: () => void): () => void {
-  pttPollingListeners.add(listener);
-  return () => pttPollingListeners.delete(listener);
-}
-
-/** Whether the PTT poller is live (see `setPttPollingLive`). */
-export function isPttPollingLive(): boolean {
-  return pttPollingLive;
 }
 
 /** Toggle local camera state. */
@@ -319,6 +299,22 @@ export function setLocalCamera(enabled: boolean): void {
 /** Toggle local screenshare state. */
 export function setLocalScreenshare(enabled: boolean): void {
   voiceStore.setState((prev) => ({ ...prev, localScreenshare: enabled }));
+}
+
+/** Whether `userId` shares music, as the room's publications say. */
+export function setMusicSharer(userId: number, sharing: boolean): void {
+  voiceStore.setState((prev) => withMusicSharer(prev, userId, sharing));
+}
+
+/** Replace the remote sharers with `userIds` (a room that just connected or
+ *  reconnected), keeping your own entry while you share. */
+export function replaceRemoteMusicSharers(userIds: readonly number[]): void {
+  voiceStore.setState((prev) => withRemoteMusicSharers(prev, userIds, ownUserId()));
+}
+
+/** You started or stopped sharing music. */
+export function setLocalMusic(sharing: boolean): void {
+  voiceStore.setState((prev) => withLocalMusic(prev, sharing, ownUserId()));
 }
 
 /** The live camera's capture was replaced (a device switch). */
@@ -475,11 +471,7 @@ export function getPeerVerification(userId: number): PeerVerification | null {
 
 /** Selector: get all voice users in a specific channel. */
 export function getChannelVoiceUsers(channelId: number): readonly VoiceUser[] {
-  return voiceStore.select((s) => {
-    const channelUsers = s.voiceUsers.get(channelId);
-    if (!channelUsers) return [];
-    return Array.from(channelUsers.values());
-  });
+  return voiceStore.select((s) => Array.from(s.voiceUsers.get(channelId)?.values() ?? []));
 }
 
 // Re-tells the server our own mute/deafen when its row for us can differ from

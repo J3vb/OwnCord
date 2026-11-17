@@ -28,7 +28,7 @@ export function mountMicControls(sc: VoiceTabScope): void {
 
   sc.micStatus.hidden = true;
 
-  sc.micCard.querySelector(".settings-card-head")!.appendChild(sc.micStatus);
+  sc.micHead.appendChild(sc.micStatus);
 
   sc.micHeard = null;
 

@@ -155,6 +155,9 @@ export function createVideoZoomNavigator(
       const step = steps[e.key];
       if (step === undefined) return;
       e.preventDefault();
+      // Only the keys the map uses stop here: Escape and F still reach the
+      // tile, theatre and pop-out handlers above it.
+      e.stopPropagation();
       const amount = e.shiftKey ? 0.25 : 0.05;
       view.panBy(step[0] * host.clientWidth * amount, step[1] * host.clientHeight * amount);
     },
@@ -168,7 +171,7 @@ export function createVideoZoomNavigator(
     },
     { signal },
   );
-  for (const event of ["mousedown", "click", "dblclick", "keydown"] as const) {
+  for (const event of ["mousedown", "click", "dblclick"] as const) {
     root.addEventListener(event, (e) => e.stopPropagation(), { signal });
   }
 

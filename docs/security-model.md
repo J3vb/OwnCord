@@ -51,7 +51,8 @@ documents. Any disagreement is a bug in this page.
   key changing. It does not catch an unknown person joining.
 - **Passwords, session tokens and API tokens are never stored in plain
   form.**
-  - Passwords are hashed with bcrypt (cost 12).
+  - Passwords are hashed with argon2id (64 MiB, 4 passes). Older bcrypt
+    hashes still sign in and are replaced at the next sign-in.
   - Session and API tokens are stored as SHA-256 hashes, never the token
     itself.
   - TOTP secrets are encrypted with a server-local AES-256 key. Secrets saved
@@ -73,16 +74,22 @@ documents. Any disagreement is a bug in this page.
 
 ### Authentication and sessions
 
-- Passwords are hashed with bcrypt (cost 12). TOTP codes are compared in
+- Passwords are hashed with argon2id (64 MiB, 4 passes), about the cost of
+  the earlier bcrypt at cost 12. A bcrypt hash is replaced at the account's
+  next sign-in, and only if it is still the stored one. A wrong password runs
+  the same work whether the account exists or which format it holds. All
+  argon2id work together uses at most 256 MiB of working memory (four checks
+  at once); past that it waits. Under a burst of sign-ins the process can
+  briefly use about 0.6 GB on top of normal use before memory is returned. TOTP codes are compared in
   constant time (`subtle.ConstantTimeCompare`).
-- **One shared budget for bcrypt.** Every bcrypt computation on a sign-in
+- **One shared budget for password hashing.** Every hash computation on a sign-in
   route goes through one process-wide limit. This covers password checks,
   password hashes and recovery-code matching.
   - Login, registration and recovery-code checks over the limit wait in a
     queue for up to 10 seconds.
   - A refused attempt gets `429 AUTH_BUSY`. That happens when the queue is
     full, the wait runs out, or a password confirmation is over the limit. A
-    refused attempt runs no bcrypt and does not count as a failed attempt.
+    refused attempt runs no hash and does not count as a failed attempt.
 - **Two-factor sign-in (TOTP).** Users enrol with a QR code and get backup
   codes. Admins can require 2FA for the whole server.
   - Second-factor state survives a restart: the login challenge, a pending
@@ -231,10 +238,20 @@ documents. Any disagreement is a bug in this page.
   compile-time constant and has a runtime guard. Only `http:` and `https:`
   URLs are allowed. `image/svg+xml` is not a safe data-URI type. YouTube
   embeds are sandboxed.
-- **Content from other websites** is fetched only by the desktop's native
-  broker (`Client/src-tauri/src/external_content.rs`). This covers link
-  previews, YouTube titles and thumbnails, inline external images, GIFs and
-  external avatars. The broker:
+- **Link previews are built by the server** when it supports them: it fetches
+  each link once through `Server/safefetch` and stores the card and a shrunk
+  thumbnail. The desktop shows them from the server (thumbnails over the
+  TOFU-pinned `http_proxy.rs` with the session token), so the viewer's computer
+  never contacts the linked site and no external-content consent applies to
+  them. Two things still reach outside: a link that is itself an image (any
+  host, GIFs included) always uses the broker path below, also on such a
+  server, and pressing Play on a YouTube card connects to YouTube, so it asks
+  for the same consent. A server that does not build cards keeps the broker
+  path below for every link for one release.
+- **Other content from other websites** is fetched only by the desktop's native
+  broker (`Client/src-tauri/src/external_content.rs`). This covers GIFs and
+  external avatars, every link that is itself an image, and, on a server that does
+  not build link previews, link previews and YouTube titles and thumbnails. The broker:
   - uses `https` on port 443 only
   - checks every resolved address with the same list as `Server/safefetch`,
     and refuses loopback, private, link-local, multicast and other non-public
@@ -480,7 +497,7 @@ documents. Any disagreement is a bug in this page.
   token lasts 10 minutes and allows 5 attempts.
 - Auth challenges are rate-limited to 10 requests per minute per IP address.
 - **Password-hashing budget:**
-  - Every bcrypt computation on an authentication route goes through one
+  - Every password-hash computation on an authentication route goes through one
     process-wide limit (`security.expensive_auth_concurrency`, default twice
     the CPU core count). This covers password checks and hashes, and
     recovery-code matching.
@@ -488,7 +505,7 @@ documents. Any disagreement is a bug in this page.
     limit wait in a bounded first-in, first-out queue for up to 10 seconds.
   - A refused attempt gets `429 AUTH_BUSY`. That happens when the queue is
     full, the wait runs out, or a password confirmation is over the limit. A
-    refused attempt runs no bcrypt and does not count as a failed attempt.
+    refused attempt runs no hash and does not count as a failed attempt.
 - TOTP codes are compared in constant time (`subtle.ConstantTimeCompare`). This
   prevents timing side-channel attacks.
 

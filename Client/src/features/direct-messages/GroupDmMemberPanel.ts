@@ -204,12 +204,14 @@ export function createGroupDmMemberPanel(
         {
           label: groupDmText("makeOwner"),
           testId: `group-make-owner-${member.id}`,
+          icon: "crown",
           onClick: () => askMakeOwner(member),
         },
         {
           label: groupDmText("removeMember"),
           danger: true,
           testId: `group-remove-${member.id}`,
+          icon: "user-minus",
           onClick: () => askRemove(member),
         },
       ],

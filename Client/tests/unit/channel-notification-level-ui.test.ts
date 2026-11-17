@@ -43,7 +43,7 @@ describe("channel menu - notification settings", () => {
     openMenu(channel());
     expect(q("ctx-notify-settings")!.textContent).toBe("Notification Settings");
     expect(q("ctx-notify-default")!.textContent).toBe("Use Server Default (Only @mentions)");
-    expect(q("ctx-notify-all")!.textContent).toBe("All Messages");
+    expect(q("ctx-notify-all")!.textContent).toBe("All messages");
     expect(q("ctx-notify-mentions")!.textContent).toBe("Only @mentions");
     expect(q("ctx-notify-nothing")!.textContent).toBe("Nothing");
   });
@@ -151,13 +151,13 @@ describe("Settings - channel notification overrides", () => {
     setChannelNotificationLevel(5, "mentions");
     mount();
     expect(q("channel-level-5")!.textContent).toBe("Only @mentions");
-    expect(q("notification-level-all")!.textContent).toBe("All Messages");
+    expect(q("notification-level-all")!.textContent).toBe("All messages");
   });
 
   it("picks up an override set from a menu while the tab is open", () => {
     mount();
     setChannelNotificationLevel(5, "all");
-    expect(q("channel-level-5")!.textContent).toBe("All Messages");
+    expect(q("channel-level-5")!.textContent).toBe("All messages");
   });
 });
 

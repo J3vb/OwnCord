@@ -14,9 +14,9 @@ between what the desktop client does and what lives only on the server web panel
 
 A tabbed overlay (`SettingsOverlay`) available both authenticated (in Main) and
 unauthenticated (on Connect, for appearance/advanced). Tabs: Account,
-Appearance, Accessibility, Voice & Video, Text & Images, Notifications, Keybinds,
+Appearance, Accessibility, Voice & video, Text & images, Notifications, Keybinds,
 Advanced, Diagnostics & logs, About (Discord's app-settings order, then the
-OwnCord-only tabs). The app version sits under Log Out, and Log Out asks "Are
+OwnCord-only tabs). The app version sits under Log out, and Log out asks "Are
 you sure you want to log out?" first. About shows the client version, the update
 check, the release notes of this version and every earlier one (the
 repository's `CHANGELOG.md`, built into a lazy chunk, never fetched) and a
@@ -30,7 +30,7 @@ Another surface that asks for a tab opens straight on that section. The
 Connect page folds its saved servers down to the selected one there, with an
 arrow that opens the full list and Add Server.
 
-The Safety tab (labelled "Privacy & Safety") lists, top to bottom: Direct messages (two
+The Safety tab (labelled "Privacy & safety") lists, top to bottom: Direct messages (two
 switches stored on the server: "Allow direct messages from server members" and
 "Message requests", the second disabled while the first is off; shown only when
 `ready.capabilities.dm_privacy`), Blocked users, moderation notices and
@@ -197,7 +197,7 @@ changes apply **live** — `ui.setTheme` + the `owncord:pref-change` event re-sk
 open views without reload. Appearance is editable pre-login (on the connect page)
 so the app respects the user's theme before they authenticate.
 
-**Custom themes** (Appearance > Custom Themes, `features/custom-themes/`): a saved
+**Custom themes** (Appearance > Custom themes, `features/custom-themes/`): a saved
 list of the user's own CSS, per device (`owncord:theme:custom:list` and
 `owncord:theme:custom:active` in localStorage), at most one active, painted as
 one `<style id="owncord-custom-theme">` after the built-in theme. Custom
@@ -209,6 +209,21 @@ ones. A theme may never load a file: after decoding CSS escapes, `url(`,
 paint; the CSP (`img-src`/`font-src 'self'`) stays behind it. Ctrl+Shift+Backspace
 turns the active theme off (Backspace is not a bindable key, so no keybind can
 claim it).
+
+A theme can also carry a **background picture** (`themeBackground.ts`,
+`themeBackgroundEditor.ts`), kept per theme under
+`owncord:theme:custom:bg:<id>`. A picked PNG, JPEG or WebP (at most 15 MB) is
+decoded and re-encoded on a canvas to WebP (JPEG where the webview has no WebP
+encoder), at most 2560 px and 2,000,000 characters as a data URL, so the app
+never reads the original file again. Only a base64 `data:image/(webp|jpeg|png)`
+URL is ever painted, checked again on every load. The painter writes one
+`<style id="owncord-custom-theme-bg">` just before the theme's own style: it
+sets `--theme-background-image` and paints it behind `.chat-area`, covered by
+`--bg-primary` at the Dim percentage (0 to 90) and blurred through a
+`backdrop-filter` layer when Blur (0 to 20 px) is set. Theme CSS reaches the
+picture only through that variable, so the `url(` refusal still holds for
+theme text. The picture goes with its theme on turn off, delete and the escape
+shortcut; Export and Copy carry the CSS only.
 
 ---
 
@@ -246,7 +261,7 @@ sequenceDiagram
 
 **Update required (B7-12).** When the server's `protocol_epoch` is **newer**
 than this build's, the connect page raises the `IncompatibleNotice`
-(`pages/connect-page/IncompatibleNotice.ts`) naming the client as the side to
+(`features/connection/IncompatibleNotice.ts`) naming the client as the side to
 update, with both epoch numbers, and offers "Update client" (mounting this same
 `UpdateNotifier`) plus "Choose another server" to defer. The notice appears for
 the selected/attempted host or a WebSocket `protocol_epoch_unsupported`

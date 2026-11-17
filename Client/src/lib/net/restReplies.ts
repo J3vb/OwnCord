@@ -41,6 +41,7 @@ import type {
   RecoveryCodesResponse,
   ReportActResult,
   TimeoutResult,
+  WarnResult,
   TotpEnrolmentResponse,
   UserUploadsPage,
   BlockedUsersResponse,
@@ -63,6 +64,7 @@ import type {
   SessionsListResponse,
   UserNote,
 } from "../apiShared";
+import type { PushSubscribeResponse, PushVapidResponse } from "../apiPush";
 
 export interface RestReplyShapes {
   NoBody: void;
@@ -86,6 +88,7 @@ export interface RestReplyShapes {
   ModerationReportDetail: ModerationReportDetail;
   ReportActResultOrNone: ReportActResult | undefined;
   TimeoutResult: TimeoutResult;
+  WarnResult: WarnResult;
   NicknameResult: NicknameResult;
   AppealRowList: ModerationAppealRow[];
   ModerationAppealDetail: ModerationAppealDetail;
@@ -122,4 +125,6 @@ export interface RestReplyShapes {
   ChannelCategoryList: readonly ChannelCategory[];
   BanMemberResponse: BanMemberResponse;
   AdminUserList: AdminUser[];
+  PushVapidResponse: PushVapidResponse;
+  PushSubscribeResponse: PushSubscribeResponse;
 }

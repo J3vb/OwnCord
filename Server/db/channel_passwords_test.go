@@ -35,6 +35,7 @@ func newPasswordChannel(t *testing.T, d *db.DB, name, chType string) *db.Channel
 // The grant is written only while the channel still has the version the
 // caller checked the password against.
 func TestGrantChannelPassword_OnlyWhileVersionIsCurrent(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openMigratedMemory(t)
 	ch := newPasswordChannel(t, d, "pw-grant", "voice")
@@ -88,6 +89,7 @@ func TestGrantChannelPassword_OnlyWhileVersionIsCurrent(t *testing.T) {
 }
 
 func TestChannelPassword_VoiceOnlyAndNeverInTheChannelRow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openMigratedMemory(t)
 	text := newPasswordChannel(t, d, "pw-text", "text")
@@ -118,6 +120,7 @@ func TestChannelPassword_VoiceOnlyAndNeverInTheChannelRow(t *testing.T) {
 
 // Deleting the channel or the user removes the grants.
 func TestChannelPasswordGrants_CascadeOnDelete(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	d := openMigratedMemory(t)
 	ch := newPasswordChannel(t, d, "pw-cascade", "voice")

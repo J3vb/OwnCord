@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -163,12 +165,15 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 }
 
 // thumbDir holds thumbnails named after their originals; List skips it so reconciliation never sees one as a
-// stranded upload.
+// stranded upload. The default-size thumbnail is thumbs/<uuid>; a small size is thumbs/<size>/<uuid>.
 const thumbDir = "thumbs"
 
-// Delete removes the file named uuid and its thumbnail (erasure, retention and
+// ThumbSizes are the small thumbnail box edges, in pixels, kept beside the default one.
+var ThumbSizes = []int{128, 256}
+
+// Delete removes the file named uuid and its thumbnails, of every size (erasure, retention and
 // the orphan sweep all come here). A missing original still removes the
-// thumbnail and reports fs.ErrNotExist; an unremovable thumbnail is an error so the caller retries.
+// thumbnails and reports fs.ErrNotExist; an unremovable thumbnail is an error so the caller retries.
 func (s *Storage) Delete(uuid string) error {
 	if err := sanitizeFilename(uuid); err != nil {
 		return err
@@ -180,27 +185,76 @@ func (s *Storage) Delete(uuid string) error {
 	// The original goes first: SaveThumb checks it after writing, so a concurrent thumbnail is removed by one
 	// side.
 	err = os.Remove(dst)
-	thumb := filepath.Join(filepath.Dir(dst), thumbDir, uuid)
-	if thumbErr := os.Remove(thumb); thumbErr != nil && !errors.Is(thumbErr, fs.ErrNotExist) {
-		return fmt.Errorf("removing thumbnail: %w: %w", ErrIO, thumbErr)
+	base := filepath.Join(filepath.Dir(dst), thumbDir)
+	thumbs := []string{filepath.Join(base, uuid)}
+	for _, size := range ThumbSizes {
+		thumbs = append(thumbs, filepath.Join(base, strconv.Itoa(size), uuid))
+	}
+	for _, size := range ThumbSizes {
+		thumbs = append(thumbs, filepath.Join(base, strconv.Itoa(size), uuid+animatedSuffix))
+	}
+	for _, thumb := range thumbs {
+		if thumbErr := os.Remove(thumb); thumbErr != nil && !errors.Is(thumbErr, fs.ErrNotExist) {
+			return fmt.Errorf("removing thumbnail: %w: %w", ErrIO, thumbErr)
+		}
 	}
 	return err
 }
 
-func (s *Storage) thumbPath(uuid string) (string, error) {
+// animatedSuffix names a small thumbnail's sidecar recording whether its GIF original is animated.
+const animatedSuffix = ".animated"
+
+// ThumbAnimation reports the recorded animated flag; known is false when nothing was recorded.
+func (s *Storage) ThumbAnimation(uuid string, size int) (animated, known bool) {
+	p, _, err := s.thumbPath(uuid, size)
+	if err != nil {
+		return false, false
+	}
+	b, err := os.ReadFile(p + animatedSuffix)
+	if err != nil || len(b) == 0 {
+		return false, false
+	}
+	return b[0] == '1', true
+}
+
+// SetThumbAnimation records whether the original is animated, beside the thumbnail of that size.
+func (s *Storage) SetThumbAnimation(uuid string, size int, animated bool) error {
+	p, original, err := s.thumbPath(uuid, size)
+	if err != nil {
+		return err
+	}
+	value := []byte("0")
+	if animated {
+		value = []byte("1")
+	}
+	return writeThumbFile(p+animatedSuffix, original, value, "thumbnail record")
+}
+
+// thumbPath is where uuid's thumbnail of the given size (0 = default) and its original live.
+func (s *Storage) thumbPath(uuid string, size int) (thumb, original string, err error) {
 	if err := sanitizeFilename(uuid); err != nil {
-		return "", err
+		return "", "", err
+	}
+	if size != 0 && !slices.Contains(ThumbSizes, size) {
+		return "", "", fmt.Errorf("unknown thumbnail size %d", size)
 	}
 	dst, err := s.resolvedPath(uuid)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	return filepath.Join(filepath.Dir(dst), thumbDir, uuid), nil
+	dir := filepath.Join(filepath.Dir(dst), thumbDir)
+	if size != 0 {
+		dir = filepath.Join(dir, strconv.Itoa(size))
+	}
+	return filepath.Join(dir, uuid), dst, nil
 }
 
 // OpenThumb opens the thumbnail of the original named uuid.
-func (s *Storage) OpenThumb(uuid string) (File, error) {
-	p, err := s.thumbPath(uuid)
+func (s *Storage) OpenThumb(uuid string) (File, error) { return s.OpenThumbSize(uuid, 0) }
+
+// OpenThumbSize opens the thumbnail of the given size (0 is the default size, else one of ThumbSizes).
+func (s *Storage) OpenThumbSize(uuid string, size int) (File, error) {
+	p, _, err := s.thumbPath(uuid, size)
 	if err != nil {
 		return nil, err
 	}
@@ -210,32 +264,40 @@ func (s *Storage) OpenThumb(uuid string) (File, error) {
 // SaveThumb stores data as uuid's thumbnail (empty data records that there is
 // none). The write is atomic via rename; if the original is gone afterwards the
 // thumbnail is removed and fs.ErrNotExist returned.
-func (s *Storage) SaveThumb(uuid string, data []byte) error {
-	p, err := s.thumbPath(uuid)
+func (s *Storage) SaveThumb(uuid string, data []byte) error { return s.SaveThumbSize(uuid, 0, data) }
+
+// SaveThumbSize is SaveThumb for the given size (0 is the default size, else one of ThumbSizes).
+func (s *Storage) SaveThumbSize(uuid string, size int, data []byte) error {
+	p, original, err := s.thumbPath(uuid, size)
 	if err != nil {
 		return err
 	}
+	return writeThumbFile(p, original, data, "thumbnail")
+}
+
+// writeThumbFile writes p atomically; a thumbnail never outlives its original (fs.ErrNotExist).
+func writeThumbFile(p, original string, data []byte, what string) error {
 	dir := filepath.Dir(p)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		return fmt.Errorf("creating thumbnail dir: %w: %w", ErrIO, err)
 	}
 	tmp, err := os.CreateTemp(dir, ".tmp-*")
 	if err != nil {
-		return fmt.Errorf("creating thumbnail: %w: %w", ErrIO, err)
+		return fmt.Errorf("creating %s: %w: %w", what, ErrIO, err)
 	}
 	_, writeErr := tmp.Write(data)
 	closeErr := tmp.Close()
 	if err := errors.Join(writeErr, closeErr); err != nil {
 		_ = os.Remove(tmp.Name())
-		return fmt.Errorf("writing thumbnail: %w: %w", ErrIO, err)
+		return fmt.Errorf("writing %s: %w: %w", what, ErrIO, err)
 	}
 	if err := os.Rename(tmp.Name(), p); err != nil {
 		_ = os.Remove(tmp.Name())
-		return fmt.Errorf("storing thumbnail: %w: %w", ErrIO, err)
+		return fmt.Errorf("storing %s: %w: %w", what, ErrIO, err)
 	}
-	if _, err := os.Stat(filepath.Join(filepath.Dir(dir), uuid)); errors.Is(err, fs.ErrNotExist) {
+	if _, err := os.Stat(original); errors.Is(err, fs.ErrNotExist) {
 		_ = os.Remove(p)
-		return fmt.Errorf("thumbnail of a removed original: %w", fs.ErrNotExist)
+		return fmt.Errorf("%s of a removed original: %w", what, fs.ErrNotExist)
 	}
 	return nil
 }

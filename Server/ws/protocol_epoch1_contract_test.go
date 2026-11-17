@@ -146,6 +146,9 @@ func volatileClass(key string) (string, bool) {
 		return "url", true
 	case strings.HasSuffix(key, "_at"), key == "timestamp", strings.HasSuffix(key, "_timestamp"), key == "ts", key == "last_seen":
 		return "ts", true
+	case key == "server_time_ms":
+		// Not "ts": a ts placeholder is a datetime string or null to the client's fixture test.
+		return "clock", true
 	case strings.Contains(key, "token"):
 		return "token", true
 	}

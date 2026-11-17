@@ -8,17 +8,7 @@ import { listeningDetailsText as t } from "../../i18n/listeningDetails";
 import { createIcon } from "../../lib/icons";
 import { appendChildren, createElement, setText } from "../../lib/dom";
 import { listeningLine, type ListeningSong } from "./listeningLine";
-
-/** "m:ss", or "h:mm:ss" from an hour on. Never negative. */
-export function formatClock(ms: number): string {
-  const total = Number.isFinite(ms) && ms > 0 ? Math.floor(ms / 1000) : 0;
-  const hours = Math.floor(total / 3600);
-  const minutes = Math.floor((total % 3600) / 60);
-  const seconds = String(total % 60).padStart(2, "0");
-  return hours > 0
-    ? `${hours}:${String(minutes).padStart(2, "0")}:${seconds}`
-    : `${minutes}:${seconds}`;
-}
+import { formatDuration } from "@lib/text/duration";
 
 /** How far into the song it is: elapsed clamped to [0, duration], and the
  *  fraction. A song of unknown length has no fraction. */
@@ -88,10 +78,10 @@ export function mountListeningCard(
   const time = createElement("div", { class: `${prefix}-listening-time` });
   appendChildren(host, track, time);
 
-  const total = formatClock(song.durationMs);
+  const total = formatDuration(song.durationMs);
   const paint = (): void => {
     const { elapsedMs, ratio } = listeningProgress(song, now());
-    const elapsed = formatClock(elapsedMs);
+    const elapsed = formatDuration(elapsedMs);
     setText(time, t("progress.text", { elapsed, total }));
     fill.style.width = `${Math.round((ratio ?? 0) * 1000) / 10}%`;
     track.setAttribute("aria-valuenow", String(Math.floor(elapsedMs / 1000)));

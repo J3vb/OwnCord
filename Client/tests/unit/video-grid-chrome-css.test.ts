@@ -1,6 +1,7 @@
-// The call view's own controls (view toggles, pop-out, show chat) sit bottom
-// right beside the control bar. Pinned top-left they covered the focused
-// tile's name and doubled up with the tile's own top-right controls.
+// The call view's View button (its menu holds the view toggles, pop-out and
+// show chat) sits bottom right beside the control bar. Pinned top-left, the
+// old controls covered the focused tile's name and doubled up with the
+// tile's own top-right controls.
 import { cascadedDeclaration } from "../helpers/app-css";
 import { describe, it, expect } from "vitest";
 
@@ -12,7 +13,11 @@ describe("video grid chrome CSS", () => {
     expect(cascadedDeclaration(".video-grid__views", "right")).toBeDefined();
   });
 
-  it("never pins the exit control on its own", () => {
-    expect(cascadedDeclaration(".video-grid__exit", "position")).toBeUndefined();
+  it("scrolls the cards in their own box, never the grid that holds the call bar", () => {
+    expect(cascadedDeclaration(".video-grid__cards", "overflow-y")).toBeDefined();
+    expect(cascadedDeclaration(".video-grid--cards", "overflow-y")).toBeUndefined();
+    expect(cascadedDeclaration(".video-grid", "overflow-y")).toBeUndefined();
+    expect(cascadedDeclaration(".video-grid__cards > .video-cell--avatar", "width")).toBeDefined();
+    expect(cascadedDeclaration(".video-grid__cards .video-username", "position")).toBeDefined();
   });
 });

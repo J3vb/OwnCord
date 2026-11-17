@@ -229,7 +229,9 @@ func genRoutes(w io.Writer) error {
 
 	// internal/app owns hub construction, so the index is generated over the
 	// same collaborators the server runs with.
-	rt, err := app.StartRuntime(cfg, database, nil, app.RuntimeInputs{Version: "gendocs", Storage: app.OpenStorage(slog.Default(), cfg)})
+	rt, err := app.StartRuntime(cfg, database, nil, app.RuntimeInputs{
+		Version: "gendocs", Storage: app.OpenStorage(slog.Default(), cfg), LinkPreviews: app.OpenLinkPreviews(slog.Default(), cfg, database),
+	})
 	if err != nil {
 		return fmt.Errorf("building runtime for the route walk: %w", err)
 	}

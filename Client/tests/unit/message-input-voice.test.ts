@@ -14,6 +14,7 @@ import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/server
 import type { VoiceUploadMeta } from "@lib/types";
 import { ATTACHMENT_TTL_MS } from "../../src/features/messaging/attachmentTtl";
 import { authStore } from "@stores/auth.store";
+import { MAX_DURATION_MS, STOP_TIMEOUT_MS } from "../../src/features/voice-messages/recorder";
 import { FakeAudioContext, FakeMediaRecorder, FakeStream, resetFakes } from "../helpers/voiceFakes";
 
 type Uploaded = { id: string; url: string; filename: string };
@@ -337,6 +338,22 @@ describe("a retained upload", () => {
     expect(onSend).toHaveBeenCalledTimes(1);
     expect(onSend.mock.calls[0]?.[2]).toEqual(["up-2"]);
     expect(onDiscardUpload).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("a failed stop at the recording limit", () => {
+  it("leaves the recording bar and shows the recording-failed error", async () => {
+    mountComposer();
+    q<HTMLButtonElement>('[data-testid="voice-mic-btn"]')!.click();
+    await flush();
+    const mr = FakeMediaRecorder.instances[0]!;
+    mr.stop = (): void => {
+      mr.state = "inactive";
+    };
+    clock += MAX_DURATION_MS + 5_000;
+    await vi.advanceTimersByTimeAsync(MAX_DURATION_MS + STOP_TIMEOUT_MS);
+    expect(q('[data-testid="voice-bar"]')).toBeNull();
+    expect(container.textContent).toContain("Recording failed");
   });
 });
 

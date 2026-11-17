@@ -105,6 +105,7 @@ func (s *MessageService) SendMessage(ctx context.Context, p SendMessageParams) (
 		result.Sticker = db.NewMessageStickerInfo(&id, stickerRef.Name)
 	}
 	result.ReferencedMessage = s.replySnippet(ctx, p, msgID)
+	result.LinkJob = newLinkJob(msgID, p.ChannelID, p.UserID, msg.Content, msg.Timestamp, false)
 
 	if isDM && !s.sendMessageDMSideEffects(ctx, p, result) {
 		return result, nil // Message saved, skip DM side effects.
@@ -282,7 +283,8 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		return nil, fmt.Errorf("%w: message_id must be positive integer", ErrBadRequest)
 	}
 
-	content, err := sanitizeContent(rawContent, false)
+	// Empty text is legal only for a message that keeps an attachment; the store decides that atomically.
+	content, err := sanitizeContent(rawContent, true)
 	if err != nil {
 		return nil, err
 	}
@@ -310,7 +312,7 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		return nil, fmt.Errorf("%w: edit message: %w", ErrInternal, err)
 	}
 	if err != nil || msg == nil {
-		return nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+		return nil, s.editRefusal(ctx, msgID, content, err)
 	}
 
 	editedAt := ""
@@ -341,6 +343,9 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		MentionsHere:     mentions.HereOnly,
 		PostOpening:      s.isPostOpening(context.WithoutCancel(ctx), ch, msgID),
 	}
+	if editedAt != "" {
+		result.LinkJob = newLinkJob(msgID, msg.ChannelID, userID, msg.Content, editedAt, true)
+	}
 
 	if isDM {
 		// Detached: the edit committed, so a dropped editor must not lose the chat_edited fan-out.
@@ -358,6 +363,17 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 
 	slog.Debug("message edited", "user_id", userID, "msg_id", msgID, "channel_id", msg.ChannelID)
 	return result, nil
+}
+
+// editRefusal names why the store wrote nothing: an empty result on a live message means it has no
+// attachment to keep, anything else is the opaque refusal.
+func (s *MessageService) editRefusal(ctx context.Context, msgID int64, content string, storeErr error) error {
+	if errors.Is(storeErr, db.ErrNotFound) && content == "" {
+		if cur, err := s.st.GetMessage(ctx, msgID); err == nil && cur != nil && !cur.Deleted {
+			return fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
+		}
+	}
+	return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 }
 
 func (s *MessageService) loadEditTarget(ctx context.Context, msgID int64) (*db.Message, *db.Channel, error) {

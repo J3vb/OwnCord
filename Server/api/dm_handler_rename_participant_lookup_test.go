@@ -88,6 +88,7 @@ func (s *cancelAfterRenameStore) SetGroupDMName(ctx context.Context, channelID, 
 // name, and since dm_channel_open is unsequenced/targeted, only a full
 // resync — never a warm reconnect's seq replay — would repair it.
 func TestRenameGroupDM_FanOutSurvivesContextCancelledAfterCommit(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
 

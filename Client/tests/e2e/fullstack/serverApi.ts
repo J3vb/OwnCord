@@ -106,7 +106,7 @@ export async function sendAndSee(page: Page, text: string, file?: string): Promi
 
 export async function openSafety(page: Page): Promise<Locator> {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
-  await page.getByRole("tab", { name: "Privacy & Safety" }).click();
+  await page.getByRole("tab", { name: "Privacy & safety" }).click();
   const pane = page.locator(".safety-tab");
   await expect(pane.getByRole("heading", { name: "Appeals" })).toBeVisible();
   return pane;
@@ -119,7 +119,7 @@ export const appealRow = (pane: Locator, reason: string) =>
 export async function relogin(page: Page, server: TestServer, username: string): Promise<void> {
   await page.getByRole("button", { name: "Settings", exact: true }).click();
   await page.locator(".settings-nav-item.danger").click();
-  // Log Out asks first.
+  // Log out asks first.
   await page.locator("[data-testid='logout-confirm']").click();
   await expect(page.locator("#host")).toBeVisible({ timeout: 30_000 });
   await login(page, server, username);

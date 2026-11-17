@@ -45,14 +45,16 @@ vi.mock("@stores/messages.store", () => ({
   setChannelLoadError: mockSetChannelLoadError,
   setOlderLoadFailed: mockSetOlderLoadFailed,
   isWindowDetached: mockIsWindowDetached,
+  holdLoadJournal: vi.fn(),
+  releaseLoadJournal: vi.fn(),
 }));
 
 // ---------------------------------------------------------------------------
 // Imports (after mocks)
 // ---------------------------------------------------------------------------
 
-import { createMessageController } from "../../src/pages/main-page/MessageController";
-import type { MessageControllerOptions } from "../../src/pages/main-page/MessageController";
+import { createMessageController } from "../../src/features/messaging/MessageController";
+import type { MessageControllerOptions } from "../../src/features/messaging/MessageController";
 
 // ---------------------------------------------------------------------------
 // Helpers

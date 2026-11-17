@@ -9,6 +9,7 @@ import (
 )
 
 func TestPadIDs(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		n, want int
 	}{{0, 0}, {1, 8}, {8, 8}, {9, 16}, {50, 64}, {256, 256}, {300, 512}, {1001, 1024}, {1025, 1025}}
@@ -31,6 +32,7 @@ func TestPadIDs(t *testing.T) {
 }
 
 func TestIDsJSON(t *testing.T) {
+	t.Parallel()
 	if got := idsJSON([]int64{3, 10, 7}); got != "[3,10,7]" {
 		t.Errorf("idsJSON = %q, want [3,10,7]", got)
 	}
@@ -38,6 +40,7 @@ func TestIDsJSON(t *testing.T) {
 
 // A full cache runs a query unprepared instead of growing.
 func TestReadStmtCache_FullRunsUnprepared(t *testing.T) {
+	t.Parallel()
 	d := openMigratedMemoryInternal(t)
 	ctx := context.Background()
 	d.readStmts.mu.Lock()
@@ -70,6 +73,7 @@ func TestReadStmtCache_FullRunsUnprepared(t *testing.T) {
 // SQL with more placeholders than padIDs pads runs unprepared, so a long
 // one-off IN list cannot fill the cache.
 func TestReadStmtCache_LongInListNotCached(t *testing.T) {
+	t.Parallel()
 	d := openMigratedMemoryInternal(t)
 	n := maxPaddedIDs + 1
 	query := "SELECT 1 WHERE 1 IN (" + strings.Repeat("?,", n-1) + "?)"
@@ -92,6 +96,7 @@ func TestReadStmtCache_LongInListNotCached(t *testing.T) {
 
 // After Close a cached query fails instead of preparing on closed pools.
 func TestReadStmtCache_ClosedFails(t *testing.T) {
+	t.Parallel()
 	d := openMigratedMemoryInternal(t)
 	rows, err := d.queryCached(context.Background(), "SELECT 1")
 	if err != nil {

@@ -25,6 +25,7 @@ func iconOf(t *testing.T, database *db.DB, channelID int64) string {
 }
 
 func TestSetGroupDMIcon_WritesIconAndOneRow(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "icon-a", f.bob)
@@ -53,6 +54,7 @@ func TestSetGroupDMIcon_WritesIconAndOneRow(t *testing.T) {
 }
 
 func TestSetGroupDMIcon_ClearWritesRowOnlyWhenIconSet(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 
@@ -77,6 +79,7 @@ func TestSetGroupDMIcon_ClearWritesRowOnlyWhenIconSet(t *testing.T) {
 }
 
 func TestSetGroupDMIcon_NonMemberAndOneToOneAreNotFound(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	dave := seedUser(t, f.database, "dave")
@@ -96,6 +99,7 @@ func TestSetGroupDMIcon_NonMemberAndOneToOneAreNotFound(t *testing.T) {
 }
 
 func TestSetGroupDMIcon_RemovedUploaderWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "icon-a", f.bob)
@@ -112,6 +116,7 @@ func TestSetGroupDMIcon_RemovedUploaderWritesNothing(t *testing.T) {
 }
 
 func TestIsGroupDMIconForUser_MembersOfTheLiveIconOnly(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	dave := seedUser(t, f.database, "dave")
@@ -150,6 +155,7 @@ func TestIsGroupDMIconForUser_MembersOfTheLiveIconOnly(t *testing.T) {
 }
 
 func TestGetUserDMChannels_CarriesIconURL(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "icon-a", f.alice)
@@ -170,6 +176,7 @@ func TestGetUserDMChannels_CarriesIconURL(t *testing.T) {
 }
 
 func TestOrphanSweep_KeepsLiveGroupIcon(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "icon-old", f.alice)
@@ -195,6 +202,7 @@ func TestOrphanSweep_KeepsLiveGroupIcon(t *testing.T) {
 }
 
 func TestDiscardUnlinked_KeepsLiveGroupIcon(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "icon-live", f.bob)
@@ -213,6 +221,7 @@ func TestDiscardUnlinked_KeepsLiveGroupIcon(t *testing.T) {
 }
 
 func TestLinkAttachments_SkipsLiveGroupIcon(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "icon-live", f.bob)
@@ -231,6 +240,7 @@ func TestLinkAttachments_SkipsLiveGroupIcon(t *testing.T) {
 }
 
 func TestEraseAccount_ClearsIconUploadedBySubject(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "icon-bob", f.bob)
@@ -256,6 +266,7 @@ func TestEraseAccount_ClearsIconUploadedBySubject(t *testing.T) {
 // the icon out of use: the group shows no icon, and the file is theirs to delete
 // again. An icon someone else uploaded stays through the same exit.
 func TestGroupDMExit_ClearsTheIconTheLeaverUploaded(t *testing.T) {
+	t.Parallel()
 	for _, exit := range []string{"leave", "remove"} {
 		t.Run(exit, func(t *testing.T) {
 			f := newGroupRowFixture(t)
@@ -283,6 +294,7 @@ func TestGroupDMExit_ClearsTheIconTheLeaverUploaded(t *testing.T) {
 }
 
 func TestGroupDMExit_KeepsAnIconUploadedBySomeoneElse(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	seedIconAttachment(t, f.database, "icon-bob", f.bob)

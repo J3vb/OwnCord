@@ -4,6 +4,7 @@
  */
 
 import { resolveDisplayName } from "@lib/ui/avatar";
+import { previewMentionsToNames } from "@lib/text/mentionNames";
 import type { ThreadInfo } from "@lib/types";
 import { membersStore } from "@stores/members.store";
 import { forumsText } from "../../i18n/forums";
@@ -21,7 +22,7 @@ export function authorName(post: ThreadInfo): string {
 export function previewOf(post: ThreadInfo): { text: string; muted: boolean } {
   const first = post.post?.first_message ?? null;
   if (first === null || first.deleted) return { text: forumsText("post.deleted"), muted: true };
-  if (first.preview !== "") return { text: first.preview, muted: false };
+  if (first.preview !== "") return { text: previewMentionsToNames(first.preview), muted: false };
   return first.has_attachments
     ? { text: forumsText("post.attachment"), muted: true }
     : { text: "", muted: true };

@@ -26,7 +26,7 @@ describe("AppearanceTab zoom", () => {
 
   it("shows the level and applies and saves a slider change", async () => {
     const { tab, ac } = build();
-    const slider = tab.querySelector<HTMLInputElement>('input[aria-label="Zoom Level"]')!;
+    const slider = tab.querySelector<HTMLInputElement>('input[aria-label="Zoom level"]')!;
     const label = slider.nextElementSibling!;
     expect(label.textContent).toBe("100%");
     slider.value = "8"; // 150%
@@ -39,7 +39,7 @@ describe("AppearanceTab zoom", () => {
 
   it("resets to 100% and follows the zoom keys while open", async () => {
     const { tab, ac } = build();
-    const slider = tab.querySelector<HTMLInputElement>('input[aria-label="Zoom Level"]')!;
+    const slider = tab.querySelector<HTMLInputElement>('input[aria-label="Zoom level"]')!;
     await appZoom.step(1);
     expect(slider.value).toBe("6");
     expect(slider.nextElementSibling!.textContent).toBe("110%");
@@ -52,7 +52,7 @@ describe("AppearanceTab zoom", () => {
   it("snaps the slider back when the native zoom fails", async () => {
     setZoom.mockRejectedValue(new Error("denied"));
     const { tab, ac } = build();
-    const slider = tab.querySelector<HTMLInputElement>('input[aria-label="Zoom Level"]')!;
+    const slider = tab.querySelector<HTMLInputElement>('input[aria-label="Zoom level"]')!;
     slider.value = "9";
     slider.dispatchEvent(new Event("input"));
     await vi.waitFor(() => expect(slider.value).toBe("5"));

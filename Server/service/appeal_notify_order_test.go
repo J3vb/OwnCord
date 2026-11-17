@@ -18,6 +18,7 @@ import (
 // half (a forced reversal failure rolls back the whole transaction) at the
 // db layer, where the test-only fault-injection hook actually lives.
 func TestAppeal_DecideDoesNotNotifyOnFailure(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -238,6 +239,7 @@ func TestAppeal_SubmitThenWithdrawNotifyOrderMatchesCommitOrder(t *testing.T) {
 // would otherwise arrive at the appellant's socket AFTER the "overturned"
 // or "upheld" frame it already received.
 func TestAppeal_DelayedAssignAfterDecisionDoesNotBroadcast(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 

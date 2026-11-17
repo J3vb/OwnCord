@@ -16,10 +16,12 @@ export function subscribeVoiceWidget(render: () => void): Array<() => void> {
         serverDeafened: s.localServerDeafened,
         camera: s.localCamera,
         screenshare: s.localScreenshare,
+        music: s.localMusic === true,
         shareRev: s.localShareRev,
         listenOnly: s.listenOnly,
         voiceStatus: s.voiceStatus,
         encryptionDegraded: s.encryptionDegraded === true,
+        phoneCallHold: s.phoneCallHold === true,
         shareBlock: shareBlockReason(s),
       }),
       render,
@@ -29,10 +31,12 @@ export function subscribeVoiceWidget(render: () => void): Array<() => void> {
         a.serverDeafened === b.serverDeafened &&
         a.camera === b.camera &&
         a.screenshare === b.screenshare &&
+        a.music === b.music &&
         a.shareRev === b.shareRev &&
         a.listenOnly === b.listenOnly &&
         a.voiceStatus === b.voiceStatus &&
         a.encryptionDegraded === b.encryptionDegraded &&
+        a.phoneCallHold === b.phoneCallHold &&
         a.shareBlock === b.shareBlock,
     ),
   );

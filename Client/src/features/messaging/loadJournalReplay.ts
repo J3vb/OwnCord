@@ -1,8 +1,9 @@
 // Re-applies the changes journaled while a history page was in flight (see
 // loadJournal.ts) to the rows that page brought in.
+import { reduceLinkPreviews } from "../../lib/linkPreviewState";
 import type { ChatEditedPayload } from "../../lib/types";
 import type { Message, MessagesState } from "./messageModel";
-import type { JournalEntry } from "./loadJournal";
+import { firstPageReplayStart, type JournalEntry } from "./loadJournal";
 import {
   reduceBulkDeleteMessages,
   reduceDeleteMessage,
@@ -41,6 +42,8 @@ function applyEntry(state: MessagesState, channelId: number, entry: JournalEntry
       return reduceDeleteMessage(state, entry.payload);
     case "bulkDelete":
       return reduceBulkDeleteMessages(state, entry.payload);
+    case "linkPreviews":
+      return reduceLinkPreviews(state, entry.payload);
     case "pin":
       return reduceSetMessagePinned(state, channelId, entry.messageId, entry.pinned);
     default:
@@ -54,8 +57,9 @@ export function replayLoadJournal(
   prev: MessagesState,
   channelId: number,
   rows: readonly Message[],
+  from = 0,
 ): readonly Message[] {
-  const journal = prev.loadJournal?.get(channelId);
+  const journal = prev.loadJournal?.get(channelId)?.slice(from);
   if (journal === undefined || journal.length === 0) return rows;
   let state: MessagesState = {
     ...prev,
@@ -63,4 +67,14 @@ export function replayLoadJournal(
   };
   for (const entry of journal) state = applyEntry(state, channelId, entry);
   return state.messagesByChannel.get(channelId) ?? rows;
+}
+
+/** replayLoadJournal for a first or around page, which replays only what its
+ *  own fetch journaled. */
+export function replayFirstPage(
+  prev: MessagesState,
+  channelId: number,
+  rows: readonly Message[],
+): readonly Message[] {
+  return replayLoadJournal(prev, channelId, rows, firstPageReplayStart(prev, channelId));
 }

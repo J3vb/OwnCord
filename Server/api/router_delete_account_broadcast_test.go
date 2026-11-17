@@ -76,6 +76,7 @@ func dialAndAuthWS(t *testing.T, srv *httptest.Server, token string) *websocket.
 }
 
 func TestNewRouter_DeleteAccount_BroadcastsMemberBanOverWS(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 
 	cfg := &config.Config{

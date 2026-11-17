@@ -32,8 +32,11 @@ func (s *AttentionService) RefreshBackup(ctx context.Context, now time.Time) {
 	}
 	var r attentionReadings
 	s.readBackup(ctx, &r)
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.settled(ctx, func() { s.refreshBackupLocked(r, now) })
+}
+
+// refreshBackupLocked swaps in the re-evaluated backup signal. s.mu held.
+func (s *AttentionService) refreshBackupLocked(r attentionReadings, now time.Time) {
 	i := slices.IndexFunc(s.signals, func(sig AttentionSignal) bool { return sig.ID == attentionBackupSignal })
 	if i < 0 {
 		return

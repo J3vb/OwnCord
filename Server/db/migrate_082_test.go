@@ -23,6 +23,7 @@ func migratedAt081(t *testing.T) *db.DB {
 // Moderator masks carry the seven owner-type bits as unused bits; after 082
 // they hold none of them and nothing else changes. The Owner is untouched.
 func TestMigration082_DefaultRolesLoseTheUnusedBits(t *testing.T) {
+	t.Parallel()
 	database := migratedAt081(t)
 	for _, id := range []int64{2, 3} {
 		if rolePerms(t, database, id)&ownerTypeMask == 0 {
@@ -52,6 +53,7 @@ func TestMigration082_DefaultRolesLoseTheUnusedBits(t *testing.T) {
 }
 
 func TestMigration082_CustomRoles(t *testing.T) {
+	t.Parallel()
 	database := migratedAt081(t)
 	ctx := context.Background()
 	exec := func(q string, args ...any) {

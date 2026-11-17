@@ -119,10 +119,10 @@ func TestEraseAccount_CrashMidDrainResumesOnReopen(t *testing.T) {
 	sub := seedEraseSubject(t, database)
 	seedBulkErasure(t, database, sub.id, sub.other, sub.channel, n)
 
-	// Chunks 1-4 are the small tables and the uploaded attachments; the
-	// messages follow in 500s, so chunk 7 is the third of them.
-	db.SetErasureChunkHookForTest(database, func(stage string, chunk int) error {
-		if stage == "chunk" && chunk == 7 {
+	// The messages drain in 500s after the small tables, the uploaded attachments
+	// and the event windows; kill once the third chunk of them has committed.
+	db.SetErasureChunkHookForTest(database, func(stage string, _ int) error {
+		if stage == "chunk" && countRows(t, database, `SELECT COUNT(*) FROM messages WHERE user_id = ?`, sub.id) <= n-1500 {
 			return errors.New("killed mid-drain")
 		}
 		return nil
@@ -164,6 +164,7 @@ func TestEraseAccount_CrashMidDrainResumesOnReopen(t *testing.T) {
 // Two administrators erased at once, the last two admin-class accounts: the
 // second lock sees the first's queued job and is refused (edge case 2).
 func TestEraseAccount_GuardExcludesAccountsUnderErasure(t *testing.T) {
+	t.Parallel()
 	database := openErasureFile(t, filepath.Join(t.TempDir(), "guard.sqlite"))
 	ctx := context.Background()
 	first := seedUser(t, database, "admin-first")
@@ -245,6 +246,7 @@ func TestEraseAccount_WriterInterleavesBetweenChunks(t *testing.T) {
 // the one job row (the all-or-nothing test above stays for a fault at the
 // lock).
 func TestEraseAccount_FaultAfterFirstChunkLeavesQueuedJob(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
@@ -314,6 +316,7 @@ func TestEraseAccountDrain_DeadlineStopsBetweenChunks(t *testing.T) {
 // that was in flight at the lock) is swept by the finish stage, which looks
 // only at rows written since the lock.
 func TestEraseAccountFinish_SweepsEventsWrittenSinceTheLock(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
@@ -338,6 +341,7 @@ func TestEraseAccountFinish_SweepsEventsWrittenSinceTheLock(t *testing.T) {
 // may already be past it, and its mention would then be reversed before it
 // was ever counted.
 func TestEraseAccountLock_RefusesLaterMessages(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)

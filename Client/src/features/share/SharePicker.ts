@@ -17,6 +17,7 @@ import { dmStore } from "@stores/dm.store";
 import {
   filterForwardTargets,
   listForwardTargets,
+  targetRowParts,
   type ForwardTarget,
 } from "../messaging/forwardTargets";
 import { shareText } from "../../i18n/share";
@@ -32,9 +33,6 @@ export interface SharePickerOptions {
 }
 
 const PREVIEW_CHARS = 120;
-
-const iconFor = (t: ForwardTarget): SVGSVGElement =>
-  createIcon(t.kind === "dm" ? "user" : t.kind === "announcement" ? "megaphone" : "hash", 14);
 
 /** What the sheet says it is sending: the file count and the start of the text. */
 export function sharePreview(share: ReceivedShare): string {
@@ -82,16 +80,7 @@ export function openSharePicker(opts: SharePickerOptions): void {
         "data-testid": `share-target-${t.id}`,
         "data-target-id": String(t.id),
       });
-      const icon = createElement("span", { class: "quick-switcher__icon" });
-      icon.appendChild(iconFor(t));
-      const parts: (Element | string)[] = [
-        icon,
-        createElement("span", { class: "quick-switcher__name" }, t.name),
-      ];
-      if (t.category !== null) {
-        parts.push(createElement("span", { class: "quick-switcher__category" }, t.category));
-      }
-      appendChildren(row, ...parts);
+      appendChildren(row, ...targetRowParts(t));
       list.appendChild(row);
     }
   }

@@ -10,6 +10,7 @@ import {
   screenTileConfig,
   tileLookups,
   useVideoGridHarness,
+  viewMenuRow,
 } from "../../helpers/videoGridHarness";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
@@ -94,22 +95,24 @@ describe("VideoGrid", () => {
       expect(cell(SCREEN).classList.contains("focused")).toBe(false);
     });
 
-    it("exposes a header control that leaves focus/grid mode and is keyboard reachable", () => {
+    it("offers Show chat in the View menu, which leaves focus/grid mode", () => {
       // Focus mode pinned a watched peer with no way back once the focused
       // tile's own nav was scrolled off (and an empty grid could cover chat
-      // with no control at all). A header button always offers the exit.
+      // with no control at all). The View menu always offers the exit.
+      const onExitGrid = vi.fn();
+      grid.setCallbacks({ onExitGrid });
+      grid.setExitVisible(true);
       grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screen());
       grid.addStream(3, "Sam", fakeStream(), camera());
-
-      const exit = container.querySelector<HTMLButtonElement>("[data-tile-control='exit-grid']");
-      expect(exit).not.toBeNull();
-      expect(exit!.tagName).toBe("BUTTON");
-      expect(exit!.getAttribute("aria-label")).toBe("Show chat");
 
       select(SCREEN).click();
       expect(grid.getFocusedTileId()).toBe(SCREEN);
 
-      exit!.click();
+      const exit = viewMenuRow(container, "chat")!;
+      expect(exit.tagName).toBe("BUTTON");
+      expect(exit.textContent).toBe("Show chat");
+      exit.click();
+      expect(onExitGrid).toHaveBeenCalledTimes(1);
       expect(grid.getFocusedTileId()).toBeNull();
       expect(cell(SCREEN).classList.contains("focused")).toBe(false);
     });

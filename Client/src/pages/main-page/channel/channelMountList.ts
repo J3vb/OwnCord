@@ -4,24 +4,23 @@
  */
 import { createElement } from "@lib/dom";
 import { createConfirmModal } from "../../../features/dialogs/confirmModal";
+import {
+  sendTrackedDelete,
+  sendTrackedEdit,
+  togglePin,
+} from "../../../features/messaging/trackedActions";
 import { createMessageList } from "../../../features/messaging/MessageList";
 import { bindGifFavoritesApi } from "@stores/gifFavorites.store";
 import { setInlineImageDecorator } from "../../../features/messaging/content/media";
 import { WAVE_CONTENT } from "../../../features/messaging/message-list/welcomeRows";
 import { gifFavoriteStar } from "../../../features/messaging/message-list/gifFavoriteStar";
 import { endPoll, votePoll } from "../../../features/messaging/pollSend";
-import {
-  messagesStore,
-  getChannelMessages,
-  setMessagePinned,
-  reattachToPresent,
-} from "@stores/messages.store";
+import { getChannelMessages, reattachToPresent } from "@stores/messages.store";
 import { jumpToMessage } from "@lib/nav/messageNavigation";
-import { uiStore } from "@stores/ui.store";
 import { reportEntryText } from "../../../i18n/reportEntry";
 import { messagingText } from "../../../i18n/messaging";
 import { markChannelRead } from "@lib/readState";
-import { log, renderDeletePreview } from "./channelShared";
+import { renderDeletePreview } from "./channelShared";
 import type { ChannelState, ChannelApi, MountScope } from "./channelState";
 
 export function mountMessageList(st: ChannelState, cc: ChannelApi, ms: MountScope): void {
@@ -29,15 +28,7 @@ export function mountMessageList(st: ChannelState, cc: ChannelApi, ms: MountScop
    *  the connection; a closed or half-open socket would drop the frame and
    *  leave the moderator thinking the message was deleted. */
   ms.sendDelete = function sendDelete(msgId: number): void {
-    if (uiStore.getState().connectionStatus !== "connected") {
-      st.showToast(messagingText("toast.deleteFailed"), "error");
-      return;
-    }
-    const id = st.ws.send({
-      type: "chat_delete",
-      payload: { message_id: msgId },
-    });
-    cc.track(st.pendingDeletes, id, { channelId: ms.channelId, messageId: msgId });
+    sendTrackedDelete(st, st.ws, st.showToast, ms.channelId, msgId);
   };
 
   /** The destructive delete confirm, on the shared confirm preset
@@ -156,19 +147,9 @@ export function mountMessageList(st: ChannelState, cc: ChannelApi, ms: MountScop
       if (original !== undefined && original.content === content) {
         return true;
       }
-      // Same connection gate as delete. A dropped edit frame must
-      // not look saved — the row would keep its old text, and the user
-      // would never know to try again. The editor stays open with the text.
-      if (uiStore.getState().connectionStatus !== "connected") {
-        st.showToast(messagingText("toast.editFailed"), "error");
-        return false;
-      }
-      const id = st.ws.send({
-        type: "chat_edit",
-        payload: { message_id: messageId, content },
-      });
-      cc.track(st.pendingEdits, id, { channelId: ms.channelId, messageId, content });
-      return true;
+      // A dropped edit frame must not look saved: the editor stays open
+      // with the text when the connection is down.
+      return sendTrackedEdit(st, st.ws, st.showToast, ms.channelId, messageId, content);
     },
     // Discord's flow: clearing an edit and pressing Save asks to delete the
     // message. Cancel leaves the editor open; Delete closes it first.
@@ -196,37 +177,7 @@ export function mountMessageList(st: ChannelState, cc: ChannelApi, ms: MountScop
       st.reactionCtrl.handleReaction(msgId, emoji);
     },
     onPinClick: (msgId: number, chId: number, currentlyPinned: boolean) => {
-      // One request per message at a time: a second click while one is
-      // pending would race its revert against the first.
-      const flightKey = `${chId}:${msgId}`;
-      if (st.pinsInFlight.has(flightKey)) return;
-      st.pinsInFlight.add(flightKey);
-      // Optimistic: the row flips now and snaps back if the server refuses,
-      // so the control answers the click instead of waiting on the round trip.
-      setMessagePinned(chId, msgId, !currentlyPinned);
-      const revisionAfterFlip = messagesStore.getState().messagePinRevision?.get(msgId);
-      const action = currentlyPinned
-        ? st.api.unpinMessage(chId, msgId)
-        : st.api.pinMessage(chId, msgId);
-      action
-        .then(() => {
-          st.showToast(
-            currentlyPinned ? messagingText("toast.unpinned") : messagingText("toast.pinned"),
-            "success",
-          );
-        })
-        .catch((err) => {
-          // A moved revision means a chat_pinned for this message already
-          // holds the truth; do not overwrite it.
-          if (messagesStore.getState().messagePinRevision?.get(msgId) === revisionAfterFlip) {
-            setMessagePinned(chId, msgId, currentlyPinned);
-          }
-          log.error("Pin/unpin failed", { error: String(err) });
-          st.showToast(messagingText("toast.pinFailed"), "error");
-        })
-        .finally(() => {
-          st.pinsInFlight.delete(flightKey);
-        });
+      togglePin(st.pinsInFlight, st.api, st.showToast, msgId, chId, currentlyPinned);
     },
     onReportClick: (msgId: number) => {
       const msg = getChannelMessages(ms.channelId).find((m) => m.id === msgId);

@@ -24,6 +24,7 @@ const (
 )
 
 func TestManageBackups_RoleCreateAndEdit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, database := newOwnerGrantRoleService(t)
 	seedRole(t, database, &db.Role{ID: backupsRoleID, Name: "Backup Keepers", Permissions: backupsBits, Position: 50})
@@ -63,6 +64,7 @@ func TestManageBackups_RoleCreateAndEdit(t *testing.T) {
 }
 
 func TestManageBackups_RoleDelete(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, database := newOwnerGrantRoleService(t)
 	seedRole(t, database, &db.Role{ID: backupsRoleID, Name: "Backup Keepers", Permissions: backupsBits, Position: 50})
@@ -78,6 +80,7 @@ func TestManageBackups_RoleDelete(t *testing.T) {
 }
 
 func TestManageBackups_RoleAssignment(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, database := newOwnerGrantModerationFixture(t)
 	seedRole(t, database, &db.Role{ID: backupsRoleID, Name: "Backup Keepers", Permissions: backupsBits, Position: 50})
@@ -115,6 +118,7 @@ func TestManageBackups_RoleAssignment(t *testing.T) {
 }
 
 func TestManageBackups_Overrides(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, database, _, low, ch := seedOverrideFixture(t)
 	holder := &db.Role{ID: 34, Name: "chan-keeper", Position: 50,

@@ -109,6 +109,9 @@ export default defineConfig({
         // Rolldown (Vite 8) only supports the function form of manualChunks.
         manualChunks(id) {
           if (id.includes("node_modules/livekit-client/")) return "livekit";
+          // Shared by the lazy sign-in alert and Settings; without this the
+          // alert would fetch the whole Settings chunk to reach it.
+          if (id.endsWith("/src/lib/net/deviceLabel.ts")) return "deviceLabel";
           return undefined;
         },
       },

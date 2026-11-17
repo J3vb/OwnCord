@@ -31,6 +31,7 @@ func (s *lostClaimStore) GetUserByID(ctx context.Context, id int64) (*db.User, e
 }
 
 func TestVerifyTOTP_LostClaimReleasesTheCode(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	uid := mustCreateUser(t, database, "racer", "$2a$12$x", 4)

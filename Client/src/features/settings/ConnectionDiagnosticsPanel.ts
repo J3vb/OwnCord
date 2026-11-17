@@ -1,4 +1,5 @@
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
+import { buildSettingsSection } from "./settingsSection";
 import { settingsText as t } from "../../i18n/settings";
 import { recordSelfTestStage, resetSelfTest } from "@lib/voice/voiceJoinTrace";
 import {
@@ -68,13 +69,18 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
   element: HTMLElement;
   cleanup(): void;
 } {
-  const element = createElement("section", {
-    class: "settings-card",
-    "data-testid": "connection-diagnostics",
-    "aria-labelledby": "connection-diagnostics-title",
+  const {
+    el: element,
+    head,
+    card,
+  } = buildSettingsSection({
+    label: t("diagnostics.title"),
+    headingAttrs: { id: "connection-diagnostics-title" },
+    attrs: {
+      "data-testid": "connection-diagnostics",
+      "aria-labelledby": "connection-diagnostics-title",
+    },
   });
-  const head = createElement("div", { class: "settings-card-head" });
-  const title = createElement("h3", { id: "connection-diagnostics-title" }, t("diagnostics.title"));
   const start = createElement(
     "button",
     { class: "ac-btn", type: "button", "data-testid": "diagnostics-start" },
@@ -86,7 +92,7 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
     t("diagnostics.cancel"),
   );
   cancel.hidden = true;
-  appendChildren(head, title, start, cancel);
+  appendChildren(head, start, cancel);
 
   const description = createElement("p", { class: "setting-desc" }, t("diagnostics.description"));
   // The answer first: one line, in the existing live status region.
@@ -122,7 +128,7 @@ export function createConnectionDiagnosticsPanel(signal: AbortSignal): {
   limits.details.appendChild(
     createElement("p", { class: "setting-desc" }, t("diagnostics.limitation")),
   );
-  appendChildren(element, head, description, summary, results, detail, micLabel, limits.details);
+  appendChildren(card, description, summary, results, detail, micLabel, limits.details);
 
   let attempt: AbortController | null = null;
   let detachSession: (() => void) | null = null;

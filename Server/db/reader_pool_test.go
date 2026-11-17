@@ -16,6 +16,7 @@ import (
 // max(8, 2×CPU), so a two-core host gets 8 rather than the old 4, and a
 // many-core host is still held to the documented 64 cap.
 func TestDefaultReaderConns_DoublesCPUWithFloorOfEight(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ cpus, want int }{
 		{1, 8},
 		{2, 8},
@@ -35,6 +36,7 @@ func TestDefaultReaderConns_DoublesCPUWithFloorOfEight(t *testing.T) {
 // handle. Zero (unset) follows the automatic size; an explicit value is
 // honoured up to the 64 clamp. The writer stays pinned at one connection.
 func TestOpenWithMaxReaders_HonoursExplicitClampAndDefault(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ maxReaders, want int }{
 		{0, defaultReaderConns(runtime.NumCPU())},
 		{1, 1},

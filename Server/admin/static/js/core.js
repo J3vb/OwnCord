@@ -399,6 +399,23 @@ document.getElementById('modal').addEventListener('keydown',e=>{
   else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
 });
 
+/* ═══ Letter avatars ═══ */
+/* A member's letter avatar colour, the same one the app gives them: this
+   mirrors pickAvatarColor in Client/src/features/profiles/avatar.ts (palette
+   and hash), and Client/tests/contract/server-admin-static-avatar.test.ts
+   fails if the two drift. Every colour keeps white initials at 4.5:1. */
+const AVATAR_COLORS=['#5865f2','#2e6db4','#00796b','#2f7d32','#8a6d00','#a35200','#c62828','#ad1457','#7b3fb3','#5c6b7a'];
+function avatarColor(name){
+  let h=0x811c9dc5;
+  for(let i=0;i<name.length;i++){h^=name.charCodeAt(i);h=Math.imul(h,0x01000193)}
+  h^=h>>>16;h=Math.imul(h,0x85ebca6b);h^=h>>>13;h=Math.imul(h,0xc2b2ae35);h^=h>>>16;
+  return AVATAR_COLORS[(h>>>0)%AVATAR_COLORS.length];
+}
+/** The letter avatar span for a username; the name beside it is the label. */
+function avatarHtml(name){
+  return '<span class="avatar" aria-hidden="true" style="background:'+avatarColor(name)+'">'+esc((name.charAt(0)||'?').toUpperCase())+'</span>';
+}
+
 /* ═══ Auth ═══ */
 function hideAll(){['setupOverlay','setupSuccessOverlay','loginOverlay'].forEach(id=>document.getElementById(id).classList.remove('visible'));document.getElementById('adminShell').classList.add('hidden')}
 function showOverlay(id){hideAll();if(id==='loginOverlay')resetLoginSteps();document.getElementById(id).classList.add('visible')}
@@ -537,7 +554,7 @@ function renderTopbar(){
   const ver=String(me.version||'');
   document.getElementById('topbarVersion').textContent=/^\d/.test(ver)?'v'+ver:ver;
   const name=me.username||'';
-  document.getElementById('userMenuBtn').innerHTML='<span class="avatar" aria-hidden="true" style="background:var(--accent)">'+esc(name.charAt(0).toUpperCase())+'</span>'
+  document.getElementById('userMenuBtn').innerHTML=avatarHtml(name)
     +'<span class="user-menu-who"><span class="user-menu-name">'+esc(name)+'</span><span class="user-menu-role">'+esc(me.role_name||'')+'</span></span>'+I.chevronDown;
   document.getElementById('userMenuBtn').setAttribute('aria-label','Account: '+name+(me.role_name?', '+me.role_name:''));
   document.getElementById('userMenu').innerHTML='<button class="user-menu-item danger" data-action="doLogout">'+I.logout+'<span>Sign out</span></button>';

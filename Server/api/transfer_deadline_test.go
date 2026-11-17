@@ -90,6 +90,7 @@ func (l smallSendBufferListener) Accept() (net.Conn, error) {
 // than it, must be accepted. Against the unfixed handler the whole-request read
 // deadline elapses mid-body and the upload fails.
 func TestUpload_SlowProgressingBodySurvivesRequestTimeout(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -129,6 +130,7 @@ func TestUpload_SlowProgressingBodySurvivesRequestTimeout(t *testing.T) {
 // on, must arrive whole. Against the unfixed handler the write deadline elapses
 // mid-copy and the body truncates silently.
 func TestServeFile_SlowProgressingClientSurvivesWriteTimeout(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -193,6 +195,7 @@ func TestServeFile_SlowProgressingClientSurvivesWriteTimeout(t *testing.T) {
 // finishes. The per-minute limiter is reset between phases so only the
 // in-flight cap can refuse.
 func TestUpload_ConcurrentUploadsPerUserCapped(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	limiter := auth.NewRateLimiter()

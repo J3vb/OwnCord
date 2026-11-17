@@ -79,8 +79,9 @@ export const beforeRenderSteps: readonly StartupStep[] = [
   {
     // The Android app's call helpers, each loaded on first use: the on-screen
     // talk button (it has no key to hold), the background call service (Android
-    // silences a background app's mic without one), and the camera pause while
-    // the app is in the background.
+    // silences a background app's mic without one), the camera pause while the
+    // app is in the background, and the call audio (where a call plays, and the
+    // pause while a phone call holds it).
     name: "androidCall",
     run: ({ log }) => {
       if (!isAndroidHost()) return;
@@ -93,6 +94,9 @@ export const beforeRenderSteps: readonly StartupStep[] = [
       void import("../features/voice/backgroundCamera")
         .then((m) => m.startBackgroundCamera(new Disposable().signal))
         .catch((e: unknown) => log.warn("Background camera pause failed to start", e));
+      void import("../features/voice/mobileRoutes")
+        .then((m) => m.startMobileRoutes(new Disposable().signal))
+        .catch((e: unknown) => log.warn("Call audio failed to start", e));
     },
   },
 ];

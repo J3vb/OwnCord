@@ -6,7 +6,9 @@ import * as logMock from "../helpers/loggerMock";
 // ---------------------------------------------------------------------------
 
 const {
-  mockPinnedToggle,
+  mockPinnedOpen,
+  mockPinnedIsOpen,
+  mockMediaCleanup,
   mockPinnedCleanup,
   mockPinnedCloseFor,
   mockSearchOpen,
@@ -15,7 +17,9 @@ const {
   mockVideoDestroy,
   mockJumpTo,
 } = vi.hoisted(() => ({
-  mockPinnedToggle: vi.fn(),
+  mockPinnedOpen: vi.fn(() => Promise.resolve()),
+  mockPinnedIsOpen: vi.fn(() => false),
+  mockMediaCleanup: vi.fn(),
   mockPinnedCleanup: vi.fn(),
   mockPinnedCloseFor: vi.fn(),
   mockSearchOpen: vi.fn(),
@@ -27,7 +31,7 @@ const {
 
 // The jumper itself is exercised in message-jump.test.ts; here we only care
 // that ChatArea wires every jump affordance into the same one.
-vi.mock("../../src/pages/main-page/MessageJump", () => ({
+vi.mock("../../src/features/messaging/MessageJump", () => ({
   createMessageJumper: vi.fn(() => ({ jumpTo: mockJumpTo })),
 }));
 
@@ -44,7 +48,8 @@ vi.mock("@lib/ui/toast", () => ({
 // Mock the OverlayManagers used by ChatArea
 vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
   createPinnedPanelController: vi.fn((_opts: unknown) => ({
-    toggle: mockPinnedToggle,
+    open: mockPinnedOpen,
+    isOpen: mockPinnedIsOpen,
     cleanup: mockPinnedCleanup,
     closeFor: mockPinnedCloseFor,
   })),
@@ -55,10 +60,11 @@ vi.mock("../../src/pages/main-page/OverlayManagers", () => ({
 }));
 
 // Mock VideoGrid
-vi.mock("../../src/pages/main-page/MediaGalleryController", () => ({
+vi.mock("../../src/features/messaging/MediaGalleryController", () => ({
   createMediaGalleryController: vi.fn(() => ({
-    toggle: vi.fn(() => Promise.resolve()),
-    cleanup: vi.fn(),
+    open: vi.fn(() => Promise.resolve()),
+    isOpen: () => false,
+    cleanup: mockMediaCleanup,
   })),
 }));
 
@@ -355,19 +361,20 @@ describe("createChatArea", () => {
   it("includes cleanup functions for the jump handler, the three controllers, the consent watch and the header", () => {
     const result = createChatArea(makeOptions());
 
-    // jump-handler unregister + pinned + media gallery + search + NSFW consent subscription + header More button
-    expect(result.unsubscribers.length).toBe(6);
+    // jump-handler unregister + the side panels (pins, threads, media) + search + NSFW consent subscription + header More button
+    expect(result.unsubscribers.length).toBe(5);
     for (const unsub of result.unsubscribers) {
       expect(typeof unsub).toBe("function");
     }
   });
 
-  it("unsubscribers call cleanup on pinned and search controllers", () => {
+  it("unsubscribers call cleanup on the side panels and the search controller", () => {
     const result = createChatArea(makeOptions());
 
     for (const unsub of result.unsubscribers) unsub();
 
     expect(mockPinnedCleanup).toHaveBeenCalledTimes(1);
+    expect(mockMediaCleanup).toHaveBeenCalledTimes(1);
     expect(mockSearchCleanup).toHaveBeenCalledTimes(1);
   });
 
@@ -445,13 +452,24 @@ describe("createChatArea", () => {
 
   // --- Pin button interaction ---
 
-  it("clicking pin button toggles the pinned panel controller", () => {
+  it("clicking pin button opens pins in the shared side panel, closing the others", () => {
     const result = createChatArea(makeOptions());
 
     const pinBtn = result.chatArea.querySelector("[data-testid='pin-btn']") as HTMLButtonElement;
     expect(pinBtn).not.toBeNull();
+    expect(pinBtn.getAttribute("aria-pressed")).toBe("false");
     pinBtn.click();
-    expect(mockPinnedToggle).toHaveBeenCalledTimes(1);
+    expect(mockPinnedOpen).toHaveBeenCalledTimes(1);
+    expect(mockMediaCleanup).toHaveBeenCalledTimes(1);
+    expect(mockPinnedCleanup).not.toHaveBeenCalled();
+  });
+
+  it("clicking the pin button of open pins closes them", () => {
+    const result = createChatArea(makeOptions());
+    mockPinnedIsOpen.mockReturnValueOnce(true);
+    result.chatArea.querySelector<HTMLButtonElement>("[data-testid='pin-btn']")!.click();
+    expect(mockPinnedCleanup).toHaveBeenCalledTimes(1);
+    expect(mockPinnedOpen).not.toHaveBeenCalled();
   });
 
   // --- Search input interaction ---

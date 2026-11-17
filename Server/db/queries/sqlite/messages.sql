@@ -25,7 +25,10 @@ ORDER BY m.id DESC LIMIT ?;
 -- another message, so no row comes back and the wrapper reports "cannot edit".
 -- A poll (WP 6.9b) is read-only too: an edit would change what people voted on.
 -- A sticker message (WP 8.8a) has no text of its own to edit.
-UPDATE messages SET content = ?, edited_at = datetime('now') WHERE id = ? AND deleted = 0 AND kind = 0
+-- Empty text is accepted only while the message still has an attachment, decided in the same statement
+-- as the write so a concurrent removal of the last file cannot leave an empty message.
+UPDATE messages SET content = sqlc.arg(content), edited_at = datetime('now') WHERE messages.id = sqlc.arg(id) AND deleted = 0 AND kind = 0
+  AND (sqlc.arg(content) <> '' OR EXISTS (SELECT 1 FROM attachments a WHERE a.message_id = messages.id))
   AND NOT EXISTS (SELECT 1 FROM message_forwards f WHERE f.message_id = messages.id)
   AND NOT EXISTS (SELECT 1 FROM polls p WHERE p.message_id = messages.id)
   AND NOT EXISTS (SELECT 1 FROM message_stickers s WHERE s.message_id = messages.id)

@@ -92,8 +92,8 @@ describe("member column CSS (3C-6b)", () => {
     );
   });
 
-  it("the pinned panel drops below the chat header, so the pin button can close it", () => {
-    expect(JSON.stringify(cascadedDeclaration(".pinned-panel", "top")?.value)).toContain(
+  it("the side panel drops below the chat header, so its button can close it", () => {
+    expect(JSON.stringify(cascadedDeclaration(".side-panel", "top")?.value)).toContain(
       "header-height",
     );
   });

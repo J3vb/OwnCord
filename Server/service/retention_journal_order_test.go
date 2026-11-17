@@ -49,6 +49,7 @@ func filesJSON(t *testing.T, raw []byte) []string {
 // names. RetentionBatch is 500; snapshotting as batch 1 returns must already
 // show all 500 names without a service-layer journal write.
 func TestRetention_TickJournalsEachBatchInDeleteTransaction(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	dir := t.TempDir()
@@ -108,6 +109,7 @@ func seedStaleMarkerBacklog(t *testing.T, database *db.DB, uid int64, n int) (ch
 // replay path rather than only through Tick, that a batch's files are
 // journaled in its own deletion transaction.
 func TestRetention_ReplayMarkersSweepsPastOneBudgetAndJournalsEachBatch(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	uid, _ := database.CreateUser(ctx, "backlog-owner", "hash", 1)

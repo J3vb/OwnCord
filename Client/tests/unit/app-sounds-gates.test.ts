@@ -71,6 +71,7 @@ describe("message and mention sounds", () => {
   it("plays a plain message with both switches on (the default)", () => {
     notifyIncomingMessage(payload());
     expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(playNotificationSound).toHaveBeenCalledWith(false);
   });
 
   it("is silent for a plain message when its own switch is off, group on", () => {
@@ -89,6 +90,7 @@ describe("message and mention sounds", () => {
     savePref("soundMessage", false);
     notifyIncomingMessage(payload({ content: "hi @everyone", mentions_everyone: true }));
     expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(playNotificationSound).toHaveBeenCalledWith(true);
   });
 
   it("silences a mention on the mention switch alone, and a message stays audible", () => {
@@ -105,6 +107,7 @@ describe("message and mention sounds", () => {
     savePref("soundMessage", false);
     notifyMention(5);
     expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(playNotificationSound).toHaveBeenCalledWith(true);
 
     playNotificationSound.mockClear();
     savePref("soundMention", false);
@@ -133,6 +136,7 @@ describe("message and mention sounds", () => {
     resetNotificationCoalescing();
     notifyChannelActivity(entry({ mentions_you: true }));
     expect(playNotificationSound).toHaveBeenCalledTimes(1);
+    expect(playNotificationSound).toHaveBeenCalledWith(true);
 
     playNotificationSound.mockClear();
     resetNotificationCoalescing();

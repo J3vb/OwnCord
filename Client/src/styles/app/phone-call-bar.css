@@ -98,6 +98,35 @@
     background: var(--danger-fill);
     color: var(--on-fill);
   }
+  /* A phone call holds the call (the Android app): the bar turns amber and a
+     second line says the call comes back by itself. */
+  .phone-call-bar--paused {
+    flex-wrap: wrap;
+    border-color: var(--yellow);
+    background: color-mix(in srgb, var(--yellow) 14%, var(--bg-secondary));
+  }
+  /* From nothing, so a long name cannot push Mute and Leave onto the hint's line. */
+  .phone-call-bar--paused .pcb-open {
+    flex-basis: 0;
+  }
+  /* Said in full: the reason matters more than one line. */
+  .phone-call-bar--paused .pcb-detail {
+    color: var(--text-warning);
+    white-space: normal;
+  }
+  .phone-call-bar--paused .pcb-mute {
+    background: color-mix(in srgb, var(--yellow) 22%, var(--bg-active));
+    color: var(--text-warning);
+  }
+  .pcb-hint {
+    flex: 1 0 100%;
+    padding: 0 4px 4px;
+    color: var(--text-warning);
+    font-size: var(--font-size-sm);
+  }
+  .pcb-hint[hidden] {
+    display: none;
+  }
 }
 
 /* features/voice/talkButton.ts: Push to Talk's hold-to-talk button, only ever
@@ -151,4 +180,16 @@
 .user-bar .ub-controls .talk-btn.talking {
   background: var(--success-fill);
   color: var(--on-fill);
+}
+
+/* features/voice/routeButton.ts: where the call plays (speaker, earpiece, a
+   headset), only ever built in the Android app, in the call view and the DM
+   call. It takes the button look of the bar it is in, and is lit while its
+   sheet is open. */
+.route-btn[hidden] {
+  display: none;
+}
+.route-btn[aria-expanded="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
 }

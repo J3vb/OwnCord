@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, afterEach } from "vitest";
+import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import * as mocks from "../../helpers/notificationsMocks";
 import { notifyIncomingMessage } from "../../../src/lib/notifications";
 import { cleanupNotificationAudio } from "../../../src/lib/media/notificationSound";
@@ -277,7 +277,11 @@ describe("notifyIncomingMessage", () => {
     });
   });
 
-  describe("playNotificationSound: oscillator params", () => {
+  describe("playNotificationSound: oscillator params (classic style)", () => {
+    beforeEach(() => {
+      testPrefs.set("soundStyle", "classic");
+    });
+
     it("sets frequency to 800 then 600", () => {
       mockOscillator.frequency.setValueAtTime.mockClear();
       mockGain.gain.setValueAtTime.mockClear();
@@ -311,8 +315,53 @@ describe("notifyIncomingMessage", () => {
       setAlertPrefs(false, false, true);
       notifyIncomingMessage(makePayload());
 
+      expect(mockOscillator.start).toHaveBeenCalledTimes(1);
       expect(mockOscillator.start).toHaveBeenCalledWith(0);
       expect(mockOscillator.stop).toHaveBeenCalledWith(0.2);
+    });
+  });
+
+  describe("playNotificationSound: oscillator params (modern style)", () => {
+    it("glides the bubble up from 420 Hz to 860 Hz with an octave above it", () => {
+      mockOscillator.frequency.setValueAtTime.mockClear();
+      mockOscillator.frequency.exponentialRampToValueAtTime.mockClear();
+      mockOscillator.start.mockClear();
+
+      setAlertPrefs(false, false, true);
+      notifyIncomingMessage(makePayload());
+
+      expect(mockOscillator.start).toHaveBeenCalledTimes(2);
+      expect(mockOscillator.frequency.setValueAtTime.mock.calls).toEqual([
+        [420, 0],
+        [840, 0],
+      ]);
+      expect(mockOscillator.frequency.exponentialRampToValueAtTime.mock.calls).toEqual([
+        [860, 0.07],
+        [1720, 0.07],
+      ]);
+    });
+
+    it("rises over the attack, decays, then releases to silence", () => {
+      mockGain.gain.setValueAtTime.mockClear();
+      mockGain.gain.linearRampToValueAtTime.mockClear();
+      mockGain.gain.exponentialRampToValueAtTime.mockClear();
+      mockOscillator.stop.mockClear();
+
+      setAlertPrefs(false, false, true);
+      notifyIncomingMessage(makePayload());
+
+      const first = mockGain.gain.linearRampToValueAtTime.mock.calls.slice(0, 2);
+      expect(mockGain.gain.setValueAtTime).toHaveBeenNthCalledWith(1, 0, 0);
+      expect(first).toEqual([
+        [0.42, 0.004],
+        [0, 0.16 + 0.008],
+      ]);
+      expect(mockGain.gain.exponentialRampToValueAtTime).toHaveBeenNthCalledWith(
+        1,
+        0.42 * 0.001,
+        0.16,
+      );
+      expect(mockOscillator.stop).toHaveBeenNthCalledWith(1, 0.16 + 0.008);
     });
 
     it("connects oscillator -> gain -> destination", () => {

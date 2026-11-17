@@ -24,6 +24,7 @@ import {
   rightClickMember,
   topMenuLabels,
 } from "../../helpers/memberListHarness";
+import { menuRowLabel } from "../../helpers/menuRowLabel";
 
 describe("MemberList full context menu (3C-3)", () => {
   let container: HTMLDivElement;
@@ -431,8 +432,8 @@ describe("MemberList rows update in place (3C-4a)", () => {
     const menuLabels = async (): Promise<(string | null | undefined)[]> => {
       row(7).dispatchEvent(new MouseEvent("contextmenu", { bubbles: true }));
       await vi.dynamicImportSettled();
-      return Array.from(document.body.querySelectorAll(".context-menu__item")).map(
-        (el) => el.firstChild?.textContent,
+      return Array.from(document.body.querySelectorAll(".context-menu__item")).map((el) =>
+        menuRowLabel(el),
       );
     };
     expect(await menuLabels()).toContain("Force Logout");

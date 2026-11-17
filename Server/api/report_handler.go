@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"time"
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/httperr"
@@ -20,6 +21,9 @@ type ModQueueBroadcaster interface {
 	BroadcastMemberBan(userID int64)
 	BroadcastChatBulkDeleted(channelID int64, messageIDs []int64)
 }
+
+// reportPostStoreTimeout bounds the id lookup that follows a stored report.
+const reportPostStoreTimeout = 5 * time.Second
 
 type fileReportRequest struct {
 	TargetType string `json:"target_type"`
@@ -74,9 +78,12 @@ func handleFileReport(svc *service.Services, hub ModQueueBroadcaster) http.Handl
 		if hub != nil {
 			hub.BroadcastModQueue(context.WithoutCancel(r.Context()), id, "open")
 		}
-		publicID, err := svc.Reports.PublicIDFor(r.Context(), id)
+		// The report is stored and announced: resolving its public id must outlive the request deadline.
+		tailCtx, cancel := context.WithTimeout(context.WithoutCancel(r.Context()), reportPostStoreTimeout)
+		defer cancel()
+		publicID, err := svc.Reports.PublicIDFor(tailCtx, id)
 		if err != nil {
-			writeReportServiceError(r.Context(), w, err)
+			writeReportServiceError(tailCtx, w, err)
 			return
 		}
 		writeJSON(w, http.StatusCreated, map[string]string{"id": publicID})

@@ -10,6 +10,7 @@ import (
 // wraps the driver's error with its own name once the handle is closed, rather
 // than panicking or returning an empty result as if nothing matched.
 func TestMentionQueries_ReportClosedDatabaseErrors(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	mustDo(t, "Close", database.Close())
 	ctx := context.Background()

@@ -37,7 +37,7 @@ describe("NotificationsTab — notification level", () => {
     expect(group).not.toBeNull();
     const options = [...group.querySelectorAll<HTMLElement>("[role='radio']")];
     expect(options.map((o) => o.textContent)).toEqual([
-      "All Messages",
+      "All messages",
       "Only @mentions",
       "Nothing",
     ]);
@@ -66,7 +66,7 @@ describe("NotificationsTab — incoming call sound", () => {
   it("is on by default and saves its own preference, apart from message sounds", () => {
     const tab = build();
     const toggle = tab.querySelector<HTMLElement>(
-      "[role='switch'][aria-label='Incoming Call Sound']",
+      "[role='switch'][aria-label='Incoming call sound']",
     )!;
     expect(toggle).not.toBeNull();
     expect(toggle.getAttribute("aria-checked")).toBe("true");

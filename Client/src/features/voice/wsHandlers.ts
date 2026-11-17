@@ -33,6 +33,7 @@ import { membersStore, memberDisplayName } from "../../stores/members.store";
 import { livekitSession, cancelVoiceRejoin, log, route } from "../connection/dispatchContext";
 import type { DispatchWs, Payload, ReconnectClock, WsRoute } from "../connection/dispatchContext";
 import { connectText } from "../../i18n/connect";
+import { clearRequestPending } from "../direct-messages/pendingRequests";
 import { WsErrorCode, ServerMessageType as S } from "@lib/protocolTypes";
 
 export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">): void {
@@ -46,7 +47,11 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   const prevServerMuted = isSelf ? (voiceStore.getState().localServerMuted ?? false) : false;
   const prevServerDeafened = isSelf ? (voiceStore.getState().localServerDeafened ?? false) : false;
   updateVoiceState(payload);
-  if (!isSelf) return;
+  if (!isSelf) {
+    // The other person in the DM's call: they accepted this user's request.
+    clearRequestPending(payload.channel_id);
+    return;
+  }
   // A self row while this device holds no call is another device's call (one
   // account, one call, one device): the roster is updated, nothing else. This
   // device's own join moves voiceStatus off "idle" before the server's answer.

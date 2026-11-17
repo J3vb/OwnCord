@@ -18,6 +18,7 @@ import (
 // The closing subtest runs the detail denylist over the recorded corpus
 // (plan docs/archive/plans/b2-protocol-trust-compat-2026-08-28.md § B2-6).
 func TestAuditCoverage_APIMutations(t *testing.T) {
+	t.Parallel()
 	const password = "Password1!"
 
 	// enrolTOTP runs enable+confirm for token and returns the TOTP secret

@@ -37,9 +37,9 @@ func (s *messageRemoval) PurgeMessages(ctx context.Context, userID, channelID in
 		limit = maxPurgeLimit
 	}
 
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return nil, fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, s.st, channelID)
+	if err != nil {
+		return nil, err
 	}
 	if ch.Type == "dm" {
 		return nil, fmt.Errorf("%w: bulk delete is not available in direct messages", ErrForbidden)

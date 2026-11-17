@@ -81,7 +81,7 @@ gates only Send (and a picked GIF), leaving the draft editable. A
 refused Send shows the reason on the composer's refusal line (linked by
 `aria-describedby`, kept current as the slow-mode countdown ticks).
 
-**Chat bar buttons (user setting).** Settings → Text & Images has one switch
+**Chat bar buttons (user setting).** Settings → Text & images has one switch
 each for the emoji, sticker, GIF, Poll and voice-message buttons
 (`features/messaging/composerButtons.ts`, local prefs `composerShow*`, all on
 by default). A switch hides its button in every open composer at once through
@@ -357,7 +357,7 @@ survives a reconnect or a REST reload of the DM list instead of resetting to 0.
 Every affordance that can jump — a search hit, a pinned entry, the quoted
 reply bar above a reply, an `owncord://message/…` permalink pasted into chat or
 opened from the OS, a clicked message notification — goes through one path
-(`lib/nav/messageNavigation.ts` registry → `main-page/MessageJump.ts`), so they
+(`lib/nav/messageNavigation.ts` registry → `features/messaging/MessageJump.ts`), so they
 behave identically. A reply never groups into the previous message, so it
 always keeps its quoted-parent header (`shouldGroup`).
 
@@ -498,7 +498,7 @@ the same signal in future.
 
 `src/features/messaging/MessageList.ts` (+ `message-list/`), `src/features/messaging/MessageInput.ts` (+ `composer/`, `src/features/messaging/attachSheet.ts`),
 `src/pages/main-page/ChannelController.ts`,
-`src/pages/main-page/MessageController.ts`, `src/pages/main-page/ReactionController.ts`,
+`src/features/messaging/MessageController.ts`, `src/features/messaging/ReactionController.ts`,
 `src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/lib/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,
 `src/features/navigation/SearchOverlay.ts`, `src/features/messaging/PinnedMessages.ts`,
 `src/features/messaging/composer/MentionAutocomplete.ts`, `src/lib/text/mentions.ts`,

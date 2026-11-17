@@ -26,13 +26,19 @@ import { createElement } from "@lib/dom";
 import { avatarInitial, resolveDisplayName, type AvatarSubject } from "@lib/ui/avatar";
 import { animatedStill, bindAnimatedImage, type AnimationMode } from "@lib/ui/animatedStill";
 import {
-  fetchImageAsObjectUrl,
   hasCachedImage,
   isSafeUrl,
   cachedImageBytes,
+  isAnimatedThumb,
   recoverEvictedImage,
   resolveServerUrl,
 } from "../messaging/content/attachments";
+import {
+  avatarFetchUrl,
+  fetchAvatarObjectUrl,
+  playOriginalOnEngage,
+  type AvatarThumbSize,
+} from "./avatarSource";
 
 export interface AvatarOptions {
   /** Class applied to the wrapper — each surface keeps its own sizing rules. */
@@ -55,6 +61,12 @@ export interface AvatarOptions {
    * (`"always"`: the profile popup). Never under reduced motion.
    */
   readonly animate?: "hover" | "always";
+  /**
+   * Which of the server's small previews of an uploaded avatar to fetch: 128 px
+   * for list rows (the default), 256 px for profile cards and popups. An external
+   * or data: avatar is fetched as it is.
+   */
+  readonly thumbSize?: AvatarThumbSize;
 }
 
 /** The rows whose hover plays an animated avatar inside them, as on Discord:
@@ -90,6 +102,9 @@ export function avatarAnimationMode(
  * that plays per `mode` when animated. Resolves once `src` is set, so an
  * image inserted after it never flashes the animation; resolves false (and
  * sets nothing) when `stillCurrent` says the picture changed meanwhile.
+ * `originalUrl` is the avatar's own URL when `objectUrl` came from its small
+ * preview: the preview of an animated one stays a still, and the original
+ * plays once `mode` engages.
  */
 export async function setAvatarSource(
   img: HTMLImageElement,
@@ -97,7 +112,14 @@ export async function setAvatarSource(
   mode: () => AnimationMode,
   stillCurrent: () => boolean = () => true,
   maxSide = AVATAR_STILL_SIDE,
+  originalUrl?: string,
 ): Promise<boolean> {
+  if (originalUrl !== undefined && isAnimatedThumb(objectUrl)) {
+    if (!stillCurrent()) return false;
+    img.src = objectUrl;
+    playOriginalOnEngage(img, objectUrl, originalUrl, mode(), stillCurrent);
+    return true;
+  }
   const still = await avatarStill(objectUrl, maxSide);
   if (!stillCurrent()) return false;
   if (still === null) img.src = objectUrl;
@@ -251,16 +273,37 @@ export function isRenderableAvatar(url: string | null | undefined): url is strin
   return isSafeUrl(resolveServerUrl(url));
 }
 
-const AVATAR_COLORS = ["#5865f2", "#57f287", "#fee75c", "#eb459e", "#ed4245"];
+/** Ten distinct hues, each dark enough for white (--on-fill) initials at
+ *  4.5:1 or better. The server admin panel's core.js mirrors this list and
+ *  the hash below; tests/helpers/avatarColorSamples.ts pins both. */
+export const AVATAR_COLORS: readonly string[] = [
+  "#5865f2",
+  "#2e6db4",
+  "#00796b",
+  "#2f7d32",
+  "#8a6d00",
+  "#a35200",
+  "#c62828",
+  "#ad1457",
+  "#7b3fb3",
+  "#5c6b7a",
+];
 
-/** The letter fallback's background: one of five colours, stable per
- *  username, so the member list, chat, voice roster and call view agree. */
+/** The letter fallback's background, stable per username, so every surface
+ *  agrees. FNV-1a with a final avalanche spreads short, similar names
+ *  ("user1", "user2") across the whole palette. */
 export function pickAvatarColor(username: string): string {
-  let hash = 0;
+  let hash = 0x811c9dc5;
   for (let i = 0; i < username.length; i++) {
-    hash = (hash * 31 + username.charCodeAt(i)) | 0;
+    hash ^= username.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
   }
-  return AVATAR_COLORS[Math.abs(hash) % AVATAR_COLORS.length] ?? "#5865f2";
+  hash ^= hash >>> 16;
+  hash = Math.imul(hash, 0x85ebca6b);
+  hash ^= hash >>> 13;
+  hash = Math.imul(hash, 0xc2b2ae35);
+  hash ^= hash >>> 16;
+  return AVATAR_COLORS[(hash >>> 0) % AVATAR_COLORS.length] ?? "#5865f2";
 }
 
 /**
@@ -289,20 +332,27 @@ export function createAvatarElement(
   }
 
   const resolved = resolveServerUrl(subject.avatar);
-  const bindAnimationOnFirstUse = (
-    img: HTMLImageElement,
-    objectUrl: string,
-    still: string,
-  ): void => {
+  const thumbSize = options.thumbSize ?? 128;
+  const fetchUrl = avatarFetchUrl(resolved, thumbSize);
+  const bindOnFirstUse = (bindNow: () => void): void => {
     const bind = (): void => {
       if (!wrapper.isConnected) return;
       wrapper.removeEventListener("pointerenter", bind);
       wrapper.removeEventListener("focusin", bind);
       // Binding checks the hover and focus already on it, so it starts playing.
-      bindAnimatedImage(img, objectUrl, still, avatarAnimationMode(wrapper, options.animate));
+      bindNow();
     };
     wrapper.addEventListener("pointerenter", bind);
     wrapper.addEventListener("focusin", bind);
+  };
+  const mode = (): AnimationMode => avatarAnimationMode(wrapper, options.animate);
+  // The server's preview of an animated avatar is its still: the original is
+  // fetched, when its row is pointed at, to play over it.
+  const showStillOfAnimated = (img: HTMLImageElement, objectUrl: string): void => {
+    img.src = objectUrl;
+    const shown = (): boolean => img.parentNode === wrapper;
+    if (wrapper.isConnected) playOriginalOnEngage(img, objectUrl, resolved, mode(), shown);
+    else bindOnFirstUse(() => playOriginalOnEngage(img, objectUrl, resolved, mode(), shown));
   };
 
   const swapInImage = (objectUrl: string | null): Promise<void> | undefined => {
@@ -313,18 +363,25 @@ export function createAvatarElement(
       loading: "lazy",
       decoding: "async",
     });
-    recoverEvictedImage(img, { url: resolved });
+    recoverEvictedImage(img, { url: fetchUrl });
+    if (isAnimatedThumb(objectUrl)) {
+      showStillOfAnimated(img, objectUrl);
+      letter.remove();
+      wrapper.style.background = "transparent";
+      wrapper.insertBefore(img, wrapper.firstChild);
+      return undefined;
+    }
     return avatarStill(objectUrl).then((still) => {
       if (still === null) img.src = objectUrl;
       else if (wrapper.isConnected) {
-        bindAnimatedImage(img, objectUrl, still, avatarAnimationMode(wrapper, options.animate));
+        bindAnimatedImage(img, objectUrl, still, mode());
       } else {
         // Not on screen: a host may build the avatar ahead of showing it (a
         // call tile kept for when the camera goes off), or the row was torn
         // down. Show the first frame either way, and bind the animation only
         // once someone points at it, so a discarded avatar holds no observer.
         img.src = still;
-        bindAnimationOnFirstUse(img, objectUrl, still);
+        bindOnFirstUse(() => bindAnimatedImage(img, objectUrl, still, mode()));
       }
       // Replacing rather than hiding keeps the letter out of the accessibility
       // tree once a real picture is there.
@@ -335,17 +392,17 @@ export function createAvatarElement(
   };
 
   if (options.deferUntilVisible !== true) {
-    void fetchImageAsObjectUrl(resolved).then(swapInImage);
+    void fetchAvatarObjectUrl(resolved, thumbSize).then(swapInImage);
     return wrapper;
   }
 
   whenVisible(wrapper, {
-    cached: () => hasCachedImage(resolved),
+    cached: () => hasCachedImage(fetchUrl),
     start: () => {
       enqueueFetch(() => {
         // Queued behind the cap, the row may be gone by the time it is its turn.
         if (!wrapper.isConnected) return Promise.resolve();
-        return fetchImageAsObjectUrl(resolved).then(swapInImage);
+        return fetchAvatarObjectUrl(resolved, thumbSize).then(swapInImage);
       });
     },
   });

@@ -162,7 +162,7 @@ func (d *DB) WarnUser(ctx context.Context, targetID, actorID int64, reportID *in
 	if err != nil {
 		return 0, fmt.Errorf("WarnUser begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	id, err := recordModerationAction(ctx, tx, "warning", targetID, actorID, reportID, reason, nil)
 	if err != nil {
 		return 0, err
@@ -184,7 +184,7 @@ func (d *DB) TimeoutUser(ctx context.Context, targetID, actorID int64, reportID 
 	if err != nil {
 		return 0, nil, fmt.Errorf("TimeoutUser begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	// SQLiteLayout, not ISOLayout: other timestamps here come from datetime('now') and compare as text.
 	expires := expiresAt.UTC().Format(dbtime.SQLiteLayout)
 	id, err = recordModerationAction(ctx, tx, "timeout", targetID, actorID, reportID, reason, &expires)
@@ -229,7 +229,7 @@ func (d *DB) LiftTimeout(ctx context.Context, targetID, actorID int64) (liftedID
 	if err != nil {
 		return nil, fmt.Errorf("LiftTimeout begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	if !strictlyOutranks(ctx, tx, actorID, targetID) {
 		return nil, ErrOutranked
@@ -356,7 +356,7 @@ func (d *DB) BanUserWithAction(ctx context.Context, targetID int64, reason strin
 	if err != nil {
 		return 0, fmt.Errorf("BanUserWithAction begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	var expiresStr *string
 	if expires != nil {
@@ -386,7 +386,7 @@ func (d *DB) ForceLogoutWithAction(ctx context.Context, targetID, actorID int64,
 	if err != nil {
 		return 0, fmt.Errorf("ForceLogoutWithAction begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	if reason == "" {
 		reason = "all sessions terminated"
 	}

@@ -38,6 +38,7 @@ export const ServerMessageType = {
   CHAT_BULK_DELETED: "chat_bulk_deleted",
   REACTION_UPDATE: "reaction_update",
   POLL_UPDATE: "poll_update", // a poll's full counts and version after a vote or its end (WP 6.9b)
+  MESSAGE_LINK_PREVIEWS: "message_link_previews", // the link preview cards the server built for a message after it was sent or edited; an empty list removes them
   TYPING: "typing",
   PRESENCE: "presence",
   PRESENCE_BATCH: "presence_batch", // many users' presence in one frame: the connect/disconnect coalescing window, or a full snapshot for a client whose queue dropped presence
@@ -236,6 +237,12 @@ export const RestErrorCode = {
   PLUGINS_DISABLED: "PLUGINS_DISABLED",
   PREVIEW_EXPIRED: "PREVIEW_EXPIRED",
   PUSH_DISABLED: "PUSH_DISABLED",
+  // The push server a device registered is on a private, loopback or otherwise
+  // non-public address; OwnCord only sends to public push servers.
+  PUSH_SERVER_NOT_PUBLIC: "PUSH_SERVER_NOT_PUBLIC",
+  // The push server a device registered uses a port other than 443; OwnCord
+  // only sends to push servers on the standard HTTPS port.
+  PUSH_SERVER_PORT_NOT_SUPPORTED: "PUSH_SERVER_PORT_NOT_SUPPORTED",
   RATE_LIMITED: "RATE_LIMITED",
   // Account recovery set the new password and spent the recovery secret, but
   // no session could be started; sign in with the new password instead of

@@ -29,10 +29,10 @@ import { markAllRead } from "@lib/readState";
 import { onChannelReselect, stepChannel } from "@lib/nav/channelNavigation";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { setAudioVolumeHost } from "@lib/voice/audioElements";
-import { attachGlobalKeybinds } from "./main-page/GlobalKeybinds";
+import { attachGlobalKeybinds } from "../features/settings/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
-import { createMessageController } from "./main-page/MessageController";
-import { createReactionController } from "./main-page/ReactionController";
+import { createMessageController } from "../features/messaging/MessageController";
+import { createReactionController } from "../features/messaging/ReactionController";
 import { createChannelController } from "./main-page/ChannelController";
 import { log, resolveChannelName, getCurrentUserId } from "./main-page/pageShared";
 import type { PageState, PageApi } from "./main-page/pageState";
@@ -281,9 +281,8 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
       onContentGated: closeActiveLightbox,
       focusFallback: ms.focusReachable,
       onJoinCall: pg.joinDmCall,
-      onOpenPins: () => {
-        void ms.chatAreaResult.openPinnedPanel();
-      },
+      onOpenPins: () => void ms.chatAreaResult.openPinnedPanel(),
+      onOpenThreadList: () => void ms.chatAreaResult.openThreadList(),
     });
 
     // Wire voice error callback to toast

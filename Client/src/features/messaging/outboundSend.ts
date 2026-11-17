@@ -19,6 +19,7 @@ import {
   savePendingText,
 } from "@lib/pendingMessages";
 import { WsErrorCode } from "@lib/protocolTypes";
+import { serverNow } from "@lib/net/serverClock";
 import type { SentAttachment } from "./MessageInput";
 import type {
   ChannelState,
@@ -209,7 +210,10 @@ function sendNow(st: ChannelState, cc: ChannelApi, ms: MountScope, plan: SendPla
     cc.clearSendTimer(cid);
     if (
       (ms.session === undefined || ms.session.isCurrent()) &&
-      st.getCurrentUserId() === ms.owner.userId
+      st.getCurrentUserId() === ms.owner.userId &&
+      getChannelMessages(ms.channelId).some(
+        (m) => m.correlationId === cid && m.status === "pending",
+      )
     ) {
       markSendFailed(cid, "UNCONFIRMED");
     }
@@ -277,7 +281,7 @@ export function resolveRetryDraft(st: ChannelState, ms: MountScope, correlationI
 /** Why a retry must not go, as a toast; null when it may. */
 export function retryRefusal(ms: MountScope, clientMessageId: string | undefined): string | null {
   if (!clientMessageId) return null;
-  if (pendingMessageExpired(clientMessageId, Date.now(), pendingMessageRetryFloor(ms.owner))) {
+  if (pendingMessageExpired(clientMessageId, serverNow(), pendingMessageRetryFloor(ms.owner))) {
     return messagingText("toast.retryExpired");
   }
   if (!supportsMessageDeduplication(ms.owner)) return messagingText("toast.retryUnsupported");

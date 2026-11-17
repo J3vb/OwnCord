@@ -170,6 +170,8 @@ export const moderationText = defineCatalog("moderation", {
     one: "{name} is banned. Only {count} message was deleted before the dialog closed.",
     other: "{name} is banned. Only {count} messages were deleted before the dialog closed.",
   },
+  "banDialog.unconfirmed":
+    "Could not confirm that {name} was banned. Check the member list before trying again.",
   "nicknameDialog.title": "Change nickname for {name}",
   "nicknameDialog.body":
     "Everyone on this server will see this name instead of their own. Leave it empty or use Reset to remove it.",
@@ -180,6 +182,15 @@ export const moderationText = defineCatalog("moderation", {
   "nicknameDialog.tooLong": "A nickname can have at most {max} characters.",
   "nicknameDialog.changed": "Changed the nickname of {username}.",
   "nicknameDialog.cleared": "Removed the nickname of {username}.",
+  "warnDialog.title": "Warn {name}",
+  "warnDialog.body": "The member sees this warning in their moderation record.",
+  "warnDialog.label": "Reason",
+  "warnDialog.send": "Send warning",
+  "warnDialog.sending": "Sending...",
+  "warnDialog.required": "Write a reason: a warning without one tells the member nothing.",
+  "warnDialog.tooLong": "A reason can have at most {max} characters.",
+  "warnDialog.failed": "Could not send the warning. Try again.",
+  "warnDialog.warned": "Warned {username}.",
   "banDialog.retryExpired":
     "Too much time has passed to continue the deletion. Check the fields and ban again.",
   "banDialog.purgeUnsupported":

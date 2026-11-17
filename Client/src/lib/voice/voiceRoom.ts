@@ -28,6 +28,8 @@ export interface VoiceCapturedTrack {
 
 export interface VoiceLocalPublication {
   readonly trackSid: string;
+  /** The name the track was published under (a music share's is "music"). */
+  readonly trackName?: string;
   readonly source: string;
   readonly kind: string;
   readonly isMuted: boolean;
@@ -75,6 +77,8 @@ export interface VoiceRemoteTrack {
 
 export interface VoiceRemotePublication {
   readonly trackSid: string;
+  /** The name the track was published under (a music share's is "music"). */
+  readonly trackName?: string;
   readonly source: string;
   readonly kind: string;
   readonly isSubscribed: boolean;
@@ -97,6 +101,27 @@ export interface VoiceRemoteParticipant {
   getTrackPublication(source: string): VoiceRemotePublication | undefined;
   getVolume(): number | undefined;
   setVolume(volume: number): void;
+}
+
+/** A room whose host publishes the music share itself (the Linux native
+ *  room). Found by capability, never by platform: `nativeMusicOf`. */
+export interface NativeMusicRoom {
+  /** Publish app `appId` as the music track; resolves with its sid. */
+  startMusic(appId: string): Promise<string>;
+  /** Stop the music share; nothing running is a no-op. */
+  stopMusic(): Promise<void>;
+  /** `listener` runs when the host withdraws the published track. Returns
+   *  the unsubscribe. */
+  onMusicEnded(listener: () => void): () => void;
+}
+
+/** `room`'s native music capability, or null for a room that has none. */
+export function nativeMusicOf(room: VoiceRoom | null): NativeMusicRoom | null {
+  return room !== null && isNativeMusicRoom(room) ? room : null;
+}
+
+function isNativeMusicRoom(room: VoiceRoom): room is VoiceRoom & NativeMusicRoom {
+  return "startMusic" in room && "stopMusic" in room && "onMusicEnded" in room;
 }
 
 /** A transport's stats report: entries by id. */

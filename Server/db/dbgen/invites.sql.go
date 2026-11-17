@@ -78,6 +78,99 @@ func (q *Queries) GetInvite(ctx context.Context, code string) (GetInviteRow, err
 	return i, err
 }
 
+const getInviteByID = `-- name: GetInviteByID :one
+SELECT id, code, created_by, max_uses, use_count, expires_at, revoked, created_at
+FROM invites WHERE id = ?
+`
+
+type GetInviteByIDRow struct {
+	ID        int64   `json:"id"`
+	Code      string  `json:"code"`
+	CreatedBy int64   `json:"createdBy"`
+	MaxUses   *int64  `json:"maxUses"`
+	UseCount  int64   `json:"useCount"`
+	ExpiresAt *string `json:"expiresAt"`
+	Revoked   int64   `json:"revoked"`
+	CreatedAt string  `json:"createdAt"`
+}
+
+func (q *Queries) GetInviteByID(ctx context.Context, id int64) (GetInviteByIDRow, error) {
+	row := q.db.QueryRowContext(ctx, getInviteByID, id)
+	var i GetInviteByIDRow
+	err := row.Scan(
+		&i.ID,
+		&i.Code,
+		&i.CreatedBy,
+		&i.MaxUses,
+		&i.UseCount,
+		&i.ExpiresAt,
+		&i.Revoked,
+		&i.CreatedAt,
+	)
+	return i, err
+}
+
+const listDeadInvites = `-- name: ListDeadInvites :many
+SELECT i.id, i.code, i.created_by, COALESCE(u.username, '') AS creator_username,
+       i.max_uses, i.use_count, i.expires_at, i.revoked, i.created_at
+FROM invites i LEFT JOIN users u ON u.id = i.created_by
+WHERE COALESCE(i.revoked = 0
+        AND (i.max_uses IS NULL OR i.use_count < i.max_uses)
+        AND (i.expires_at IS NULL OR strftime('%s', i.expires_at) > strftime('%s', 'now')), 0) = 0
+  AND (?1 = 0 OR i.id < ?1)
+ORDER BY i.id DESC LIMIT ?2
+`
+
+type ListDeadInvitesParams struct {
+	BeforeID interface{} `json:"beforeId"`
+	RowLimit int64       `json:"rowLimit"`
+}
+
+type ListDeadInvitesRow struct {
+	ID              int64   `json:"id"`
+	Code            string  `json:"code"`
+	CreatedBy       int64   `json:"createdBy"`
+	CreatorUsername string  `json:"creatorUsername"`
+	MaxUses         *int64  `json:"maxUses"`
+	UseCount        int64   `json:"useCount"`
+	ExpiresAt       *string `json:"expiresAt"`
+	Revoked         int64   `json:"revoked"`
+	CreatedAt       string  `json:"createdAt"`
+}
+
+func (q *Queries) ListDeadInvites(ctx context.Context, arg ListDeadInvitesParams) ([]ListDeadInvitesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listDeadInvites, arg.BeforeID, arg.RowLimit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListDeadInvitesRow{}
+	for rows.Next() {
+		var i ListDeadInvitesRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Code,
+			&i.CreatedBy,
+			&i.CreatorUsername,
+			&i.MaxUses,
+			&i.UseCount,
+			&i.ExpiresAt,
+			&i.Revoked,
+			&i.CreatedAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Close(); err != nil {
+		return nil, err
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const listInviteRedemptions = `-- name: ListInviteRedemptions :many
 SELECT r.id, r.user_id, COALESCE(u.username, '') AS username, r.redeemed_at
 FROM invite_redemptions r
@@ -128,14 +221,23 @@ func (q *Queries) ListInviteRedemptions(ctx context.Context, arg ListInviteRedem
 	return items, nil
 }
 
-const listInvites = `-- name: ListInvites :many
+const listLiveInvites = `-- name: ListLiveInvites :many
 SELECT i.id, i.code, i.created_by, COALESCE(u.username, '') AS creator_username,
        i.max_uses, i.use_count, i.expires_at, i.revoked, i.created_at
 FROM invites i LEFT JOIN users u ON u.id = i.created_by
-ORDER BY i.created_at DESC LIMIT 200
+WHERE COALESCE(i.revoked = 0
+        AND (i.max_uses IS NULL OR i.use_count < i.max_uses)
+        AND (i.expires_at IS NULL OR strftime('%s', i.expires_at) > strftime('%s', 'now')), 0) = 1
+  AND (?1 = 0 OR i.id < ?1)
+ORDER BY i.id DESC LIMIT ?2
 `
 
-type ListInvitesRow struct {
+type ListLiveInvitesParams struct {
+	BeforeID interface{} `json:"beforeId"`
+	RowLimit int64       `json:"rowLimit"`
+}
+
+type ListLiveInvitesRow struct {
 	ID              int64   `json:"id"`
 	Code            string  `json:"code"`
 	CreatedBy       int64   `json:"createdBy"`
@@ -147,15 +249,17 @@ type ListInvitesRow struct {
 	CreatedAt       string  `json:"createdAt"`
 }
 
-func (q *Queries) ListInvites(ctx context.Context) ([]ListInvitesRow, error) {
-	rows, err := q.db.QueryContext(ctx, listInvites)
+// Live = what UseInviteAtomic would still accept. An unparseable expiry counts as dead.
+// before_id = 0 starts from the newest.
+func (q *Queries) ListLiveInvites(ctx context.Context, arg ListLiveInvitesParams) ([]ListLiveInvitesRow, error) {
+	rows, err := q.db.QueryContext(ctx, listLiveInvites, arg.BeforeID, arg.RowLimit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	items := []ListInvitesRow{}
+	items := []ListLiveInvitesRow{}
 	for rows.Next() {
-		var i ListInvitesRow
+		var i ListLiveInvitesRow
 		if err := rows.Scan(
 			&i.ID,
 			&i.Code,

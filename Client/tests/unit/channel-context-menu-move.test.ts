@@ -54,6 +54,14 @@ function openMove(
   contextMenuAt4(el);
 }
 
+/** Move Down on the first of `rows`; returns the reorder callback. */
+function moveFirstDown(rows: readonly Channel[]) {
+  const onReorder = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
+  openMove(rows, rows[0]!, onReorder);
+  (document.querySelector('[data-testid="ctx-move-down"]') as HTMLElement).click();
+  return onReorder;
+}
+
 describe("channel context menu - Move Up / Move Down", () => {
   it("emits entries that carry each channel's previous position", () => {
     const rows = [channel(1, 0), channel(2, 3), channel(3, 6)];
@@ -70,16 +78,29 @@ describe("channel context menu - Move Up / Move Down", () => {
   });
 
   it("records the pre-nudge position when tied positions are nudged apart", () => {
-    const rows = [channel(1, 0), channel(2, 0)];
+    const onReorder = moveFirstDown([channel(1, 0), channel(2, 0)]);
+
+    expect(onReorder).toHaveBeenCalledWith([{ channelId: 1, newPosition: 1, previousPosition: 0 }]);
+  });
+
+  it("moves one place among three rows that share a position", () => {
+    moveFirstDown([channel(1, 0), channel(2, 0), channel(3, 0)]);
+
+    const positions = (id: number): number | undefined =>
+      channelsStore.getState().channels.get(id)?.position;
+    expect([positions(2), positions(1), positions(3)]).toEqual([0, 1, 2]);
+  });
+
+  it("moves the last of three tied rows up by one place, without a negative position", () => {
+    const rows = [channel(1, 0), channel(2, 0), channel(3, 0)];
     const onReorder = vi.fn<(reorders: readonly ChannelReorderData[]) => void>();
-    openMove(rows, rows[0]!, onReorder);
+    openMove(rows, rows[2]!, onReorder);
 
-    (document.querySelector('[data-testid="ctx-move-down"]') as HTMLElement).click();
+    (document.querySelector('[data-testid="ctx-move-up"]') as HTMLElement).click();
 
-    expect(onReorder).toHaveBeenCalledWith([
-      { channelId: 1, newPosition: 1, previousPosition: 0 },
-      { channelId: 2, newPosition: 0, previousPosition: 0 },
-    ]);
+    const positions = (id: number): number | undefined =>
+      channelsStore.getState().channels.get(id)?.position;
+    expect([positions(1), positions(3), positions(2)]).toEqual([0, 1, 2]);
   });
 });
 
@@ -157,7 +178,7 @@ describe("channel context menu - injected access", () => {
   });
 });
 
-describe("channel context menu - Developer Mode Copy Channel ID", () => {
+describe("channel context menu - Developer mode Copy Channel ID", () => {
   let writeText: ReturnType<typeof vi.fn>;
   beforeEach(() => {
     writeText = vi.fn().mockResolvedValue(undefined);
@@ -174,7 +195,7 @@ describe("channel context menu - Developer Mode Copy Channel ID", () => {
   const item = (): HTMLElement | null =>
     document.querySelector<HTMLElement>('[data-testid="ctx-copy-channel-id"]');
 
-  it("offers the item when Developer Mode is on and copies the id", () => {
+  it("offers the item when Developer mode is on and copies the id", () => {
     setDeveloperMode(true);
     open(channel(42, 0));
     expect(item()?.textContent).toBe("Copy Channel ID");
@@ -182,13 +203,13 @@ describe("channel context menu - Developer Mode Copy Channel ID", () => {
     expect(writeText).toHaveBeenCalledWith("42");
   });
 
-  it("leaves it out when Developer Mode is off", () => {
+  it("leaves it out when Developer mode is off", () => {
     setDeveloperMode(false);
     open(channel(42, 0));
     expect(item()).toBeNull();
   });
 
-  it("a voice channel's menu holds only Open chat for a non-manager, plus Copy Channel ID in Developer Mode", () => {
+  it("a voice channel's menu holds only Open chat for a non-manager, plus Copy Channel ID in Developer mode", () => {
     authStore.setState((s) => ({
       ...s,
       user: { id: 1, username: "t", avatar: null, role: "member" },

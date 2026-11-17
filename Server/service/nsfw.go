@@ -37,9 +37,9 @@ func NewNSFWService(st nsfwStore, perms *PermissionService) *NSFWService {
 // checkVisible asserts the caller may see channelID (permissions.CanViewChannel): acknowledge and revoke ask
 // no more than other visibility-gated surfaces. An invisible channel is ErrNotFound.
 func (s *NSFWService) checkVisible(ctx context.Context, userID, channelID int64) error {
-	ch, err := s.st.GetChannel(ctx, channelID)
-	if err != nil || ch == nil {
-		return fmt.Errorf("%w: channel not found", ErrNotFound)
+	ch, err := lookupChannel(ctx, s.st, channelID)
+	if err != nil {
+		return err
 	}
 	if ch.IsThread() {
 		// A thread's label and consent are its parent's; acknowledgement rows are keyed by the parent only.

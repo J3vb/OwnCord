@@ -8,7 +8,7 @@
  * out of voice". The disconnect branch matters most — getting it wrong either
  * strands the user in a dead call or tears down a call that was only blipping.
  */
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/roomEventHandlersMocks";
 import { Track } from "livekit-client";
 import type { LocalTrackPublication, RemoteTrackPublication } from "livekit-client";
@@ -475,5 +475,71 @@ describe("track routing edge cases", () => {
     h.handlers.handleTrackUnpublished(remotePub(Track.Source.Camera), participant("user-9:tok"));
 
     expect(h.spies.onRemoteVideoRemoved).toHaveBeenCalledWith(9, false);
+  });
+});
+
+// ── music shares ──────────────────────────────────────────────────────────
+
+describe("music shares", () => {
+  const musicPub = () => {
+    const publication = remotePub(Track.Source.ScreenShareAudio);
+    Object.assign(publication, { trackName: "music" });
+    return publication;
+  };
+  const sharers = () => voiceStore.getState().musicSharers ?? new Set<number>();
+
+  beforeEach(() => {
+    voiceStore.setState((prev) => ({ ...prev, musicSharers: new Set<number>() }));
+  });
+
+  it("subscribes a published music track without a watch and notes its sharer", () => {
+    const h = build();
+    const music = musicPub();
+
+    h.handlers.handleTrackPublished(music, participant("user-7:tok"));
+
+    expect(music.setSubscribed).toHaveBeenCalledWith(true);
+    expect(sharers().has(7)).toBe(true);
+  });
+
+  it("still holds a screen share's sound until it is watched", () => {
+    const h = build();
+    const stream = remotePub(Track.Source.ScreenShareAudio);
+
+    h.handlers.handleTrackPublished(stream, participant("user-7:tok"));
+
+    expect(stream.setSubscribed).toHaveBeenCalledWith(false);
+    expect(sharers().has(7)).toBe(false);
+  });
+
+  it("plays a subscribed music track without the watch gate", () => {
+    const h = build();
+    const music = musicPub();
+    const track = audioTrack();
+
+    h.handlers.handleTrackSubscribed(track, music, participant("user-7:tok"));
+
+    expect(music.setSubscribed).not.toHaveBeenCalledWith(false);
+    expect(h.audioElements.handleTrackSubscribedAudio).toHaveBeenCalled();
+  });
+
+  it("drops the sharer when its music track is unpublished", () => {
+    const h = build();
+    h.handlers.handleTrackPublished(musicPub(), participant("user-7:tok"));
+
+    h.handlers.handleTrackUnpublished(musicPub(), participant("user-7:tok"));
+
+    expect(sharers().has(7)).toBe(false);
+    expect(h.spies.onRemoteVideoRemoved).not.toHaveBeenCalled();
+  });
+
+  it("takes the sharers from the room on connect, and drops the stale ones", () => {
+    const h = build();
+    h.handlers.handleTrackPublished(musicPub(), participant("user-3:tok"));
+    const room = roomWithRemotePubs({ m: musicPub() });
+
+    h.handlers.handleConnected(room);
+
+    expect([...sharers()]).toEqual([7]);
   });
 });

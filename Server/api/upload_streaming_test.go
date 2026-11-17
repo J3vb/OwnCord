@@ -97,6 +97,7 @@ func (c *countingReader) Read(p []byte) (int, error) {
 // unknown length skips it entirely and the whole body gets read (and, above
 // the in-memory threshold, spooled) before Reserve ever sees it.
 func TestUpload_UnknownLengthIsFloorGatedBeforeTheBodyIsRead(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	var probes atomic.Int32
 	h.limits(t, 0, 256<<20, func(string) (uint64, error) { probes.Add(1); return 100 << 20, nil })
@@ -144,6 +145,7 @@ func chunkedUpload(t *testing.T, h *quotaHarness, content []byte) *httptest.Resp
 // the unfixed handler the envelope is always the 100 MiB request cap, so
 // this quota (10 MiB) refuses every chunked upload outright.
 func TestUpload_UnknownLengthAdmittedUnderAPerFileCap(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	h.limitsCapped(t, 10<<20, 0, nil, 5<<20) // quota above the 5 MiB cap, below the 100 MiB request cap
 
@@ -155,6 +157,7 @@ func TestUpload_UnknownLengthAdmittedUnderAPerFileCap(t *testing.T) {
 // the quota sits below the cap, so it still refuses — admitting the cap
 // instead of the request size is a tighter bound, not an open one.
 func TestUpload_UnknownLengthRefusedWhenQuotaBelowTheCap(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	h.limitsCapped(t, 3<<20, 0, nil, 5<<20) // quota below the 5 MiB cap
 
@@ -168,6 +171,7 @@ func TestUpload_UnknownLengthRefusedWhenQuotaBelowTheCap(t *testing.T) {
 // request cap, still admits — proving the reservation made before any byte
 // is read is the cap, not uploadMaxBodySize.
 func TestUpload_UnknownLengthReservesThePerFileCapBeforeTheBodyIsRead(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	var probes atomic.Int32
 	// 60 MiB free, 50 MiB floor: room for 10 MiB in flight — enough for the
@@ -187,6 +191,7 @@ func TestUpload_UnknownLengthReservesThePerFileCapBeforeTheBodyIsRead(t *testing
 // same-named non-file value. findFilePart matches on form name alone, so
 // this would otherwise upload the field's own bytes as a nameless file.
 func TestUpload_PlainFieldNamedFileIsNotAFile(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	h.limits(t, 0, 0, nil)
 

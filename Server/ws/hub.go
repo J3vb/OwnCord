@@ -49,8 +49,10 @@ type Hub struct {
 
 	stats hubStats
 
-	seams  hubSeams
-	events hubEventTier
+	seams hubSeams
+	// ringPush carries DM call rings to phones; nil means off. Atomic: internal/app installs it after Run.
+	ringPush atomic.Pointer[ringPusherBox]
+	events   hubEventTier
 
 	lifecycle hubLifecycle
 

@@ -116,6 +116,7 @@ func assertErrorCode(t *testing.T, rr *httptest.ResponseRecorder, status int, co
 }
 
 func TestUploadQuota_ExceededIs507WithItsOwnCode(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	// B5-2 follow-up: Reserve now admits the multipart envelope (the file
 	// bytes plus a few hundred bytes of boundary/header framing) up front,
@@ -144,6 +145,7 @@ func TestUploadQuota_ExceededIs507WithItsOwnCode(t *testing.T) {
 // the declared length before the multipart parser spools anything, so a
 // full volume gets no temp file either.
 func TestUploadQuota_LowDiskIs507BeforeTheBodyIsSpooled(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	var probes atomic.Int32
 	h.limits(t, 0, 256<<20, func(string) (uint64, error) { probes.Add(1); return 100 << 20, nil })
@@ -169,6 +171,7 @@ func TestUploadQuota_LowDiskIs507BeforeTheBodyIsSpooled(t *testing.T) {
 // proof through the real route under -race: eight parallel POSTs (under the
 // ten-per-minute limiter) with room for three.
 func TestUploadQuota_ConcurrentRacersThroughTheHandler(t *testing.T) {
+	t.Parallel()
 	const size = 1000
 	h := newQuotaHarness(t, nil)
 	// B5-2 follow-up: room for exactly three admissions is now three
@@ -212,6 +215,7 @@ func TestUploadQuota_ConcurrentRacersThroughTheHandler(t *testing.T) {
 // TestUploadQuota_ChargeReleasedWhenTheWriteFails: a blocked file type is
 // refused by the store after the charge; the charge comes back.
 func TestUploadQuota_ChargeReleasedWhenTheWriteFails(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	h.limits(t, 1<<20, 0, nil)
 	rr := doUpload(t, h.router, h.token, "file", "evil.exe", append([]byte("MZ"), make([]byte, 100)...))
@@ -224,6 +228,7 @@ func TestUploadQuota_ChargeReleasedWhenTheWriteFails(t *testing.T) {
 // TestUploadQuota_ChargeReleasedWhenTheRowFails: the file is written, the
 // row insert fails, the file is removed and the charge comes back.
 func TestUploadQuota_ChargeReleasedWhenTheRowFails(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	h.limits(t, 1<<20, 0, nil)
 	if _, err := h.database.ExecContext(context.Background(), `CREATE TRIGGER fail_attachment_insert BEFORE INSERT ON attachments BEGIN SELECT RAISE(ABORT, 'forced'); END`); err != nil {
@@ -251,6 +256,7 @@ func (panicOnOpen) Open(string) (storage.File, error) {
 // TestUploadQuota_ChargeReleasedOnPanicAfterTheWrite: nothing reaches Record,
 // and the counter is still returned by the deferred Settle.
 func TestUploadQuota_ChargeReleasedOnPanicAfterTheWrite(t *testing.T) {
+	t.Parallel()
 	real, err := storage.New(t.TempDir(), 10)
 	if err != nil {
 		t.Fatal(err)
@@ -278,6 +284,7 @@ func TestUploadQuota_ChargeReleasedOnPanicAfterTheWrite(t *testing.T) {
 // TestAvatarUpload_IsChargedAndQuotaGated: an avatar is an attachment and
 // counts against its uploader's quota.
 func TestAvatarUpload_IsChargedAndQuotaGated(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	dir := t.TempDir()
 	store, err := storage.New(dir, 10)
@@ -316,6 +323,7 @@ func TestAvatarUpload_IsChargedAndQuotaGated(t *testing.T) {
 // TestEmojiUpload_IsFloorGatedButNotCharged: emoji go through the headroom
 // floor and nothing else — the bounded exclusion, proved at the route.
 func TestEmojiUpload_IsFloorGatedButNotCharged(t *testing.T) {
+	t.Parallel()
 	h := newEmojiHarness(t)
 	png := makePNGBytes(t, 8, 8)
 	h.svc.Uploads.SetStorageLimits(service.StorageLimits{MinFreeBytes: 256 << 20, Dir: t.TempDir(), FreeBytes: func(string) (uint64, error) { return 100 << 20, nil }})
@@ -338,6 +346,7 @@ func TestEmojiUpload_IsFloorGatedButNotCharged(t *testing.T) {
 // files that are not there. The row survives, the file 404s, and the counter
 // keeps charging the row — the safe side — until the operator reconciles.
 func TestUploadQuota_RestoreWithoutStorageDirRowsOutliveFiles(t *testing.T) {
+	t.Parallel()
 	h := newQuotaHarness(t, nil)
 	h.limits(t, 0, 0, nil)
 	rr := doUpload(t, h.router, h.token, "file", "f.bin", []byte("survives in the database only"))
@@ -371,6 +380,7 @@ func TestUploadQuota_RestoreWithoutStorageDirRowsOutliveFiles(t *testing.T) {
 // TestHandleMetrics_StoragePressureFields: disk_free_mb is extended, not
 // joined by an endpoint — the floor, the pressure bit and the storage total.
 func TestHandleMetrics_StoragePressureFields(t *testing.T) {
+	t.Parallel()
 	r := chi.NewRouter()
 	r.Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{
 		DiskFree:    func() (uint64, error) { return 100 << 20, nil },
@@ -409,6 +419,7 @@ func TestHandleMetrics_StoragePressureFields(t *testing.T) {
 // outside it; the absence of such a writer at HEAD is recorded in the plan's
 // evidence, not enforced here.
 func TestEveryFileStoreSaveIsReserved(t *testing.T) {
+	t.Parallel()
 	root, err := filepath.Abs("..")
 	if err != nil {
 		t.Fatal(err)

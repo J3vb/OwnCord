@@ -10,6 +10,7 @@
  */
 
 import type { ApiClient, OwnReportSummary } from "@lib/api";
+import { buildSettingsSection } from "../settings/settingsSection";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { parseTimestamp } from "@lib/text/formatting";
 import { formatDate } from "../../i18n/format";
@@ -106,12 +107,15 @@ export function buildMyReportsSection(
   api: Pick<ApiClient, "getMyReports">,
 ): HTMLElement {
   const titleId = `my-reports-${++sectionSeq}`;
-  const section = createElement("section", { class: "my-reports", "aria-labelledby": titleId });
-  const heading = createElement(
-    "h3",
-    { class: "safety-heading", id: titleId, tabindex: "-1" },
-    t("mine.title"),
-  );
+  const {
+    el: section,
+    heading,
+    card,
+  } = buildSettingsSection({
+    label: t("mine.title"),
+    headingAttrs: { id: titleId, tabindex: "-1" },
+    attrs: { class: "my-reports", "aria-labelledby": titleId },
+  });
   const desc = createElement("p", { class: "setting-desc" }, t("mine.desc"));
   // Both live regions exist before their text changes, so each change is read.
   const status = createElement("div", { class: "my-reports-status", role: "status" });
@@ -120,7 +124,7 @@ export function buildMyReportsSection(
   setText(retry, t("mine.retry"));
   retry.hidden = true;
   const list = createElement("ul", { class: "my-reports-list" });
-  appendChildren(section, heading, desc, status, failure, retry, list);
+  appendChildren(card, desc, status, failure, retry, list);
 
   let loading = false;
   function load(): void {

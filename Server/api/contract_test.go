@@ -15,6 +15,7 @@ import (
 // ─── GET /api/v1/channels/{id}/messages: response shape ─────────────────────
 
 func TestContract_Messages_HasRequiredFields(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "contract-msg1", 1, "contract-ch", "text")
 	_ = mustCreateMessage(t, database, chID, user.ID, "contract test message")
 
@@ -74,6 +75,7 @@ func TestContract_Messages_HasRequiredFields(t *testing.T) {
 // TestContract_Messages_ReactionsHaveMeFlag verifies that when a reaction
 // exists, the response includes the 'me' boolean per docs/api.md.
 func TestContract_Messages_ReactionsHaveMeFlag(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "contract-react1", 1, "react-ch", "text")
 	msgID := mustCreateMessage(t, database, chID, user.ID, "reaction target")
 	_ = database.AddReaction(context.Background(), msgID, user.ID, "👍")
@@ -113,6 +115,7 @@ func TestContract_Messages_ReactionsHaveMeFlag(t *testing.T) {
 // ─── GET /api/v1/search: response shape ─────────────────────────────────────
 
 func TestContract_Search_HasRequiredFields(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "contract-search1", 1, "search-ch", "text")
 	_ = mustCreateMessage(t, database, chID, user.ID, "contractsearchterm in body")
 

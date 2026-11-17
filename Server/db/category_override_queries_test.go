@@ -58,6 +58,7 @@ func (f *catFixture) move(t *testing.T, ch, category int64) {
 }
 
 func TestMigrate_076NothingIsSynced(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 	mustDo(t, "MigrateFS() building pre-076 schema", db.MigrateFS(database, migrationsUpTo(t, "076_")))
@@ -87,6 +88,7 @@ func TestMigrate_076NothingIsSynced(t *testing.T) {
 }
 
 func TestCategoryOverride_TemplateIsCopiedNeverInherited(t *testing.T) {
+	t.Parallel()
 	f := newCatFixture(t, 1)
 	ctx := context.Background()
 	// A channel in the category BEFORE the template exists carries nothing,
@@ -113,6 +115,7 @@ func TestCategoryOverride_TemplateIsCopiedNeverInherited(t *testing.T) {
 }
 
 func TestCategoryOverride_GuardRefusalWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newCatFixture(t, 2)
 	ctx := context.Background()
 	refuse := errors.New("refused")
@@ -148,6 +151,7 @@ func TestCategoryOverride_GuardRefusalWritesNothing(t *testing.T) {
 // touched. The guard runs inside the write transaction, so a move started from
 // there queues behind it on the single writer connection.
 func TestCategoryOverride_ChannelMovedOutMidWriteIsFullyWritten(t *testing.T) {
+	t.Parallel()
 	f := newCatFixture(t, 2)
 	ctx := context.Background()
 	moved := make(chan struct{})
@@ -182,6 +186,7 @@ func TestCategoryOverride_ChannelMovedOutMidWriteIsFullyWritten(t *testing.T) {
 }
 
 func TestCategoryOverride_ChannelMovedOutBeforeTheWriteIsNotTouched(t *testing.T) {
+	t.Parallel()
 	f := newCatFixture(t, 2)
 	ctx := context.Background()
 	f.move(t, f.chs[0], f.other)
@@ -204,6 +209,7 @@ func TestCategoryOverride_ChannelMovedOutBeforeTheWriteIsNotTouched(t *testing.T
 // Writes and moves racing: whatever the interleaving, a channel that ends up
 // synced carries exactly the category's row.
 func TestCategoryOverride_RacingWritesAndMovesNeverLeaveASyncedChannelBehind(t *testing.T) {
+	t.Parallel()
 	f := newCatFixture(t, 6)
 	ctx := context.Background()
 	var wg sync.WaitGroup
@@ -246,6 +252,7 @@ func TestCategoryOverride_RacingWritesAndMovesNeverLeaveASyncedChannelBehind(t *
 }
 
 func TestSyncChannelPermissions_Errors(t *testing.T) {
+	t.Parallel()
 	f := newCatFixture(t, 1)
 	ctx := context.Background()
 	if _, err := f.database.SyncChannelPermissions(ctx, 9999, nil); !errors.Is(err, db.ErrNotFound) {
@@ -267,6 +274,7 @@ func TestSyncChannelPermissions_Errors(t *testing.T) {
 }
 
 func TestDeleteChannelCategory_UnsyncsItsChannelsAndDropsTheTemplate(t *testing.T) {
+	t.Parallel()
 	f := newCatFixture(t, 2)
 	ctx := context.Background()
 	if _, err := f.database.WriteCategoryRoleOverride(ctx, f.cat, f.role, 2, 0, nil); err != nil {
@@ -288,6 +296,7 @@ func TestDeleteChannelCategory_UnsyncsItsChannelsAndDropsTheTemplate(t *testing.
 }
 
 func TestCategoryOverride_UserRowsClearAndPreview(t *testing.T) {
+	t.Parallel()
 	f := newCatFixture(t, 2)
 	ctx := context.Background()
 	uid := seedUser(t, f.database, "template-user")
@@ -352,6 +361,7 @@ func TestCategoryOverride_UserRowsClearAndPreview(t *testing.T) {
 }
 
 func TestSyncChannelPermissions_ReplacesRolesAndMembersWithTheTemplate(t *testing.T) {
+	t.Parallel()
 	f := newCatFixture(t, 1)
 	ctx := context.Background()
 	uid := seedUser(t, f.database, "sync-user")
@@ -381,6 +391,7 @@ func TestSyncChannelPermissions_ReplacesRolesAndMembersWithTheTemplate(t *testin
 }
 
 func TestChannelCategoryLookups(t *testing.T) {
+	t.Parallel()
 	f := newCatFixture(t, 0)
 	ctx := context.Background()
 	c, err := f.database.GetChannelCategory(ctx, f.cat)
@@ -401,6 +412,7 @@ func TestChannelCategoryLookups(t *testing.T) {
 // A create in the category racing a template write: whichever commits first,
 // the new channel ends with exactly the committed template row and is synced.
 func TestCategoryOverride_CreateRacingATemplateWrite(t *testing.T) {
+	t.Parallel()
 	t.Run("create queued behind the write", func(t *testing.T) {
 		f := newCatFixture(t, 0)
 		ctx := context.Background()
@@ -439,6 +451,7 @@ func TestCategoryOverride_CreateRacingATemplateWrite(t *testing.T) {
 }
 
 func TestAdminUpdateChannel_SyncWithoutACategoryIsUncategorized(t *testing.T) {
+	t.Parallel()
 	f := newCatFixture(t, 1)
 	err := f.database.AdminUpdateChannel(context.Background(), f.chs[0], db.ChannelUpdate{
 		Name:      "a",

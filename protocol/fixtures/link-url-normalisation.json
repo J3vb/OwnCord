@@ -1,0 +1,220 @@
+{
+  "_comment": "Link normalisation shared by Server/linkpreview (NormalizeURL) and the client's normalizeLinkUrl: each `in` normalises to `want`, or is refused when `want` is null. Both test suites read this file so the two spellings cannot drift. Cases were produced by NormalizeURL.",
+  "cases": [
+    {
+      "name": "HTTPS://Example.COM/Path",
+      "in": "HTTPS://Example.COM/Path",
+      "want": "https://example.com/Path"
+    },
+    {
+      "name": "https://example.com/a#section",
+      "in": "https://example.com/a#section",
+      "want": "https://example.com/a"
+    },
+    {
+      "name": "https://example.com/a?b=2&a=1",
+      "in": "https://example.com/a?b=2&a=1",
+      "want": "https://example.com/a?b=2&a=1"
+    },
+    {
+      "name": "https://example.com/a?x=1#frag",
+      "in": "https://example.com/a?x=1#frag",
+      "want": "https://example.com/a?x=1"
+    },
+    {
+      "name": "https://example.com",
+      "in": "https://example.com",
+      "want": "https://example.com/"
+    },
+    {
+      "name": "https://Foo_Bar.example.com/",
+      "in": "https://Foo_Bar.example.com/",
+      "want": "https://foo_bar.example.com/"
+    },
+    {
+      "name": "https://example.com?q=1",
+      "in": "https://example.com?q=1",
+      "want": "https://example.com/?q=1"
+    },
+    {
+      "name": "https://example.com:443/a",
+      "in": "https://example.com:443/a",
+      "want": "https://example.com/a"
+    },
+    {
+      "name": "http://example.com:80/a",
+      "in": "http://example.com:80/a",
+      "want": "http://example.com/a"
+    },
+    {
+      "name": "https://example.com:8443/a",
+      "in": "https://example.com:8443/a",
+      "want": "https://example.com:8443/a"
+    },
+    {
+      "name": "http://example.com:443/a",
+      "in": "http://example.com:443/a",
+      "want": "http://example.com:443/a"
+    },
+    {
+      "name": "https://example.com/a%2Fb%20c",
+      "in": "https://example.com/a%2Fb%20c",
+      "want": "https://example.com/a%2Fb%20c"
+    },
+    {
+      "name": "  https://example.com/a \n",
+      "in": "  https://example.com/a \n",
+      "want": "https://example.com/a"
+    },
+    {
+      "name": "http://[::1]:8080/x",
+      "in": "http://[::1]:8080/x",
+      "want": "http://[::1]:8080/x"
+    },
+    {
+      "name": "https://[::1]:443/x",
+      "in": "https://[::1]:443/x",
+      "want": "https://[::1]/x"
+    },
+    {
+      "name": "https://Example.com./a",
+      "in": "https://Example.com./a",
+      "want": "https://example.com/a"
+    },
+    {
+      "name": "https://Bücher.example/x",
+      "in": "https://Bücher.example/x",
+      "want": "https://xn--bcher-kva.example/x"
+    },
+    {
+      "name": "https://xn--bcher-kva.example/x",
+      "in": "https://xn--bcher-kva.example/x",
+      "want": "https://xn--bcher-kva.example/x"
+    },
+    {
+      "name": "https://example.com/a/",
+      "in": "https://example.com/a/",
+      "want": "https://example.com/a/"
+    },
+    {
+      "name": "https://de.wikipedia.org/wiki/Köln",
+      "in": "https://de.wikipedia.org/wiki/Köln",
+      "want": "https://de.wikipedia.org/wiki/K%C3%B6ln"
+    },
+    {
+      "name": "https://example.com/x|y",
+      "in": "https://example.com/x|y",
+      "want": "https://example.com/x%7Cy"
+    },
+    {
+      "name": "https://example.com/{a}",
+      "in": "https://example.com/{a}",
+      "want": "https://example.com/%7Ba%7D"
+    },
+    {
+      "name": "https://example.com/a%2fb",
+      "in": "https://example.com/a%2fb",
+      "want": "https://example.com/a%2fb"
+    },
+    {
+      "name": "https://example.com/a%7cb",
+      "in": "https://example.com/a%7cb",
+      "want": "https://example.com/a%7cb"
+    },
+    {
+      "name": "https://example.com/a b",
+      "in": "https://example.com/a b",
+      "want": "https://example.com/a%20b"
+    },
+    {
+      "name": "https://example.com/p%20q?",
+      "in": "https://example.com/p%20q?",
+      "want": "https://example.com/p%20q?"
+    },
+    {
+      "name": "https://example.com/wiki/Foo_(bar)",
+      "in": "https://example.com/wiki/Foo_(bar)",
+      "want": "https://example.com/wiki/Foo_(bar)"
+    },
+    {
+      "name": "https://example.com/a!b'c*d",
+      "in": "https://example.com/a!b'c*d",
+      "want": "https://example.com/a!b'c*d"
+    },
+    {
+      "name": "https://example.com/a[1]",
+      "in": "https://example.com/a[1]",
+      "want": "https://example.com/a[1]"
+    },
+    {
+      "name": "https://example.com/a^b`c",
+      "in": "https://example.com/a^b`c",
+      "want": "https://example.com/a%5Eb%60c"
+    },
+    {
+      "name": "https://example.com/a%2Fb|c",
+      "in": "https://example.com/a%2Fb|c",
+      "want": "https://example.com/a/b%7Cc"
+    },
+    {
+      "name": "https://example.com/café?q=café",
+      "in": "https://example.com/café?q=café",
+      "want": "https://example.com/caf%C3%A9?q=café"
+    },
+    {
+      "name": "https://example.com/a;b,c=d@e:f+g$h&i",
+      "in": "https://example.com/a;b,c=d@e:f+g$h&i",
+      "want": "https://example.com/a;b,c=d@e:f+g$h&i"
+    },
+    {
+      "name": "https://example.com/%E2%82%AC",
+      "in": "https://example.com/%E2%82%AC",
+      "want": "https://example.com/%E2%82%AC"
+    },
+    {
+      "name": "https://example.com/a\"b<c>d\\e",
+      "in": "https://example.com/a\"b<c>d\\e",
+      "want": "https://example.com/a%22b%3Cc%3Ed%5Ce"
+    },
+    {
+      "name": "https://example.com/~user/-_.",
+      "in": "https://example.com/~user/-_.",
+      "want": "https://example.com/~user/-_."
+    },
+    {
+      "name": "ftp://example.com/a",
+      "in": "ftp://example.com/a",
+      "want": null
+    },
+    {
+      "name": "https://user:pw@example.com/",
+      "in": "https://user:pw@example.com/",
+      "want": null
+    },
+    {
+      "name": "https://user@example.com/",
+      "in": "https://user@example.com/",
+      "want": null
+    },
+    {
+      "name": "https:///nohost",
+      "in": "https:///nohost",
+      "want": null
+    },
+    {
+      "name": "http://[fe80::1%25eth0]/",
+      "in": "http://[fe80::1%25eth0]/",
+      "want": null
+    },
+    {
+      "name": "http://%zz/",
+      "in": "http://%zz/",
+      "want": null
+    },
+    {
+      "name": "https://example.com/a%zz",
+      "in": "https://example.com/a%zz",
+      "want": null
+    }
+  ]
+}

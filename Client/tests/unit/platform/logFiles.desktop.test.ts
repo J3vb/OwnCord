@@ -66,7 +66,7 @@ describeLogFilesSuite(async () => {
 });
 
 // The `clearAll` half: no exported seam until this milestone, so its coverage
-// lands with the move. The old path (the Clear Log Files button in
+// lands with the move. The old path (the Clear log files button in
 // AdvancedTab) keeps its own test in tests/unit/advanced-tab.test.ts.
 /** Initialises the module on /logs and buffers one entry that has not been flushed yet. */
 async function initWithBufferedEntry(mod: Awaited<ReturnType<typeof freshModule>>): Promise<void> {
@@ -147,6 +147,25 @@ describe("LogFiles daily limit", () => {
     expect(written[0]).toContain("xxx");
     expect(written[1]).toContain("daily log limit reached");
     expect(written[1]).not.toContain("yyy");
+  });
+
+  test("writes again after the logs were cleared past the limit", async () => {
+    const mod = await freshModule();
+    appLogDir.mockResolvedValue("/logs");
+    readDir.mockResolvedValue([{ name: "2026-09-19.jsonl", isDirectory: false }]);
+    await mod.logFiles.init();
+    const line = (message: string): void =>
+      capturedListener?.({ timestamp: "t", level: "debug", component: "test", message });
+
+    line("x".repeat(25 << 20));
+    await mod.logFiles.flush();
+    await mod.logFiles.clearAll();
+    writeTextFile.mockClear();
+    line("after the clear");
+    await mod.logFiles.flush();
+
+    expect(writeTextFile).toHaveBeenCalledTimes(1);
+    expect(writeTextFile.mock.calls[0]?.[1]).toContain("after the clear");
   });
 });
 

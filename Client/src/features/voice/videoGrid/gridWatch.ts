@@ -8,8 +8,22 @@ import { syncVideoSurface } from "@lib/voice/videoSurface";
 import { voiceText } from "../../../i18n/voice";
 import type { VideoView } from "../remoteTracks";
 import { openPopout } from "../popout";
+import { reportVideoOnScreen } from "../videoOnScreen";
 import { VIEW_RESIZE_MS, log, type CellEntry, isPlayingHere } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
+
+/** A camera or a stream is drawn: yours or someone else's, in its tile
+ *  (not behind Watch stream, not in a closed grid), in the mini-player or
+ *  in a pop-out window. A stream held while its owner publishes it again
+ *  (a codec switch) is still being watched. */
+function drawsPicture(entry: CellEntry): boolean {
+  if (entry.video.srcObject == null && entry.holding === undefined) return false;
+  if (entry.popout !== undefined || entry.mini !== undefined) return true;
+  return (
+    !entry.el.classList.contains("video-cell--stopped") &&
+    entry.el.getBoundingClientRect().width > 0
+  );
+}
 
 export function createGridWatch(st: GridState, api: GridApi) {
   // --- Video layers -------------------------------------------------------
@@ -58,6 +72,14 @@ export function createGridWatch(st: GridState, api: GridApi) {
       entry.view = key;
       st.callbacks.setStreamView?.(id, view);
     }
+    syncOnScreen();
+  }
+
+  function syncOnScreen(): void {
+    const on = [...st.cells.values()].some(drawsPicture);
+    if (on === st.onScreen) return;
+    st.onScreen = on;
+    reportVideoOnScreen(on);
   }
 
   /** Resizes come every frame while the window drags: send the views once
@@ -277,6 +299,7 @@ export function createGridWatch(st: GridState, api: GridApi) {
   return {
     viewOf,
     syncViews,
+    syncOnScreen,
     scheduleViewSync,
     togglePopout,
     bringBack,

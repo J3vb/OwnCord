@@ -50,20 +50,20 @@ describe("VoiceAudioTab UI structure", () => {
     ac.abort();
   });
 
-  it("Let more soft speech through is on by default, needs Enhanced Noise Suppression, and saves its choice", () => {
+  it("Let more soft speech through is on by default, needs Enhanced noise suppression, and saves its choice", () => {
     stubNavigator();
     const { ac, el } = mountTab();
     try {
       const toggle = el.querySelector<HTMLElement>("[data-testid='soft-speech'] .toggle")!;
       expect(toggle.getAttribute("aria-label")).toBe("Let more soft speech through");
       expect(toggle.getAttribute("aria-checked")).toBe("true");
-      // Without Enhanced Noise Suppression there is no speech detector to tune.
+      // Without Enhanced noise suppression there is no speech detector to tune.
       expect(toggle.getAttribute("aria-disabled")).toBe("true");
       toggle.click();
       expect(localStorage.getItem("owncord:settings:softSpeech")).toBeNull();
 
       el.querySelector<HTMLElement>(
-        "[role='switch'][aria-label='Enhanced Noise Suppression']",
+        "[role='switch'][aria-label='Enhanced noise suppression']",
       )!.click();
       expect(toggle.getAttribute("aria-disabled")).toBe("false");
       toggle.click();
@@ -90,16 +90,16 @@ describe("VoiceAudioTab UI structure", () => {
     }
   });
 
-  it("disables Let more soft speech through while Noise Suppression is off, which turns the enhanced one off too", () => {
+  it("disables Let more soft speech through while Noise suppression is off, which turns the enhanced one off too", () => {
     stubNavigator();
     const { ac, el } = mountTab();
     try {
       const toggle = el.querySelector<HTMLElement>("[data-testid='soft-speech'] .toggle")!;
       const noiseSuppression = el.querySelector<HTMLElement>(
-        "[role='switch'][aria-label='Noise Suppression']",
+        "[role='switch'][aria-label='Noise suppression']",
       )!;
       el.querySelector<HTMLElement>(
-        "[role='switch'][aria-label='Enhanced Noise Suppression']",
+        "[role='switch'][aria-label='Enhanced noise suppression']",
       )!.click();
       expect(toggle.getAttribute("aria-disabled")).toBe("false");
 
@@ -119,11 +119,11 @@ describe("VoiceAudioTab UI structure", () => {
     stubNavigator();
     const { ac, el } = mountTab();
     try {
-      const slider = el.querySelector<HTMLInputElement>('input[aria-label="Voice Buffer"]')!;
+      const slider = el.querySelector<HTMLInputElement>('input[aria-label="Voice buffer"]')!;
       expect(slider.disabled).toBe(true);
       expect([slider.min, slider.max, slider.step, slider.value]).toEqual(["0", "300", "1", "200"]);
       el.querySelector<HTMLElement>(
-        "[role='switch'][aria-label='Enhanced Noise Suppression']",
+        "[role='switch'][aria-label='Enhanced noise suppression']",
       )!.click();
       expect(slider.disabled).toBe(false);
       await vi.waitFor(() => expect(navigator.mediaDevices.getUserMedia).toHaveBeenCalled());
@@ -222,7 +222,7 @@ describe("VoiceAudioTab UI structure", () => {
         .filter((audio) => audio !== false && audio !== undefined);
     await vi.waitFor(() => expect(audioRequests()).toHaveLength(1));
 
-    el.querySelector<HTMLElement>("[role='switch'][aria-label='Noise Suppression']")!.click();
+    el.querySelector<HTMLElement>("[role='switch'][aria-label='Noise suppression']")!.click();
 
     await vi.waitFor(() => expect(audioRequests()).toHaveLength(2));
     expect(audioRequests()[1]).toMatchObject({ noiseSuppression: false });
@@ -244,7 +244,7 @@ describe("VoiceAudioTab UI structure", () => {
     const requests = vi.mocked(navigator.mediaDevices.getUserMedia).mock.calls.length;
 
     el.querySelector<HTMLElement>(
-      "[role='switch'][aria-label='Enhanced Noise Suppression']",
+      "[role='switch'][aria-label='Enhanced noise suppression']",
     )!.click();
 
     await vi.waitFor(() =>
@@ -259,7 +259,7 @@ describe("VoiceAudioTab UI structure", () => {
   it("moves the meter to a newly chosen input device", async () => {
     stubNavigator([{ kind: "audioinput", deviceId: "mic-2", label: "Mic 2" }]);
     const { ac, el } = mountTab();
-    const inputSelect = el.querySelector<HTMLSelectElement>('select[aria-label="Input Device"]')!;
+    const inputSelect = el.querySelector<HTMLSelectElement>('select[aria-label="Input device"]')!;
     await vi.waitFor(() => expect(inputSelect.options.length).toBe(2));
 
     inputSelect.value = "mic-2";
@@ -331,12 +331,12 @@ describe("VoiceAudioTab UI structure", () => {
     // Wait for devices to load
     await vi.waitFor(() => {
       const videoSelect = el.querySelector(
-        'select[aria-label="Video Device"]',
+        'select[aria-label="Video device"]',
       ) as HTMLSelectElement;
       expect(videoSelect.querySelectorAll("option").length).toBeGreaterThan(1);
     });
 
-    const videoSelect = el.querySelector('select[aria-label="Video Device"]') as HTMLSelectElement;
+    const videoSelect = el.querySelector('select[aria-label="Video device"]') as HTMLSelectElement;
     videoSelect.value = "cam-1";
     videoSelect.dispatchEvent(new Event("change"));
     // A live camera in a call moves to the picked device too.
@@ -381,7 +381,7 @@ describe("VoiceAudioTab UI structure", () => {
 
     const { ac, el } = mountTab();
     const videoSelect = await vi.waitFor(() => {
-      const select = el.querySelector('select[aria-label="Video Device"]') as HTMLSelectElement;
+      const select = el.querySelector('select[aria-label="Video device"]') as HTMLSelectElement;
       expect(select.querySelectorAll("option").length).toBeGreaterThan(2);
       return select;
     });
@@ -682,11 +682,11 @@ describe("VoiceAudioTab UI structure", () => {
     const { ac, el } = mountTab();
 
     const qualitySelect = el.querySelector(
-      'select[aria-label="Camera Quality"]',
+      'select[aria-label="Camera quality"]',
     ) as HTMLSelectElement;
     expect(qualitySelect.value).toBe("low");
     const screenSelect = el.querySelector(
-      'select[aria-label="Screen Share Quality"]',
+      'select[aria-label="Screen share quality"]',
     ) as HTMLSelectElement;
     expect(screenSelect.value).toBe("source");
     ac.abort();
@@ -766,7 +766,7 @@ describe("VoiceAudioTab input mode", () => {
   const sensitivityShown = (el: HTMLElement): boolean =>
     !el.querySelector<HTMLElement>(".mic-meter-wrap")!.hidden;
 
-  it("opens on Voice Activity with the sensitivity row and no key controls", () => {
+  it("opens on Voice activity with the sensitivity row and no key controls", () => {
     const { el, ac } = mount();
     expect(option(el, "vad").getAttribute("aria-checked")).toBe("true");
     expect(option(el, "ptt").getAttribute("aria-checked")).toBe("false");
@@ -775,7 +775,7 @@ describe("VoiceAudioTab input mode", () => {
     ac.abort();
   });
 
-  it("Push to Talk shows the key and release delay and hides the sensitivity row", () => {
+  it("Push to talk shows the key and release delay and hides the sensitivity row", () => {
     localStorage.setItem("owncord:settings:pttVk", "65");
     localStorage.setItem("owncord:settings:inputMode", '"vad"');
     const { el, ac } = mount();
@@ -793,7 +793,7 @@ describe("VoiceAudioTab input mode", () => {
     ac.abort();
   });
 
-  it("repaints the key as Not set when arming Push to Talk clears a refused key", async () => {
+  it("repaints the key as Not set when arming Push to talk clears a refused key", async () => {
     localStorage.setItem("owncord:settings:pttVk", "65");
     localStorage.setItem("owncord:settings:inputMode", '"vad"');
     mockPttUpdateKey.mockImplementationOnce(async () => {
@@ -801,7 +801,7 @@ describe("VoiceAudioTab input mode", () => {
     });
     const { el, ac } = mount();
     const keyButton = (): HTMLElement =>
-      pttBox(el).querySelector<HTMLElement>('button[aria-label^="Push to Talk keybind"]')!;
+      pttBox(el).querySelector<HTMLElement>('button[aria-label^="Push to talk keybind"]')!;
     expect(keyButton().textContent).toBe("A");
 
     option(el, "ptt").click();
@@ -809,7 +809,7 @@ describe("VoiceAudioTab input mode", () => {
     ac.abort();
   });
 
-  it("switching back to Voice Activity stops push to talk and restores the sensitivity row", () => {
+  it("switching back to Voice activity stops push to talk and restores the sensitivity row", () => {
     localStorage.setItem("owncord:settings:inputMode", '"ptt"');
     const { el, ac } = mount();
     expect(sensitivityShown(el)).toBe(false);
@@ -835,7 +835,7 @@ describe("VoiceAudioTab input mode", () => {
     ac.abort();
   });
 
-  it("shows Push to Talk for a profile from before Input Mode with a bound key", () => {
+  it("shows Push to talk for a profile from before Input mode with a bound key", () => {
     localStorage.setItem("owncord:settings:pttVk", "65");
     const { el, ac } = mount();
     expect(option(el, "ptt").getAttribute("aria-checked")).toBe("true");
@@ -907,16 +907,16 @@ describe("VoiceAudioTab mic test", () => {
       gain: { value: number };
     };
 
-  it("plays the meter's processed output on Let's Check, and stops on Stop Testing", async () => {
+  it("plays the meter's processed output on Let's check, and stops on Stop testing", async () => {
     localStorage.setItem("owncord:settings:audioOutputDevice", '"spk-1"');
     localStorage.setItem("owncord:settings:outputVolume", "60");
     const { el, ac } = await mount();
-    expect(button(el).textContent).toBe("Let's Check");
+    expect(button(el).textContent).toBe("Let's check");
     expect(played).toHaveLength(0);
 
     button(el).click();
 
-    expect(button(el).textContent).toBe("Stop Testing");
+    expect(button(el).textContent).toBe("Stop testing");
     expect(button(el).getAttribute("aria-pressed")).toBe("true");
     expect(played).toHaveLength(1);
     const audio = played[0]!;
@@ -926,7 +926,7 @@ describe("VoiceAudioTab mic test", () => {
 
     button(el).click();
 
-    expect(button(el).textContent).toBe("Let's Check");
+    expect(button(el).textContent).toBe("Let's check");
     expect(pause).toHaveBeenCalledTimes(1);
     expect(audio.srcObject).toBeNull();
     ac.abort();
@@ -954,17 +954,17 @@ describe("VoiceAudioTab mic test", () => {
     const first = played[0]!;
     const contexts = FakeAudioContext.instances.length;
 
-    el.querySelector<HTMLElement>("[role='switch'][aria-label='Noise Suppression']")!.click();
+    el.querySelector<HTMLElement>("[role='switch'][aria-label='Noise suppression']")!.click();
 
     await vi.waitFor(() => expect(played).toHaveLength(2));
     expect(first.srcObject).toBeNull();
     expect(FakeAudioContext.instances.length).toBe(contexts + 1);
     expect(tracksOf(played[1]!)).toEqual([FakeAudioContext.instances.at(-1)!.outputTrack]);
-    expect(button(el).textContent).toBe("Stop Testing");
+    expect(button(el).textContent).toBe("Stop testing");
     ac.abort();
   });
 
-  it("gates the playback on the detector in Voice Activity, and not in Push to Talk", async () => {
+  it("gates the playback on the detector in Voice activity, and not in Push to talk", async () => {
     localStorage.setItem("owncord:settings:inputMode", '"vad"');
     const { el, ac } = await mount();
     const ctx = FakeAudioContext.instances.at(-1)!;
@@ -997,10 +997,10 @@ describe("VoiceAudioTab mic test", () => {
     ac.abort();
   });
 
-  it("lets Output Volume go to 200% and shows a saved 150% as 150%", async () => {
+  it("lets Output volume go to 200% and shows a saved 150% as 150%", async () => {
     localStorage.setItem("owncord:settings:outputVolume", "150");
     const { el, ac } = await mount();
-    const volume = el.querySelector<HTMLInputElement>('input[aria-label="Output Volume"]')!;
+    const volume = el.querySelector<HTMLInputElement>('input[aria-label="Output volume"]')!;
     expect(volume.max).toBe("200");
     expect(volume.value).toBe("150");
     expect(volume.parentElement?.querySelector(".slider-val")?.textContent).toBe("150%");
@@ -1013,13 +1013,13 @@ describe("VoiceAudioTab mic test", () => {
     const audio = played[0]!;
     setSinkId.mockClear();
 
-    const output = el.querySelector<HTMLSelectElement>('select[aria-label="Output Device"]')!;
+    const output = el.querySelector<HTMLSelectElement>('select[aria-label="Output device"]')!;
     output.appendChild(Object.assign(document.createElement("option"), { value: "spk-2" }));
     output.value = "spk-2";
     output.dispatchEvent(new Event("change"));
     expect(setSinkId).toHaveBeenCalledWith("spk-2");
 
-    const volume = el.querySelector<HTMLInputElement>('input[aria-label="Output Volume"]')!;
+    const volume = el.querySelector<HTMLInputElement>('input[aria-label="Output volume"]')!;
     volume.value = "25";
     volume.dispatchEvent(new Event("input"));
     expect(audio.volume).toBeCloseTo(0.25);

@@ -94,6 +94,7 @@ func newRestorePaths(dbPath string) (restorePaths, error) {
 	if err != nil {
 		return restorePaths{}, err
 	}
+	p = restoreBase(p)
 	return restorePaths{
 		db:        p,
 		staged:    p + restoreStagedSuffix,

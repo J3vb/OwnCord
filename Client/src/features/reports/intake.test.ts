@@ -138,7 +138,7 @@ describe("report dialog", () => {
     expect(dialog()).toBeNull();
     expect(document.activeElement).toBe(opener);
     expect(showToast).toHaveBeenCalledWith(
-      "Report sent. You can follow it in Settings, Safety.",
+      "Report sent. You can follow it in Settings, Privacy & safety.",
       "success",
     );
   });

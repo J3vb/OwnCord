@@ -99,7 +99,7 @@ export function failedReply(
     message: err.message,
     reqId: res.headers.get("x-request-id") ?? undefined,
   });
-  return httpError(res.status, err.error, err.message, parseRetryAfterMs(res));
+  return httpError(res.status, err.error, err.message, parseRetryAfterMs(res), err.appeal_contact);
 }
 
 /** Map a body-read failure: a non-JSON 2xx becomes NOT_JSON, anything else rethrows. */

@@ -48,6 +48,7 @@ func newMarkerFileWithMarker(t *testing.T, key []byte) string {
 // the file records a fingerprint of the key it was written under and refuses
 // to open under any other.
 func TestMarkerStore_KeyFingerprintRefusesWrongKey(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := newMarkerFileWithMarker(t, testMarkerKey(1))
 
@@ -82,6 +83,7 @@ func TestMarkerStore_KeyFingerprintRefusesWrongKey(t *testing.T) {
 // the file's key of record and every marker is voided silently. It is
 // refused instead, and the operator's acknowledgement statement unblocks it.
 func TestMarkerStore_KeyFingerprintRefusesUnfingerprintedMarkers(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	path := newMarkerFileWithMarker(t, testMarkerKey(1))
 	execOnMarkerFile(t, path, `DELETE FROM marker_meta`)
@@ -112,6 +114,7 @@ func TestMarkerStore_KeyFingerprintRefusesUnfingerprintedMarkers(t *testing.T) {
 // under becomes its key of record — that is how every new installation gets
 // its fingerprint.
 func TestMarkerStore_KeyFingerprintAdoptsEmptyFile(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "erasure", "markers.sqlite")
 	first, err := OpenMarkerStore(path, testMarkerKey(1))
 	if err != nil {
@@ -134,6 +137,7 @@ func TestMarkerStore_KeyFingerprintAdoptsEmptyFile(t *testing.T) {
 // shorter than that prefix is a corrupt or hand-edited row, not a reason for
 // the security branch to panic instead of producing its operator message.
 func TestMarkerStore_KeyFingerprintShortMetaValueDoesNotPanic(t *testing.T) {
+	t.Parallel()
 	path := newMarkerFileWithMarker(t, testMarkerKey(1))
 	execOnMarkerFile(t, path, `UPDATE marker_meta SET value = 'abc' WHERE name = 'erasure-key-fingerprint'`)
 

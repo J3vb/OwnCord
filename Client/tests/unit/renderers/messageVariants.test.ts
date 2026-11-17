@@ -215,7 +215,7 @@ describe("renderMessage variants", () => {
     const parent = makeMessage({ id: 4, content: "parent **text**" });
 
     it("a loaded parent shows its author and plain text", () => {
-      const { ref, ac } = mountReply({}, [parent]);
+      const { ref, ac } = mountReply({}, [parent], { onJumpToMessage: vi.fn() });
       expect(ref.getAttribute("role")).toBe("button");
       expect(ref.dataset["replyTo"]).toBe("4");
       expect(ref.dataset["authorKey"]).toBeTruthy();

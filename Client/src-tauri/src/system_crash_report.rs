@@ -139,16 +139,7 @@ fn log_kernel(run: EndedRun, home: Option<&str>) {
     };
     let since = format!("@{}", last_seen - WINDOW_SECS);
     let until = format!("@{}", last_seen + WINDOW_SECS);
-    let args = [
-        "-k",
-        "--no-pager",
-        "-o",
-        "cat",
-        "--since",
-        &since,
-        "--until",
-        &until,
-    ];
+    let args = kernel_args(&since, &until);
     match query("journalctl", &args) {
         Ok(answer) => {
             let lines = kernel_lines(&answer.out, run.pid, home);
@@ -273,6 +264,24 @@ fn coredump_lines(out: &str, home: Option<&str>) -> Vec<String> {
 }
 
 #[cfg(target_os = "linux")]
+/// The journalctl query for the kernel lines around a run. `-k` would limit it
+/// to the current boot, and the run being reported usually ended before a
+/// reboot, so the kernel transport is matched instead and every boot the
+/// journal kept is searched within the time window.
+fn kernel_args<'a>(since: &'a str, until: &'a str) -> [&'a str; 8] {
+    [
+        "_TRANSPORT=kernel",
+        "--no-pager",
+        "-o",
+        "cat",
+        "--since",
+        since,
+        "--until",
+        until,
+    ]
+}
+
+#[cfg(target_os = "linux")]
 /// Kernel lines that report a crash (any process: the line names the
 /// faulting thread, which carries no pid of ours) or that killed `pid`.
 fn kernel_lines(out: &str, pid: u32, home: Option<&str>) -> Vec<String> {
@@ -321,6 +330,16 @@ mod tests {
         assert_eq!(lines.len(), 2);
         assert!(lines[0].contains("owncord-screen"));
         assert!(lines[1].contains("101272"));
+    }
+
+    #[test]
+    fn kernel_query_searches_earlier_boots_in_the_window() {
+        let args = kernel_args("@100", "@700");
+        assert!(!args
+            .iter()
+            .any(|a| *a == "-k" || *a == "--dmesg" || a.starts_with("-b")));
+        assert!(args.contains(&"_TRANSPORT=kernel"));
+        assert_eq!(&args[4..], ["--since", "@100", "--until", "@700"]);
     }
 
     #[test]

@@ -4,6 +4,7 @@ import type { ServerMessage } from "../types";
 import { recordEvent } from "../diagnostics/eventSink";
 import { createLogger } from "../logger";
 import { checkFrame, type WireFault } from "./wireCheck";
+import { isRecord } from "../isRecord";
 
 const log = createLogger("ws");
 
@@ -23,14 +24,12 @@ export function parseFrame(raw: string): RawFrame | null {
   } catch {
     return null;
   }
-  return typeof value === "object" && value !== null && !Array.isArray(value) ? value : null;
+  return isRecord(value) ? value : null;
 }
 
 /** Every server payload is an object; null or a bare value is never dispatched. */
 export function hasObjectPayload(frame: RawFrame): boolean {
-  return (
-    typeof frame.payload === "object" && frame.payload !== null && !Array.isArray(frame.payload)
-  );
+  return isRecord(frame.payload);
 }
 
 /**

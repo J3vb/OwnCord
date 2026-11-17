@@ -32,6 +32,7 @@ func fillDistinct(t *testing.T, database *db.DB, msgID int64, n int) {
 }
 
 func TestAddReaction_CapRefusesNewDistinctAt20(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	msgID := seedReactionFixture(t, database, 2)
 	fillDistinct(t, database, msgID, db.MaxDistinctReactions)
@@ -47,6 +48,7 @@ func TestAddReaction_CapRefusesNewDistinctAt20(t *testing.T) {
 }
 
 func TestAddReaction_AllowsExistingEmojiAtCap(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	msgID := seedReactionFixture(t, database, 2)
 	fillDistinct(t, database, msgID, db.MaxDistinctReactions)
@@ -55,6 +57,7 @@ func TestAddReaction_AllowsExistingEmojiAtCap(t *testing.T) {
 }
 
 func TestAddReaction_DuplicateStillConflictAtCap(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	msgID := seedReactionFixture(t, database, 1)
 	fillDistinct(t, database, msgID, db.MaxDistinctReactions)
@@ -69,6 +72,7 @@ func TestAddReaction_DuplicateStillConflictAtCap(t *testing.T) {
 }
 
 func TestAddReaction_CountsDistinctNotRows(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	msgID := seedReactionFixture(t, database, 30)
 	ctx := context.Background()
@@ -87,6 +91,7 @@ func TestAddReaction_CountsDistinctNotRows(t *testing.T) {
 }
 
 func TestAddReaction_CapRaceNeverExceeds20(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	const racers = 10
 	msgID := seedReactionFixture(t, database, racers+1)

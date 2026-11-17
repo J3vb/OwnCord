@@ -1,13 +1,13 @@
 # Credential storage
 
-Where the desktop app keeps your saved sign-in, your voice key and unsent
-messages.
+Where the app keeps your saved sign-in, your voice key and unsent messages.
 
 ## For users
 
 - **Your saved sign-ins and voice key** are kept in the system keychain:
-  Windows Credential Manager, or the keyring on Linux. If there is no working
-  keychain, the app uses an encrypted file instead.
+  Windows Credential Manager, the keyring on Linux, or the Android Keystore on
+  a phone. If there is no working keychain, the app uses an encrypted file
+  instead.
 - **Your password never reaches the app's web page.** Only the Rust side of
   the app reads it, to sign you in.
 - **Unsent messages** are kept the same way, per server and per account, so
@@ -33,6 +33,23 @@ The client saves these secrets through a verified secret store, under the
 service name `com.owncord.client`. It tries the OS credential store first.
 If a write fails or cannot be read back, it uses the encrypted fallback
 described below.
+
+A read answers "nothing stored" only when neither store holds the secret. A
+read error from the OS store is passed on, so a locked keychain is never taken
+for a first sign-in, with one exception: on Linux, when there is no session
+bus, or nobody owns the Secret Service's name and no provider could be started
+for it (checked on the bus, after a one-second wait the first time in a run,
+for a provider still starting from autostart), the OS store can hold nothing.
+Then an empty fallback means "nothing stored" and the first write creates the
+fallback copy. A provider whose start fails is an error, as before.
+
+A fallback entry that cannot be decrypted or decoded is an error, never
+"nothing stored", so an identity key is never replaced because its copy could
+not be read. That happens when `credential_fallback.key` was lost or the
+Windows entry came from another user or machine. To start over for one
+server, quit the app and remove that account's entry from
+`credential_fallback.json`; the app then creates a new identity key, which
+peers see as a changed key.
 
 | Secret                          | Account name                      | Contents                                             |
 | ------------------------------- | --------------------------------- | ---------------------------------------------------- |
@@ -222,24 +239,33 @@ not a Windows policy fault, a roaming-profile fault, or a target-name fault.
 
 ### The fix
 
-`src-tauri/Cargo.toml` now names the backends explicitly:
+The 2026-07 fix named the keyring 3 backend features explicitly. Since keyring
+4 the platform stores are separate crates behind `keyring-core`, and the client
+names one per target in `src-tauri/Cargo.toml` (`os_store` in
+`secret_store.rs`):
 
 ```toml
-keyring = { version = "3", default-features = false, features = [
-    "windows-native",       # Windows Credential Manager
-    "apple-native",         # macOS Keychain
-    "sync-secret-service",  # Linux Secret Service (GNOME Keyring / KWallet)
-    "crypto-rust",          # pure-Rust session crypto for Secret Service
-] }
+keyring-core = "1"
+# [target.'cfg(windows)']
+windows-native-keyring-store = { version = "1", default-features = false }      # Credential Manager
+# [target.'cfg(target_os = "macos")']
+apple-native-keyring-store = { version = "1", features = ["keychain"] }          # Keychain
+# [target.'cfg(target_os = "linux")']
+dbus-secret-service-keyring-store = { version = "1", features = ["crypto-rust"] } # Secret Service
 ```
 
-`sync-secret-service` links libdbus, so Linux builds need `libdbus-1-dev`.
+No mock store can be picked by accident any more: a desktop target without a
+store crate fails to compile. The stores use the same names keyring 3 wrote
+(Windows target `{account}.{service}`, the Keychain's service/account pair, the
+Secret Service's `service` and `username` attributes), so saved logins and
+identity keys carry over. The Secret Service store links libdbus, so Linux
+builds need `libdbus-1-dev`.
 
 Two guards keep this from regressing silently:
 
 - `secret_store::tests::compiled_keyring_backend_is_persistent` fails the build
-  if the compiled backend is not disk-persistent. It inspects the backend, so it
-  needs no live keychain and runs in CI.
+  if the compiled store is not disk-persistent. It needs no live keychain and
+  runs in CI.
 - Every write is read back before `save_*` returns (see below).
 
 ## Verifying the credential store on a machine
@@ -351,6 +377,27 @@ fallback:
   the default;
 - is cleared automatically as soon as the OS credential store works again, so a
   repaired machine returns to the real store with no migration step.
+
+## Android
+
+Android has no `keyring` backend, so the crate is not built there and
+`secret_store` puts the Android Keystore first (`android_secrets.rs`, calling
+`SecretsPlugin.kt`). One AES-256 key lives in the Keystore under the alias
+`owncord-secrets` (hardware-backed where the phone has it, no user
+authentication). Each value is sealed with AES-GCM under it, with the same
+associated data as the fallback file (`com.owncord.client`, a `\u0001`, the
+account name), and saved in the app-private preferences file
+`owncord_secrets`. The same write check applies: a value that does not read
+back goes to the encrypted fallback file, and the Keystore wins again once it
+round-trips. A stored value whose key is gone is an error, never "nothing
+stored". The log line reads `credential store: Android Keystore`.
+
+The first store call of each run moves what `credential_fallback.json` still
+holds into the Keystore: an entry leaves the file only after its Keystore copy
+reads back byte for byte, and an entry the Keystore already holds is dropped
+from the file (reads prefer the Keystore copy). Whatever fails stays in the
+file and is tried again next run. Once the file is empty, and no copy of an
+unreadable file was saved aside, `credential_fallback.key` is deleted.
 
 None of this weakens the fail-closed E2EE posture: a peer whose announce
 signature does not verify is still rejected. The fallback only affects whether

@@ -37,11 +37,13 @@ export function serverMenu(host: string, deps: RailMutations): ContextMenuItem[]
     {
       label: serverRailText("moveUp"),
       testId: "rail-move-up",
+      icon: "arrow-up",
       onClick: () => commit(shiftItem(current, ref, -1)),
     },
     {
       label: serverRailText("moveDown"),
       testId: "rail-move-down",
+      icon: "arrow-down",
       onClick: () => commit(shiftItem(current, ref, 1)),
     },
   ];
@@ -49,6 +51,7 @@ export function serverMenu(host: string, deps: RailMutations): ContextMenuItem[]
     items.push({
       label: serverRailText("removeFromFolder"),
       testId: "rail-remove-from-folder",
+      icon: "folder-minus",
       onClick: () => commit(moveOutOfFolder(current, host)),
     });
   } else {
@@ -58,6 +61,7 @@ export function serverMenu(host: string, deps: RailMutations): ContextMenuItem[]
       items.push({
         label: serverRailText("groupNext"),
         testId: "rail-group-next",
+        icon: "folder-plus",
         onClick: () => commit(groupWithNext(current, host, newFolderId())),
       });
     }
@@ -76,16 +80,19 @@ export function folderMenu(
   return [
     {
       label: folder.collapsed ? serverRailText("expand") : serverRailText("collapse"),
+      icon: folder.collapsed ? "chevron-down" : "chevron-up",
       onClick: () => commit(toggleCollapsed(current, folder.id)),
     },
     {
       label: serverRailText("renameFolder"),
       testId: "rail-rename-folder",
+      icon: "pencil",
       onClick: () => promptRename(folder),
     },
     {
       label: serverRailText("folderColor"),
       testId: "rail-folder-color",
+      icon: "palette",
       onClick: () => {},
       submenu: FOLDER_COLORS.map((color, i) => ({
         label: serverRailText(COLOR_NAME_KEYS[i] ?? "color.grey"),
@@ -97,15 +104,18 @@ export function folderMenu(
     },
     {
       label: serverRailText("moveUp"),
+      icon: "arrow-up",
       onClick: () => commit(shiftItem(current, ref, -1)),
     },
     {
       label: serverRailText("moveDown"),
+      icon: "arrow-down",
       onClick: () => commit(shiftItem(current, ref, 1)),
     },
     {
       label: serverRailText("ungroup"),
       testId: "rail-ungroup",
+      icon: "folder-minus",
       onClick: () => commit(ungroupFolder(current, folder.id)),
     },
   ];

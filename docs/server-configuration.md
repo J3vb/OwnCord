@@ -110,10 +110,10 @@ start-up output. This also applies after you re-open setup by clearing the
 
 ### Security (`security`)
 
-| Key                                   | Type  | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| ------------------------------------- | ----- | ------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `security.auth_rate_limit_multiplier` | float | `1.0`   | Scales the per-IP auth rate limits and failure thresholds (registration, login, TOTP, sensitive endpoints, WebSocket upgrades). The defaults assume roughly one person per IP; raise this for communities behind a shared NAT (office, school). Clamped to 0.1–100.                                                                                                                                                                                             |
-| `security.expensive_auth_concurrency` | int   | `0`     | Bounds how many bcrypt computations — password checks and hashes on every auth route, recovery-code matching at the second-factor step — run at once. Login, registration and recovery-code checks over the budget queue for up to 10 s; an attempt refused (queue full, wait over, or a password confirmation over budget) gets `429 AUTH_BUSY`, runs no bcrypt and consumes no lockout attempt. `0` = twice the CPU count (never below 4); clamped to 1–4096. |
+| Key                                   | Type  | Default | Description                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| ------------------------------------- | ----- | ------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `security.auth_rate_limit_multiplier` | float | `1.0`   | Scales the per-IP auth rate limits and failure thresholds (registration, login, TOTP, sensitive endpoints, WebSocket upgrades). The defaults assume roughly one person per IP; raise this for communities behind a shared NAT (office, school). Clamped to 0.1–100.                                                                                                                                                                                                  |
+| `security.expensive_auth_concurrency` | int   | `0`     | Bounds how many password-hash computations — password checks and hashes on every auth route, recovery-code matching at the second-factor step — run at once. Login, registration and recovery-code checks over the budget queue for up to 10 s; an attempt refused (queue full, wait over, or a password confirmation over budget) gets `429 AUTH_BUSY`, runs no hash and consumes no lockout attempt. `0` = twice the CPU count (never below 4); clamped to 1–4096. |
 
 ### Uploads (`upload`)
 
@@ -131,16 +131,14 @@ start-up output. This also applies after you re-open setup by clearing the
 Disabled by default: with `push.enabled` false, every `/api/v1/push/*` route
 answers `503 PUSH_DISABLED` after authenticating the caller, and nothing is
 written. Turning it off again later keeps existing subscription rows —
-nothing dispatches to them either way — but the staleness sweep keeps
-running.
+nothing is sent to them — but the staleness sweep keeps running.
 
-Dispatch (sending an actual push to a stored subscription) has its **own,
-second** opt-in: `push.dispatch_enabled`, false by default and independent
-of `push.enabled`, so an operator who enabled subscription storage before
-dispatch existed does not acquire dispatch on upgrade. **Turning dispatch on
-makes the server open outbound HTTPS connections to the push service named
-in each stored subscription's endpoint** — see
-[diagnostics.md](architecture/diagnostics.md)'s egress table. With dispatch
+One switch, `push.enabled`, turns on both device registration and sending
+(the older second switch, `push.dispatch_enabled`, is deprecated and ignored;
+a config file or settings override that still names it loads fine).
+**Turning push on makes the server open outbound HTTPS connections to the
+push service named in each stored subscription's endpoint** — see
+[diagnostics.md](architecture/diagnostics.md)'s egress table. With push
 on, a new message in a channel or DM sends a generic `{"t":"activity"}`
 payload (no message text, channel name or sender) to every offline,
 permitted recipient's subscriptions, coalesced to at most one push per user
@@ -148,11 +146,36 @@ per channel per 60 seconds; a `404`/`410` response prunes the subscription,
 a `429` or `5xx` (or a network error) gets two retries — three attempts
 total — before being dropped; any other failure status drops immediately.
 
+A direct message call also rings by push: the server sends `{"t":"ring","c":<channel id>}`
+to every subscription of the people it rings, online or not (a phone whose app
+sleeps keeps no connection; one whose app is open ignores it), and
+`{"t":"ring_end","c":<channel id>}` when one of them declines or joins the call
+on any device, or the caller leaves it. Both carry only the DM channel id, are
+sent at high urgency with a 30-second TTL, get one retry a second later, and
+skip a member on Do Not Disturb or already in the call (a ring end is always
+sent). The server remembers a ring for 65 seconds (its 30-second TTL plus the
+phone's 30-second ring), in memory only: after a restart a ring rings out on
+the phone instead of being taken down.
+
+The Android app registers through UnifiedPush: each member's own push app
+(ntfy, or another distributor) receives the pushes, so no Google service is
+involved, and the phone shows "New messages on <server>" while the app is
+closed.
+
+A phone's subscription belongs to the session that made it: signing out,
+"sign out everywhere", an expired session, a ban or an admin revoke deletes it
+with the session, so a signed-out phone gets no more pushes. The server only
+sends to a push server on a public address: a self-hosted ntfy on your own
+network, a VPN address or the same machine is refused at send time (the same
+rule that keeps any outbound fetch off the server's own network), so a member
+using one sees push as on but gets nothing. Use a public ntfy server such as
+ntfy.sh, or one published on a public address.
+
 | Key                          | Type   | Default | Description                                                                                                                                                                                                |
 | ---------------------------- | ------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `push.enabled`               | bool   | `false` | Owner opt-in for Web Push subscription storage. Routes are always mounted; this only gates whether they do anything.                                                                                       |
+| `push.enabled`               | bool   | `false` | Owner opt-in for Web Push: devices may register and the server sends to them. Opens outbound connections to the push service named in each subscription's endpoint. Routes are always mounted.             |
 | `push.subscription_ttl_days` | int    | `90`    | A subscription whose `last_seen_at` is older than this many days is removed by the maintenance sweep. Clients keep a row alive by re-POSTing the same endpoint. Clamped to 1–3650; `0` falls back to `90`. |
-| `push.dispatch_enabled`      | bool   | `false` | Owner opt-in for actually sending pushes, separate from `push.enabled`. Dispatch runs only when both are true. Opens outbound connections to the push service named in each subscription's endpoint.       |
+| `push.dispatch_enabled`      | bool   | `false` | Deprecated and ignored: `push.enabled` alone turns on sending. A config file or settings override that still sets it loads without error; the server logs one Info line at start-up.                       |
 | `push.contact`               | string | `""`    | Operator contact for VAPID JWTs (RFC 8292), sent as `mailto:<contact>` in the token's `sub` claim. Empty omits the claim; some push services require one and will refuse a request without it.             |
 
 **VAPID key and rotation.** The server generates (or loads) a P-256 VAPID key
@@ -266,6 +289,16 @@ never ships in the desktop bundle — the client only ever calls
 > **Treat this as a credential.** Prefer `OWNCORD_GIF_API_KEY` (or a secrets
 > manager) over writing it into `config.yaml`, and rotate it if it has ever
 > been exposed to a client build.
+
+### Link previews (`link_previews`)
+
+The server fetches a link in a new message once and keeps the card text in the database and a shrunk thumbnail on disk under `<data_dir>/link-previews/`. Thumbnails are stored by content hash, so the same image is kept once.
+
+| Key                                   | Type | Default | Description                                                                                                                                                                                          |
+| ------------------------------------- | ---- | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `link_previews.enabled`               | bool | `true`  | Fetch links in new messages and keep their previews. `false` stops fetching only; stored previews stay and the thumbnail sweep still runs, so turning it off reclaims disk down to the cap.          |
+| `link_previews.thumbnail_cache_mb`    | int  | `512`   | Cap on the thumbnails kept on disk. When it is passed, the thumbnails shown longest ago are deleted first. `0` keeps no thumbnails. A negative value falls back to the default with a warning.       |
+| `link_previews.thumbnail_unused_days` | int  | `30`    | A thumbnail nothing has shown for this many days is deleted, whatever the cap says. Cards no message names are pruned on the same clock, but never within 7 days of their last use. Range 1 to 3650. |
 
 ### Logging (`logging`)
 
@@ -540,7 +573,7 @@ anyway, so the panel would add risk and save no work. To move it:
 
 <!-- gendocs:config:start -->
 
-Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 82 keys.
+Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags otel,wazero ./cmd/gendocs` — do not edit by hand; `make docs-verify` fails when it drifts, and the tool exits non-zero when a key is documented nowhere above. 85 keys.
 
 | Key                                         | Documented in                           |
 | ------------------------------------------- | --------------------------------------- |
@@ -563,6 +596,9 @@ Generated from the `yaml` tags of `config.Config` by `cd Server && go run -tags 
 | `github.owner`                              | GitHub / Updates (`github`)             |
 | `github.repo`                               | GitHub / Updates (`github`)             |
 | `github.token`                              | GitHub / Updates (`github`)             |
+| `link_previews.enabled`                     | Link previews (`link_previews`)         |
+| `link_previews.thumbnail_cache_mb`          | Link previews (`link_previews`)         |
+| `link_previews.thumbnail_unused_days`       | Link previews (`link_previews`)         |
 | `logging.history_days`                      | Logging (`logging`)                     |
 | `logging.history_max_mb`                    | Logging (`logging`)                     |
 | `logging.level`                             | Logging (`logging`)                     |
@@ -644,6 +680,11 @@ table below is only a sample.
 - A list key takes a comma-separated list. For example,
   `OWNCORD_SERVER_TRUSTED_PROXIES=10.0.0.2/32,10.0.0.3/32` is two entries.
   Spaces around each entry are trimmed.
+  Blank entries are dropped. A value that is empty (or only commas and spaces)
+  is ignored with a start-up warning, and the list keeps its `config.yaml` or
+  default value: a blank variable can neither lock you out of the admin panel
+  nor switch its address allowlist off. To clear a list, set it to `[]` in
+  `config.yaml`.
 - Every other key takes one value of its own type.
 - A value of the wrong type stops the server at start-up, naming the variable.
   It is never silently changed or ignored.

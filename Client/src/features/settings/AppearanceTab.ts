@@ -1,8 +1,9 @@
 /**
- * Appearance settings tab — theme, font size, compact mode.
+ * Appearance settings tab — theme, accent, text size, layout and clocks.
  */
 
 import { createElement, appendChildren, setText } from "@lib/dom";
+import { buildSettingsSection } from "./settingsSection";
 import { loadPref, savePref, createToggle, platformText } from "./helpers";
 import { isAndroidApp } from "../voice/native/platform";
 import { readStored } from "@lib/prefs/preferences";
@@ -18,6 +19,8 @@ import {
   type ThemeName,
 } from "@lib/prefs/themes";
 import { setRovingTabindex, enableRovingNavigation } from "@lib/ui/a11y";
+import { createRadioCards, type RadioCardOption } from "@lib/ui/radioCards";
+import { defaultAccentOf, drawSystemPreview, drawThemePreview } from "./themePreview";
 import {
   applyFontSize,
   effectiveFontSize,
@@ -39,17 +42,26 @@ import { buildCustomThemeSection } from "../custom-themes/customThemeSection";
 import { buildChoiceRow, buildSettingRow } from "./settingRow";
 import { settingsText as t } from "../../i18n/settings";
 
-const FALLBACK_ACCENT = "#5865f2";
-
-function getDefaultAccent(themeName: string): string {
-  if (themeName === "neon-glow") return "#00c8ff";
-  // Light's own accent (B9 Q13): white on it reads at 5.54:1.
-  return themeName === "light" ? "#4f5bd5" : FALLBACK_ACCENT;
-}
-
 /** "system" is a choice, not a palette: the accent default follows what it shows. */
 function paletteOf(choice: string): string {
   return choice === SYSTEM_THEME ? resolveSystemTheme() : choice;
+}
+
+/** One tile per built-in theme, then the system choice, each a preview over its name. */
+function themeTileOptions(): RadioCardOption<string>[] {
+  const palettes = (Object.keys(THEMES) as ThemeName[]).map((name) => ({
+    value: name,
+    label: t(`appearance.theme.${name}`),
+    preview: drawThemePreview(name),
+  }));
+  return [
+    ...palettes,
+    {
+      value: SYSTEM_THEME,
+      label: platformText(t("appearance.theme.system"), t("appearance.theme.system.android")),
+      preview: drawSystemPreview(),
+    },
+  ];
 }
 
 /** The font size slider row; its label shows the effective size. */
@@ -151,88 +163,61 @@ function applyStoredPreferences(
   }
 }
 
-export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
+export function buildAppearanceTab(
+  signal: AbortSignal,
+  onDirtyCheck?: (isDirty: () => boolean) => void,
+): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
+  const themeGroup = buildSettingsSection({
+    label: t("appearance.theme"),
+    headingAttrs: { id: "appearance-theme-heading" },
+  });
+  const colorGroup = buildSettingsSection({
+    label: t("appearance.accentColor"),
+    headingAttrs: { id: "appearance-accent-heading" },
+  });
+  const textGroup = buildSettingsSection({ label: t("appearance.section.textSize") });
+  const layoutGroup = buildSettingsSection({ label: t("appearance.section.layout") });
+  appendChildren(section, themeGroup.el, colorGroup.el, textGroup.el, layoutGroup.el);
   const activeThemeName = getActiveThemeName();
   const currentTheme =
     activeThemeName in THEMES || activeThemeName === SYSTEM_THEME ? activeThemeName : null;
   const currentFontSize = loadPref<number>("fontSize", 16);
   const currentCompact = loadPref<boolean>("compactMode", false);
   let hasStoredAccent = readStored("owncord:settings:accentColor") !== null;
-  const defaultAccent = getDefaultAccent(paletteOf(activeThemeName));
+  const defaultAccent = defaultAccentOf(paletteOf(activeThemeName));
 
-  // Theme selector
-  const themeRow = createElement("div", {
-    class: "theme-options",
-    role: "radiogroup",
-    "aria-label": t("appearance.theme"),
-  });
-  const choices: string[] = [...(Object.keys(THEMES) as ThemeName[]), SYSTEM_THEME];
-  for (const name of choices) {
-    const isActive = name === currentTheme;
-    const label =
-      name === SYSTEM_THEME
-        ? platformText(t("appearance.theme.system"), t("appearance.theme.system.android"))
-        : name.charAt(0).toUpperCase() + name.slice(1);
-    const btn = createElement(
-      "button",
-      {
-        class: `theme-opt ${name}${isActive ? " active" : ""}`,
-        role: "radio",
-        tabindex: isActive ? "0" : "-1",
-        "aria-checked": isActive ? "true" : "false",
-        "aria-label": label,
-      },
-      label,
-    );
-
-    const activateTheme = (): void => {
+  // Theme: one radiogroup of preview tiles. A custom theme paints over the
+  // checked one, so exactly one tile stays checked while it is on.
+  const themeTiles = createRadioCards<string>({
+    signal,
+    labelledBy: "appearance-theme-heading",
+    testId: "theme",
+    layout: "tiles",
+    options: themeTileOptions(),
+    value: currentTheme,
+    onChange: (name) => {
       applyThemeChoice(name);
-      for (const child of themeRow.children) {
-        child.classList.remove("active");
-        child.setAttribute("aria-checked", "false");
-      }
-      btn.classList.add("active");
-      btn.setAttribute("aria-checked", "true");
       if (hasStoredAccent) {
         // applyThemeByName clears every inline custom property on <body>,
         // which includes the accent override applyAccent puts there. Without
         // re-applying it, a theme that sets --accent on its body class
         // (neon-glow) silently reverts the user's accent until restart.
-        applyAccent(loadPref<string>("accentColor", getDefaultAccent(paletteOf(name))));
+        applyAccent(loadPref<string>("accentColor", defaultAccentOf(paletteOf(name))));
       } else {
-        syncDisplayedAccent(getDefaultAccent(paletteOf(name)));
+        syncDisplayedAccent(defaultAccentOf(paletteOf(name)));
       }
-    };
+    },
+  });
+  themeTiles.group.classList.add("theme-tiles");
+  themeGroup.card.appendChild(themeTiles.el);
 
-    btn.addEventListener("click", activateTheme, { signal });
-    btn.addEventListener(
-      "keydown",
-      (e) => {
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          activateTheme();
-        }
-      },
-      { signal },
-    );
-
-    themeRow.appendChild(btn);
-  }
-  // One Tab stop with arrow-key movement (contract Keyboard table). The theme
-  // tiles are a horizontal row, so ArrowLeft/Right is the stepping axis.
-  setRovingTabindex(themeRow, "[role='radio']");
-  enableRovingNavigation(themeRow, "[role='radio']", signal);
-  section.appendChild(
-    buildSettingRow({ label: t("appearance.theme"), control: themeRow, stacked: true }),
-  );
-
-  section.appendChild(buildFontSizeRow(signal, currentFontSize));
+  textGroup.card.appendChild(buildFontSizeRow(signal, currentFontSize));
 
   // Zoom level: the native webview zoom, snapping to Discord's levels. The
   // slider follows the zoom keys (Ctrl+= / Ctrl+- / Ctrl+0) while it is open.
   const zoomRow = buildZoomRow(signal);
-  if (zoomRow !== null) section.appendChild(zoomRow);
+  if (zoomRow !== null) textGroup.card.appendChild(zoomRow);
 
   // Compact mode toggle
   const compactToggle = createToggle(currentCompact, {
@@ -243,7 +228,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
       document.documentElement.classList.toggle("compact-mode", isNowCompact);
     },
   });
-  section.appendChild(
+  textGroup.card.appendChild(
     buildSettingRow({ label: t("appearance.compactMode"), control: compactToggle }),
   );
 
@@ -273,7 +258,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
       timeFormatRow.paint();
     },
   });
-  section.append(timeFormatRow.row, dateFormatRow.row);
+  layoutGroup.card.append(timeFormatRow.row, dateFormatRow.row);
 
   // Member list position (right column / under the channels)
   const memberLayoutRow = buildChoiceRow<MemberLayout>({
@@ -289,7 +274,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     save: (value) => savePref(MEMBER_LAYOUT_PREF, value),
   }).row;
   // A phone shows the member list as an overlay, so it has no side to pick.
-  if (!isAndroidApp()) section.appendChild(memberLayoutRow);
+  if (!isAndroidApp()) layoutGroup.card.appendChild(memberLayoutRow);
 
   // Accent color picker
   const ACCENT_PRESETS: readonly string[] = [
@@ -313,7 +298,11 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
     applyAccent(color);
   }
 
-  const swatchesRow = createElement("div", { class: "accent-swatches" });
+  const swatchesRow = createElement("div", {
+    class: "accent-swatches",
+    role: "radiogroup",
+    "aria-labelledby": "appearance-accent-heading",
+  });
 
   // Declare hexInput early so swatch closures can reference it after construction
   const hexInputRow = createElement("div", { class: "accent-hex-row" });
@@ -336,10 +325,16 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   );
 
   function syncDisplayedAccent(color: string): void {
-    for (const child of swatchesRow.children) {
-      const isMatch = (child as HTMLElement).style.backgroundColor === hexToRgb(color);
-      child.classList.toggle("active", isMatch);
-      child.setAttribute("aria-checked", isMatch ? "true" : "false");
+    const swatches = Array.from(swatchesRow.children);
+    const match = swatches.find(
+      (child) => (child as HTMLElement).style.backgroundColor === hexToRgb(color),
+    );
+    // The tab stop follows the check; a custom colour leaves the first swatch as the way in.
+    const stop = match ?? swatches[0];
+    for (const child of swatches) {
+      child.classList.toggle("active", child === match);
+      child.setAttribute("aria-checked", child === match ? "true" : "false");
+      child.setAttribute("tabindex", child === stop ? "0" : "-1");
     }
     hexInput.value = color.replace("#", "");
     hexInput.placeholder = color.replace("#", "");
@@ -377,7 +372,7 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
 
     swatchesRow.appendChild(swatch);
   }
-  // Same roving behaviour as the theme tiles (A11Y-09).
+  // One tab stop with arrow-key movement, like the theme tiles.
   setRovingTabindex(swatchesRow, "[role='radio']");
   enableRovingNavigation(swatchesRow, "[role='radio']", signal);
 
@@ -398,16 +393,14 @@ export function buildAppearanceTab(signal: AbortSignal): HTMLDivElement {
   appendChildren(hexInputRow, hexPrefix, hexInput);
   const accentControl = createElement("div", { class: "accent-control" });
   appendChildren(accentControl, swatchesRow, hexInputRow, accentNote);
-  section.appendChild(
-    buildSettingRow({ label: t("appearance.accentColor"), control: accentControl, stacked: true }),
-  );
-  section.appendChild(buildCustomThemeSection(signal));
+  colorGroup.card.appendChild(accentControl);
+  section.appendChild(buildCustomThemeSection(signal, onDirtyCheck));
 
-  // An OS light/dark flip under "Sync with computer" changes the default
+  // An OS light/dark flip under "Match my computer" changes the default
   // accent; with no stored accent the controls must follow it.
   onSystemThemePainted(() => {
     if (hasStoredAccent) return;
-    syncDisplayedAccent(getDefaultAccent(paletteOf(getActiveThemeName())));
+    syncDisplayedAccent(defaultAccentOf(paletteOf(getActiveThemeName())));
   }, signal);
 
   applyStoredPreferences(currentTheme, currentCompact, hasStoredAccent ? currentAccent : null);

@@ -16,6 +16,7 @@ import (
 // Note this exercises the raw tryLockFile, not acquireProcessLock — the
 // latter's 30s restart-handoff retry would stall the contended case.
 func TestTryLockFile_Exclusive(t *testing.T) {
+	t.Parallel()
 	path := lockFilePath(filepath.Join(t.TempDir(), "test.db"))
 
 	release1, err := tryLockFile(path)
@@ -40,6 +41,7 @@ func TestTryLockFile_Exclusive(t *testing.T) {
 // taken for another reason (here, a missing data dir) must not send the
 // operator looking for a running server.
 func TestAcquireProcessLock_OnlyBlamesAHolderWhenLocked(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "test.db")
 	release, err := AcquireProcessLock(dbPath)
 	if err != nil {

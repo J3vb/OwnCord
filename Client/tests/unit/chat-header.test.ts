@@ -8,6 +8,7 @@ import {
   setChatHeaderLock,
 } from "../../src/pages/main-page/ChatHeader";
 import { useMountContainer } from "../helpers/mountContainer";
+import { cascadedDeclaration } from "../helpers/app-css";
 
 describe("ChatHeader", () => {
   let container: HTMLDivElement;
@@ -55,6 +56,28 @@ describe("ChatHeader", () => {
     const searchInput = container.querySelector(".search-input") as HTMLInputElement;
     expect(searchInput).not.toBeNull();
     expect(searchInput.placeholder).toBe("Search...");
+  });
+
+  it("leads the search box with a decorative search icon", () => {
+    const { element } = buildChatHeader({ onTogglePins: vi.fn() });
+    container.appendChild(element);
+
+    const field = container.querySelector(".ch-tools > .search-field")!;
+    const [icon, input] = Array.from(field.children);
+    expect(icon?.getAttribute("data-icon")).toBe("search");
+    expect(icon?.getAttribute("aria-hidden")).toBe("true");
+    expect(input?.getAttribute("data-testid")).toBe("search-input");
+    // The phone icon button is still its own control beside the field.
+    expect(field.nextElementSibling?.getAttribute("data-testid")).toBe("search-btn");
+  });
+
+  it("gives the member list search the header search's height and text size", () => {
+    for (const property of ["height", "font-size"]) {
+      const header = cascadedDeclaration(".chat-header .search-input", property);
+      const members = cascadedDeclaration(".member-search-wrap .member-search", property);
+      expect(header).toBeDefined();
+      expect(JSON.stringify(members?.value)).toBe(JSON.stringify(header?.value));
+    }
   });
 
   it("calls onTogglePins when pin button is clicked", () => {

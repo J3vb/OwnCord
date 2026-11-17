@@ -16,6 +16,7 @@ import (
 // with an application/json content type, so the admin panel reads one shape on
 // every route.
 func TestPluginsHandler_ErrorsUseTheJSONEnvelope(t *testing.T) {
+	t.Parallel()
 	disabled := NewPluginAdminHandler(nil, nil, nil)
 	reg, store := newTestPluginRegistryWithStore(t)
 	live := NewPluginAdminHandler(reg, store, nil)
@@ -78,6 +79,7 @@ func TestPluginsHandler_ErrorsUseTheJSONEnvelope(t *testing.T) {
 // request cap while multipart parsing is still reading it: that is an
 // over-size upload, not a malformed one.
 func TestPluginsHandler_UploadPastTheCapMidParseIs413(t *testing.T) {
+	t.Parallel()
 	h := NewPluginAdminHandler(newTestPluginRegistry(t), nil, nil)
 	var buf bytes.Buffer
 	mw := multipart.NewWriter(&buf)
@@ -99,6 +101,7 @@ func TestPluginsHandler_UploadPastTheCapMidParseIs413(t *testing.T) {
 // TestPluginsHandler_ListStoreFailureIsJSON500 covers the list route's one
 // error: a store that cannot be read.
 func TestPluginsHandler_ListStoreFailureIsJSON500(t *testing.T) {
+	t.Parallel()
 	reg, store := newTestPluginRegistryWithStore(t)
 	h := NewPluginAdminHandler(reg, store, nil)
 	_ = store.Close()

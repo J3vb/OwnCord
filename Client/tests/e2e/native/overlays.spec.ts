@@ -189,7 +189,7 @@ test.describe("Pinned Messages", () => {
     // pin-btn click below. Start from a known-closed panel.
     const openPanel = nativePage.locator(".pinned-panel");
     if (await openPanel.isVisible().catch(() => false)) {
-      await openPanel.locator(".pinned-panel__close").click();
+      await openPanel.locator(".side-panel__close").click();
       await expect(openPanel).not.toBeVisible({ timeout: 3_000 });
     }
   });
@@ -221,7 +221,7 @@ test.describe("Pinned Messages", () => {
     const panel = nativePage.locator(".pinned-panel");
     await expect(panel).toBeVisible({ timeout: 5_000 });
 
-    await panel.locator(".pinned-panel__close").click();
+    await panel.locator(".side-panel__close").click();
     await expect(panel).not.toBeVisible({ timeout: 3_000 });
   });
 });

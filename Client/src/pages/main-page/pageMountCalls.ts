@@ -18,6 +18,7 @@ import {
 import { uiStore } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
 import { watchGroupDmExits } from "../../features/direct-messages/groupExitWatch";
+import { mountPendingRequestNotice } from "../../features/direct-messages/pendingRequestNotice";
 import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import {
@@ -38,6 +39,7 @@ import {
   stopRingChime,
   startRingback,
   stopRingback,
+  playCallEnded,
 } from "@lib/media/notificationSound";
 import { createTileMenuActions } from "./tileMenuActions";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
@@ -45,6 +47,13 @@ import { log, callAlerts, personName, getCurrentUserId, tileLabel } from "./page
 import type { PageState, PageApi, MountScope } from "./pageState";
 
 export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
+  const header = ms.chatAreaResult.chatHeaderRefs;
+  st.unsubscribers.push(
+    mountPendingRequestNotice({
+      inputSlot: ms.chatAreaResult.slots.inputSlot,
+      callButtons: [header.callBtn, header.videoCallBtn],
+    }),
+  );
   // --- DM calls ---
   // The banner is mounted on the page root rather than inside the chat area
   // so a ring stays visible while the user is looking at another channel —
@@ -59,6 +68,7 @@ export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
       st.ws.send({ type: "call_decline", payload: { channel_id: channelId } });
     },
     onRingStart: (ring) => void callAlerts().then((m) => m.alertIncomingCall(ring)),
+    onRedial: (ring) => void callAlerts().then((m) => m.alertRedial(ring)),
     onMissed: (ring) => void callAlerts().then((m) => m.alertMissedCall(ring)),
     onRingEnd: (ring, reason) =>
       void callAlerts().then((m) => {
@@ -82,13 +92,15 @@ export function mountCalls(st: PageState, pg: PageApi, ms: MountScope): void {
       toastOutgoingCallOutcome(state);
     },
     onRingback: (playing) => (playing ? startRingback() : stopRingback()),
+    onUnanswered: playCallEnded,
   });
 
   // Loaded on demand like the sidebar drawer: the panel is only drawn in a
   // DM with a call, so its code stays out of the eager MainPage chunk
   // (bundle budget). Until it lands, the banner answers every ring.
-  void callAlerts().then(({ createDmCallPanel }) => {
+  void callAlerts().then(({ createDmCallPanel, followCallActions }) => {
     if (st.tornDown) return;
+    st.unsubscribers.push(followCallActions(st, pg, ms.voiceKeybindActions));
     const panel = createDmCallPanel({
       onMuteToggle: () => ms.voiceKeybindActions.onMuteToggle(),
       onDeafenToggle: () => ms.voiceKeybindActions.onDeafenToggle(),

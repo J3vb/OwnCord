@@ -37,6 +37,7 @@ func storedExpiry(t *testing.T, database *db.DB, id int64) (text, expiresAt stri
 }
 
 func TestHandlePresenceUpdate_StoresExpiry(t *testing.T) {
+	t.Parallel()
 	svc, database := newExpiryChannels(t)
 	fixed := time.Date(2026, 10, 15, 12, 0, 0, 0, time.UTC)
 	svc.now = func() time.Time { return fixed }
@@ -59,6 +60,7 @@ func TestHandlePresenceUpdate_StoresExpiry(t *testing.T) {
 }
 
 func TestHandlePresenceUpdate_NewTextWithoutExpiryClearsOld(t *testing.T) {
+	t.Parallel()
 	svc, database := newExpiryChannels(t)
 	ctx := context.Background()
 	first, second := "lunch", "back"
@@ -87,6 +89,7 @@ func TestHandlePresenceUpdate_NewTextWithoutExpiryClearsOld(t *testing.T) {
 }
 
 func TestHandlePresenceUpdate_BareFlipKeepsExpiry(t *testing.T) {
+	t.Parallel()
 	svc, database := newExpiryChannels(t)
 	ctx := context.Background()
 	text := "heads down"
@@ -103,6 +106,7 @@ func TestHandlePresenceUpdate_BareFlipKeepsExpiry(t *testing.T) {
 }
 
 func TestHandlePresenceUpdate_RejectsBadExpiry(t *testing.T) {
+	t.Parallel()
 	svc, _ := newExpiryChannels(t)
 	ctx := context.Background()
 	text, empty := "x", ""
@@ -129,6 +133,7 @@ func TestHandlePresenceUpdate_RejectsBadExpiry(t *testing.T) {
 }
 
 func TestLogout_ClearsExpiry(t *testing.T) {
+	t.Parallel()
 	svc, database := newExpiryChannels(t)
 	ctx := context.Background()
 	text := "away"
@@ -188,6 +193,7 @@ func inSeconds(d time.Duration) *string {
 }
 
 func TestCustomStatusExpirer_ClearsAtDeadline(t *testing.T) {
+	t.Parallel()
 	_, database := newExpiryChannels(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	text := "short"
@@ -209,6 +215,7 @@ func TestCustomStatusExpirer_ClearsAtDeadline(t *testing.T) {
 }
 
 func TestCustomStatusExpirer_WakesOnEarlierSet(t *testing.T) {
+	t.Parallel()
 	svc, database := newExpiryChannels(t)
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", PasswordHash: "h"})
 	ctx, cancel := context.WithCancel(context.Background())
@@ -242,6 +249,7 @@ func TestCustomStatusExpirer_WakesOnEarlierSet(t *testing.T) {
 }
 
 func TestCustomStatusExpirer_BootSweepClearsOfflineExpiry(t *testing.T) {
+	t.Parallel()
 	_, database := newExpiryChannels(t)
 	ctx := context.Background()
 	text := "left a while ago"
@@ -296,6 +304,7 @@ func (failingExpiryStore) ClearCustomStatusIfExpiry(context.Context, int64, stri
 }
 
 func TestCustomStatusExpirer_ReadErrorRetriesAndStillExits(t *testing.T) {
+	t.Parallel()
 	st := failingExpiryStore{reads: make(chan struct{}, 8)}
 	e := NewCustomStatusExpirer(st)
 	e.retryAfter = 20 * time.Millisecond

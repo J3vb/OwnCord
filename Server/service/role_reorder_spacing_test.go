@@ -21,6 +21,7 @@ import (
 // still has somewhere to put a new role.
 
 func TestReorderRoles_LeavesRoomToCreateBelow(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 	ctx := context.Background()
 
@@ -47,6 +48,7 @@ func TestReorderRoles_LeavesRoomToCreateBelow(t *testing.T) {
 // The spacing has to survive repeated reorders: a manager who reorders their
 // own subtree must not compact it out of room either.
 func TestReorderRoles_SpacingSurvivesRepeatedReorders(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 	ctx := context.Background()
 
@@ -78,6 +80,7 @@ func TestReorderRoles_SpacingSurvivesRepeatedReorders(t *testing.T) {
 // slot above it — the same wedge OC-0374 describes, reappearing on exactly the
 // servers with the most roles to manage.
 func TestReorderRoles_SpreadsAcrossTheWholeRangeAtHighRoleCounts(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 	ctx := context.Background()
 

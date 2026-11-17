@@ -4,12 +4,17 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { appendToggleRows, platformText, savePref } from "./helpers";
+import { buildSettingsSection } from "./settingsSection";
 import { isAndroidApp } from "../voice/native/platform";
-import { playNotificationSound } from "@lib/media/notificationSound";
+import { previewSounds } from "@lib/media/soundPreview";
 import {
   APP_SOUNDS_VOLUME_KEY,
+  SOUND_STYLE_KEY,
   SOUND_SWITCH_KEYS,
   loadAppSoundsGain,
+  loadSoundStyle,
+  soundSwitchDefault,
+  type SoundStyle,
   type SoundSwitch,
 } from "@lib/prefs/soundPrefs";
 import { setStatusIcon, statusIcon, type StatusKind } from "./status";
@@ -26,6 +31,7 @@ import {
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
 import { buildChoiceRow } from "./settingRow";
+import { addSoundPreviewButton } from "./soundPreviewButton";
 import {
   LEVEL_LABELS,
   buildChannelLevelsSection,
@@ -123,10 +129,19 @@ const SOUND_SWITCH_TEXT: Readonly<
     label: () => t("notifications.sound.stream.label"),
     desc: () => t("notifications.sound.stream.desc"),
   },
+  connection: {
+    label: () => t("notifications.sound.connection.label"),
+    desc: () => t("notifications.sound.connection.desc"),
+  },
+  ptt: {
+    label: () => t("notifications.sound.ptt.label"),
+    desc: () => t("notifications.sound.ptt.desc"),
+  },
 };
 
 /** A group switch (its pref key unchanged) followed by its nested per-sound
- *  switches. A sound plays only when both the group and its own switch are on. */
+ *  switches, each with a play button. A sound plays only when both the group
+ *  and its own switch are on; the play button plays it either way. */
 function appendSoundGroup(
   section: HTMLElement,
   group: { key: string; label: string; desc: string },
@@ -140,11 +155,15 @@ function appendSoundGroup(
       key: SOUND_SWITCH_KEYS[sound],
       label: SOUND_SWITCH_TEXT[sound].label(),
       desc: SOUND_SWITCH_TEXT[sound].desc(),
-      fallback: true,
+      fallback: soundSwitchDefault(sound),
     })),
     signal,
   );
-  for (const row of rows) row.classList.add("nested");
+  rows.forEach((row, i) => {
+    const sound = sounds[i]!;
+    row.classList.add("nested");
+    addSoundPreviewButton(row, sound, SOUND_SWITCH_TEXT[sound].label(), signal);
+  });
 }
 
 /** The slider's value as spoken and shown: a percent. */
@@ -156,7 +175,7 @@ function valueText(percent: number): string {
  * The "App sounds volume" slider: scales the master gain every app
  * sound shares. 100% is today's level, 0% is silent. The value is saved on
  * every move (the player re-reads it on its next sound); letting go of the
- * thumb plays the message chime once so the level can be judged.
+ * thumb previews the message chime so the level can be judged.
  */
 function buildSoundsVolumeRow(signal: AbortSignal): HTMLDivElement {
   const row = createElement("div", { class: "setting-row stacked" });
@@ -188,15 +207,50 @@ function buildSoundsVolumeRow(signal: AbortSignal): HTMLDivElement {
     },
     { signal },
   );
-  slider.addEventListener("change", () => playNotificationSound(), { signal });
+  slider.addEventListener("change", () => previewSounds(["message"], signal), { signal });
   const control = createElement("div", { class: "slider-row" });
   appendChildren(control, slider, readout);
   row.appendChild(control);
   return row;
 }
 
+/** The "Sound style" row: Modern or Classic. Picking one previews the
+ *  message sound in it, as letting go of the volume slider does. */
+function buildSoundStyleRow(signal: AbortSignal): HTMLDivElement {
+  return buildChoiceRow<SoundStyle>({
+    signal,
+    label: t("notifications.soundStyle.label"),
+    desc: t("notifications.soundStyle.desc"),
+    testId: "sound-style",
+    options: [
+      ["modern", t("notifications.soundStyle.modern")],
+      ["classic", t("notifications.soundStyle.classic")],
+    ],
+    current: loadSoundStyle,
+    save: (style) => {
+      savePref(SOUND_STYLE_KEY, style);
+      previewSounds(["message"], signal);
+    },
+  }).row;
+}
+
+/** The Android app's push row, under the permission row; it loads on demand. */
+function appendPushRow(after: HTMLElement, signal: AbortSignal): void {
+  if (!isAndroidApp()) return;
+  void import("../push/pushSettingRow").then(
+    (m) => {
+      if (!signal.aborted) after.after(m.buildPushRow(signal));
+    },
+    () => undefined,
+  );
+}
+
 export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const section = createElement("div", { class: "settings-pane active" });
+  const alerts = buildSettingsSection({ label: t("notifications.section.alerts") });
+  const sounds = buildSettingsSection({ label: t("notifications.section.sounds") });
+  const channels = buildSettingsSection({ label: t("notifications.section.channels") });
+  appendChildren(section, alerts.el, sounds.el, channels.el);
 
   // The OS permission the toggles below are gated on, read from the native
   // notifier (the desktop contract) rather than assumed from a user-agent or
@@ -209,11 +263,12 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     desktopRow.classList.toggle("blocked", blocked);
     blockedReason.hidden = !blocked;
   });
-  section.appendChild(permissionRow);
+  alerts.card.appendChild(permissionRow);
+  appendPushRow(permissionRow, signal);
 
-  section.appendChild(buildLevelRow(signal));
+  alerts.card.appendChild(buildLevelRow(signal));
   const serverLevelRow = buildServerLevelRow(signal);
-  if (serverLevelRow !== null) section.appendChild(serverLevelRow);
+  if (serverLevelRow !== null) alerts.card.appendChild(serverLevelRow);
 
   const toggles: ReadonlyArray<{ key: string; label: string; desc: string; fallback: boolean }> = [
     {
@@ -249,13 +304,14 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   const shownToggles = toggles.filter(
     ({ key }) => !isAndroidApp() || (key !== "flashTaskbar" && key !== "unreadBadge"),
   );
-  const [desktopRow] = appendToggleRows(section, shownToggles, signal) as [HTMLDivElement];
+  const [desktopRow] = appendToggleRows(alerts.card, shownToggles, signal) as [HTMLDivElement];
 
-  section.appendChild(buildSoundsVolumeRow(signal));
+  sounds.card.appendChild(buildSoundsVolumeRow(signal));
+  sounds.card.appendChild(buildSoundStyleRow(signal));
 
   // Each group switch keeps its pref key; its own sounds follow it, nested.
   appendSoundGroup(
-    section,
+    sounds.card,
     {
       key: "notificationSounds",
       label: t("notifications.sounds.label"),
@@ -265,7 +321,7 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     signal,
   );
   appendSoundGroup(
-    section,
+    sounds.card,
     {
       key: "callSounds",
       label: t("notifications.callSound.label"),
@@ -275,13 +331,13 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     signal,
   );
   appendSoundGroup(
-    section,
+    sounds.card,
     {
       key: "voiceSounds",
       label: t("notifications.voiceSounds.label"),
       desc: t("notifications.voiceSounds.desc"),
     },
-    ["joinLeave", "muteDeafen", "stream"],
+    ["joinLeave", "muteDeafen", "stream", "connection", "ptt"],
     signal,
   );
   const blockedReason = createElement(
@@ -292,8 +348,8 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
   blockedReason.hidden = true;
   desktopRow.querySelector(".setting-desc")!.after(blockedReason);
 
-  section.appendChild(buildMutedChannelsSection(signal));
-  section.appendChild(buildChannelLevelsSection(signal));
+  channels.card.appendChild(buildMutedChannelsSection(signal));
+  channels.card.appendChild(buildChannelLevelsSection(signal));
   return section;
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
+	"github.com/J3vb/OwnCord/Server/linkpreview"
 	"github.com/J3vb/OwnCord/Server/syncutil"
 	"github.com/microcosm-cc/bluemonday"
 )
@@ -71,6 +72,8 @@ type EditMessageResult struct {
 	MentionsEveryone bool
 	MentionsHere     bool
 	PostOpening      bool
+	// LinkJob is the unfurl job for the edited text; see SendMessageResult.LinkJob.
+	LinkJob *linkpreview.Job
 }
 
 // DeleteMessageResult is the output of a successful delete.
@@ -148,7 +151,7 @@ type MessageService struct {
 	bg       *syncutil.Group
 	bgInline bool
 	// pushNotifier is the Web Push dispatch hook; nil means dispatch is off (the root installs
-	// a *PushDispatcher only when push.enabled and push.dispatch_enabled are both true).
+	// a *PushDispatcher only when push.enabled is true).
 	pushNotifier PushNotifier
 	forward      forwardDeps
 	poll         pollDeps
@@ -174,7 +177,7 @@ func (s *MessageService) SetLiveStatusLookup(liveStatus func(userID int64) strin
 }
 
 // SetPushNotifier installs the Web Push dispatch hook. The root calls it once, only when
-// push.enabled and push.dispatch_enabled are both true; nil leaves dispatch off.
+// push.enabled is true; nil leaves dispatch off.
 func (s *MessageService) SetPushNotifier(n PushNotifier) {
 	s.pushNotifier = n
 }

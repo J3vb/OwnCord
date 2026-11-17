@@ -14,6 +14,7 @@ import (
 // accounts that differ only in non-ASCII case never share a lockout bucket,
 // while ASCII case variants of one account still do.
 func TestLogin_LockoutKeyFoldsLikeTheAccountLookup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	hash, err := auth.HashPassword("securePass1")

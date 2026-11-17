@@ -17,6 +17,7 @@
 
 import type { Shape } from "./wireShapes";
 import type { RestReplyShapes } from "./restReplies";
+import { isRecord } from "../isRecord";
 
 export interface WireFault {
   /** The failing field, by name only. Empty for the payload itself. */
@@ -32,10 +33,6 @@ const NULL = 3;
 
 type Table = readonly Shape[];
 type ObjectShape = Extract<Shape, readonly [2, ...unknown[]]>;
-
-function isObject(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
 
 function matchesPrimitive(value: unknown, kind: number): boolean {
   switch (kind) {
@@ -79,7 +76,7 @@ function matchesItems(table: Table, value: unknown, item: number): boolean {
 }
 
 function matchesValues(table: Table, value: unknown, item: number): boolean {
-  if (!isObject(value)) return false;
+  if (!isRecord(value)) return false;
   for (const key in value) {
     if (!matches(table, value[key], item)) return false;
   }
@@ -105,7 +102,7 @@ export function matches(table: Table, value: unknown, ref: number): boolean {
       return matchesValues(table, value, shape[1]);
     case 2:
       return (
-        isObject(value) &&
+        isRecord(value) &&
         matchesFields(table, value, shape[1], shape[2], true) &&
         (shape[3] === undefined || matchesFields(table, value, shape[3], shape[4] ?? [], false))
       );
@@ -205,7 +202,7 @@ function locateItems(table: Table, value: unknown, item: number, path: string): 
 }
 
 function locateValues(table: Table, value: unknown, item: number, path: string): WireFault | null {
-  if (!isObject(value)) return null;
+  if (!isRecord(value)) return null;
   for (const key in value) {
     const fault = locate(table, value[key], item, `${path}{}`);
     if (fault !== null) return fault;
@@ -219,7 +216,7 @@ function locateObject(
   shape: ObjectShape,
   path: string,
 ): WireFault | null {
-  if (!isObject(value)) return null;
+  if (!isRecord(value)) return null;
   return (
     locateField(table, value, shape[1], shape[2], true, path) ??
     locateField(table, value, shape[3] ?? [], shape[4] ?? [], false, path)

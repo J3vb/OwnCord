@@ -16,7 +16,7 @@ import { APPEAL_ACTION, appealRow } from "./support/moderationFixtures";
 // ---------------------------------------------------------------------------
 // B9-17: the Moderation Center's Appeals tab against the owner's Q1 checks —
 // keyboard, names, errors, targets, contrast in every theme and High
-// Contrast, motion, and reflow at 940x500 with 20 px Large Font.
+// Contrast, motion, and reflow at 940x500 with 20 px Large font.
 //
 // The server is mocked with two appeals from otheruser (id 2): one held by
 // the signed-in moderator (testuser, id 1) with its decision form on screen,
@@ -197,7 +197,7 @@ test.describe("appeal review accessibility", () => {
     test(c.title, c.run);
   }
 
-  test.describe("reflow at the 940x500 minimum window with 20 px Large Font", () => {
+  test.describe("reflow at the 940x500 minimum window with 20 px Large font", () => {
     test.use({ viewport: { width: 940, height: 500 } });
 
     test("every control is reachable and nothing scrolls sideways", async ({ page }, testInfo) => {

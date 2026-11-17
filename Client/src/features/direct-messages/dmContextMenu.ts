@@ -112,6 +112,7 @@ function pushMarkRead(m: RowMenu): void {
     items.push({
       label: requestsText("dm.markRead"),
       testId: `dm-mark-read-${id}`,
+      icon: "check-check",
       onClick: () => markRead(id),
     });
   }
@@ -124,6 +125,7 @@ function pushProfile(m: RowMenu): void {
     items.push({
       label: requestsText("dm.profile"),
       testId: `dm-profile-${id}`,
+      icon: "user",
       onClick: () => openProfile(id),
     });
   }
@@ -139,6 +141,7 @@ function pushCall(m: RowMenu): void {
     items.push({
       label: requestsText("dm.call"),
       testId: `dm-call-${id}`,
+      icon: "phone",
       ...(reason === undefined ? {} : { disabled: true, title: reason }),
       onClick: () => call(id),
     });
@@ -156,6 +159,7 @@ function pushMute(m: RowMenu): void {
   items.push({
     label: convo.muted ? requestsText("dm.unmute") : requestsText("dm.mute"),
     testId: `dm-mute-${id}`,
+    icon: convo.muted ? "bell" : "bell-off",
     ...(until === null ? {} : { detail: until }),
     // The row itself is the default action (mute until turned off); the
     // flyout offers the timed choices.
@@ -181,6 +185,7 @@ function pushGroupItems(m: RowMenu): void {
     items.push({
       label: requestsText("dm.renameGroup"),
       testId: `dm-rename-${id}`,
+      icon: "pencil",
       onClick: () => rename(id),
     });
   }
@@ -192,6 +197,7 @@ function pushGroupItems(m: RowMenu): void {
     items.push({
       label: requestsText("dm.changeGroupIcon"),
       testId: `dm-change-icon-${id}`,
+      icon: "image",
       onClick: () => change(id),
     });
   }
@@ -200,6 +206,7 @@ function pushGroupItems(m: RowMenu): void {
     items.push({
       label: requestsText("dm.removeGroupIcon"),
       testId: `dm-remove-icon-${id}`,
+      icon: "trash-2",
       onClick: () => remove(id),
     });
   }
@@ -215,6 +222,7 @@ function pushBlockAndCopyId(m: RowMenu): void {
       label: shellText(blockedByMe ? "member.unblock" : "member.block"),
       danger: !blockedByMe,
       testId: `dm-block-${id}`,
+      icon: blockedByMe ? "user" : "user-x",
       onClick: () => toggleBlock(convo.userId, convo.username, !blockedByMe),
     });
   }
@@ -222,6 +230,7 @@ function pushBlockAndCopyId(m: RowMenu): void {
     items.push({
       label: shellText("member.copyId"),
       testId: `dm-copy-id-${id}`,
+      icon: "copy",
       onClick: () =>
         copyWithToast(String(convo.userId), "toast.userIdCopied", "toast.userIdCopyFailed"),
     });
@@ -236,6 +245,7 @@ function pushClose(m: RowMenu, confirmLeave: DmConfirmLeave): void {
     label: convo.isGroup ? requestsText("dm.leaveGroup") : requestsText("dm.close"),
     danger: true,
     testId: `dm-close-${id}`,
+    icon: convo.isGroup ? "log-out" : "x",
     // The menu item has no Shift modifier, so a group always confirms here
     // too — the destructive action is destructive whichever path opens it.
     onClick: () => (convo.isGroup ? confirmLeave(convo, close) : close(id)),

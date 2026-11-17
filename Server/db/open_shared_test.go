@@ -13,6 +13,7 @@ import (
 // holds the single-process lock — SQLite WAL makes the file access safe, and
 // the lock only guards the server's process-local state.
 func TestOpenShared_WorksWhileServerHoldsLock(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "shared.db")
 
 	server, err := db.Open(path) // takes the process lock

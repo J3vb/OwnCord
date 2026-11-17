@@ -38,6 +38,9 @@ export type DispatchApi = Pick<ApiClient, "listBlocks"> &
       | "getDmChannels"
       | "getOwnModeration"
       | "getMyAppeals"
+      | "getPushVapid"
+      | "subscribePush"
+      | "getSession"
     >
   >;
 

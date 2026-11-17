@@ -45,6 +45,59 @@ ownership, dependency automation — gets **at most a short block at the end**,
 and only when it changes something a contributor or fork holder must do
 (a moved directory, a renamed module, a new required command).
 
+### Known issues are required
+
+Every release section after v2.9.0 carries a `### Known issues` list with at
+least one bullet; `release.yml` refuses to publish without it
+(`scripts/release/verify-release-notes.mjs`). Keep the running list under
+**Unreleased**: add a line when a user-visible problem is accepted for a
+release, remove it when the fix merges. At release time, check each line is
+still true, then carry the list into the new section. With nothing to report,
+write one bullet that says no issues are known. Where the lines come from:
+the previous release's list, open ledger entries a user can run into, and
+anything the hands-on checks for this release did not cover.
+
+### Release section template
+
+Copy this under the new tag heading and delete the headings you do not need,
+except **Known issues**. A fix-only release usually needs only the intro,
+**Fixed**, **Known issues** and **Under the hood**.
+
+```markdown
+## vX.Y.Z
+
+**OwnCord X.Y** (what kind of release: features, fixes only) gives you … One
+short paragraph in plain words.
+
+It is still a **beta and a hobby project**: don't use it for anything
+sensitive. Update the server and the desktop app together. (Say here if this
+release changes the database, and anything an operator must do first.)
+
+### Highlights
+
+- **The thing**: what a user gets.
+
+### Added
+
+- …
+
+### Changed
+
+- …
+
+### Fixed
+
+- What was broken. What it does now.
+
+### Known issues
+
+- **What still goes wrong**, who it hits, and what to do about it.
+
+### Under the hood
+
+- Internal, CI and test-only changes, short.
+```
+
 ## Unreleased
 
 ### Known issues
@@ -55,35 +108,201 @@ and only when it changes something a contributor or fork holder must do
 - **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
 - **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
 
-## v2.9.1
+## v2.10.0
 
-**OwnCord 2.9.1** is a fix update to 2.9. It keeps you in your voice call after a reconnect, brings back thread replies that failed to send, loads GIFs in the picker faster, fits direct message headers on small phones, lets soft speech through the noise gate (with a new switch, on by default) and lights the speaking ring for it, and tightens a few voice and channel permission edge cases. Emoji are now drawn as images, so they look the same everywhere and the emoji picker scrolls smoothly. The database does not change. It is still a **beta and a hobby project**: don't use it for anything sensitive. **Update the server and the desktop app together**: the reconnect fix needs both.
+**OwnCord 2.10** (the eleventh public beta) gives the app a new look and new sounds, and brings Android message and call notifications that work while the app is closed. Settings, dialogs, menus and avatars get a cleaner, consistent design; the app sounds are new, with a Classic style to go back to; and the Android app gets UnifiedPush notifications, a sound route button and calls that pause for a phone call. You can share music in a voice channel, your server now builds link previews so your computer never contacts linked sites, custom themes can have a background picture, and owners can give the server an icon. Emoji are now drawn as images, soft speech gets through Enhanced Noise Suppression, search finds thread and forum posts, and many voice, thread and admin fixes are included.
+
+It is still a **beta and a hobby project**: don't use it for anything sensitive. Update the server and the desktop app together. **This release changes the database** (changes 092, 093 and 094). The server upgrades it on first start and keeps a safety copy first; you cannot go back to 2.9 without restoring that copy. **Passwords are stored in a new format**: once members have signed in, do not roll back below 2.10.0, or they cannot sign in until you upgrade again. **Push now has one switch**: a server that had `push.enabled` on but `push.dispatch_enabled` off starts sending pushes after the upgrade; set `push.enabled: false` first if you do not want that. **Link previews are on by default**: the server fetches the links members post (turn it off with `link_previews.enabled: false`). **If you run LiveKit through Docker or manage `livekit.yaml` yourself**, set `audio.active_level` to 60 in that file and restart LiveKit, so the speaking ring lights for soft voices.
+
+### Highlights
+
+- **A new look**: Settings in a larger window with the same layout on every page, theme preview tiles, an icon in front of every menu action, tidier invite and Create channel dialogs, and letter avatars with one colour per person everywhere.
+- **New sounds**: a fresh set of app sounds (Classic brings back the old ones), sounds for a dropped voice connection and an unanswered call, and a play button for every sound in Settings.
+- **Android notifications and calls**: messages and call rings reach the phone while the app is closed, through UnifiedPush with no Google service; plus a sound route button, calls that pause for a phone call, and Mute and Leave in the call notification.
+- **Emoji as images**: emoji look the same on every computer and the emoji picker scrolls smoothly.
+- **Soft speech**: a soft "hmm" or "yes" gets through Enhanced Noise Suppression, and the speaking ring lights for it.
+- **Search in threads**: search now finds text in threads and forum posts.
+- **Share music in voice**: share one app's sound in a voice channel without a screen share; listeners get their own music volume.
+- **Link previews from your server**: previews and YouTube cards come from your server and show at once, and your computer never contacts the linked site.
+- **Theme background pictures**: a custom theme can show a picture behind the chat, with Dim and Blur.
+- **Server icon**: owners can give the server an icon that shows in members' server lists.
 
 ### Added
 
-- **Voice:** Enhanced Noise Suppression has a new switch, "Let more soft speech through", in Settings > Voice & Video. It is on by default, so a soft "hmm" or "yes" gets through. Turn it off if coughs or other short sounds get through too often; soft words are then cut off a little more often. The Linux desktop app does not have it: its gate works differently.
+**Android**
 
-### Fixed
+- Calls have a sound route button, in the call view and in a DM call: pick Speaker, Earpiece, or a wired or Bluetooth headset. A headset you connect is used by itself, and the call goes back to the speaker when it disconnects. Needs Android 12 or newer.
+- A phone call now pauses your OwnCord call: your mic closes and the call goes silent, and both come back by themselves when the phone call ends. Your own mute and deafen stay as you left them.
+- The screen stays on while a call shows a camera or a stream, and may sleep again once no picture is on screen.
+- The "In a call" notification has Mute and Leave buttons, so you can mute, unmute or hang up without opening the app. It also says when you are muted.
+- A direct message call that comes in while the app is not on screen rings like a phone call: a notification with Accept and Decline and your phone's ringtone, on the lock screen too. Accept joins the call (after you unlock, on a locked phone). A call you missed leaves a notification that opens the conversation. On a phone with Android's notification cooldown switched on, a call that comes right after a message can ring more quietly.
+- A call now rings the phone even when the app is closed or asleep, through the same UnifiedPush setup as message push. The ring says "Incoming call on <server>" (a push names nobody), Accept opens the conversation and joins the call once the app has connected, and the ring stops when you answer or decline on another device or the caller hangs up. Declining from a ring the app was closed for only silences it on the phone: the caller hears no answer until their ring times out. A ring that runs out while the app is closed leaves no missed-call notification. Do Not Disturb gets no ring, and nor does anyone already in that call.
+- New messages reach the phone while the app is closed, through UnifiedPush: install ntfy (Settings > Notifications offers it from the Play Store or F-Droid) and the app sets itself up, with no Google service involved. The phone shows "New messages on <server>", one notification per server, and opening the app clears it. Signing out, or turning off message notifications, stops them. Needs a server with push turned on (`push.enabled`) and a push server on a public address, such as ntfy.sh.
+- Your status goes Idle once the app has been out of view for ten minutes (in the background, or the screen off) and back to Online as soon as you open it. A phone that sleeps can take several minutes longer, and a phone that stops the app in the background shows you as offline instead.
+- `owncord://` links open the app: an invite link opens the join screen, and a message link copied on the desktop opens that message (after sign-in, if the app was closed).
+- Saved sign-ins, your voice key and unsent messages are kept in the Android Keystore. Updating moves them there once; you stay signed in and your voice safety number does not change.
 
-- **Voice:** a reconnect after a live update the app could not read took you out of your call, and everyone saw you leave. The reconnect now keeps the call.
-- **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
-- **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
-- **Channels:** a channel permission change on a busy server now always applies to every connected member.
-- **Threads:** a thread reply that failed to send was lost when you restarted the desktop app. It now comes back after a restart with Retry, like a channel message.
-- **Threads:** a thread reply whose delivery was never confirmed kept spinning. After 20 seconds it now shows as failed with Retry.
-- **Phone app:** on a small phone the buttons at the end of a direct message's header were off screen, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
-- **GIFs:** GIFs in the GIF picker showed up slowly in the desktop app. Thumbnails from the same site now share open connections, and six load at a time instead of four.
-- **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
-- **Mentions:** typing just @ listed only 10 people, so members who were offline or had not posted lately were missing until you typed part of their name. The list now holds up to 50 people and scrolls.
-- **Messages:** a very long message or code block could make the app hang for a moment while it was shown. It now shows without the wait.
-- **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
-- **Link previews:** the outside-content cache now keeps closer to its memory limit.
-- **Voice:** a soft voice was heard, but the speaking ring the others see stayed dark, mostly with Automatic Gain Control off. The ring now lights for soft speech too. The server update brings it; with Docker, or if you manage `livekit.yaml` yourself, set `audio.active_level` to 60 in that file and restart LiveKit.
-- **Voice:** with Enhanced Noise Suppression on, a soft "hmm" or "yes" after a pause or after typing was often cut off. Short soft words now get through much more often, while keys, clicks and thumps stay out. A cough or a sneeze gets through a little more often than before.
+**Voice**
+
+- Enhanced Noise Suppression has a new switch, "Let more soft speech through", in Settings > Voice & Video. It is on by default, so a soft "hmm" or "yes" gets through. Turn it off if coughs or other short sounds get through too often; soft words are then cut off a little more often. The Linux desktop app does not have it: its gate works differently.
+- **Zoom into a screen share or camera with your fingers.** On a phone or touch screen, pinch a video tile to zoom, drag with one finger to look around, and double tap to go back.
+- A call with no camera or screen share on shows one small card per person instead of large empty tiles, and on desktop the five small view buttons are now one View menu.
+
+**Server**
+
+- A push subscription now ends with the session that made it: signing out, "sign out everywhere", an expired session or a ban stops the pushes to that device (migration 093). A server older than this keeps a signed-out phone's subscription until its staleness sweep; the phone has already let go of it, so nothing shows.
+- With push on, a direct message call also sends a ring push to the people it rings, whether or not they look online, and a ring-end push when one of them answers or declines on any device or the caller leaves. Both carry only the conversation's id, never a name, and skip a member on Do Not Disturb or already in the call.
+
+**Voice: music**
+
+- **Share music in a voice channel.** The new music button in the call controls shares one app's sound, with no screen share needed. Pick the player from the list and everyone in the call hears it beside your voice.
+- **Listeners set the music apart from voices.** Right-click someone who is sharing music for a Music volume slider and Mute music. Deafening yourself silences it too.
+- **Windows and Linux only.** The button says why it is off on a computer or a server that cannot share an app's sound.
+- **A music share ends with the call.** After a dropped connection the app shares the same player again when it can, and says so when it cannot.
+
+**Desktop UI**
+
+- **Custom themes can have a background picture.** In Settings > Appearance > Custom themes, pick a PNG, JPEG or WebP picture for a theme. It shows behind the chat, with Dim and Blur sliders so text stays readable. The picture is shrunk and kept in the app, so it keeps working after the original file is deleted; Export and Copy carry only the CSS. Theme CSS can place it anywhere with `var(--theme-background-image)`.
+
+**Messages & files**
+
+- **Avatars and group icons load faster.** Lists and messages now fetch a small 128 px preview, and profile cards a 256 px one, instead of the full-size picture. An animated GIF avatar shows a still and plays when you hover it.
+- **Servers make the small previews once.** `GET /api/v1/files/{id}/thumb` takes an optional `size` of `128` or `256`, and a GIF with more than one frame is answered with an `X-Image-Animated: 1` header. Avatars and group icons get both sizes when uploaded; older ones get them the first time they are shown.
+- **Link previews show up instantly after a restart.** The server fetches each link once, keeps the preview and its picture, and sends both with the message. Your app no longer fetches them again on every launch.
+- **Your computer no longer contacts the sites people link to.** Page previews and YouTube titles and stills now come from your server, so the linked site never sees your IP address and the "Load external content" prompt does not appear for them.
+- **A message with a link can show its preview a moment after it appears.** The server builds it right after sending; an older message you scroll to gets its preview shortly after it loads.
+- **Servers that do not build previews work as before for one more release** (an older server, or one with `link_previews.enabled` off; the server now says so in its `ready` capabilities): the app fetches those previews itself and still asks first.
+- **Pictures and GIFs linked in chat work as before.** A link that is itself an image is still loaded by your app, still animates and still asks first; only page previews and YouTube cards come from your server.
+- **Settings > Text & Images says which content still needs your say-so.** Link previews built by your server no longer do.
+
+**Accounts & admin**
+
+- **Moderators can warn a member from the member list.** Right-click a member and choose Warn; until now a warning could only come from a report.
+- **Three new warnings on the admin Attention page.** One says the owner has no recovery kit (without one, a lost owner password means restoring a backup and running setup again). One says fewer than two people can work reports. One says no role besides Owner carries Moderate Members, which a customised Moderator role can be missing. Each clears by itself once fixed.
+- **Owners can set an appeal contact in admin Settings; a banned member sees it when sign-in is refused.**
+- **Owners can give the server an icon.** Choose a picture under Settings > General in the admin panel (it is cropped to a square and shrunk), and it shows in your members' server list in place of the initials. Remove it there to go back to initials.
+- **The server owner gets a notice on their phone when something needs fixing.** When a disk, backup, certificate, last-exit, last-restore or voice warning turns critical, the owner's devices get one notice that says only "Your OwnCord server needs attention"; the admin panel says what. At most one per warning every 6 hours while the server runs, and only when `push.enabled` is on.
+
+**Push**
+
+- **Settings > Notifications says when push cannot work.** Members now see it when their push server is on a private network or a non-standard port, instead of silently getting nothing.
+
+**Direct messages**
+
+- On Home, People and Message requests are now proper rows with an icon. Message requests shows how many requests are waiting, and the Home icon counts them too, so a new request is hard to miss.
+
+**Notifications**
+
+- New app sounds: a short bubble pop for a message, its own two-note chime for a mention, a marimba phrase for an incoming call, and softer voice and call sounds. Settings > Notifications has a new "Sound style" choice under the volume slider; Classic brings back the plain tones OwnCord had before.
+- Three new sounds: a short phrase when your voice connection drops (and the join sound when it is back), soft tones when your call is declined or not answered, and an optional quiet tick when push-to-talk opens and closes your mic. The connection and push-to-talk sounds have their own switches in Settings > Notifications (the push-to-talk tick starts off); the call sound follows the Ringback switch.
+- Every app sound can be tried in Settings > Notifications: each sound switch has a play button, which works with the switch off. Previews, including the volume slider's and the sound style's, now also sound while you are deafened or on Do Not Disturb.
 
 ### Changed
 
+- Right-click menus and the phone action sheets now show an icon in front of every action (message, channel, server, member, direct message, thread, category, folder, image, volume and camera menus), so an action is quicker to find. Destructive actions keep their red colour.
+- The invite dialog is tidier: the link to share and its Copy button come first, a new link is made with two labelled choices, and the other links sit in a short list. A link with no uses left says "Used up", and a link you just made shows your name, not "unknown".
+- The Create channel dialog starts with the channel type, shown as cards that each say what the type is for. On a small screen the buttons of a tall dialog stay in view.
+- The alert for a new sign-in to your account is readable now: it names the device ("Chrome on Windows"), the address and the time, and a Review devices button opens the devices list in Settings. That list names devices the same way.
+- Pins, Threads and Media in the channel header now open the same side panel: same place, same header and Close button, one open at a time, and the button shows which one is open.
+- Settings opens in a larger window that uses the space you have, and every page is laid out the same way: a small heading above a card of rows. Narrow windows and phones keep their full width.
+- Settings labels are written the same way everywhere, with a capital on the first word only ("Voice & video", "Push to talk").
+- Settings > Appearance shows each theme as a small preview tile, with "Match my computer" for following your system. The page now reads Theme, Accent color, Text & size, then Layout, date & time.
+- The connect page shows the OwnCord logo once and its button reads "Sign in".
+- @mention suggestions show each member's picture or letter avatar next to their name.
+- The search box in the channel header and the one in the member list now look the same, and the header search has a magnifier icon.
+- On a phone, the GIF and emoji buttons step aside while you type, so the message box has room, and come back when the box is empty.
+- Letter avatars use ten clearly different colours with readable white letters, and a person has the same colour everywhere: chat, member list, direct messages, pins, profile card and your own user bar. Colours change once with this update.
+- The admin panel's member list gives each member the same avatar colour as the app.
+- The right-click menu on a video tile shows an icon in front of every action.
+
+**Accounts & admin**
+
+- **Passwords are stored as argon2id.** Older accounts switch over at their next sign-in, and both formats keep working.
+- **Do not roll back below 2.10.0 once members have signed in.** Older versions cannot read the new password format, so those members could not sign in until you upgrade again.
+- **One switch turns push on.** `push.enabled` now lets phones register and sends them notifications; the second switch, `push.dispatch_enabled`, is retired. **Upgrade note:** a server that had push on but sending off starts sending after the upgrade (to the push service each phone named, such as ntfy.sh); set `push.enabled: false` before upgrading if you do not want that. A `config.yaml` or admin-panel setting that still names `push.dispatch_enabled` loads fine and is ignored, and the server logs one line at start-up saying so. The admin Settings row "Send push notifications" is gone; "Enable push notifications" covers both.
+- **The settings request no longer takes `server_icon` by hand.** Use the new icon control (`PUT` and `DELETE /admin/api/server-icon`); a request that sets it directly is refused. A regular backup holds the database only, so after a restore on a new machine the icon has to be uploaded again (the full archive carries it).
+
+### Fixed
+
+- **Voice:** while the Go Live dialog is open, the voice panel no longer says you are sharing your screen; the stream card shows once the share is live.
+- **Invites:** an invite link that has expired or is used up no longer offers a Copy button.
+- **Settings:** on a phone, the header of a Settings page stays solid while you scroll, and report messages point to Settings, Privacy & safety.
+- **Server:** after first-run setup or a rename in the admin settings, the new server name and welcome message show at the next sign-in instead of up to 30 seconds later. Clients that are already connected see them when they reconnect.
+- **Direct messages:** calling someone who has not accepted your message request yet no longer leaves you alone in a call. The chat now says you are waiting for them to accept.
+- **Invites:** the list shows all usable invites first and pages older ones; invites can be revoked by id (an older server still works through a fallback to the code); creating invites is limited to 20 per user per hour.
+- **Accounts:** an account recovery, sign-up, two-factor sign-in or report that already went through no longer asks you to try again just because the request ran long.
+- **Voice:** a full voice channel stays at its limit while someone moves their call to another device.
+- **Voice:** a call that is still connecting follows the channel's permissions as soon as it connects.
+- **Voice:** with LiveKit webhooks on, a voice reconnect no longer drops the member from the call.
+- **Channels:** a channel permission change on a busy server now always applies to every connected member.
+- **Voice:** if the server could not read who is in voice while you connect, the connect now retries instead of showing voice channels as empty.
+- **Group DMs:** a group DM created just as your connection dropped is no longer reported as failed.
+- **Group DMs:** creating group DMs now has a per-user limit of 5 a minute and 50 in any 24 hours.
+- **Sign-in:** after a password change in Settings, a remembered password was still the old one, so the next one-click sign-in was refused. It now holds the new password.
+- **Voice:** on a phone, tapping someone in a voice channel who had their camera or screen on joined the call at once. It now asks first, like a tap on the channel.
+- **Moderation:** closing the ban dialog after a failed ban said the member was banned. It now says the ban could not be confirmed.
+- **Desktop UI:** animated avatars and banners kept old rows in memory after every channel switch. They no longer do.
+- **Direct messages:** the People view redrew every row on each presence change or new message on busy servers. It now updates only the rows that changed.
+- **Admin:** `chatserver restore` on a symlinked database path wrote its message-retry cutoff where the server did not read it. The cutoff now sits beside the real database, and one left beside the link is still honoured.
+- **Linux:** while the camera or a screen share was being published on a slow connection, mute, push-to-talk release, deafen, volume changes and Leave waited for it (up to 10 seconds or more). They now act at once.
+- **Linux:** after a microphone device change landed during an unmute, you could show as unmuted while others heard nothing.
+- **Linux:** when the window's page process ends unexpectedly, the app now leaves your call and reloads the window instead of staying blank.
+- **Admin:** the `chatserver token` commands applied pending database updates themselves, skipping the safety copy an upgrade takes. They now stop and ask you to start the server once first.
+- **Linux:** on a desktop without a keyring service (no gnome-keyring or KWallet), the app now creates your voice identity key and saves unsent messages for recovery, instead of showing "Could not save this pending message" on every send.
+- **Threads:** thread edits (rename, archive, lock, tags) are now limited to 5 a second per user, and an edit that changes nothing is no longer announced.
+- **Admin:** the support bundle could not be created while the database was slow or unreadable. It now still builds, with `database.json` marked unavailable.
+- **Retention:** the 15-minute clean-up no longer rewrites its records or holds the database for writing on channels and threads that have nothing old enough to remove.
+- **Channels:** opening the media gallery of a channel with few or no pictures no longer reads every attachment on the server, so it opens quickly on a large server.
+- **Admin:** restoring a backup from the admin panel on a symlinked database path replaced the link with a plain file. The link is now kept and the restore goes to the linked file.
+- **Accounts:** erasing an account now also removes the erased user's messages from stored reconnect history, including later edits and reactions on them.
+- **Accounts:** erasing an account, and the retention clean-up, now also remove the link preview cards of the removed messages from stored reconnect history.
+- **Push:** registering a device for push is limited to 30 times an hour per member.
+- **Settings:** closing Settings while a recovery code or a half-written custom theme was on screen lost it without asking. It now asks first.
+- **Settings:** the Devices list kept signed-out devices after a password change, and signing out a device that was already gone put it back with an error. Both now stay in step.
+- **Settings:** "Clear All Cache & Restart" also wiped Push to Talk, muted channels, drafts, notes and server folders. It now keeps them.
+- **Server rail:** when the saved-server list could not be read, a folder or order change could drop folders. The rail now waits for the list.
+- **Channels:** Move Up / Move Down jumped two places when channels shared a position, and a channel drag whose mouse release was lost stayed armed. Both fixed.
+- **Members:** the member right-click menu kept its old state after Block, Unblock or a role change. It now closes when the action is done.
+- **Direct messages:** the New DM and Add people picker opens and filters faster on large servers.
+- **Desktop UI:** one Escape (or Android back) closed every stacked dialog. It now closes only the top one.
+- **Desktop UI:** after the daily log limit was reached, Clear logs left the app writing no log lines until the next day. Logging now resumes.
+- **Browser client:** Chrome and Edge never showed the unread count in the tab title. They now do.
+- **Admin:** a blank `OWNCORD_*` list variable (such as `OWNCORD_SERVER_ADMIN_ALLOWED_CIDRS=`) locked everyone out of the admin panel. It is now ignored with a start-up warning and the list keeps its configured value.
+- **Admin:** a backup folder set to the database's own folder counted the live database as a backup, so scheduled backups stopped. That folder is now refused, and the live database is never listed, deleted or restored as a backup.
+- **Admin:** first-run setup opened over a bare IPv6 address showed a broken link after a port or TLS change.
+- **Server rail:** the connected server's icon showed digits from its address ("12" for 127.0.0.1) instead of the server's initials. It now shows the initials of the server's name.
+
+**Messages & files**
+
+- **Search never found text written in a thread or a forum post.** Search now covers the threads and forum posts of every channel you can read (a forum post follows its forum's permissions and NSFW acknowledgement), and picking such a result opens it in the thread panel. Search hits gain a `thread_parent_id` field; an older desktop client lists these hits but cannot open them.
+- **An open thread could close and disappear after a reconnect when the server was slow to answer.** It now stays and can be reloaded.
+- **A thread reply that failed to send was lost when you restarted the desktop app.** It now comes back after a restart with Retry, like a channel message.
+- **A thread reply whose delivery was never confirmed kept spinning.** After 20 seconds it now shows as failed with Retry.
+- **GIFs in the GIF picker show up faster in the desktop app.** Thumbnails from the same site now share open connections instead of opening a new one each, and six load at a time instead of four.
+- **Large outside images and GIF pages were cut off on a slow connection** in the browser client. They now load in full as long as the connection keeps moving.
+- **The text on a message with a picture or file could not be removed.** Clearing it offered to delete the whole message. It now removes just the text and keeps the files.
+- **Typing just @ listed only 10 people**, so members who were offline or had not posted lately were missing until you typed part of their name. The list now holds up to 50 people and scrolls.
+- **A voice message, video or YouTube player stopped and went back to the start when anyone reacted to or pinned that message**, and a spoiler you had opened was covered again. A reaction or pin now only redraws the reactions and pin button; playback and opened spoilers stay.
+- **In a thread or forum post, clicking a reply quote did nothing.** It now jumps to the replied-to message, loading it if needed.
+- **Pin, edit and delete in a thread or forum post skipped the channel's safety checks**: a quick double click could pin and unpin at once, and an edit or delete lost to a bad connection vanished silently. They now behave like in a channel: one pin request at a time, and a failed edit puts your text back.
 - **Emoji now look the same on every computer and the emoji picker scrolls smoothly.** Emoji in messages, reactions, polls and the picker are drawn as images (Twemoji, the set Discord uses) instead of your system's emoji font, which was slow to draw on Windows. Copying a message still gives you the emoji.
+- **An edit, delete or pin that arrived while older history or a jump was loading was undone when it finished.** It now stays applied.
+- **A message posted at the moment you jumped back to the present could be missing until you reopened the channel.** It is now fetched right after the jump lands.
+- **A message the server refused showed its real reason for only 20 seconds**, then changed to "Delivery not confirmed". It now keeps the reason.
+- **A too-long message sent as a text file was lost when its upload failed after you switched channel.** The text now comes back in the composer.
+- **A voice message that hit the 5-minute limit and failed to stop froze the recording bar.** The bar now closes and shows "Recording failed".
+- **Link previews are limited to five per message**; further links stay plain links.
+
+**Voice**
+
+- **A reconnect after a live update the app could not read took you out of your call**, and everyone saw you leave. The reconnect now keeps the call. Update the app as well as the server: an older app still drops the call.
+- **A soft voice was heard, but the speaking ring the others see stayed dark**, mostly with Automatic Gain Control off. The ring now lights for soft speech too. The server update brings it; with Docker, or if you manage `livekit.yaml` yourself, set `audio.active_level` to 60 in that file and restart LiveKit.
+- **With Enhanced Noise Suppression on, a soft "hmm" or "yes" after a pause or after typing was often cut off.** Short soft words now get through much more often, while keys, clicks and thumps stay out. A cough or a sneeze gets through a little more often than before.
+
+**Phone app**
+
+- **On a small phone the buttons at the end of a direct message's header were off screen**, so Pins could not be reached. Profile and Pins now sit behind a More button there, and a long name is shortened instead.
+- **In a call, the round controls were stacked in two short rows.** They now sit in one row.
 
 ### Known issues
 
@@ -92,6 +311,17 @@ and only when it changes something a contributor or fork holder must do
 - **Scrolling far back in a long channel while it reloads can make the list jump** to another spot. Scroll back to where you were; nothing is lost.
 - **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
 - **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
+
+### Under the hood
+
+- **Message history, search and other big lists download smaller.** The server gzips them (about a fifth of the size) for the browser client, and the desktop and Android app now ask for it too. Sign-in, tokens, invites, voice and files are sent as before.
+- **The browser client loads faster.** With `server.browser_client_enabled` on, the server sends the browser client's files brotli- or gzip-compressed (about a third of the download). It builds the compressed copies in the background for a few seconds after start and keeps them in memory beside the originals, a few extra MB.
+- **How server-built link previews work** (see Messages & files above):
+  - Database change 094 adds four tables for link cards and their thumbnails.
+  - The server fetches the links in a new or edited message once and stores the card (title, description, site name, shrunk image). Message history and a new live event carry the cards; older apps ignore them.
+  - Thumbnails are kept in a new `link-previews/` folder in the server data folder, trimmed on the 15-minute maintenance pass, and served to signed-in members from `GET /api/v1/link-previews/images/{hash}`.
+  - Three settings in `config.yaml`: `link_previews.enabled` (default on; can be changed in the admin panel, a restart applies it, and `false` stops fetching only), `link_previews.thumbnail_cache_mb` (default 512, `0` keeps no thumbnails) and `link_previews.thumbnail_unused_days` (default 30).
+- Database change 092: eight indexes for the lookups a message or channel delete runs. The first start after the update builds them, which takes a little longer on a large database. Deleting a busy channel, a thread or a group DM, and retention clean-up, are much faster on a server with many channels (a 20,000-message channel on a server with 5,000 channels: 23 s before, under 1 s after).
 
 ## v2.9.0
 

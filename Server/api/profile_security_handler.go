@@ -79,15 +79,19 @@ func handleChangePassword(svc *service.Services, limiter *auth.RateLimiter, broa
 		// Verify the old password (constant-time bcrypt) inside the one admission slot every password route
 		// takes: a refused attempt ran no compare and counts as no failure.
 		failKey := auth.Key("pw_confirm_fail", user.ID)
+		refund, reserved := service.ReservePasswordAttempt(limiter, failKey, service.PwConfirmFailureThreshold, service.PwConfirmFailureWindow)
+		if !reserved {
+			writeErr(w, http.StatusTooManyRequests, httperr.CodeRateLimited, "too many failed attempts, try again later")
+			return
+		}
 		matched, admitted := limiter.Admission().CheckPassword(user.PasswordHash, req.OldPassword)
 		if !admitted {
+			refund()
 			writeAuthBusy(w, service.ErrAuthBusy)
 			return
 		}
 		if !matched {
-			if !limiter.Allow(failKey, service.PwConfirmFailureThreshold, service.PwConfirmFailureWindow) {
-				limiter.Lockout(r.Context(), lockKey, service.PwConfirmLockoutDuration)
-			}
+			service.SettleFailedAttempt(r.Context(), limiter, failKey, lockKey, service.PwConfirmFailureThreshold, service.PwConfirmFailureWindow, service.PwConfirmLockoutDuration)
 			writeErr(w, http.StatusForbidden, httperr.CodeForbidden, "incorrect password")
 			return
 		}

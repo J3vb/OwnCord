@@ -118,15 +118,16 @@ switch profiles (HFP to A2DP), which is audible in playback. Muting has to stop
 the OS capture rather than only mute the publication, so the profile switch is
 the accepted cost.
 
-| Control state  | Presentation                                                                                                                                                                                                                                                                           |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| mic muted      | Mic-slash icon on self tile + control bar                                                                                                                                                                                                                                              |
-| deafened       | Headphone-slash alone (deafen implies mute, so no mic-slash beside it); a moderator mute or deafen gives it the server-muted class and title                                                                                                                                           |
-| server muted   | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `features/channels/voiceSidebarRows.ts`, `features/voice/UserBar.ts`                               |
-| listen-only    | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                                                       |
-| camera on      | Self video tile in the grid                                                                                                                                                                                                                                                            |
-| screenshare on | Screen tile; a stop-share affordance always visible                                                                                                                                                                                                                                    |
-| speaking       | Green ring on the speaking user's tile/avatar, and on your own user-panel avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers, held 200 ms after they drop out; a mute or disconnect clears it at once, and leaving a channel clears its rings) |
+| Control state   | Presentation                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| mic muted       | Mic-slash icon on self tile + control bar                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| deafened        | Headphone-slash alone (deafen implies mute, so no mic-slash beside it); a moderator mute or deafen gives it the server-muted class and title                                                                                                                                                                                                                                                                                                                                                               |
+| server muted    | Distinct server-muted icon (title "Muted by a moderator"); the user panel's mute/deafen buttons are disabled with the reason while the mute holds — `serverMuted`/`serverDeafened`, `features/channels/voiceSidebarRows.ts`, `features/voice/UserBar.ts`                                                                                                                                                                                                                                                   |
+| listen-only     | Badge "Listen only — no microphone" with a **Retry mic** affordance (`retryMicPermission`); the mic button is disabled, dimmed and reads mic-off                                                                                                                                                                                                                                                                                                                                                           |
+| phone call hold | The Android app, while a phone call holds the phone's audio (`VoiceState.phoneCallHold`, written only by `features/voice/mobileRoutes.ts`): the mic is closed and every mic control is disabled, reads mic-off and is titled "Muted while paused"; the call bar turns amber and reads "Paused for a phone call", and the call view, the DM call and the voice widget say the same. The member's own mute and deafen are not written and nothing is sent, so the call is as it was when the phone call ends |
+| camera on       | Self video tile in the grid                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| screenshare on  | Screen tile; a stop-share affordance always visible                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| speaking        | Green ring on the speaking user's tile/avatar, and on your own user-panel avatar (your own: the input-sensitivity gate when one runs; others: LiveKit ActiveSpeakers, held 200 ms after they drop out; a mute or disconnect clears it at once, and leaving a channel clears its rings)                                                                                                                                                                                                                     |
 
 **DM call panel on a phone** (`features/direct-messages/DmCallPanel.ts`,
 `styles/app/dm-call.css`): the open call is the call view and takes the chat
@@ -148,39 +149,99 @@ with keyboard focus on the grid. A stream that arrives during focus is drawn
 Small. People without video sit in the participant strip in focus as in the
 grid (`gridPeopleStrip.ts`). Screen shares carry a
 **LIVE** badge, and the speaking ring (`--text-positive`) and a mic-slash or
-headphone-slash badge for a muted or deafened user are on camera tiles. A
-**Show chat** control in the grid's header leaves the grid for
-the chat without leaving the call. In the guild call view the header also has
-**Show non-video participants**, **Show my camera** (hides only your own
-camera tile, here) and **Show participant strip**; each is a
-saved preference (`callShowNonVideo`, `callShowSelfCamera`, `callShowStrip`)
-and none applies while the DM call panel hosts the grid. **Show non-video
-participants** decides whether people without video are drawn at all, in the
-strip or as tiles; **Show participant strip** hides or shows the strip itself
-while a video tile is up (with no video up the people are tiles in the grid and
-only the first toggle applies). A control bar at the
-bottom of the call view, focused or not, has mute, deafen, camera,
-share and disconnect; camera and share are inert until the join has connected.
-The header toggles sit beside the bar, or stack above it with room kept below
-the tiles when the call view is narrower than 680 px. On a phone the toggles
-are not square buttons: one round **View options** control in the bar opens
-them as a menu, so the call screen has a single row of round controls.
+headphone-slash badge for a muted or deafened user are on camera tiles.
+**With no camera or screen share on show** (a voice-only call, guild or DM)
+the people are not packed tiles: each is a compact card (avatar, name,
+speaking ring, mute/deafen badge), side by side and centred, wrapping onto
+more rows, in a box of their own that scrolls when they do not fit, so the
+control bar and the View button stay put (`gridCards.ts`). The first camera
+or share brings the packed grid and the participant strip back; when the last
+one stops the same card elements return, in roster order, keeping keyboard
+focus. A control bar at the bottom of the call view, focused or not, has
+mute, deafen, camera, share and disconnect; camera and share are inert until
+the join has connected. Beside it, one labelled **View** button
+(`gridViewMenu.ts`) opens a menu of named rows: **Show non-video
+participants**, **Show my camera** (hides only your own camera tile, here)
+and **Show participant strip** as checked rows, then **Pop out call** and
+**Show chat**, which leaves the grid for the chat without leaving the call.
+Each toggle is a saved preference (`callShowNonVideo`, `callShowSelfCamera`,
+`callShowStrip`) and none applies while the DM call panel hosts the grid.
+**Show non-video participants** decides whether people without video are
+drawn while a video tile is up, in the strip or as tiles; with no video up it
+waits (the cards always show) and the row keeps its state. **Show
+participant strip** hides or shows the strip itself while a video tile is up.
+The View button sits beside the bar, or above it with room kept below the
+tiles when the call view is narrower than 680 px. On a phone the View button
+gives way to one round **View options** control in the bar, which opens the
+same rows in the same order without Show chat (the phone's row has its own
+Chat control), so the call screen has a single row of round controls.
 On a phone with a front and a back camera, **Flip camera** sits beside Camera
 while the camera is on and moves it to the camera facing the other way; a tap
 while a flip is still switching does nothing. Share is left out where the
 device cannot capture its screen (the Android app, a phone browser): those can
 still watch a share.
-**Pop out call**, last in the header, moves the whole call view (tiles,
-toggles and control bar) into a pop-out window of its own and returns the app
+**Pop out call**, in the View menu, moves the whole call view (tiles, View
+button and control bar) into a pop-out window of its own and returns the app
 window to the chat; opening the call again from the app raises that window.
-**Bring the call back**, or closing the window, puts the call view back in the
-app window; leaving the call closes it. Show chat and the camera picker arrow
-are hidden there and the tile menu has no Profile row (each opens in the app
-window), and starting a share brings the call back first so its picker is in
-view.
+The View menu opens in that window, where its row reads **Bring the call
+back**; that row, or closing the window, puts the call view back in the app
+window (a View menu open in the window closes with it), and leaving the call
+closes it. Show chat and the camera picker arrow are left out there and the
+tile menu has no Profile row (each opens in the app window), and starting a
+share brings the call back first so its picker is in view.
+
+**Sound route in the Android app** (`features/voice/routeButton.ts`,
+`features/voice/mobileRoutes.ts`, the `mobileAudio` platform member): a round
+control in the call view's row and in the open DM call shows where the call
+plays (speaker, earpiece, a wired or a Bluetooth headset) and opens a sheet to
+pick another. It shows only where there is a choice: in a call, on Android 12
+or newer, with more than one route, a microphone and no phone call holding the
+call. With no pick the WebView routes the call by itself (a headset when one
+is connected, else the speaker). A pick lasts for the call, and goes when its
+device leaves or a headset is newly connected. Every call starts from no pick,
+also the first one after the app reloaded in the middle of a call. While a
+pick is on, one extra microphone capture stays open, disabled and never sent:
+Android lets an app choose a call's device only while it captures for a call,
+and a mute closes the call's own capture. Android therefore shows the
+microphone as in use while the member is muted, which the sheet says. A pick
+the phone will not keep (that capture cannot open, or Android refuses the
+device) goes back to the phone's own choice, and a toast says so. In the sheet
+the routes are one tab stop: the arrow keys move through them, and Enter,
+Space or a tap picks. The app takes no audio focus, so music and games keep
+playing beside a call; only an answered or dialled phone call pauses it (the
+phone call hold above), and a ringing phone does not.
+
+**Screen stays on in the Android app** (`features/voice/videoOnScreen.ts`,
+`features/voice/backgroundCall.ts`, the `callService` platform member): while a
+call has a live picture on screen, the app keeps the phone from dimming and
+locking. A picture is a camera or a stream, yours or someone else's, drawn in a
+tile of the call view or in the mini-player; the video grid reports it
+(`syncOnScreen` in `features/voice/videoGrid/gridWatch.ts`). A stream that
+waits for its owner to publish it again (a codec switch) still counts. A stream
+still behind **Watch stream**, a call view that is closed with no mini-player,
+and a call with no video leave the screen to the phone's own timeout, and the
+screen may sleep again as soon as the last picture goes or the call ends. The
+power button turns the screen off as always.
+
+**Call notification buttons in the Android app**
+(`features/voice/backgroundCall.ts`,
+`features/direct-messages/callNotificationActions.ts`, the `callService`
+platform member): the "In a call" notification that keeps a call running in the
+background says how the microphone stands and has two buttons. **Mute** becomes
+**Unmute** while the member is muted, and the notification then reads "In a
+call, muted"; under a moderator's mute it says so and has no microphone button,
+since that mute is not the member's to lift. **Leave** ends the call. The
+notification follows a mute made anywhere (the app, a hotkey, a moderator) as
+the voice store changes. The host only shows the buttons and reports a press;
+the app acts on it through the same code as its own buttons. Mute and Unmute
+name the state they promise, so a press that crosses a change made in the app
+never flips the microphone back. Leave is the one teardown every Leave uses,
+whatever the call is doing (joining, reconnecting). Once no call is left, a
+press that was still on its way does nothing: no second teardown, and no mute
+carried into the next call.
 
 **The voice channel's chat beside the grid** (guild calls): opening the call
-view selects the voice channel you are in (`pages/main-page/callChat.ts`), so
+view selects the voice channel you are in (`features/voice/callChat.ts`), so
 its chat mounts as for any channel, and the grid sits left of it with the chat
 in a column on the right (stacked under the grid at narrow width). The chat
 column is 360px by default; the handle on its left edge resizes it (drag, or
@@ -319,10 +380,10 @@ existed starts in Push to Talk when it has a key bound (`migrateInputMode` in
 
 | State               | Presentation                                                                                                                                                                                                                             |
 | ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| input mode          | Voice & Audio opens with an "Input Mode" choice: Voice Activity (shows Input Sensitivity) or Push to Talk (shows the key and release delay, hides Input Sensitivity); the Keybinds tab notes the key does nothing in Voice Activity mode |
+| input mode          | Voice & Audio opens with an "Input mode" choice: Voice activity (shows Input sensitivity) or Push to talk (shows the key and release delay, hides Input sensitivity); the Keybinds tab notes the key does nothing in Voice activity mode |
 | PTT bound, released | Gate closed (nothing is heard), the mic button reads unmuted (it shows only your own mute) with the title "Push-to-talk — hold your key to talk"; toggling mute or deafen with the key up never opens the gate                           |
 | PTT pressed         | Unmuted + speaking ring                                                                                                                                                                                                                  |
-| release delay       | Voice & Audio (Push to Talk) and Keybinds tab: a "Push to Talk release delay" slider, 0–2000 ms in 10 ms steps, read on each release                                                                                                     |
+| release delay       | Voice & Audio (Push to talk) and Keybinds tab: a "Push to talk release delay" slider, 0–2000 ms in 10 ms steps, read on each release                                                                                                     |
 | binding a key       | Keybinds tab: "Press a key…" (10 s capture window, `ptt_listen_for_key`); reject text keys with "Pick a non-text key"                                                                                                                    |
 | PTT thread error    | Toast "Push-to-talk stopped unexpectedly" on `ptt-error`, offer re-enable                                                                                                                                                                |
 | PTT unsupported     | macOS or a Wayland session (`ptt_polling_supported` false): the Keybinds tab says the key can never gate the mic and disables capturing a key (Clear stays, to remove an older binding)                                                  |
@@ -531,13 +592,70 @@ DM voice is the same voice machinery on the DM's voice channel, plus a ring
 layer (no server-side call state — presence in the DM voice channel _is_ the
 call):
 
-| Event                      | Reaction                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Outgoing: user clicks Call | Caller joins the DM voice channel, then `call_ring` is sent once the voice session is connected (not while joining or securing) and held back (with transport slack) so it stays inside the 1/3 s server limit, and dropped if the socket disconnects meanwhile; a refused join sends none, and a 1:1 ring to someone who has not accepted the caller is refused at once with `CALL_REQUIRES_ACCEPTANCE` (the ring is never delivered; the caller's "Calling…" ends and the error toast explains), and a held-back ring or Ring again is dropped if the caller has left the call; the call panel shows "Calling…" and a 30 s no-answer window over the members who are online (offline members are left out, since the server drops their rings; if none is online all are kept) (`createOutgoingCall`, `lib/voice/callRing.ts`), except on a redial into a call someone else is already in, which only re-rings. While the ring is in flight the caller hears a soft 440 Hz ringback every 3 s (`lib/media/notificationSound.ts`); DND and the Incoming Call Sound toggle silence it, an incoming ring pauses it and it resumes when that ring ends, and it stops the moment the phase leaves `ringing` — a join, the last callee declining, the timeout or leaving |
-| Incoming: `call_incoming`  | A repeating ringtone distinct from the message chime (`lib/media/notificationSound.ts`; governed by the Incoming Call Sound toggle and DND, which also silence the caller's ringback) driven by the `lib/voice/callRing.ts` state machine (30 s auto-timeout). When the window is not focused, a new ring also raises one "_X_ is calling you" OS notification (not under DND) and one urgent taskbar flash until focus (`features/direct-messages/callAlerts.ts`); clicking it opens the DM (`owncord://channel/<id>?host=` on Windows, same cross-server guard as a message notification). With the ringing DM open, the call panel is the answer surface and the banner stays hidden; anywhere else, `features/direct-messages/IncomingCallBanner.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Accept                     | Join the DM voice channel; ring clears. "Join with video" also turns the camera on once connected. Being in the room answers the ring however you got there: joining it another way clears the ring, and a `call_incoming` for the channel you are already in is ignored                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| Decline                    | `call_decline` sent → the ringer's panel says "declined" in a 1:1, and in a group that callee drops off the ringing list. Another callee's ring stops when its own ringer declines (`call_declined`) or when a `voice_leave` for that channel leaves the room empty, whoever left; the ringer leaving while others stay in does not stop it. A caller who is not looking at that DM (another channel, settings or another view) gets one toast instead: "<name> declined"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
-| Timeout / caller leaves    | Timeout: the callee's ring clears with a "Missed call from _X_" toast (plus an OS notification when the window is not focused; the ringer hanging up before the timeout is reported the same way, but an accept, decline or newer call is not a miss), and the caller's panel says "didn't answer", draws only the caller's own tile, and stays in the call with Ring again / Leave call; a caller who is not looking at the DM gets a "No answer" toast. Caller leaves: the call simply ends, the caller's outgoing ring clears, and the callees' rings clear once the room is empty, with the same "Missed call" notice. In a 1:1, when the other person hangs up and you are left alone, the connected panel's status reads "<name> left the call" with Ring again                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| Event                      | Reaction                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Outgoing: user clicks Call | Caller joins the DM voice channel, then `call_ring` is sent once the voice session is connected (not while joining or securing) and held back (with transport slack) so it stays inside the 1/3 s server limit, and dropped if the socket disconnects meanwhile; a refused join sends none, and a 1:1 ring to someone who has not accepted the caller is refused at once with `CALL_REQUIRES_ACCEPTANCE` (the ring is never delivered; the caller's "Calling…" ends and the error toast explains), and a held-back ring or Ring again is dropped if the caller has left the call; the call panel shows "Calling…" and a 30 s no-answer window over the members who are online (offline members are left out, since the server drops their rings; if none is online all are kept) (`createOutgoingCall`, `lib/voice/callRing.ts`), except on a redial into a call someone else is already in, which only re-rings. While the ring is in flight the caller hears a soft 440 Hz ringback every 3 s (`lib/media/notificationSound.ts`); DND and the Incoming Call Sound toggle silence it, an incoming ring pauses it and it resumes when that ring ends, and it stops the moment the phase leaves `ringing` — a join, the last callee declining, the timeout or leaving. When the ring ends without a call (the last callee declined, nobody answered, or the 1:1 callee is offline) the caller hears three soft call-ended tones once, under the same gates and switch as the ringback; a join or the caller leaving plays nothing |
+| Incoming: `call_incoming`  | A repeating ringtone distinct from the message chime (`lib/media/notificationSound.ts`; governed by the Incoming Call Sound toggle and DND, which also silence the caller's ringback) driven by the `lib/voice/callRing.ts` state machine (30 s auto-timeout). When the window is not focused, a new ring also raises one "_X_ is calling you" OS notification (not under DND) and one urgent taskbar flash until focus (`features/direct-messages/callAlerts.ts`); clicking it opens the DM (`owncord://channel/<id>?host=` on Windows, same cross-server guard as a message notification). With the ringing DM open, the call panel is the answer surface and the banner stays hidden; anywhere else, `features/direct-messages/IncomingCallBanner.ts`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Accept                     | Join the DM voice channel; ring clears. "Join with video" also turns the camera on once connected. Being in the room answers the ring however you got there: joining it another way clears the ring, and a `call_incoming` for the channel you are already in is ignored                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| Decline                    | `call_decline` sent → the ringer's panel says "declined" in a 1:1, and in a group that callee drops off the ringing list. Another callee's ring stops when its own ringer declines (`call_declined`) or when a `voice_leave` for that channel leaves the room empty, whoever left; the ringer leaving while others stay in does not stop it. A caller who is not looking at that DM (another channel, settings or another view) gets one toast instead: "<name> declined"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Timeout / caller leaves    | Timeout: the callee's ring clears with a "Missed call from _X_" toast (plus an OS notification when the window is not focused; the ringer hanging up before the timeout is reported the same way, but an accept, decline or newer call is not a miss), and the caller's panel says "didn't answer", draws only the caller's own tile, and stays in the call with Ring again / Leave call; a caller who is not looking at the DM gets a "No answer" toast. Caller leaves: the call simply ends, the caller's outgoing ring clears, and the callees' rings clear once the room is empty, with the same "Missed call" notice. In a 1:1, when the other person hangs up and you are left alone, the connected panel's status reads "<name> left the call" with Ring again                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+
+**An incoming call in the Android app**
+(`features/direct-messages/callAlerts.ts`, the `Notifier`'s `ringsCalls`,
+`CallRing.kt`): a ring that arrives while the app is out of sight (another app
+in front, or the screen off) is shown by the phone, as an incoming-call
+notification with Accept and Decline over whatever is on screen and on the lock
+screen. It rings with the phone's own ringtone, so the phone's ring volume,
+silent mode and Do Not Disturb apply, and the app's chime stays quiet for that
+ring. With the app in front the ring is the app's own, as on a desktop, and the
+phone shows nothing. Each ring has one voice: if Android will not show the
+notification (notifications are off for the app or for that channel), the app
+rings by itself after all (Android 17 silences an app that is out of sight and
+has no call, so there that ring is heard only once the app is on screen). With
+the ring sound off in the app (the Incoming Call Sound toggle or the ring's own
+switch) the notification goes on a second channel that makes no sound. Under
+OwnCord's own Do Not Disturb there is no notification and no ring, as on a
+desktop. What is switched off while the phone rings holds for that ring at
+once: with the ring sound off the notification is shown again without a sound,
+which stops the ringtone, and under Do Not Disturb or with notifications off in
+the app it comes down and the ring is the app's own from there. A ring that
+went up without a sound stays so until it is rung again, and a ring rung again
+asks all of it again. All of it needs a page that runs: Android freezes a
+background app that has no call after a while (how long differs per phone and
+Android version), and a frozen app hears no ring until it is opened again.
+
+Accept opens the app, after the unlock on a locked phone, and answers the ring.
+Decline declines without opening the app. A tap on the notification opens the
+conversation with the ring still to answer. The notification goes when the ring
+ends, however it ends, and Android takes it down by itself a few seconds after
+a ring's 30 if the app is gone. A press that lands after the ring ended (Accept
+as the caller hangs up) opens the conversation and joins nothing; a press on a
+ring this page did not put there, or one from another server, does nothing. A
+ring rung again is shown again, so its time starts over; it goes on ringing and
+its buttons stay the same. Android 12 and older stop the ringtone of a ring
+that is shown again in place, so there the notification comes down and goes up
+again, and the ringtone starts over. A missed call leaves an ordinary
+notification whose tap opens the conversation. A ring that started with the app
+in front is not handed to the phone when the member leaves the app while it
+rings (on Android 17 the app's own ring goes silent then).
+
+Android lets an app alert once a second and mutes what comes sooner, and a ring
+it mutes makes no sound for as long as it is up. So a ring that comes within
+about a second of another alert of the app (a message just before the call, or
+the same call rung twice in a row) is shown a second or two later (a page that
+is out of sight runs its timers once a second), and a notification that comes
+while a ring is on its way is shown after the ring, unless it was withdrawn
+meanwhile (`platform/desktop/androidNotifications.ts`).
+
+Because the ringtone is the notification's own sound, two more of Android's
+rules apply to it, and the app cannot lift either. A phone with the
+notification cooldown (Android 16, and Android 15 on some phones; a switch
+under Notifications in the system settings, on by default) turns an app's
+alerts down when they follow each other: a ring within a minute of another
+OwnCord alert, such as the message before the call, can play at a lower volume,
+and one that follows two alerts within seconds can make no sound. On Android 9
+and 10 another notification that makes a sound while the phone rings takes the
+ringtone's place. The notification with Accept and Decline shows in both cases.
 
 Call is on the DM chat header and in another member's profile popup. The
 popup's Call opens the 1:1 DM with that member (creating it if needed) and then
@@ -571,21 +689,85 @@ not dispatcher handlers (see [README §4](README.md)).
 
 ## 10. App sounds (DP-40)
 
-The message chime, the DM ringtone, the caller's ringback and the voice UI
-sounds share one `AudioContext` (`lib/media/notificationSound.ts`), whose output
-follows the `audioOutputDevice` chosen in Settings › Voice & Audio through
-`setSinkId`.
-Where the webview cannot route an `AudioContext` (WebKitGTK, the Linux webview),
-those sounds fall back to the system default — see
-[known limitations](../../known-limitations.md#desktop-app).
+The message and mention sounds, the DM ringtone, the caller's ringback and the
+voice UI sounds are synthesized, with no audio files. Each is a short list of
+sine notes (a tone spec) in `lib/media/soundTables.ts`. A note has a start
+time, a length, a starting and an ending loudness and one or more pitches; it
+can also fade in (`attack`), fade out after its length (`release`), and slide
+smoothly from one pitch to the next instead of jumping (`glide`). The Modern
+sounds build each musical note from a few such notes stacked as overtones,
+which gives the mallet, glass and soft tones their colour.
+
+`lib/media/notificationSound.ts` decides when a sound plays and draws the spec
+in one of two ways. Everywhere but the Linux desktop it uses one shared
+`AudioContext`, whose output follows the `audioOutputDevice` chosen in Settings
+› Voice & Audio through `setSinkId`. WebKitGTK, the Linux webview, cannot
+route an `AudioContext`, so on the Linux desktop the spec goes to the native
+host (`native_voice_play_sound`, `src-tauri/src/native_voice/app_sound.rs`),
+which renders the same notes and plays them on the chosen output; if the host
+cannot, the sound plays through Web Audio on the default output. The host takes
+at most 32 notes and 2 seconds per sound, and a unit test checks every sound of
+both styles against those limits.
+
+**Sound style** (Settings › Notifications, under the volume slider): Modern,
+the default, or Classic, the plain single tones OwnCord played before. In
+Modern a mention has its own two-note glass chime and a plain message a short
+bubble pop; in Classic both play the old falling chime. The style also sets
+how often the ringtone repeats (every 2.8 s in Modern, 2 s in Classic; the
+ringback every 3 s in both). A ring keeps the period it started with, and each
+burst plays in the style saved at that moment, so a change made while a call
+rings takes effect on the next burst. Answering or declining cuts the burst
+that is sounding, every note of it. The sounds added after the Classic set
+(call ended, connection lost, the push-to-talk ticks) have no Classic version
+and play their Modern sound in both styles.
+
+**Previews** (`lib/media/soundPreview.ts`): each per-sound switch in Settings ›
+Notifications has a play button that plays that switch's sounds in the saved
+style, one after another with 300 ms of silence after each sound's last note
+ends (the ringback row plays the ringback and then the call-ended tones, the
+connection row the lost phrase and then the join sound). Letting go of the
+volume slider and picking a style preview the message sound the same way. A
+preview is a deliberate press, so it ignores deafen, Do Not Disturb and every
+switch, but it goes through the same player (volume, output device, the Linux
+host) and never touches the ring timers. One preview runs at a time: a second
+press on its button stops it, and any other preview cuts it. Leaving the tab or
+closing Settings stops it and cuts the sound in flight.
+
+When your own **outgoing call ends unanswered** (declined, no answer, or the
+callee offline), the ringback stops and three soft tones play once. A call that
+is answered, or that you hang up yourself, plays nothing. They follow the
+ringback's gates and share its switch, so they are silent while an incoming
+ring sounds; a new ringback ("Ring again") or an incoming ring cuts them.
 
 `features/voice/uiSounds.ts` plays a short **voice UI sound** on your join,
 leave and move; on another member joining or leaving the channel you are in;
 on a screen share starting or ending in that channel, your own included (keyed
 off the server's roster, so a cancelled picker plays nothing); and on your
-mute/unmute and deafen/undeafen. One **Voice Sounds** toggle (Settings ›
+mute/unmute and deafen/undeafen. One **Voice sounds** toggle (Settings ›
 Notifications, on by default) gates them, and DND silences them like the message
-chime. Two edges stay silent by design: push-to-talk, and the wholesale roster
+chime.
+
+When your live voice session drops and starts reconnecting, a short falling
+phrase plays, but only if it is still reconnecting 0.8 s later, so a hiccup
+the connection rides out stays silent. If the session then comes back in the
+same channel, the join sound plays once as a "you are back" cue; if the lost
+sound did not play, the return is silent, and a session that ends instead
+plays the leave sound as before; a drop while a channel switch waits for the
+server plays nothing. The sound follows the same "reconnecting" state the
+call UI shows, which includes a signalling-only reconnect that outlasts the
+grace time while audio may still flow: the sound matches what is on screen.
+Its switch is **Connection sounds**, on by default.
+
+With **Push-to-talk sounds** switched on (off by default), a quiet tick plays
+when push-to-talk opens your mic and a lower one when it closes it, for the
+talk key and the phone's hold-to-talk button alike. They tick only in a
+connected call in push-to-talk mode, and only when the mic is yours to open:
+a press while you are muted, muted by a moderator, listen-only, in the AFK
+channel or on a phone call's hold makes no tick, and unmuting with the key
+held ticks from the next press. Joining or leaving, switching the input mode
+and the gate closing as a call starts stay silent.
+
+One edge stays silent by design: the wholesale roster
 replacement (`setVoiceStates`) behind the initial `ready` and a reconnect
 resync — the module keys remote joins off a monotonic roster revision that only
 the incremental `voice_state`/`voice_leave` handlers bump, so a replay cannot
@@ -607,5 +789,8 @@ never silences message chimes for the rest of the session.
 `src/features/channels/voiceSidebarRows.ts` (voice rows, join freeze on WS reconnect,
 and the E2EE verification badge), `src/features/voice/videoGrid/VideoGrid.ts`,
 `src-tauri/src/livekit_proxy.rs`, `src-tauri/src/ptt.rs`,
+`src-tauri/src/mobile_audio.rs` and `MobileAudioPlugin.kt` (the Android app's call audio),
+`src-tauri/src/call_service.rs` and `CallServicePlugin.kt` (the Android app's call service and screen-on),
+`CallButtons.kt`, `CallActionReceiver.kt` and `CallRing.kt` (its call notifications' buttons and the incoming call's notification),
 `src/lib/net/e2eeCrypto.ts`, `src/lib/net/identity.ts`; and the structural map in
 [../voice-e2ee.md](../voice-e2ee.md).

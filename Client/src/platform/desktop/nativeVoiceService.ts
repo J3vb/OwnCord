@@ -118,6 +118,11 @@ export const nativeVoice: NativeVoice = {
     invokeOrThrow<void>("native_voice_set_volume", { session, identity, volume }),
   setScreenshareVolume: (session, identity, volume) =>
     invokeOrThrow<void>("native_voice_set_screenshare_volume", { session, identity, volume }),
+  setMusicVolume: (session, identity, volume) =>
+    invokeOrThrow<void>("native_voice_set_music_volume", { session, identity, volume }),
+  startMusic: (session, appId) =>
+    invokeOrThrow<string>("native_voice_start_music", { session, appId }),
+  stopMusic: (session) => invokeOrThrow<void>("native_voice_stop_music", { session }),
   publishCamera: (session, capture, options) =>
     invokeOrThrow<string>("native_voice_publish_camera", { session, capture, options }),
   unpublishCamera: (session, sid) =>

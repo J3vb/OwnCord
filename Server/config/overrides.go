@@ -58,6 +58,10 @@ func EnvOverridden(key string) bool {
 	return ok
 }
 
+// deprecatedPushDispatchKey is the retired second push switch. A stored override for it is kept in the
+// file, so a downgrade still reads it, but never applied.
+const deprecatedPushDispatchKey = "push.dispatch_enabled"
+
 // ReadOverrides reads the overrides file as a flat map of dotted key to value; a missing file is an empty
 // map. Values are normalised so a hand-edited file and the admin API carry the same Go types. An editable
 // key whose stored value fails its rule is dropped with a warning, so a hand-edit cannot stop startup.
@@ -243,6 +247,10 @@ func applyOverrideLayer(cfg *Config) error {
 func applyOverrides(cfg *Config, overrides map[string]any) error {
 	nested := make(map[string]map[string]any)
 	for key, value := range overrides {
+		if key == deprecatedPushDispatchKey {
+			slog.Info("config: push.dispatch_enabled is deprecated and ignored; push.enabled alone turns on sending", "source", OverridesFileName)
+			continue
+		}
 		if !IsEditable(key) {
 			slog.Warn("config: ignoring non-editable key in overrides file (typo, or a protected key)", "key", key)
 			continue

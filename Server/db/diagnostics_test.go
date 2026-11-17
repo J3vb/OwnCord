@@ -11,6 +11,7 @@ import (
 )
 
 func TestDiagnostics_ExportsCompiledNamesAndCountsOnly(t *testing.T) {
+	t.Parallel()
 	database, err := db.Open(":memory:")
 	mustDo(t, "Open", err)
 	defer database.Close()
@@ -53,6 +54,7 @@ func TestDiagnostics_ExportsCompiledNamesAndCountsOnly(t *testing.T) {
 }
 
 func TestDiagnosticNames_ReturnsUsernamesDisplayNamesAndServerName(t *testing.T) {
+	t.Parallel()
 	database, err := db.Open(":memory:")
 	mustDo(t, "Open", err)
 	defer database.Close()

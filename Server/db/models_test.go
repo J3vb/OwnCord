@@ -10,6 +10,7 @@ import (
 // ─── Role JSON round-trip ────────────────────────────────────────────────────
 
 func TestRole_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
 	color := "#ff0000"
 	original := db.Role{
 		ID:          1,
@@ -47,6 +48,7 @@ func TestRole_JSONRoundTrip(t *testing.T) {
 }
 
 func TestRole_JSONKeys(t *testing.T) {
+	t.Parallel()
 	role := db.Role{ID: 1, Name: "member", Permissions: 3, Position: 1, IsDefault: true}
 	data, _ := json.Marshal(role)
 
@@ -62,6 +64,7 @@ func TestRole_JSONKeys(t *testing.T) {
 }
 
 func TestRole_NilColor(t *testing.T) {
+	t.Parallel()
 	role := db.Role{ID: 1, Name: "member"}
 	data, _ := json.Marshal(role)
 
@@ -76,6 +79,7 @@ func TestRole_NilColor(t *testing.T) {
 // ─── Channel JSON round-trip ─────────────────────────────────────────────────
 
 func TestChannel_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
 	quality := "high"
 	threshold := 10
 	original := db.Channel{
@@ -112,6 +116,7 @@ func TestChannel_JSONRoundTrip(t *testing.T) {
 }
 
 func TestChannel_OmitEmptyFields(t *testing.T) {
+	t.Parallel()
 	ch := db.Channel{ID: 1, Name: "voice-1", Type: "voice"}
 	data, _ := json.Marshal(ch)
 
@@ -130,6 +135,7 @@ func TestChannel_OmitEmptyFields(t *testing.T) {
 // ─── VoiceState JSON ─────────────────────────────────────────────────────────
 
 func TestVoiceState_JoinedAtOmittedFromJSON(t *testing.T) {
+	t.Parallel()
 	vs := db.VoiceState{
 		UserID:    1,
 		ChannelID: 2,
@@ -150,6 +156,7 @@ func TestVoiceState_JoinedAtOmittedFromJSON(t *testing.T) {
 }
 
 func TestVoiceState_BoolDefaults(t *testing.T) {
+	t.Parallel()
 	vs := db.VoiceState{UserID: 1, ChannelID: 2, Username: "bob"}
 	data, _ := json.Marshal(vs)
 
@@ -164,6 +171,7 @@ func TestVoiceState_BoolDefaults(t *testing.T) {
 // ─── MessageAPIResponse JSON ─────────────────────────────────────────────────
 
 func TestMessageAPIResponse_JSONKeys(t *testing.T) {
+	t.Parallel()
 	resp := db.MessageAPIResponse{
 		ID:          1,
 		ChannelID:   2,
@@ -192,6 +200,7 @@ func TestMessageAPIResponse_JSONKeys(t *testing.T) {
 // ─── AttachmentInfo omitempty ─────────────────────────────────────────────────
 
 func TestAttachmentInfo_OmitsNilDimensions(t *testing.T) {
+	t.Parallel()
 	att := db.AttachmentInfo{
 		ID: "abc", Filename: "doc.pdf", Size: 1024, Mime: "application/pdf", URL: "/files/abc",
 	}
@@ -209,6 +218,7 @@ func TestAttachmentInfo_OmitsNilDimensions(t *testing.T) {
 }
 
 func TestAttachmentInfo_IncludesDimensions(t *testing.T) {
+	t.Parallel()
 	w, h := 1920, 1080
 	att := db.AttachmentInfo{
 		ID: "abc", Filename: "img.png", Size: 2048, Mime: "image/png",
@@ -230,6 +240,7 @@ func TestAttachmentInfo_IncludesDimensions(t *testing.T) {
 // ─── UserPublic omitempty ────────────────────────────────────────────────────
 
 func TestUserPublic_OmitsNilAvatar(t *testing.T) {
+	t.Parallel()
 	u := db.UserPublic{ID: 1, Username: "alice"}
 	data, _ := json.Marshal(u)
 
@@ -242,6 +253,7 @@ func TestUserPublic_OmitsNilAvatar(t *testing.T) {
 }
 
 func TestUserPublic_IncludesAvatar(t *testing.T) {
+	t.Parallel()
 	av := "avatar.png"
 	u := db.UserPublic{ID: 1, Username: "alice", Avatar: &av}
 	data, _ := json.Marshal(u)
@@ -257,6 +269,7 @@ func TestUserPublic_IncludesAvatar(t *testing.T) {
 // ─── ServerStats JSON ────────────────────────────────────────────────────────
 
 func TestServerStats_JSONRoundTrip(t *testing.T) {
+	t.Parallel()
 	original := db.ServerStats{
 		UserCount:    150,
 		MessageCount: 50000,
@@ -280,6 +293,7 @@ func TestServerStats_JSONRoundTrip(t *testing.T) {
 // ─── AuditEntry JSON ─────────────────────────────────────────────────────────
 
 func TestAuditEntry_JSONKeys(t *testing.T) {
+	t.Parallel()
 	entry := db.AuditEntry{
 		ID: 1, ActorID: 2, ActorName: "admin", Action: "ban_user",
 		TargetType: "user", TargetID: 3, Detail: "reason", CreatedAt: "2026-01-01",

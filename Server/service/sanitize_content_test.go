@@ -13,6 +13,7 @@ import (
 // would no longer start with the literal ">" the markdown blockquote regex
 // requires.
 func TestSanitizeContent_PlainTextRoundTrip(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		`don't > quote "this" & that`,
 		`a & b`,
@@ -38,6 +39,7 @@ func TestSanitizeContent_PlainTextRoundTrip(t *testing.T) {
 // sees real markup and strips it, so the smuggled payload must not survive as
 // an active <script>/<img>/on-event sink.
 func TestSanitizeContent_EntitySmugglingBlocked(t *testing.T) {
+	t.Parallel()
 	cases := []string{
 		"&lt;script&gt;alert(1)&lt;/script&gt;",
 		"&lt;img src=x onerror=alert(1)&gt;",

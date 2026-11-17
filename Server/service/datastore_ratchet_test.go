@@ -34,7 +34,7 @@ const (
 	// service starts or stops calling a method. It was 309 while Store listed
 	// its methods itself; it fell to 288 when each service declared its own
 	// interface and the methods no service calls left Store.
-	storeMethodBaseline = 295
+	storeMethodBaseline = 300
 
 	// modelsJSONTagBaseline is the number of struct fields in db/models.go
 	// whose tag carries a json: key, json:"-" included.
@@ -79,7 +79,7 @@ const (
 	// storeFullSurfaceBaseline is the compiler's own method count for Store,
 	// promoted methods from the cross-package embeds included. It closes the
 	// gap the source count leaves for growth inside a cross-package embed.
-	storeFullSurfaceBaseline = 306
+	storeFullSurfaceBaseline = 311
 )
 
 // storeCrossPackageEmbeds names every interface embedded in Store that is
@@ -233,6 +233,7 @@ func readServerFile(t *testing.T, rel string) string {
 }
 
 func TestStoreMethodRatchet(t *testing.T) {
+	t.Parallel()
 	sources := serviceSources(t)
 
 	got, err := measureInterface("Store", sources)
@@ -266,6 +267,7 @@ func TestStoreMethodRatchet(t *testing.T) {
 }
 
 func TestModelsJSONTagRatchet(t *testing.T) {
+	t.Parallel()
 	got, err := countJSONTags(readServerFile(t, "db/models.go"))
 	mustDo(t, "count tags", err)
 	if got != modelsJSONTagBaseline {
@@ -274,6 +276,7 @@ func TestModelsJSONTagRatchet(t *testing.T) {
 }
 
 func TestMeasureInterface(t *testing.T) {
+	t.Parallel()
 	const store = `package p
 type Store interface {
 	Inner
@@ -337,6 +340,7 @@ type Store interface {
 }
 
 func TestCountJSONTags(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		src  string

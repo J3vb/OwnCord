@@ -107,7 +107,7 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 	if err != nil {
 		return nil, fmt.Errorf("GetMessages: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	var msgs []MessageWithUser
 	for rows.Next() {
@@ -127,10 +127,12 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 }
 
 // EditMessage updates the content, sets edited_at and returns the row via
-// RETURNING; ErrNotFound if the message does not exist, is deleted or userID is
-// not the owner. The UPDATE carries `AND deleted = 0` because a delete can
-// commit between the ownership read and the write; otherwise the tombstone
-// would be rewritten and chat_edited broadcast for a replaced message.
+// RETURNING. ErrNotFound if the message does not exist, is deleted, cannot be
+// edited, or the content is empty and the message has no attachment;
+// ErrForbidden if userID is not the owner. The UPDATE carries `AND deleted = 0`
+// because a delete can commit between the ownership read and the write;
+// otherwise the tombstone would be rewritten and chat_edited broadcast for a
+// replaced message.
 func (d *DB) EditMessage(ctx context.Context, id, userID int64, content string) (*Message, error) {
 	msg, err := d.GetMessage(ctx, id)
 	if err != nil {
@@ -212,7 +214,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 	if err != nil {
 		return nil, fmt.Errorf("GetMessagesForAPI: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
@@ -232,7 +234,7 @@ func (d *DB) GetMessagesAfterForAPI(ctx context.Context, channelID, after int64,
 	if err != nil {
 		return nil, fmt.Errorf("GetMessagesAfterForAPI: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
@@ -274,7 +276,7 @@ func (d *DB) GetMessagesAroundForAPI(ctx context.Context, channelID, centerID in
 	if err != nil {
 		return nil, fmt.Errorf("GetMessagesAroundForAPI: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }

@@ -41,6 +41,7 @@ func (f *fakeKickDisconnectNotifier) calls() []int64 {
 // account recovery, ban) already disconnects synchronously; kick — the one
 // action whose entire purpose is immediate ejection — must too.
 func TestForceLogout_DisconnectsLiveSocket(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 

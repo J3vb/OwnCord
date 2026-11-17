@@ -57,14 +57,14 @@ describe("talk button", () => {
     setPttPollingLive(false);
   });
 
-  it("makes Push to Talk gate on the button alone, with no key bound", () => {
+  it("makes Push to talk gate on the button alone, with no key bound", () => {
     setPref("inputMode", "ptt");
     startTalkButton(owner.signal);
     expect(isPttPollingLive()).toBe(true);
     expect(pttGates(isPttPollingLive())).toBe(true);
   });
 
-  it("reports no press source in Voice Activity mode", () => {
+  it("reports no press source in Voice activity mode", () => {
     setPref("inputMode", "vad");
     startTalkButton(owner.signal);
     expect(isPttPollingLive()).toBe(false);
@@ -102,7 +102,7 @@ describe("talk button", () => {
     expect(voiceStore.getState().pttGated).toBe(false);
   });
 
-  it("does nothing outside a call or in Voice Activity mode", async () => {
+  it("does nothing outside a call or in Voice activity mode", async () => {
     setPref("inputMode", "ptt");
     startTalkButton(owner.signal);
     pressTalk();
@@ -133,7 +133,7 @@ describe("talk button", () => {
     expect(session.setPttGated).not.toHaveBeenCalled();
   });
 
-  it("closes the gate of a call in progress when Push to Talk is chosen, and opens it again for Voice Activity", async () => {
+  it("closes the gate of a call in progress when Push to talk is chosen, and opens it again for Voice activity", async () => {
     setPref("inputMode", "vad");
     startTalkButton(owner.signal);
     joinCall(false);
@@ -179,7 +179,7 @@ describe("talk button", () => {
       startTalkButton(owner.signal);
     });
 
-    it("shows only in a call in Push to Talk mode", async () => {
+    it("shows only in a call in Push to talk mode", async () => {
       const btn = createTalkButton("call", owner.signal);
       expect(btn.hidden).toBe(true);
       joinCall(true);
@@ -257,6 +257,25 @@ describe("talk button", () => {
       voiceStore.setState((s) => ({ ...s, localMuted: true }));
       await settle();
       expect(session.setPttGated).toHaveBeenLastCalledWith(true);
+    });
+
+    it("goes away while a phone call holds the call, closing a held gate, and comes back", async () => {
+      joinCall(true);
+      const btn = createTalkButton("bar", owner.signal);
+      btn.dispatchEvent(pointer("pointerdown"));
+      await settle();
+      expect(session.setPttGated).toHaveBeenLastCalledWith(false);
+
+      voiceStore.setState((s) => ({ ...s, phoneCallHold: true }));
+      await settle();
+      expect(btn.hidden).toBe(true);
+      expect(session.setPttGated).toHaveBeenLastCalledWith(true);
+      expect(btn.getAttribute("aria-pressed")).toBe("false");
+
+      voiceStore.setState((s) => ({ ...s, phoneCallHold: false }));
+      await settle();
+      expect(btn.hidden).toBe(false);
+      expect(btn.disabled).toBe(false);
     });
 
     it("taking the button down while it is held closes the gate", async () => {

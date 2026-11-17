@@ -105,7 +105,8 @@ func handleListBackups(paths backupPaths) http.HandlerFunc {
 
 		var backups []backupEntry
 		for _, e := range entries {
-			if e.IsDir() || filepath.Ext(e.Name()) != ".db" {
+			if e.IsDir() || filepath.Ext(e.Name()) != ".db" ||
+				isLiveDatabaseFile(filepath.Join(backupDir, e.Name()), paths.dbFile) {
 				continue
 			}
 			info, err := e.Info()
@@ -130,7 +131,7 @@ func handleListBackups(paths backupPaths) http.HandlerFunc {
 
 // resolveBackupName joins the {name} path parameter onto the backup directory, refusing a name that could
 // leave it; false means the 400 is written.
-func resolveBackupName(w http.ResponseWriter, r *http.Request, backupDir string) (string, string, bool) {
+func resolveBackupName(w http.ResponseWriter, r *http.Request, backupDir, dbFile string) (string, string, bool) {
 	name := chi.URLParam(r, "name")
 	if name == "" || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid backup name")
@@ -141,12 +142,16 @@ func resolveBackupName(w http.ResponseWriter, r *http.Request, backupDir string)
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "invalid backup name")
 		return "", "", false
 	}
+	if isLiveDatabaseFile(target, dbFile) {
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "that file is the live database, not a backup")
+		return "", "", false
+	}
 	return name, target, true
 }
 
 func handleDeleteBackup(database *db.DB, paths backupPaths) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name, target, ok := resolveBackupName(w, r, paths.dir)
+		name, target, ok := resolveBackupName(w, r, paths.dir, paths.dbFile)
 		if !ok {
 			return
 		}
@@ -205,7 +210,7 @@ const restoreCarryTimeout = 10 * time.Second
 // database reopens, and the restart goes through normal shutdown.
 func handleRestoreBackup(database *db.DB, paths backupPaths, gate *backupGate) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name, target, ok := resolveBackupName(w, r, paths.dir)
+		name, target, ok := resolveBackupName(w, r, paths.dir, paths.dbFile)
 		if !ok {
 			return
 		}
