@@ -26,6 +26,16 @@
 id = "GHSA-g3hv-75wg-m249"
 reason = "minimatch dev-only via eslint/typescript-eslint/stryker; fix only in 11.x, which no dependent accepts; patterns are our own config"
 
+# --- npm: dev-only. picomatch 2.3.2 and 4.0.7 reach us only through build and
+# test tools (vite, vitest, knip, tinyglobby, micromatch via patch-package, and
+# the root tooling), ship in no artifact, and no patched version exists yet.
+# The advisory needs an attacker-supplied glob pattern; every pattern here comes
+# from our own build, test and lint config. Drop it once a fixed picomatch is
+# published and the lockfiles move to it.
+[[IgnoredVulns]]
+id = "GHSA-fc5q-39xc-vjpf"
+reason = "picomatch dev-only via vite/vitest/knip/tinyglobby/micromatch; no fixed version yet; patterns are our own config"
+
 # --- Rust: the accepted advisories cargo-deny carries in
 # Client/src-tauri/deny.toml (the authoritative list with the reachability
 # argument), kept in step with it, plus glib's unsound advisory, which
