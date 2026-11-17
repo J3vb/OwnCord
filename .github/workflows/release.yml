@@ -995,20 +995,19 @@ jobs:
       # smoke passed. release-server-docker compares it against the digest it
       # pushed, so "the image the owner pulls" is provably the one that booted
       # on native hardware.
+      #
+      # Read from the saved image's manifest.json, not from build-push-action's
+      # `imageid`: on a runner whose Docker uses the containerd image store,
+      # `imageid` is the local manifest digest, not the config digest, and the
+      # two never compare equal. `docker save` names the config blob in both
+      # store modes ("blobs/sha256/<hex>" or "<hex>.json").
       - id: id-amd64
         if: matrix.arch == 'amd64'
-        env:
-          # Via env, not inline in the run script: zizmor's template-injection
-          # audit is right that a `steps.*.outputs.*` expansion inside `run:` is
-          # attacker-influenced text.
-          IMAGEID: ${{ steps.build.outputs.imageid }}
-        run: echo "imageid=${IMAGEID}" >> "$GITHUB_OUTPUT"
+        run: bash Server/scripts/docker-config-digest.sh owncord-smoke:candidate >> "$GITHUB_OUTPUT"
 
       - id: id-arm64
         if: matrix.arch == 'arm64'
-        env:
-          IMAGEID: ${{ steps.build.outputs.imageid }}
-        run: echo "imageid=${IMAGEID}" >> "$GITHUB_OUTPUT"
+        run: bash Server/scripts/docker-config-digest.sh owncord-smoke:candidate >> "$GITHUB_OUTPUT"
 
   # B6-8. An upgrade is the path every existing install takes to this release,
   # and a failed one is the path back out — neither is exercised by any job
