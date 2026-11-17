@@ -210,6 +210,21 @@ paint; the CSP (`img-src`/`font-src 'self'`) stays behind it. Ctrl+Shift+Backspa
 turns the active theme off (Backspace is not a bindable key, so no keybind can
 claim it).
 
+A theme can also carry a **background picture** (`themeBackground.ts`,
+`themeBackgroundEditor.ts`), kept per theme under
+`owncord:theme:custom:bg:<id>`. A picked PNG, JPEG or WebP (at most 15 MB) is
+decoded and re-encoded on a canvas to WebP (JPEG where the webview has no WebP
+encoder), at most 2560 px and 2,000,000 characters as a data URL, so the app
+never reads the original file again. Only a base64 `data:image/(webp|jpeg|png)`
+URL is ever painted, checked again on every load. The painter writes one
+`<style id="owncord-custom-theme-bg">` just before the theme's own style: it
+sets `--theme-background-image` and paints it behind `.chat-area`, covered by
+`--bg-primary` at the Dim percentage (0 to 90) and blurred through a
+`backdrop-filter` layer when Blur (0 to 20 px) is set. Theme CSS reaches the
+picture only through that variable, so the `url(` refusal still holds for
+theme text. The picture goes with its theme on turn off, delete and the escape
+shortcut; Export and Copy carry the CSS only.
+
 ---
 
 ## 5. Updater

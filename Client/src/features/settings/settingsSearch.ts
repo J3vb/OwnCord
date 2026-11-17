@@ -112,6 +112,8 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("appearance.accentNote"),
     s("appearance.customThemes"),
     platformText(s("appearance.customThemes.desc"), s("appearance.customThemes.desc.android")),
+    s("appearance.customThemes.background"),
+    s("appearance.customThemes.background.desc"),
   ],
   Accessibility: () => [
     s("accessibility.group.motion"),

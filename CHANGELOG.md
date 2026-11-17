@@ -100,6 +100,10 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Desktop UI
+
+- **Custom themes can have a background picture.** In Settings > Appearance > Custom themes, pick a PNG, JPEG or WebP picture for a theme. It shows behind the chat, with Dim and Blur sliders so text stays readable. The picture is shrunk and kept in the app, so it keeps working after the original file is deleted; Export and Copy carry only the CSS. Theme CSS can place it anywhere with `var(--theme-background-image)`.
+
 ### Push notifications
 
 - **Settings > Notifications says when push cannot work.** Members now see it when their push server is on a private network or a non-standard port, instead of silently getting nothing.
