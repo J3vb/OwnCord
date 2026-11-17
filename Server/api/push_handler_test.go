@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
@@ -45,7 +46,7 @@ func buildPushRouter(t *testing.T, database *db.DB, enabled bool) (http.Handler,
 		return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
 	})
 	r := chi.NewRouter()
-	api.MountPushRoutes(r, service.NewSessionService(database), push, enabled)
+	api.MountPushRoutes(r, service.NewSessionService(database), push, auth.NewRateLimiter(), enabled)
 	return r, push
 }
 
@@ -387,6 +388,33 @@ func TestPushSubscriptions_DeviceCapEvictsOldest(t *testing.T) {
 	if oldestSurvives != 0 {
 		t.Errorf("the oldest subscription (endpoint 0) survived the cap")
 	}
+}
+
+func TestPushSubscriptions_RegistrationIsRateLimitedPerUser(t *testing.T) {
+	t.Parallel()
+	database := openMigratedDB(t)
+	router, _ := buildPushRouter(t, database, true)
+	userID := mintUser(t, database, "push-limit")
+	token, _ := mintSession(t, database, userID)
+	other := mintUser(t, database, "push-limit-other")
+	otherToken, _ := mintSession(t, database, other)
+
+	body := validSubscribeBody("https://push.example.com/sub/limit")
+	for i := range 30 {
+		rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, body)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("subscribe #%d = %d %s", i, rr.Code, rr.Body.String())
+		}
+	}
+	rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, body)
+	requireStatus(t, rr, http.StatusTooManyRequests)
+	if rr.Header().Get("Retry-After") == "" {
+		t.Error("a refused registration has no Retry-After header")
+	}
+
+	// The budget is per user: another member still registers.
+	rr = pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", otherToken, validSubscribeBody("https://push.example.com/sub/limit-other"))
+	requireStatus(t, rr, http.StatusCreated)
 }
 
 // ─── VAPID ───────────────────────────────────────────────────────────────────

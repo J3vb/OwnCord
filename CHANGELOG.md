@@ -256,6 +256,8 @@ It is still a **beta and a hobby project**: don't use it for anything sensitive.
 - **Channels:** opening the media gallery of a channel with few or no pictures no longer reads every attachment on the server, so it opens quickly on a large server.
 - **Admin:** restoring a backup from the admin panel on a symlinked database path replaced the link with a plain file. The link is now kept and the restore goes to the linked file.
 - **Accounts:** erasing an account now also removes the erased user's messages from stored reconnect history, including later edits and reactions on them.
+- **Accounts:** erasing an account, and the retention clean-up, now also remove the link preview cards of the removed messages from stored reconnect history.
+- **Push:** registering a device for push is limited to 30 times an hour per member.
 - **Settings:** closing Settings while a recovery code or a half-written custom theme was on screen lost it without asking. It now asks first.
 - **Settings:** the Devices list kept signed-out devices after a password change, and signing out a device that was already gone put it back with an error. Both now stay in step.
 - **Settings:** "Clear All Cache & Restart" also wiped Push to Talk, muted channels, drafts, notes and server folders. It now keeps them.
