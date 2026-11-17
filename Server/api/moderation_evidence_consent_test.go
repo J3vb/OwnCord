@@ -231,6 +231,7 @@ const nsfwAckRequired = service.EvidenceNSFWAcknowledgementRequired
 // is refused both reads; acknowledging grants both; revoking refuses both
 // again on the very next read.
 func TestModerationEvidence_AcknowledgeAndRevoke(t *testing.T) {
+	t.Parallel()
 	for _, target := range []string{"message", "attachment"} {
 		t.Run(target, func(t *testing.T) {
 			f := newEvidenceFixture(t, target, true)
@@ -254,6 +255,7 @@ func TestModerationEvidence_AcknowledgeAndRevoke(t *testing.T) {
 // acknowledgement does not open the evidence to another, and the reporter's
 // own acknowledgement (given to file) opens it to nobody else.
 func TestModerationEvidence_ConsentIsPerModerator(t *testing.T) {
+	t.Parallel()
 	f := newEvidenceFixture(t, "message", true)
 	acked := f.moderator("ev-mod-a", 0)
 	other := f.moderator("ev-mod-b", 0)
@@ -269,6 +271,7 @@ func TestModerationEvidence_ConsentIsPerModerator(t *testing.T) {
 // Administrator bit reads labelled evidence only with its own
 // acknowledgement, exactly like a moderator.
 func TestModerationEvidence_AdministratorHasNoBypass(t *testing.T) {
+	t.Parallel()
 	f := newEvidenceFixture(t, "message", true)
 	admin := f.moderator("ev-admin", permissions.Administrator)
 
@@ -286,6 +289,7 @@ func TestModerationEvidence_AdministratorHasNoBypass(t *testing.T) {
 // acknowledge the new label. A label added after the report was filed
 // gates it too.
 func TestModerationEvidence_SourceChannelRelabelling(t *testing.T) {
+	t.Parallel()
 	t.Run("unlabel then relabel", func(t *testing.T) {
 		f := newEvidenceFixture(t, "message", true)
 		mod := f.moderator("ev-mod", 0)
@@ -325,6 +329,7 @@ func TestModerationEvidence_SourceChannelRelabelling(t *testing.T) {
 // the file itself, unlinked by the cascade, is refused to a moderator and
 // to an administrator.
 func TestModerationEvidence_SourceChannelDeletion(t *testing.T) {
+	t.Parallel()
 	t.Run("labelled then deleted", func(t *testing.T) {
 		f := newEvidenceFixture(t, "message", true)
 		mod := f.moderator("ev-mod", 0)
@@ -381,6 +386,7 @@ func TestModerationEvidence_SourceChannelDeletion(t *testing.T) {
 // control: an ordinary channel's evidence reaches a moderator with no
 // acknowledgement at all.
 func TestModerationEvidence_UnlabelledSourceNeedsNoAcknowledgement(t *testing.T) {
+	t.Parallel()
 	f := newEvidenceFixture(t, "message", false)
 	mod := f.moderator("ev-mod", 0)
 	f.expectEvidence(mod, "")

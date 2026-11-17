@@ -261,6 +261,7 @@ func wrongTOTPCode(t *testing.T, secret string) string {
 // Content-Type and rate-limiter side effects — whether the account does not
 // exist, exists, is banned, or is spelled in another case.
 func TestAuthCharacterization_LoginRejectionsAreIndistinguishable(t *testing.T) {
+	t.Parallel()
 	type outcome struct {
 		status  int
 		body    string
@@ -388,6 +389,7 @@ func constantWork(wrong, unknown []time.Duration) bool {
 // median-based ratio false-alarms. The skipped-hash case drops the unknown
 // path to a store-scan cost with no bcrypt at all.
 func TestAuthCharacterization_TimingGuardIsRobustToAsymmetricNoise(t *testing.T) {
+	t.Parallel()
 	const base = 62 * time.Millisecond
 	// Same constant work on both paths, but noise delayed several of the
 	// wrong-password samples: min recovers the base on each arm, median does not.
@@ -408,6 +410,7 @@ func TestAuthCharacterization_TimingGuardIsRobustToAsymmetricNoise(t *testing.T)
 // Registration refusals that depend on state an attacker wants to probe —
 // a taken username versus an unusable invite — share one 400 body.
 func TestAuthCharacterization_RegisterRejectionsAreIndistinguishable(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	seedUser(t, database, "taken", "somePass1", 4)
@@ -441,6 +444,7 @@ func TestAuthCharacterization_RegisterRejectionsAreIndistinguishable(t *testing.
 // ─── Sentinel and failure-path mapping: /register ────────────────────────────
 
 func TestAuthCharacterization_RegisterPolicyAndFailurePaths(t *testing.T) {
+	t.Parallel()
 	body := func(invite string) map[string]string {
 		return map[string]string{"username": "fresh", "password": "securePass1", "invite_code": invite}
 	}
@@ -530,6 +534,7 @@ func TestAuthCharacterization_RegisterPolicyAndFailurePaths(t *testing.T) {
 // ─── Sentinel and failure-path mapping: /login ───────────────────────────────
 
 func TestAuthCharacterization_LoginFailurePaths(t *testing.T) {
+	t.Parallel()
 	login := func(t *testing.T, router http.Handler, password string) *httptest.ResponseRecorder {
 		t.Helper()
 		return send(t, router, http.MethodPost, "/api/v1/auth/login", "", "", "", map[string]string{"username": "target", "password": password})
@@ -601,6 +606,7 @@ func TestAuthCharacterization_LoginFailurePaths(t *testing.T) {
 // ─── Session issue ───────────────────────────────────────────────────────────
 
 func TestAuthCharacterization_SessionShape(t *testing.T) {
+	t.Parallel()
 	hexToken := regexp.MustCompile(`^[0-9a-f]{64}$`)
 	userKeys := []string{"about", "banner", "banner_color", "created_at", "custom_status", "custom_status_expires_at", "display_name", "id", "role_id", "status", "totp_enabled", "username"}
 	checkSuccess := func(t *testing.T, rr *httptest.ResponseRecorder, wantStatus int) string {
@@ -688,6 +694,7 @@ func TestAuthCharacterization_SessionShape(t *testing.T) {
 // ─── Logout ──────────────────────────────────────────────────────────────────
 
 func TestAuthCharacterization_Logout(t *testing.T) {
+	t.Parallel()
 	custom := "in a meeting"
 	setup := func(t *testing.T) (*db.DB, http.Handler, int64, string) {
 		t.Helper()
@@ -738,6 +745,7 @@ func TestAuthCharacterization_Logout(t *testing.T) {
 // 401 would make the client discard a valid session (AuthMiddleware's
 // documented reason). Pinned per auth route so the slice cannot change it.
 func TestAuthCharacterization_TokenResolutionFaultIs503(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	uid := seedUser(t, database, "res", "correctPass1", 4)
@@ -768,6 +776,7 @@ func TestAuthCharacterization_TokenResolutionFaultIs503(t *testing.T) {
 // ─── DELETE /account ─────────────────────────────────────────────────────────
 
 func TestAuthCharacterization_DeleteAccountFailurePaths(t *testing.T) {
+	t.Parallel()
 	t.Run("purge fails -> 500, account and session intact", func(t *testing.T) {
 		database := newMigratedAuthTestDB(t)
 		router := buildAuthRouter(database, auth.NewRateLimiter())
@@ -814,6 +823,7 @@ func TestAuthCharacterization_DeleteAccountFailurePaths(t *testing.T) {
 // ─── POST /verify-totp ───────────────────────────────────────────────────────
 
 func TestAuthCharacterization_VerifyTOTPFailurePaths(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (*db.DB, http.Handler, int64, string) {
 		t.Helper()
 		database := newAuthTestDB(t)
@@ -921,6 +931,7 @@ func TestAuthCharacterization_VerifyTOTPFailurePaths(t *testing.T) {
 // ─── TOTP management: /enable, /confirm, DELETE /users/me/totp ───────────────
 
 func TestAuthCharacterization_TOTPManagementFailurePaths(t *testing.T) {
+	t.Parallel()
 	setup := func(t *testing.T) (*db.DB, http.Handler, int64, string) {
 		t.Helper()
 		database := newAuthTestDB(t)
@@ -1020,6 +1031,7 @@ func TestAuthCharacterization_TOTPManagementFailurePaths(t *testing.T) {
 // The per-IP RateLimitMiddleware on each auth route: N requests per minute
 // pass, the N+1th is 429 with Retry-After, regardless of the credentials.
 func TestAuthCharacterization_RouteRateLimits(t *testing.T) {
+	t.Parallel()
 	const slowDown = "too many requests, please slow down"
 	rows := []struct {
 		name   string

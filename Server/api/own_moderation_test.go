@@ -88,6 +88,7 @@ func field[T any](t *testing.T, row map[string]json.RawMessage, key string) T {
 // eligibility, never another user's rows, never a kick, and never a
 // moderator-only field.
 func TestOwnModeration(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "owncord.db")
 	database := openFileTestDB(t, path)
 	h := buildOwnModerationRouter(database)
@@ -200,6 +201,7 @@ func TestOwnModeration(t *testing.T) {
 // TestOwnModeration_RateLimited: the read is budgeted per IP like its
 // /users/me siblings.
 func TestOwnModeration_RateLimited(t *testing.T) {
+	t.Parallel()
 	database := newModQueueActTestDB(t)
 	h := buildOwnModerationRouter(database)
 	token, _ := mintSession(t, database, mintUser(t, database, "own-rl"))
@@ -218,6 +220,7 @@ func TestOwnModeration_RateLimited(t *testing.T) {
 // omits it, while a warning a higher-ranked moderator issued them still
 // appears.
 func TestOwnModeration_OmitsOwnPurge(t *testing.T) {
+	t.Parallel()
 	database := newModQueueActTestDB(t)
 	h := buildOwnModerationRouter(database)
 	ctx := context.Background()
@@ -257,6 +260,7 @@ func TestOwnModeration_OmitsOwnPurge(t *testing.T) {
 // retire, so the read is bounded to the newest 200 instead of serializing
 // the member's whole history.
 func TestOwnModeration_ReturnsAtMostTheNewestLimitRows(t *testing.T) {
+	t.Parallel()
 	database := openFileTestDB(t, filepath.Join(t.TempDir(), "owncord.db"))
 	t.Cleanup(func() { _ = database.Close() })
 	h := buildOwnModerationRouter(database)
@@ -289,6 +293,7 @@ func TestOwnModeration_ReturnsAtMostTheNewestLimitRows(t *testing.T) {
 // TestOwnModeration_RefusesAPIToken: the read is session-only, so an
 // API-token principal (no session) gets the same 401 as logout.
 func TestOwnModeration_RefusesAPIToken(t *testing.T) {
+	t.Parallel()
 	database := openFileTestDB(t, filepath.Join(t.TempDir(), "owncord.db"))
 	t.Cleanup(func() { _ = database.Close() })
 	h := buildOwnModerationRouter(database)

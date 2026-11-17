@@ -48,6 +48,7 @@ func (s errGetChannelStore) GetChannel(ctx context.Context, id int64) (*db.Chann
 // a private DM they are not a participant of, and the reaction would be
 // fanned out as a channel event instead of a DM event.
 func TestHandleReaction_ChannelLookupErrorFailsClosed(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
@@ -88,6 +89,7 @@ func TestHandleReaction_ChannelLookupErrorFailsClosed(t *testing.T) {
 // returning success to the caller. The fix must resolve participants before
 // mutating and fail the whole request on error.
 func TestHandleReaction_DMParticipantFetchErrorFailsClosed(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedAliceBobDM(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 
@@ -116,6 +118,7 @@ func TestHandleReaction_DMParticipantFetchErrorFailsClosed(t *testing.T) {
 // it): "kiss: woman, man, light skin tone", ten runes, well under
 // maxReactionRunes. The generator fails if a sequence ever exceeds the cap.
 func TestValidateEmoji_LongestSkinToneSequence(t *testing.T) {
+	t.Parallel()
 	const kiss = "\U0001F469\U0001F3FB\u200D\u2764\uFE0F\u200D\U0001F48B\u200D\U0001F468\U0001F3FB"
 	if n := len([]rune(kiss)); n != 10 {
 		t.Fatalf("fixture is %d runes, want 10", n)
@@ -144,6 +147,7 @@ func reactWith(ctx context.Context, t *testing.T, database *db.DB, msgID int64, 
 }
 
 func TestAddReaction_CapReturnsReactionLimit(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
 	seedUserRole(t, database, 2, permissions.MemberRoleID)
@@ -173,6 +177,7 @@ func TestAddReaction_CapReturnsReactionLimit(t *testing.T) {
 }
 
 func TestAddReaction_LegacyOverCapUntouched(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ctx := context.Background()
 	msgID := mustCreateMessage(t, database, 10, 1, "legacy", nil)

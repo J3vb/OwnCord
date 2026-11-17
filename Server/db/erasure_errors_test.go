@@ -14,6 +14,7 @@ import (
 // retention call fails cleanly on a closed handle instead of panicking or
 // answering with a zero value that reads as success.
 func TestErasureRetentionMarkers_ErrorsOnAClosedStore(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "closed-store")
@@ -107,6 +108,7 @@ func TestErasureRetentionMarkers_ErrorsOnAClosedStore(t *testing.T) {
 // The replay callbacks' errors surface: an erase that fails stops the
 // account replay, a sweep that fails stops the messages replay.
 func TestMarkerStore_ReplayPropagatesCallbackErrors(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid := seedUser(t, database, "replay-error")

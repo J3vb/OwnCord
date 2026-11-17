@@ -16,6 +16,7 @@ import (
 // The recovery kit's routes (B4-5): enrolment and status under /users/me,
 // public redemption that signs the holder in without the second factor.
 func TestRecoveryKitRoutes_EnrolStatusRecover(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, _, router := newAuthEnv(t)
 	uid := seedUser(t, database, "kitholder", "KitHolderPass1!", 4)
@@ -119,6 +120,7 @@ func issueAPIToken(t *testing.T, database interface {
 // An owner-issued credential (B4-6) is redeemed through the same public
 // route, in the credential field, and signs the holder in likewise.
 func TestRecoverRoute_AcceptsAnOwnerIssuedCredential(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, limiter, router := newAuthEnv(t)
 	uid := seedUser(t, database, "assisted", "AssistedPass1!", 4)
@@ -148,6 +150,7 @@ func TestRecoverRoute_AcceptsAnOwnerIssuedCredential(t *testing.T) {
 // The public route bounds the username as login does (Codex on #1512): it
 // becomes a limiter key and a lockout row.
 func TestRecoverRoute_BoundsTheUsername(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	for _, name := range []string{strings.Repeat("a", 33), strings.Repeat("a", 200000)} {
@@ -159,6 +162,7 @@ func TestRecoverRoute_BoundsTheUsername(t *testing.T) {
 }
 
 func TestRecoveryKitStatusRoute_StoreFaultYieldsAGenericBody(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	uid := seedUser(t, database, "kitfault", "KitFaultPass1!", 4)
@@ -178,6 +182,7 @@ func TestRecoveryKitStatusRoute_StoreFaultYieldsAGenericBody(t *testing.T) {
 // A recovery that committed but could not start a session answers its own
 // code and tells the holder to sign in, not the generic "try again".
 func TestRecoverRoute_SessionIssueFailureAfterCommitSaysSignIn(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	uid := seedUser(t, database, "kitsignin", "KitSignInPass1!", 4)

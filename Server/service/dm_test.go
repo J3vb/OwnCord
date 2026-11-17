@@ -18,6 +18,7 @@ import (
 // for the tombstone user (v116).
 
 func TestDMService_CreateDM_RefusesBannedRecipient(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Banned: true})
@@ -34,6 +35,7 @@ func TestDMService_CreateDM_RefusesBannedRecipient(t *testing.T) {
 // (auth.IsEffectivelyBanned), so refusing the DM here would be a stricter,
 // inconsistent rule.
 func TestDMService_CreateDM_AllowsLapsedTemporaryBan(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Banned: true})
@@ -62,6 +64,7 @@ func setRegistrationStatus(t *testing.T, database *db.DB, userID int64, status s
 // Only active accounts can be reached: a pending or denied applicant gets the
 // same 404 body as an id that does not exist, and no rows are written.
 func TestCreateDM_NonActiveRecipientNotFound(t *testing.T) {
+	t.Parallel()
 	for _, status := range []string{db.RegistrationPending, db.RegistrationDenied} {
 		t.Run(status, func(t *testing.T) {
 			database := newTestDB(t)
@@ -91,9 +94,8 @@ func TestCreateDM_NonActiveRecipientNotFound(t *testing.T) {
 // An application approved between two calls: the first call is a 404 and
 // leaves nothing behind, the second creates exactly one channel.
 func TestCreateDM_ApprovedBetweenCalls(t *testing.T) {
-	database := newTestDB(t)
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	t.Parallel()
+	database := newAliceBobDB(t)
 	setRegistrationStatus(t, database, 2, db.RegistrationPending)
 
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
@@ -115,9 +117,8 @@ func TestCreateDM_ApprovedBetweenCalls(t *testing.T) {
 }
 
 func TestDMService_CreateGroupDM_RefusesBannedRecipient(t *testing.T) {
-	database := newTestDB(t)
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	t.Parallel()
+	database := newAliceBobDB(t)
 	seedUser(t, database, &db.User{ID: 3, Username: "carol", Banned: true})
 
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
@@ -166,9 +167,7 @@ func TestDMService_CreateGroupDM_OversizedNameRejectedBeforeSanitizing(t *testin
 // OC-0194 sibling: RenameGroupDM runs the identical cleanText(name) call and
 // must be bounded the same way as CreateGroupDM.
 func TestDMService_RenameGroupDM_OversizedNameRejectedBeforeSanitizing(t *testing.T) {
-	database := newTestDB(t)
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	database := newAliceBobDB(t)
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 
@@ -202,9 +201,8 @@ func TestDMService_RenameGroupDM_OversizedNameRejectedBeforeSanitizing(t *testin
 // under a 200-byte cap, so this test is self-contained proof of a rune cap,
 // not just consistent with one.
 func TestS03_GroupDMNameCountsRunesNotBytes(t *testing.T) {
-	database := newTestDB(t)
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	t.Parallel()
+	database := newAliceBobDB(t)
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
 	svc := NewDMService(database, NewPermissionService(database, permissions.NewChecker(database)))
 
@@ -260,9 +258,8 @@ func (s *cancelAfterCreateGroupDMStore) CreateGroupDMChannel(ctx context.Context
 // (db/dm_queries.go CreateGroupDMChannel doc), creates a second identical
 // group.
 func TestDMService_CreateGroupDM_SurvivesCancelledPostCommitRead(t *testing.T) {
-	database := newTestDB(t)
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	t.Parallel()
+	database := newAliceBobDB(t)
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -308,6 +305,7 @@ func TestDMService_CreateGroupDM_SurvivesCancelledPostCommitRead(t *testing.T) {
 // next to it.
 
 func TestDMService_DMSummaryFor_RecipientOfflineWhenDisconnected(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: db.StatusDND})
@@ -331,6 +329,7 @@ func TestDMService_DMSummaryFor_RecipientOfflineWhenDisconnected(t *testing.T) {
 }
 
 func TestDMService_ListDMs_RecipientOfflineWhenDisconnected(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: db.StatusDND})
@@ -354,6 +353,7 @@ func TestDMService_ListDMs_RecipientOfflineWhenDisconnected(t *testing.T) {
 }
 
 func TestDMService_CreateGroupDM_ParticipantOfflineWhenDisconnected(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: db.StatusDND})
@@ -393,6 +393,7 @@ func TestDMService_CreateGroupDM_ParticipantOfflineWhenDisconnected(t *testing.T
 // badge silently vanished on the documented REST recovery path (the client
 // calls GET /dms when accepting a message request).
 func TestDMService_ListDMs_CarriesMentionCount(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice", Status: "online"})
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: "online"})
@@ -435,6 +436,7 @@ func (s *erroringIsGroupDMStore) GetDMDeliveryTargets(ctx context.Context, chann
 // ringer either — their own call_ring attempt still succeeds, nobody is
 // rung (mirrors decision 5's "the actor's own action always succeeds").
 func TestRingTargets_GroupLookupErrorFailsClosedToNoTargets(t *testing.T) {
+	t.Parallel()
 	database, _ := newDMFixture(t)
 	svc := NewDMService(&erroringIsGroupDMStore{DB: database}, NewPermissionService(database, permissions.NewChecker(database)))
 
@@ -460,6 +462,7 @@ func (s *failingParticipantsStore) GetDMParticipants(ctx context.Context, channe
 // not be persisted — the next ring would see the DM as open and never announce
 // it, leaving the callee ringing into a channel their client does not have.
 func TestOpenForRing_SummaryFailureLeavesDMClosed(t *testing.T) {
+	t.Parallel()
 	database, _ := newDMFixture(t)
 	ctx := context.Background()
 	mustDo(t, "CloseDM", database.CloseDM(ctx, 2, 50))
@@ -485,6 +488,7 @@ func TestOpenForRing_SummaryFailureLeavesDMClosed(t *testing.T) {
 // sidebar row for the channel (no chat frame follows), so it must carry the
 // history metadata, not the zero values DMSummaryFor builds.
 func TestOpenForRing_SummaryCarriesHistoryMetadata(t *testing.T) {
+	t.Parallel()
 	database, _ := newDMFixture(t)
 	ctx := context.Background()
 	ids := seedPurgeMessages(t, database, 50, 2)
@@ -505,6 +509,7 @@ func TestOpenForRing_SummaryCarriesHistoryMetadata(t *testing.T) {
 // the same statement, or a member who leaves between the check and the write
 // gets the DM back in their open list.
 func TestOpenDMIfParticipant_RefusesNonParticipant(t *testing.T) {
+	t.Parallel()
 	database, _ := newDMFixture(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
@@ -526,6 +531,7 @@ func TestOpenDMIfParticipant_RefusesNonParticipant(t *testing.T) {
 // A group ring reopening the DM for several targets fills each reopen's own
 // unread and mention counts from one read, matching the sidebar list.
 func TestOpenForRing_GroupReopensCarryPerTargetHistory(t *testing.T) {
+	t.Parallel()
 	database, _ := newDMFixture(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
@@ -565,6 +571,7 @@ func TestOpenForRing_GroupReopensCarryPerTargetHistory(t *testing.T) {
 
 // A failed history read still announces every reopen, with bare summaries.
 func TestOpenForRing_HistoryFailureKeepsBareReopens(t *testing.T) {
+	t.Parallel()
 	database, _ := newDMFixture(t)
 	ctx := context.Background()
 	seedPurgeMessages(t, database, 50, 1)

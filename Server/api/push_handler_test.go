@@ -89,6 +89,7 @@ func pushDo(t *testing.T, router http.Handler, method, path, token string, body 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 func TestPushSubscriptions_LifecycleCreateListRevoke(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-lifecycle")
@@ -160,6 +161,7 @@ func TestPushSubscriptions_NonStandardPortIsRefusedWithItsOwnCode(t *testing.T) 
 }
 
 func TestPushSubscriptions_VisibleOnlyToOwner(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 
@@ -199,6 +201,7 @@ func TestPushSubscriptions_VisibleOnlyToOwner(t *testing.T) {
 }
 
 func TestPushSubscriptions_DisabledIs503AfterAuthAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, false)
 	userID := mintUser(t, database, "push-disabled")
@@ -224,6 +227,7 @@ func TestPushSubscriptions_DisabledIs503AfterAuthAndWritesNothing(t *testing.T) 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 func TestPushSubscriptions_RejectsMalformed(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-malformed")
@@ -287,6 +291,7 @@ func TestPushSubscriptions_RejectsMalformed(t *testing.T) {
 // ─── Refresh and cap ─────────────────────────────────────────────────────────
 
 func TestPushSubscriptions_RefreshIsAnUpsert(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-refresh")
@@ -340,6 +345,7 @@ func TestPushSubscriptions_RefreshIsAnUpsert(t *testing.T) {
 }
 
 func TestPushSubscriptions_DeviceCapEvictsOldest(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-cap")
@@ -386,6 +392,7 @@ func TestPushSubscriptions_DeviceCapEvictsOldest(t *testing.T) {
 // ─── VAPID ───────────────────────────────────────────────────────────────────
 
 func TestPushVAPID_ReturnsTheRunningKey(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, push := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-vapid")
@@ -413,6 +420,7 @@ func TestPushVAPID_ReturnsTheRunningKey(t *testing.T) {
 // TestPushSubscriptions_TiedToTheSubscribingSession: the row names the
 // session that made it, so signing that session out ends the pushes to it.
 func TestPushSubscriptions_TiedToTheSubscribingSession(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-session")

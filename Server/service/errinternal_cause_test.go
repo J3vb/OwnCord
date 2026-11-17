@@ -91,6 +91,7 @@ func (f *faultStore) GetRecoveryKit(ctx context.Context, userID int64) (*db.Reco
 // chain: the REST handler logs ErrInternal causes, so a dropped %w is a lost
 // log line.
 func TestErrInternal_KeepsStoreCause(t *testing.T) {
+	t.Parallel()
 	cause := errors.New("database is locked")
 
 	cases := []struct {

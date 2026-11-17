@@ -21,6 +21,7 @@ import (
 // UPDATE lands.
 
 func TestEditMessage_RefusesASoftDeletedRow(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	userID := seedUser(t, database, "edit-race-owner")
@@ -56,6 +57,7 @@ func TestEditMessage_RefusesASoftDeletedRow(t *testing.T) {
 // neighbouring tokens into one term that exists nowhere in the index. Any
 // query carrying punctuation therefore matched nothing at all.
 func TestSearchMessages_PunctuationFoldsToASeparator(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	userID := seedUser(t, database, "fts-author")
@@ -94,6 +96,7 @@ func TestSearchMessages_PunctuationFoldsToASeparator(t *testing.T) {
 // The separator folding must not reopen what the sanitizer exists to close:
 // FTS5 operator syntax still has to be inert.
 func TestSearchMessages_OperatorSyntaxStaysInert(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	userID := seedUser(t, database, "fts-operator-author")

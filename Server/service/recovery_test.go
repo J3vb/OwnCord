@@ -155,6 +155,7 @@ func (r *recordingRecoveryDisconnector) DisconnectRevokedUser(userID int64) {
 // working until the hub's 30-second sweep. DELETE /api/v1/users/me/sessions
 // already closes this gap (profile_handler.go); recovery must too.
 func TestRecoveryKit_DisconnectsLiveSocketOnRedeem(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	hash, err := auth.HashPassword(kitPassword)

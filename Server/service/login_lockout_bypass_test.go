@@ -14,6 +14,7 @@ import (
 // logged in successfully for that account recently is not the attacker, so it
 // must still reach the password check instead of being locked out with them.
 func TestLogin_LockedOutUsernameStillAdmitsARecentSuccessfulIP(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	hash, err := auth.HashPassword("securePass1")

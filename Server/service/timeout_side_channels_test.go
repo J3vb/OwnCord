@@ -12,6 +12,7 @@ import (
 // DM, and setting a custom status. Each is set up before the timeout lands so
 // only the timeout can be what refuses it.
 func TestTimedOutUser_RefusedOnDMAndPresenceWrites(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	dms := NewDMService(f.database, f.mod.perms)

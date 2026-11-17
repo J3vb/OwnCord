@@ -28,6 +28,7 @@ func countOf(t *testing.T, tally db.PollTally, answerID int64) int64 {
 }
 
 func TestSetPollVote_ReplaceSetAndRemove(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 	id := f.create(t, pizzaPoll())
@@ -71,6 +72,7 @@ func TestSetPollVote_ReplaceSetAndRemove(t *testing.T) {
 }
 
 func TestSetPollVote_MultiVersusSingleChoice(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 	single := f.create(t, pizzaPoll())
@@ -113,6 +115,7 @@ func (f pollFixture) version(t *testing.T, id int64) int64 {
 }
 
 func TestSetPollVote_RefusesBadAnswerIDs(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	multi := pizzaPoll()
 	multi.AllowMultiselect = true
@@ -134,6 +137,7 @@ func TestSetPollVote_RefusesBadAnswerIDs(t *testing.T) {
 }
 
 func TestSetPollVote_UnchangedIsNoop(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 	id := f.create(t, pizzaPoll())
@@ -151,6 +155,7 @@ func TestSetPollVote_UnchangedIsNoop(t *testing.T) {
 }
 
 func TestSetPollVote_RefusedAfterExpiryBeforeSweep(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	id := f.create(t, pizzaPoll())
 	// Expired by the clock, though nothing has marked it ended.
@@ -173,6 +178,7 @@ func TestSetPollVote_RefusedAfterExpiryBeforeSweep(t *testing.T) {
 }
 
 func TestSetPollVote_DeletedPoll(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 	id := f.create(t, pizzaPoll())
@@ -194,6 +200,7 @@ func TestSetPollVote_DeletedPoll(t *testing.T) {
 }
 
 func TestSetPollVote_RefusedWhileErasing(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	id := f.create(t, pizzaPoll())
 	f.exec(t, `INSERT INTO erasure_jobs (user_id, state) VALUES (?, 'queued')`, f.viewer)
@@ -206,6 +213,7 @@ func TestSetPollVote_RefusedWhileErasing(t *testing.T) {
 }
 
 func TestEndPoll_OnceOnly(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 	id := f.create(t, pizzaPoll())
@@ -231,6 +239,7 @@ func TestEndPoll_OnceOnly(t *testing.T) {
 }
 
 func TestEndPoll_CountsIncludeEarlierVote(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 	id := f.create(t, pizzaPoll())
@@ -247,6 +256,7 @@ func TestEndPoll_CountsIncludeEarlierVote(t *testing.T) {
 }
 
 func TestEndPoll_ReportsDeletedPoll(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 	id := f.create(t, pizzaPoll())
@@ -258,6 +268,7 @@ func TestEndPoll_ReportsDeletedPoll(t *testing.T) {
 }
 
 func TestEndPoll_ExpiredButNotSweptStillEnds(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	id := f.create(t, pizzaPoll())
 	f.exec(t, `UPDATE polls SET expires_at = strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-5 seconds') WHERE message_id = ?`, id)
@@ -269,6 +280,7 @@ func TestEndPoll_ExpiredButNotSweptStillEnds(t *testing.T) {
 // Two voters race: the single writer serialises them, so each commit gets its
 // own version and the final counts are exact.
 func TestSetPollVote_RaceTwoVoters(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 	multi := pizzaPoll()
@@ -316,6 +328,7 @@ func TestSetPollVote_RaceTwoVoters(t *testing.T) {
 // returned a tally the end committed after it, so the end's counts include
 // it. When it was refused no row exists.
 func TestSetPollVote_RaceEnd(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 	counted, refused := 0, 0
@@ -363,6 +376,7 @@ func TestSetPollVote_RaceEnd(t *testing.T) {
 }
 
 func TestNextPollExpiryAndListDuePolls(t *testing.T) {
+	t.Parallel()
 	f := newPollFixture(t)
 	ctx := context.Background()
 	if _, ok, err := f.database.NextPollExpiry(ctx); err != nil || ok {

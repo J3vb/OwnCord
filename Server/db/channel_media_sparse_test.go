@@ -10,6 +10,7 @@ import (
 // A channel whose few pictures sit among other channels' and its own files pages the same in both
 // directions, across a cursor and a start point.
 func TestListChannelMedia_SparseChannelAmongBusyOnes(t *testing.T) {
+	t.Parallel()
 	f := newMediaFixture(t)
 	for i := range 20 {
 		f.post(t, f.other, f.bob, "2026-01-01 10:00:00", png("other"+string(rune('a'+i))+".png"))

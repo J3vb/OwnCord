@@ -14,6 +14,7 @@ import (
 // keeps are exactly the full reader walk's readers among them, across random
 // roles, role overrides, per-user allow/deny overrides, administrators and bans.
 func TestMentionReadersAmong_MatchesFullWalkFilteredToNamedUsers(t *testing.T) {
+	t.Parallel()
 	const users = 14
 	roleIDs := []int64{301, 302, 303, 304}
 	for seed := uint64(1); seed <= 25; seed++ {
@@ -117,6 +118,7 @@ func (c *countingMentionStore) ListMentionTargetsByRoles(ctx context.Context, ro
 // A plain @user mention raises the badge without walking every member that holds
 // a reading role; @everyone still walks them.
 func TestMentionEntries_DirectMentionSkipsMemberWalk(t *testing.T) {
+	t.Parallel()
 	_, _, database := newMentionFixture(t)
 	st := &countingMentionStore{DB: database}
 	m := newMentionState(st, NewPermissionService(database, permissions.NewChecker(database)))

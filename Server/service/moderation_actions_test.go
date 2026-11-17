@@ -70,6 +70,7 @@ func newModerationActionsFixture(t *testing.T) *moderationActionsFixture {
 
 // TestModeration_Self: every action on oneself is refused.
 func TestModeration_Self(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -90,6 +91,7 @@ func TestModeration_Self(t *testing.T) {
 // TestModeration_Peer: a peer of equal role position is refused by
 // requireOutranks, before existence would matter.
 func TestModeration_Peer(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -110,6 +112,7 @@ func TestModeration_Peer(t *testing.T) {
 // TestModeration_Superior: a member has no MODERATE_MEMBERS at all, and even
 // holding it would not reach past a higher-ranked target.
 func TestModeration_Superior(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -124,6 +127,7 @@ func TestModeration_Superior(t *testing.T) {
 // TestModeration_OwnerTarget: the owner outranks everyone, so every kind
 // refuses the owner as target even from a moderator with the right bit.
 func TestModeration_OwnerTarget(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -154,6 +158,7 @@ func TestModeration_OwnerTarget(t *testing.T) {
 // goroutine forced to contend for that one connection via a barrier inside
 // the transaction, rather than two sequential calls in this one.
 func TestModeration_ConcurrentRoleChange(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -183,6 +188,7 @@ func TestModeration_ConcurrentRoleChange(t *testing.T) {
 // at all (Warn/Timeout write a fixed phrase), so the bound is proved on the
 // stored ledger value directly.
 func TestModeration_ReasonBounded(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -227,6 +233,7 @@ func TestModeration_ReasonBounded(t *testing.T) {
 // reaches audit_log, because Warn/Timeout write a fixed phrase there and
 // never the reason text itself.
 func TestModeration_AuditDetailsSafe(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	const secretReason = "password: hunter2, token abcdefghijklmnopqrstuvwxyz0123456789ABCD"
@@ -254,6 +261,7 @@ func TestModeration_AuditDetailsSafe(t *testing.T) {
 // effect rolls back too, for all five kinds: the ledger row is never
 // optional, and neither the effect nor the row lands alone.
 func TestModeration_EveryActionWritesALedgerRow(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("warning", func(t *testing.T) {
@@ -326,6 +334,7 @@ func TestModeration_EveryActionWritesALedgerRow(t *testing.T) {
 // across all five kinds and confirms each ledger row carries the report id
 // it was linked to.
 func TestModeration_ReportLinkedActionCarriesTheReportID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	cases := []struct {
@@ -412,6 +421,7 @@ func TestModeration_ReportLinkedActionCarriesTheReportID(t *testing.T) {
 // live and uncached, so no reconnect (which would just re-run the same
 // lookup) is needed.
 func TestTimeout_BitesOnNextSendWithoutReconnect(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -440,6 +450,7 @@ func TestTimeout_BitesOnNextSendWithoutReconnect(t *testing.T) {
 // exactly as on send; the DM path shares the identical channelSubject/
 // CanSendMessage call, so nothing about this fix is guild-only.
 func TestTimeout_BlocksMessageEdit(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -462,6 +473,7 @@ func TestTimeout_BlocksMessageEdit(t *testing.T) {
 // Restoring just the DM branch's old membership/block-only check (skipping
 // CanSendMessage) must fail this test.
 func TestTimeout_BlocksMessageEdit_DM(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -507,6 +519,7 @@ func (s *timeoutLookupErrorStore) ListActiveTimeoutExpiries(context.Context) ([]
 // DM send with an unknown timeout state must be refused (fail closed), not
 // silently let through as "not timed out".
 func TestChannelSubject_TimeoutLookupErrorFailsClosedForDM(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -529,6 +542,7 @@ func TestChannelSubject_TimeoutLookupErrorFailsClosedForDM(t *testing.T) {
 // reactions (through CanAddReaction) and to voice (through CanJoinVoice) —
 // both consult the identical live Subject.TimedOut a send does.
 func TestTimeout_BlocksReactionsAndVoiceJoin(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -604,6 +618,7 @@ func (f *fakeVoiceMuter) UnmuteForTimeout(_ context.Context, _ int64, actionIDs 
 // the target is not in any voice channel at all, since there is then no
 // channel to authorize against.
 func TestTimeout_VoiceHalf_ChannelScopedAuthorization(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("actor authorized, target in voice: applied", func(t *testing.T) {
@@ -730,6 +745,7 @@ func TestTimeout_VoiceHalf_ChannelScopedAuthorization(t *testing.T) {
 // datetime('now')) is what "lifts" it, with no separate sweep required for
 // enforcement (only for the retention row's own cleanup, later).
 func TestTimeout_ExpiryLiftsAutomatically(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -752,6 +768,7 @@ func TestTimeout_ExpiryLiftsAutomatically(t *testing.T) {
 // actor separately passes CanModerateVoice there, P1-4), and the target can
 // send again immediately.
 func TestTimeout_LiftEarly(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	mustDo(t, "JoinVoiceChannel", f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel))
@@ -789,6 +806,7 @@ func TestTimeout_LiftEarly(t *testing.T) {
 // not have LiftTimeout clear anything — there is no mute of this timeout's
 // own to lift.
 func TestLiftTimeout_DoesNotClearAMuteItNeverApplied(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	muter := newFakeVoiceMuter()
@@ -819,6 +837,7 @@ func TestLiftTimeout_DoesNotClearAMuteItNeverApplied(t *testing.T) {
 // channel-level deny) — clearing the mute is refused to THIS actor, even
 // though the timeout itself is lifted (text/reactions are freed either way).
 func TestLiftTimeout_DoesNotClearAnotherModeratorsAuthority(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	mustDo(t, "JoinVoiceChannel", f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel))
@@ -864,6 +883,7 @@ func TestLiftTimeout_DoesNotClearAnotherModeratorsAuthority(t *testing.T) {
 // voice_muted must stay 0, and a later lift must not clear a mute this
 // timeout never owned.
 func TestLiftTimeout_DoesNotClearAnAlreadyMutedTarget(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 	mustDo(t, "JoinVoiceChannel", f.database.JoinVoiceChannel(ctx, fixtureMember, fixtureChannel))
@@ -914,6 +934,7 @@ func (f *fakeModActionNotifier) NotifyModAction(_, _ int64, kind, _ string, _ *t
 // stale finalize would tell a live client it is free when B's timeout still
 // holds.
 func TestFinalizeTimeoutLift_StaleFinalizeSendsNoFrameOrAudit(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 
@@ -1091,6 +1112,7 @@ func TestTimeout_VoiceHalf_RefusedWhenLiftedBetweenLedgerCommitAndVoiceHalf(t *t
 // TestWarning_AckIsOwnRowsOnly: another user's ack attempt finds nothing to
 // acknowledge; the target's own ack succeeds and cannot be repeated.
 func TestWarning_AckIsOwnRowsOnly(t *testing.T) {
+	t.Parallel()
 	f := newModerationActionsFixture(t)
 	ctx := context.Background()
 

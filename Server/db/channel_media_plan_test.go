@@ -39,6 +39,7 @@ func explainMediaPage(t *testing.T, d *DB, q ChannelMediaQuery) string {
 // Every page seeks: the channel's messages are walked through idx_messages_channel and attachments are looked
 // up per message, so a channel with few pictures never reads the server's other attachments.
 func TestChannelMediaPagePlanSeeks(t *testing.T) {
+	t.Parallel()
 	d := openMigratedMemoryInternal(t)
 	if _, err := d.writer.Exec(`INSERT INTO users (id, username, password) VALUES (1, 'u', 'h')`); err != nil {
 		t.Fatal(err)

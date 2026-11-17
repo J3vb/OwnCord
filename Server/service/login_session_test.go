@@ -19,6 +19,7 @@ func sessionPrincipal(u *db.User) Principal {
 // session before it reads or writes anything, so a route that forgets the
 // transport middleware still fails closed.
 func TestAccountSecurityMethods_RefuseAPITokenPrincipal(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	// A nil store and limiter prove the refusal comes first: touching either
 	// would panic.

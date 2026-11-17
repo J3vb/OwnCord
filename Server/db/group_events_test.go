@@ -92,6 +92,7 @@ func rawMessage(t *testing.T, database *db.DB, ch, user int64) {
 }
 
 func TestMigration065_BackfillsOwnerFromOldestMemberMessage(t *testing.T) {
+	t.Parallel()
 	database, a, b, c := migrate064(t)
 	gone := seedUser(t, database, "left")
 	ch := rawGroup(t, database, 1, a, b, c)
@@ -106,6 +107,7 @@ func TestMigration065_BackfillsOwnerFromOldestMemberMessage(t *testing.T) {
 }
 
 func TestMigration065_FallsBackToLowestMember(t *testing.T) {
+	t.Parallel()
 	database, a, b, c := migrate064(t)
 	ch := rawGroup(t, database, 1, c, b, a)
 	mustDo(t, "Migrate to head", db.Migrate(database))
@@ -115,6 +117,7 @@ func TestMigration065_FallsBackToLowestMember(t *testing.T) {
 }
 
 func TestMigration065_OneToOneHasNoOwner(t *testing.T) {
+	t.Parallel()
 	database, a, b, _ := migrate064(t)
 	ch := rawGroup(t, database, 0, a, b)
 	rawMessage(t, database, ch, a)
@@ -130,6 +133,7 @@ func TestMigration065_OneToOneHasNoOwner(t *testing.T) {
 // ─── Owner at create, hand-off on leave ─────────────────────────────────────
 
 func TestCreateGroupDMChannel_SetsOwner(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	if got := ownerOf(t, f.database, f.group); got != f.alice {
 		t.Errorf("owner = %d, want creator %d", got, f.alice)
@@ -140,6 +144,7 @@ func TestCreateGroupDMChannel_SetsOwner(t *testing.T) {
 }
 
 func TestLeaveGroupDM_OwnerHandsOffToLowestRemaining(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	if _, err := f.database.LeaveGroupDM(ctx, f.alice, f.group, "left"); err != nil {
@@ -159,6 +164,7 @@ func TestLeaveGroupDM_OwnerHandsOffToLowestRemaining(t *testing.T) {
 }
 
 func TestLeaveGroupDM_NonOwnerLeaveKeepsOwner(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	if _, err := f.database.LeaveGroupDM(context.Background(), f.carol, f.group, "left"); err != nil {
 		t.Fatalf("LeaveGroupDM: %v", err)
@@ -171,6 +177,7 @@ func TestLeaveGroupDM_NonOwnerLeaveKeepsOwner(t *testing.T) {
 // The owner statement also heals a NULL owner (a group whose owner column was
 // cleared) on the next membership change.
 func TestLeaveGroupDM_HealsNullOwner(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	if _, err := f.database.ExecContext(context.Background(), `UPDATE channels SET dm_owner_id = NULL WHERE id = ?`, f.group); err != nil {
 		t.Fatalf("clear owner: %v", err)
@@ -184,6 +191,7 @@ func TestLeaveGroupDM_HealsNullOwner(t *testing.T) {
 }
 
 func TestGetUserDMChannels_CarriesOwner(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	dm, _, err := f.database.GetOrCreateDMChannel(ctx, f.alice, f.bob)
@@ -216,6 +224,7 @@ func TestGetUserDMChannels_CarriesOwner(t *testing.T) {
 // ─── History payload ────────────────────────────────────────────────────────
 
 func TestMessagesForAPI_GroupRowCarriesKindAndGroupEvent(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	plain, err := f.database.CreateMessage(ctx, f.group, f.bob, "hi", nil)
@@ -271,6 +280,7 @@ func itoa(n int64) string {
 // ─── Read-only ──────────────────────────────────────────────────────────────
 
 func TestEditMessageContent_GroupRowNotFound(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	row := f.insertGroupRow(t, f.alice, db.MessageKindGroupLeave, "Alice left the group.", nil, nil, 0)
 	if _, err := f.database.EditMessage(context.Background(), row, f.alice, "rewritten"); !errors.Is(err, db.ErrNotFound) {
@@ -283,6 +293,7 @@ func TestEditMessageContent_GroupRowNotFound(t *testing.T) {
 }
 
 func TestSoftDeleteMessage_GroupRowUntouched(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	row := f.insertGroupRow(t, f.alice, db.MessageKindGroupLeave, "Alice left the group.", nil, nil, 0)
 	ctx := context.Background()
@@ -301,6 +312,7 @@ func TestSoftDeleteMessage_GroupRowUntouched(t *testing.T) {
 }
 
 func TestSearch_ExcludesGroupRows(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	f.insertGroupRow(t, f.alice, db.MessageKindGroupLeave, "zebra left the group", nil, nil, 0)
@@ -314,6 +326,7 @@ func TestSearch_ExcludesGroupRows(t *testing.T) {
 }
 
 func TestGetReferencedMessages_GroupRowIsSystem(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	row := f.insertGroupRow(t, f.alice, db.MessageKindGroupLeave, "Alice left the group.", nil, nil, 0)
@@ -330,6 +343,7 @@ func TestGetReferencedMessages_GroupRowIsSystem(t *testing.T) {
 }
 
 func TestMessageKindName(t *testing.T) {
+	t.Parallel()
 	want := map[int64]string{
 		db.MessageKindUser: "", db.MessageKindCall: "call", db.MessageKindGroupAdd: "group_add",
 		db.MessageKindGroupRemove: "group_remove", db.MessageKindGroupLeave: "group_leave",
@@ -346,6 +360,7 @@ func TestMessageKindName(t *testing.T) {
 // ─── Erasure ────────────────────────────────────────────────────────────────
 
 func TestEraseAccount_RemovesRowsNamingSubjectAsTarget(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	// alice adds carol and bob: erasing carol removes only the row naming her,
@@ -371,6 +386,7 @@ func TestEraseAccount_RemovesRowsNamingSubjectAsTarget(t *testing.T) {
 }
 
 func TestEraseAccount_HandsOffGroupOwnership(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	if _, err := f.database.EraseAccount(context.Background(), f.alice, ""); err != nil {
 		t.Fatalf("EraseAccount: %v", err)

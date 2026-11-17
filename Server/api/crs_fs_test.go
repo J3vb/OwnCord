@@ -17,6 +17,7 @@ const backslashInclude = `@owasp_crs\REQUEST-901-INITIALIZATION.conf`
 // slashFS wrapper normalizes it and resolves it. Runs identically on Linux
 // because the backslash name is constructed literally, not via filepath.
 func TestSlashFS_ResolvesBackslashPath(t *testing.T) {
+	t.Parallel()
 	// The raw coreruleset FS rejects a backslash path (embed.FS is
 	// forward-slash only) — exactly the Windows failure mode.
 	if _, err := fs.ReadFile(coreruleset.FS, backslashInclude); err == nil {
@@ -41,6 +42,7 @@ func TestSlashFS_ResolvesBackslashPath(t *testing.T) {
 // TestSlashFS_GlobNormalizes verifies the Glob passthrough returns the CRS rule
 // files, which is how coraza expands the "@owasp_crs/*.conf" include.
 func TestSlashFS_GlobNormalizes(t *testing.T) {
+	t.Parallel()
 	matches, err := fs.Glob(slashFS{coreruleset.FS}, "@owasp_crs/*.conf")
 	if err != nil {
 		t.Fatalf("slashFS.Glob: %v", err)

@@ -33,6 +33,7 @@ func newTwoRoleFixture(t *testing.T) (*MessageService, *ChannelService, *Permiss
 // that cannot read is a reader through Helper alone, counted
 // once; a Member-only user is not.
 func TestMentionReaders_TwoRoleHolderCounted(t *testing.T) {
+	t.Parallel()
 	svc, _, _, database := newTwoRoleFixture(t)
 	ctx := context.Background()
 	// dave's TOP role is one that cannot read the channel, so only a join on
@@ -66,6 +67,7 @@ func TestMentionReaders_TwoRoleHolderCounted(t *testing.T) {
 // A per-user READ deny does not drop a member holding ADMINISTRATOR in a role
 // that is not their top role.
 func TestMentionReaders_AdminInLowerRoleBypassesUserDeny(t *testing.T) {
+	t.Parallel()
 	svc, _, _, database := newTwoRoleFixture(t)
 	ctx := context.Background()
 	seedRole(t, database, &db.Role{ID: 8, Name: "warden", Position: 5, Permissions: permissions.Administrator})
@@ -82,6 +84,7 @@ func TestMentionReaders_AdminInLowerRoleBypassesUserDeny(t *testing.T) {
 // member layer applies after the OR of the role layers, through the cached
 // PermissionService path.
 func TestPermissionService_UserDenyBeatsOtherRoleGrant(t *testing.T) {
+	t.Parallel()
 	_, _, perms, database := newTwoRoleFixture(t)
 	ctx := context.Background()
 	seedRole(t, database, &db.Role{ID: 11, Name: "pinner", Position: 15,
@@ -105,6 +108,7 @@ func TestPermissionService_UserDenyBeatsOtherRoleGrant(t *testing.T) {
 // channel the Member role is denied, the verdict matches a Member-only user
 // and the held-role summary carries the OR of the masks.
 func TestPermissionService_TwoRoleSubject(t *testing.T) {
+	t.Parallel()
 	_, chSvc, perms, _ := newTwoRoleFixture(t)
 	ctx := context.Background()
 
@@ -153,6 +157,7 @@ func TestPermissionService_TwoRoleSubject(t *testing.T) {
 // A cache load racing a role add is discarded by the generation guard, and the
 // next read sees both roles.
 func TestPermissionService_LoadRacingRoleAddIsDiscarded(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	seedRole(t, database, &db.Role{ID: permissions.MemberRoleID, Name: "member", Position: 1,

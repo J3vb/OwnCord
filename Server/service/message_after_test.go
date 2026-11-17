@@ -10,6 +10,7 @@ import (
 )
 
 func TestGetMessagesAfter_AscendingPagesToTheNewest(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ids := seedAroundHistory(t, database, 10, 12)
 
@@ -41,6 +42,7 @@ func TestGetMessagesAfter_AscendingPagesToTheNewest(t *testing.T) {
 }
 
 func TestGetMessagesAfter_ClampsLimit(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ids := seedAroundHistory(t, database, 10, 130)
 
@@ -52,6 +54,7 @@ func TestGetMessagesAfter_ClampsLimit(t *testing.T) {
 }
 
 func TestGetMessagesAfter_RejectsBadCursor(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 	for _, after := range []int64{0, -1} {
 		if _, _, err := svc.GetMessagesAfter(context.Background(), 1, 10, after, 50); !errors.Is(err, ErrBadRequest) {
@@ -61,6 +64,7 @@ func TestGetMessagesAfter_RejectsBadCursor(t *testing.T) {
 }
 
 func TestGetMessagesAfter_SameReadGateAsBefore(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: "online"})
 	seedUser(t, database, &db.User{ID: 3, Username: "outsider", Status: "offline"})

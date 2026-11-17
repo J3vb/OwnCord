@@ -49,6 +49,7 @@ func buildMetricsRouter(allowedCIDRs []string) http.Handler {
 }
 
 func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
+	t.Parallel()
 	router := buildMetricsRouter(nil) // no IP restriction
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
@@ -152,6 +153,7 @@ func TestHandleMetrics_ReturnsExpectedFields(t *testing.T) {
 }
 
 func TestHandleMetrics_AdminIPRestrict_BlocksNonAdmin(t *testing.T) {
+	t.Parallel()
 	router := buildMetricsRouter([]string{"10.0.0.0/8"}) // only 10.x allowed
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
@@ -162,6 +164,7 @@ func TestHandleMetrics_AdminIPRestrict_BlocksNonAdmin(t *testing.T) {
 }
 
 func TestHandleMetrics_AdminIPRestrict_AllowsAdmin(t *testing.T) {
+	t.Parallel()
 	router := buildMetricsRouter([]string{"127.0.0.0/8"})
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics", nil)
@@ -171,6 +174,7 @@ func TestHandleMetrics_AdminIPRestrict_AllowsAdmin(t *testing.T) {
 }
 
 func TestHandleMetrics_WithoutLiveKitHealthCheck(t *testing.T) {
+	t.Parallel()
 	r := chi.NewRouter()
 	r.Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{
 		ConnectedUsers: func() int { return 0 },
@@ -203,6 +207,7 @@ func TestHandleMetrics_WithoutLiveKitHealthCheck(t *testing.T) {
 // stay at zero — never absent, they are plain uint64s — when it is nil, the
 // state of a server with dispatch off (the compiled default).
 func TestHandleMetrics_PushCounters(t *testing.T) {
+	t.Parallel()
 	r := chi.NewRouter()
 	r.Get("/api/v1/metrics", api.HandleMetricsForTest(api.MetricsSources{
 		PushCounters: func() (uint64, uint64, uint64) { return 7, 2, 1 },

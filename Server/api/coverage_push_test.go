@@ -25,6 +25,7 @@ import (
 // ─── handleCreateInvite: malformed JSON body ────────────────────────────────
 
 func TestCreateInvite_MalformedJSON(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -37,6 +38,7 @@ func TestCreateInvite_MalformedJSON(t *testing.T) {
 }
 
 func TestCreateInvite_WithExpiration(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -59,6 +61,7 @@ func TestCreateInvite_WithExpiration(t *testing.T) {
 // ─── handleEnableTOTP: already enabled ──────────────────────────────────────
 
 func TestEnableTOTP_AlreadyEnabled(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "alreadytotp", 4)
@@ -86,6 +89,7 @@ func TestEnableTOTP_AlreadyEnabled(t *testing.T) {
 // ─── handleEnableTOTP: malformed body ───────────────────────────────────────
 
 func TestEnableTOTP_MalformedBody(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "enablemalformed", 4)
@@ -98,6 +102,7 @@ func TestEnableTOTP_MalformedBody(t *testing.T) {
 // ─── handleConfirmTOTP: malformed body ──────────────────────────────────────
 
 func TestConfirmTOTP_MalformedBody(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "confirmmalformed", 4)
@@ -110,6 +115,7 @@ func TestConfirmTOTP_MalformedBody(t *testing.T) {
 // ─── handleDisableTOTP: malformed body ──────────────────────────────────────
 
 func TestDisableTOTP_MalformedBody(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 
 	token := loginAndGetToken(t, router, database, "disablemalformed", 4)
@@ -122,6 +128,7 @@ func TestDisableTOTP_MalformedBody(t *testing.T) {
 // ─── handleUpdateProfile: malformed body ────────────────────────────────────
 
 func TestUpdateProfile_MalformedBody(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "profilemalformed", 4)
@@ -134,6 +141,7 @@ func TestUpdateProfile_MalformedBody(t *testing.T) {
 // ─── handleUpdateProfile: invalid username (too short/long or special chars) ─
 
 func TestUpdateProfile_InvalidUsername(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "validuser1", 4)
@@ -158,6 +166,7 @@ func TestUpdateProfile_InvalidUsername(t *testing.T) {
 // ─── handleUpdateProfile: avatar sanitisation ───────────────────────────────
 
 func TestUpdateProfile_WithAvatar(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "avataruser", 4)
@@ -173,6 +182,7 @@ func TestUpdateProfile_WithAvatar(t *testing.T) {
 }
 
 func TestUpdateProfile_NullAvatar(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "nullavuser", 4)
@@ -187,6 +197,7 @@ func TestUpdateProfile_NullAvatar(t *testing.T) {
 // ─── handleChangePassword: malformed body ───────────────────────────────────
 
 func TestChangePassword_MalformedBody(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "chpwmalformed", 4)
@@ -199,6 +210,7 @@ func TestChangePassword_MalformedBody(t *testing.T) {
 // ─── handleChangePassword: missing fields ───────────────────────────────────
 
 func TestChangePassword_MissingOldPassword(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "chpwmissold", 4)
@@ -211,6 +223,7 @@ func TestChangePassword_MissingOldPassword(t *testing.T) {
 }
 
 func TestChangePassword_MissingNewPassword(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "chpwmissnew", 4)
@@ -225,6 +238,7 @@ func TestChangePassword_MissingNewPassword(t *testing.T) {
 // ─── handleRevokeSession: invalid ID format ─────────────────────────────────
 
 func TestRevokeSession_InvalidID(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "revokebadfmt", 4)
@@ -234,6 +248,7 @@ func TestRevokeSession_InvalidID(t *testing.T) {
 }
 
 func TestRevokeSession_NegativeID(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "revokenegid", 4)
@@ -248,6 +263,7 @@ func TestRevokeSession_NegativeID(t *testing.T) {
 // ─── handleLiveKitHealth via exported test helper ───────────────────────────
 
 func TestLiveKitHealth_OK(t *testing.T) {
+	t.Parallel()
 	handler := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return true, nil
 	})
@@ -267,6 +283,7 @@ func TestLiveKitHealth_OK(t *testing.T) {
 }
 
 func TestLiveKitHealth_Degraded_WithError(t *testing.T) {
+	t.Parallel()
 	handler := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return false, errors.New("connection refused")
 	})
@@ -286,6 +303,7 @@ func TestLiveKitHealth_Degraded_WithError(t *testing.T) {
 }
 
 func TestLiveKitHealth_Degraded_NilError(t *testing.T) {
+	t.Parallel()
 	handler := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return false, nil
 	})
@@ -304,6 +322,7 @@ func TestLiveKitHealth_Degraded_NilError(t *testing.T) {
 // ─── handleListSessions: unauthenticated ────────────────────────────────────
 
 func TestListSessions_BadToken(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 
@@ -316,6 +335,7 @@ func TestListSessions_BadToken(t *testing.T) {
 // ─── handleRevokeSession: unauthenticated ───────────────────────────────────
 
 func TestRevokeSession_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 
@@ -326,6 +346,7 @@ func TestRevokeSession_Unauthorized(t *testing.T) {
 // ─── handleChangePassword: unauthorized ─────────────────────────────────────
 
 func TestChangePassword_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 
@@ -339,6 +360,7 @@ func TestChangePassword_Unauthorized(t *testing.T) {
 // ─── handleUpdateProfile: unauthorized ──────────────────────────────────────
 
 func TestUpdateProfile_NoToken(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 
@@ -353,6 +375,7 @@ func TestUpdateProfile_NoToken(t *testing.T) {
 // ─── handleListInvites: member forbidden ────────────────────────────────────
 
 func TestListInvites_MemberForbidden(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -373,6 +396,7 @@ func (b *offlineBroadcaster) SendToUser(_ int64, _ []byte) bool {
 }
 
 func TestCloseDM_BroadcasterUserOffline(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	broadcaster := &offlineBroadcaster{}
 	router := buildDMRouter(database, broadcaster)
@@ -399,6 +423,7 @@ func TestCloseDM_BroadcasterUserOffline(t *testing.T) {
 // isInvalidSearchQueryError and handleSearch edge cases.
 
 func TestSearch_EmptyQuery(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "searchempty", 1)
 
@@ -410,6 +435,7 @@ func TestSearch_EmptyQuery(t *testing.T) {
 }
 
 func TestSearch_SpecialCharacters(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "searchspecial", 1)
 
@@ -433,6 +459,7 @@ func TestSearch_SpecialCharacters(t *testing.T) {
 // ─── handleListChannels: unauthorized ───────────────────────────────────────
 
 func TestListChannels_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -445,6 +472,7 @@ func TestListChannels_Unauthorized(t *testing.T) {
 // ─── handleGetMessages: edge cases ──────────────────────────────────────────
 
 func TestGetMessages_InvalidLimit(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "msglimit", 1)
 	chID := mustCreateChannel(t, database, "limit-ch", "text")
@@ -467,6 +495,7 @@ func TestGetMessages_InvalidLimit(t *testing.T) {
 // ─── handleGetPins: basic and unauthorized ──────────────────────────────────
 
 func TestGetPins_Success(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "pinuser", 1)
 	chID := mustCreateChannel(t, database, "pin-ch", "text")
@@ -476,6 +505,7 @@ func TestGetPins_Success(t *testing.T) {
 }
 
 func TestGetPins_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	chID := mustCreateChannel(t, database, "pin-unauth-ch", "text")
@@ -489,6 +519,7 @@ func TestGetPins_Unauthorized(t *testing.T) {
 // ─── handleSetPinned: unauthorized and invalid ──────────────────────────────
 
 func TestSetPinned_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	chID := mustCreateChannel(t, database, "setpin-ch", "text")
@@ -506,6 +537,7 @@ func TestSetPinned_Unauthorized(t *testing.T) {
 // writeJSON is at 75% — testing the success path covers the rest.
 
 func TestWriteJSON_BasicSuccess(t *testing.T) {
+	t.Parallel()
 	handler := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return true, nil
 	})
@@ -533,6 +565,7 @@ var (
 // ─── handleRevokeInvite: already revoked ────────────────────────────────────
 
 func TestRevokeInvite_AlreadyRevoked(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -560,6 +593,7 @@ func TestRevokeInvite_AlreadyRevoked(t *testing.T) {
 // ─── handleListSessions: multiple sessions ──────────────────────────────────
 
 func TestListSessions_MultipleSessions(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "multisess", 4)
@@ -582,6 +616,7 @@ func TestListSessions_MultipleSessions(t *testing.T) {
 // ─── handleListDMs: with token but invalid ──────────────────────────────────
 
 func TestListDMs_InvalidToken(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router := buildDMRouter(database, nil)
 
@@ -607,6 +642,7 @@ func buildCombinedRouter(t *testing.T) (http.Handler, *auth.RateLimiter, string)
 }
 
 func TestCombinedRouter_ProfileAndInvites(t *testing.T) {
+	t.Parallel()
 	router, _, token := buildCombinedRouter(t)
 
 	// Profile update.
@@ -625,6 +661,7 @@ func TestCombinedRouter_ProfileAndInvites(t *testing.T) {
 // ─── handleSetPinned: message not found ─────────────────────────────────────
 
 func TestSetPinned_MessageNotFound_Push(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinmissmsg", 1)
@@ -635,6 +672,7 @@ func TestSetPinned_MessageNotFound_Push(t *testing.T) {
 }
 
 func TestSetPinned_ChannelNotFound_Push(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinmissch", 1)
@@ -644,6 +682,7 @@ func TestSetPinned_ChannelNotFound_Push(t *testing.T) {
 }
 
 func TestSetPinned_InvalidChannelID(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinbadid", 1)
@@ -653,6 +692,7 @@ func TestSetPinned_InvalidChannelID(t *testing.T) {
 }
 
 func TestSetPinned_InvalidMessageID(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinbadmsg", 1)
@@ -663,6 +703,7 @@ func TestSetPinned_InvalidMessageID(t *testing.T) {
 }
 
 func TestUnpin_Success(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router, token, user, chID := newChannelEnvOn(t, database, "unpinner", 1, "unpin-ch", "text")
 	msgID := mustCreateMessage(t, database, chID, user.ID, "to unpin")
@@ -675,6 +716,7 @@ func TestUnpin_Success(t *testing.T) {
 }
 
 func TestSetPinned_MemberForbidden(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router, token, user, chID := newChannelEnvOn(t, database, "pinmember", 4, "pinforbid-ch", "text")
 	msgID := mustCreateMessage(t, database, chID, user.ID, "cant pin")
@@ -684,6 +726,7 @@ func TestSetPinned_MemberForbidden(t *testing.T) {
 }
 
 func TestSetPinned_WrongChannel(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinwrongch", 1)
@@ -700,6 +743,7 @@ func TestSetPinned_WrongChannel(t *testing.T) {
 // ─── handleSetPinned: DM channel pin ────────────────────────────────────────
 
 func TestSetPinned_DMChannel_ParticipantSuccess(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	tokenAlice := chTestCreateToken(t, database, "dmpin_alice", 4)
@@ -715,6 +759,7 @@ func TestSetPinned_DMChannel_ParticipantSuccess(t *testing.T) {
 }
 
 func TestSetPinned_DMChannel_NonParticipantForbidden(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	_ = chTestCreateToken(t, database, "dmpinforbid_alice", 4)
@@ -733,6 +778,7 @@ func TestSetPinned_DMChannel_NonParticipantForbidden(t *testing.T) {
 // ─── handleSearch: with channel_id filter ───────────────────────────────────
 
 func TestSearch_WithChannelID_Push(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "searchch", 1, "search-ch1", "text")
 	_ = mustCreateMessage(t, database, chID, user.ID, "findable in channel")
 
@@ -741,6 +787,7 @@ func TestSearch_WithChannelID_Push(t *testing.T) {
 }
 
 func TestSearch_WithInvalidChannelID(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "searchbadch", 1)
 
@@ -749,6 +796,7 @@ func TestSearch_WithInvalidChannelID(t *testing.T) {
 }
 
 func TestSearch_WithNonexistentChannelID(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "searchmissch", 1)
 
@@ -757,6 +805,7 @@ func TestSearch_WithNonexistentChannelID(t *testing.T) {
 }
 
 func TestSearch_WithLimit_Push(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "searchlimit", 1)
 
@@ -765,6 +814,7 @@ func TestSearch_WithLimit_Push(t *testing.T) {
 }
 
 func TestSearch_WithInvalidLimit(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "searchbadlimit", 1)
 
@@ -773,6 +823,7 @@ func TestSearch_WithInvalidLimit(t *testing.T) {
 }
 
 func TestSearch_WithNegativeLimit(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "searchneglimit", 1)
 
@@ -781,6 +832,7 @@ func TestSearch_WithNegativeLimit(t *testing.T) {
 }
 
 func TestSearch_WithOverMaxLimit(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "searchmaxlimit", 1)
 
@@ -789,6 +841,7 @@ func TestSearch_WithOverMaxLimit(t *testing.T) {
 }
 
 func TestSearch_Unauthorized(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -799,6 +852,7 @@ func TestSearch_Unauthorized(t *testing.T) {
 // ─── handleGetMessages: more edge cases ─────────────────────────────────────
 
 func TestGetMessages_ChannelNotFound(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "msgnotfound", 1)
 
@@ -807,6 +861,7 @@ func TestGetMessages_ChannelNotFound(t *testing.T) {
 }
 
 func TestGetMessages_InvalidChannelID(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "msgbadid", 1)
 
@@ -815,6 +870,7 @@ func TestGetMessages_InvalidChannelID(t *testing.T) {
 }
 
 func TestGetMessages_WithBeforeParam(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "msgbefore", 1, "before-ch", "text")
 	_ = mustCreateMessage(t, database, chID, user.ID, "msg one")
 	msgID2 := mustCreateMessage(t, database, chID, user.ID, "msg two")
@@ -824,6 +880,7 @@ func TestGetMessages_WithBeforeParam(t *testing.T) {
 }
 
 func TestGetMessages_WithCustomLimit(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "msglimitcust", 1)
 	chID := mustCreateChannel(t, database, "limitch", "text")
@@ -835,6 +892,7 @@ func TestGetMessages_WithCustomLimit(t *testing.T) {
 // ─── handleListChannels: member role filtering ──────────────────────────────
 
 func TestListChannels_MemberRole(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "memberchanlist", 4)
 	_, _ = database.CreateChannel(context.Background(), "visible-ch", "text", "", "", 0)
@@ -844,6 +902,7 @@ func TestListChannels_MemberRole(t *testing.T) {
 }
 
 func TestListChannels_AdminSeesAll(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "adminchanlist", 2)
 	_, _ = database.CreateChannel(context.Background(), "admin-visible-ch", "text", "", "", 0)
@@ -860,6 +919,7 @@ func TestListChannels_AdminSeesAll(t *testing.T) {
 // ─── handleGetMessages: DM channel access ───────────────────────────────────
 
 func TestGetMessages_DMChannel_NonParticipant(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	_ = chTestCreateToken(t, database, "dmmsg_alice", 4)
@@ -875,6 +935,7 @@ func TestGetMessages_DMChannel_NonParticipant(t *testing.T) {
 }
 
 func TestGetMessages_DMChannel_ParticipantSuccess(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	tokenAlice := chTestCreateToken(t, database, "dmmsgok_alice", 4)
@@ -891,6 +952,7 @@ func TestGetMessages_DMChannel_ParticipantSuccess(t *testing.T) {
 // ─── handleSearch: DM channel search ────────────────────────────────────────
 
 func TestSearch_DMChannelFilter_NonParticipant(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	_ = chTestCreateToken(t, database, "dmsearch_alice", 4)
@@ -906,6 +968,7 @@ func TestSearch_DMChannelFilter_NonParticipant(t *testing.T) {
 }
 
 func TestSearch_NegativeChannelID_Push(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "searchnegch", 1)
 
@@ -916,6 +979,7 @@ func TestSearch_NegativeChannelID_Push(t *testing.T) {
 // ─── RateLimitMiddleware "search:" bucket: coverage via multiple rapid requests ─
 
 func TestSearch_RateLimit(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "searchrl", 1)
 

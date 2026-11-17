@@ -14,6 +14,7 @@ import (
 // The one-to-one acceptance gate needs both people to have accepted: a
 // pending request, where the recipient starts the call, writes nothing.
 func TestCallLog_PendingRequestRecipientStartsCallWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	// alice asked bob: alice trusts bob, bob has not accepted alice.
 	if _, err := f.database.ExecContext(context.Background(),
@@ -43,6 +44,7 @@ func TestCallLog_PendingRequestRecipientStartsCallWritesNothing(t *testing.T) {
 
 // Who joined comes only from completion notes; a voice row is occupancy.
 func TestCallLog_VoiceRowWithoutNoteIsNotAParticipantOrAuthor(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	ctx := context.Background()
 	if err := f.database.JoinVoiceChannel(ctx, clBob, clDM); err != nil { // no note
@@ -75,6 +77,7 @@ func TestCallLog_VoiceRowWithoutNoteIsNotAParticipantOrAuthor(t *testing.T) {
 // A noted user who has since been removed neither blocks the channel nor
 // becomes the author.
 func TestCallLog_NoteForRemovedUserDoesNotBlockTheCall(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	ctx := context.Background()
 	f.svc.NoteJoin(clDM, 999, clT0.Add(-time.Second)) // earlier than alice, but gone
@@ -126,6 +129,7 @@ func (s *authorFailStore) GetUserByID(ctx context.Context, id int64) (*db.User, 
 // The row still goes out when the author cannot be read, so the frame that
 // ends it has a row to update.
 func TestCallLog_AuthorLookupFailureStillSendsTheRow(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.svc.st = &authorFailStore{Store: f.database}
 	f.join(t, clAlice, clDM)
@@ -140,6 +144,7 @@ func TestCallLog_AuthorLookupFailureStillSendsTheRow(t *testing.T) {
 
 // The end goes to everyone the start went to, even if standing changed.
 func TestCallLog_EndReachesTheStartAudience(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM)
 	f.pass(t)
@@ -163,6 +168,7 @@ func TestCallLog_EndReachesTheStartAudience(t *testing.T) {
 
 // A member removed from a group mid-call gets no end frame; the others do.
 func TestCallLog_GroupEndSkipsARemovedMember(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	ctx := context.Background()
 	seedUser(t, f.database, &db.User{ID: clCarol, Username: "carol"})
@@ -190,6 +196,7 @@ func TestCallLog_GroupEndSkipsARemovedMember(t *testing.T) {
 
 // A failed participant read at the end announces nothing but still ends the row.
 func TestCallLog_EndTargetsErrorAnnouncesNothing(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	st := &flakyTargetsStore{Store: f.database}
 	f.svc.st = st
@@ -225,6 +232,7 @@ func (f *callLogFixture) endAfterLeave(t *testing.T, userID int64) {
 
 // A note left in the dirty map cannot open a second row after the end.
 func TestCallLog_DueEndTakesTheChannelsPendingNotes(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM)
 	f.pass(t)
@@ -247,6 +255,7 @@ func TestCallLog_DueEndTakesTheChannelsPendingNotes(t *testing.T) {
 // Stop stamps a call that is empty and waiting out its grace period with the
 // moment the room emptied.
 func TestCallLog_StopStampsCallInGrace(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM)
 	f.pass(t)
@@ -264,6 +273,7 @@ func TestCallLog_StopStampsCallInGrace(t *testing.T) {
 
 // Start after a stop runs a fresh worker; concurrent starts run one.
 func TestCallLog_StartAfterStopAndConcurrentStarts(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.svc.running = false
 	ctx := t.Context()
@@ -318,6 +328,7 @@ func (s *countingStore) EndCall(ctx context.Context, id int64, at, content strin
 
 // An unchanged room costs no participant write.
 func TestCallLog_UnchangedRoomWritesNoParticipants(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	cs := &countingStore{Store: f.database}
 	f.svc.st = cs
@@ -335,6 +346,7 @@ func TestCallLog_UnchangedRoomWritesNoParticipants(t *testing.T) {
 
 // A store that keeps failing is retried on a bounded schedule, not in a loop.
 func TestCallLog_FailingEndIsRetriedOnABackoff(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	cs := &countingStore{Store: f.database, failEnd: true}
 	f.svc.st = cs
@@ -368,6 +380,7 @@ func TestCallLog_FailingEndIsRetriedOnABackoff(t *testing.T) {
 
 // A leave note that has not been reconciled yet still dates the stop stamp.
 func TestCallLog_StopStampsPendingLeave(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	f.join(t, clAlice, clDM)
 	f.pass(t)
@@ -385,6 +398,7 @@ func TestCallLog_StopStampsPendingLeave(t *testing.T) {
 // A Start while the previous loop is still finishing waits for it, so
 // recovery never ends a call that loop still tends.
 func TestCallLog_StartWaitsForPreviousLoop(t *testing.T) {
+	t.Parallel()
 	f := newCallLogFixture(t)
 	ctx := t.Context()
 	if _, err := f.database.CreateCallLog(ctx, db.CallLogParams{

@@ -291,6 +291,7 @@ func TestServeFile_StalledClientClosesWithContentLengthMismatch(t *testing.T) {
 // lives for minutes, so one user may hold only two at a time; a third is
 // refused before any of its body is read.
 func TestUploadAvatar_InFlightUploadsPerUserCapped(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildAvatarRouter(database, store)

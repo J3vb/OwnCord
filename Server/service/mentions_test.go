@@ -72,6 +72,7 @@ func mentionCount(t *testing.T, database *db.DB, userID int64) int {
 // ─── parsing ─────────────────────────────────────────────────────────────────
 
 func TestParseMentionTokens(t *testing.T) {
+	t.Parallel()
 	tests := []struct {
 		name         string
 		content      string
@@ -114,6 +115,7 @@ func TestParseMentionTokens(t *testing.T) {
 // TestParseMentionTokens_TrailingPunctuationSpelling locks the fallback that
 // makes "@bob." resolve to bob when no user is literally named "bob.".
 func TestParseMentionTokens_TrailingPunctuationSpelling(t *testing.T) {
+	t.Parallel()
 	tokens := parseMentionTokens("thanks @bob.").Tokens
 	if len(tokens) != 1 {
 		t.Fatalf("tokens = %d, want 1", len(tokens))
@@ -124,6 +126,7 @@ func TestParseMentionTokens_TrailingPunctuationSpelling(t *testing.T) {
 }
 
 func TestParseMentionTokens_CandidateCap(t *testing.T) {
+	t.Parallel()
 	var sb strings.Builder
 	for i := range maxMentionCandidates + 20 {
 		fmt.Fprintf(&sb, "@user%d ", i)
@@ -137,6 +140,7 @@ func TestParseMentionTokens_CandidateCap(t *testing.T) {
 // ─── resolution on the send path ─────────────────────────────────────────────
 
 func TestSendMessage_ResolvesKnownUsername(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	res := sendAs(t, svc, 1, "hey @Bob, look at this")
@@ -154,6 +158,7 @@ func TestSendMessage_ResolvesKnownUsername(t *testing.T) {
 }
 
 func TestSendMessage_CaseInsensitiveUsername(t *testing.T) {
+	t.Parallel()
 	svc, _, _ := newMentionFixture(t)
 
 	res := sendAs(t, svc, 1, "hi @bOB")
@@ -171,6 +176,7 @@ func TestSendMessage_CaseInsensitiveUsername(t *testing.T) {
 // stored non-ASCII-uppercase row, and the mention silently degrades to plain
 // text.
 func TestSendMessage_NonASCIIUppercaseUsernameResolves(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedUser(t, database, &db.User{ID: 5, Username: "Émile", Status: "online"})
 	seedUserRole(t, database, 5, permissions.MemberRoleID)
@@ -182,6 +188,7 @@ func TestSendMessage_NonASCIIUppercaseUsernameResolves(t *testing.T) {
 }
 
 func TestSendMessage_UnknownWordStaysText(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	res := sendAs(t, svc, 1, "@nobody @bob@example.com hello")
@@ -198,6 +205,7 @@ func TestSendMessage_UnknownWordStaysText(t *testing.T) {
 }
 
 func TestSendMessage_MentionCapped(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	// 25 distinct mentionable users, all readers of channel 10.
@@ -223,6 +231,7 @@ func TestSendMessage_MentionCapped(t *testing.T) {
 // ─── @everyone / @here permission gate ───────────────────────────────────────
 
 func TestSendMessage_EveryoneRequiresPermission(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	res := sendAs(t, svc, 1, "@everyone stand up") // alice is a plain member
@@ -240,6 +249,7 @@ func TestSendMessage_EveryoneRequiresPermission(t *testing.T) {
 }
 
 func TestSendMessage_EveryoneCountsEveryReaderButAuthor(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	sendAs(t, svc, 4, "@everyone meeting now")
@@ -254,6 +264,7 @@ func TestSendMessage_EveryoneCountsEveryReaderButAuthor(t *testing.T) {
 }
 
 func TestSendMessage_HereSkipsOfflineUsers(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	sendAs(t, svc, 4, "@here quick question")
@@ -272,6 +283,7 @@ func TestSendMessage_HereSkipsOfflineUsers(t *testing.T) {
 // reconnecting client uses MentionsHere to avoid raising a mention badge the
 // server never counted for a here-only mention delivered in its replay burst.
 func TestSendMessage_MentionsHereDistinguishesHereFromEveryone(t *testing.T) {
+	t.Parallel()
 	svc, _, _ := newMentionFixture(t)
 
 	here := sendAs(t, svc, 4, "@here quick question")
@@ -298,6 +310,7 @@ func TestSendMessage_MentionsHereDistinguishesHereFromEveryone(t *testing.T) {
 // collapse through db.BroadcastStatus first, so @here agrees with what everyone
 // else can see of that reader.
 func TestSendMessage_HereSkipsInvisibleUsers(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	mustDo(t, "UpdateUserStatus(invisible)", database.UpdateUserStatus(context.Background(), 2, db.StatusInvisible))
@@ -322,6 +335,7 @@ func TestSendMessage_HereSkipsInvisibleUsers(t *testing.T) {
 // db.BroadcastStatus(r.Status) == db.StatusOffline test can never catch a
 // disconnected idle/dnd reader without also consulting live connection state.
 func TestSendMessage_HereSkipsDisconnectedIdleDndUsers(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	// bob's last chosen status was "dnd" before disconnecting (mirrors what
@@ -352,6 +366,7 @@ func TestSendMessage_HereSkipsDisconnectedIdleDndUsers(t *testing.T) {
 // whose stamp has not flushed (users.status still "offline", as after the
 // boot-time ResetAllUserStatuses) is present, so @here counts them.
 func TestSendMessage_HereReachesConnectedReaderBeforeStampFlush(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	mustDo(t, "UpdateUserStatus(offline)", database.UpdateUserStatus(context.Background(), 2, db.StatusOffline))
@@ -367,6 +382,7 @@ func TestSendMessage_HereReachesConnectedReaderBeforeStampFlush(t *testing.T) {
 // presence: a plain @everyone reaches every reader, offline ones included,
 // without a per-reader live-status lookup.
 func TestSendMessage_EveryoneIgnoresLiveStatus(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	lookups := 0
 	svc.SetLiveStatusLookup(func(int64) string {
@@ -388,6 +404,7 @@ func TestSendMessage_EveryoneIgnoresLiveStatus(t *testing.T) {
 // TestSendMessage_EveryoneSkipsUsersWithoutRead locks that the @everyone
 // fan-out honors per-channel denies, not just the base role mask.
 func TestSendMessage_EveryoneSkipsUsersWithoutRead(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.ReadMessages)
 
@@ -403,6 +420,7 @@ func TestSendMessage_EveryoneSkipsUsersWithoutRead(t *testing.T) {
 // @everyone fan-out: it is the last layer of the resolution order, so it must
 // both DROP a reader the role admitted and ADD one the role excluded.
 func TestSendMessage_EveryoneHonorsUserOverrides(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	// The role cannot read the channel at all...
 	seedChannelOverride(t, database, permissions.MemberRoleID, 10, 0, permissions.ReadMessages)
@@ -419,6 +437,7 @@ func TestSendMessage_EveryoneHonorsUserOverrides(t *testing.T) {
 }
 
 func TestSendMessage_EveryoneSkipsUserDenied(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	// carol alone is denied READ on a channel her role can read.
 	mustDo(t, "UpsertChannelUserOverride carol", database.UpsertChannelUserOverride(context.Background(), 10, 3, 0, permissions.ReadMessages))
@@ -435,6 +454,7 @@ func TestSendMessage_EveryoneSkipsUserDenied(t *testing.T) {
 // A direct @mention of a user the channel's per-user deny excludes must not
 // raise their badge either — mentionReaders is the single gate behind both.
 func TestSendMessage_DirectMentionSkipsUserDenied(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	mustDo(t, "UpsertChannelUserOverride bob", database.UpsertChannelUserOverride(context.Background(), 10, 2, 0, permissions.ReadMessages))
 
@@ -450,6 +470,7 @@ func TestSendMessage_DirectMentionSkipsUserDenied(t *testing.T) {
 // mentioned-uid x reader lookup has to get right regardless of how it is
 // implemented internally (loop or map).
 func TestSendMessage_MultipleDirectMentionsResolveIndependently(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	mustDo(t, "UpsertChannelUserOverride carol", database.UpsertChannelUserOverride(context.Background(), 10, 3, 0, permissions.ReadMessages))
 
@@ -469,6 +490,7 @@ func TestSendMessage_MultipleDirectMentionsResolveIndependently(t *testing.T) {
 // ─── mention counts ──────────────────────────────────────────────────────────
 
 func TestSendMessage_DirectMentionIncrementsCount(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	sendAs(t, svc, 1, "@bob ping")
@@ -486,6 +508,7 @@ func TestSendMessage_DirectMentionIncrementsCount(t *testing.T) {
 // real `go fn()` dispatcher and confirm the count still lands shortly after
 // SendMessage returns.
 func TestSendMessage_MentionCountsWrittenInBackground(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	// Undo the fixture's inline seam so bg is the production `go fn()` again.
 	svc.bgInline = false
@@ -505,6 +528,7 @@ func TestSendMessage_MentionCountsWrittenInBackground(t *testing.T) {
 }
 
 func TestSendMessage_SelfMentionDoesNotCount(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	sendAs(t, svc, 2, "note to self @bob")
@@ -514,6 +538,7 @@ func TestSendMessage_SelfMentionDoesNotCount(t *testing.T) {
 }
 
 func TestSendMessage_BlockedAuthorDoesNotRaiseBadge(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedBlock(t, database, 2, 1) // bob blocked alice
 
@@ -527,6 +552,7 @@ func TestSendMessage_BlockedAuthorDoesNotRaiseBadge(t *testing.T) {
 }
 
 func TestChannelFocus_ClearsMentionCount(t *testing.T) {
+	t.Parallel()
 	msgSvc, chanSvc, database := newMentionFixture(t)
 
 	sendAs(t, msgSvc, 1, "@bob look")
@@ -549,6 +575,7 @@ func TestChannelFocus_ClearsMentionCount(t *testing.T) {
 // (UpdateReadState via channel focus / mark-read) — DeleteMessage never
 // touched it, so the badge survived the message that caused it.
 func TestDeleteMessage_ClearsMentionCount(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	res := sendAs(t, svc, 1, "@bob look")
@@ -575,6 +602,7 @@ func TestDeleteMessage_ClearsMentionCount(t *testing.T) {
 // mention raised by a *different, still-live* message instead of being
 // rejected as a no-op.
 func TestDeleteMessage_RepeatedDeleteDoesNotDecrementMentionCountTwice(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	m1 := sendAs(t, svc, 1, "@bob first")
@@ -614,6 +642,7 @@ func TestDeleteMessage_RepeatedDeleteDoesNotDecrementMentionCountTwice(t *testin
 // the mention_count increments of every message it purges, the same way a
 // single moderator delete does.
 func TestPurgeMessages_ClearsMentionCounts(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	// newMentionFixture's moderator role only carries MENTION_EVERYONE by
 	// default; grant it MANAGE_MESSAGES on channel 10 so mod (user 4) can purge.
@@ -638,6 +667,7 @@ func TestPurgeMessages_ClearsMentionCounts(t *testing.T) {
 // ─── edits ───────────────────────────────────────────────────────────────────
 
 func TestEditMessage_ReplacesMentionsWithoutRecounting(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	res := sendAs(t, svc, 1, "@bob first")
@@ -666,6 +696,7 @@ func TestEditMessage_ReplacesMentionsWithoutRecounting(t *testing.T) {
 }
 
 func TestEditMessage_EveryoneGateApplies(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	res := sendAs(t, svc, 1, "plain text")
@@ -684,6 +715,7 @@ func TestEditMessage_EveryoneGateApplies(t *testing.T) {
 // ─── read-state fan-out ──────────────────────────────────────────────────────
 
 func TestGetChannelUnreadCounts_CarriesMentionCount(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	sendAs(t, svc, 1, "@bob check the ready payload")
@@ -703,6 +735,7 @@ func TestGetChannelUnreadCounts_CarriesMentionCount(t *testing.T) {
 // TestSendMessage_DMMentionsResolve locks that DMs resolve usernames but never
 // gain @everyone semantics — there is no permission surface behind a DM.
 func TestSendMessage_DMMentionsResolve(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
 	seedDMParticipant(t, database, 50, 1)
@@ -725,6 +758,7 @@ func TestSendMessage_DMMentionsResolve(t *testing.T) {
 // author and the author's blockers are removed by the caller, outside
 // MentionReach, so they are not part of this table.
 func TestMentionReach_AgreesWithMentionEntries(t *testing.T) {
+	t.Parallel()
 	svc, _, _ := newMentionFixture(t)
 	ctx := context.Background()
 	// bob(2) online, carol(3) no connection, mod(4) invisible; alice(1) authors.

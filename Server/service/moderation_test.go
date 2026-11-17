@@ -31,6 +31,7 @@ func newTestModerationService(t *testing.T) (*ModerationService, *db.DB) {
 }
 
 func TestBanUser_RequiresBanPermission(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestModerationService(t)
 
 	// A member without BAN_MEMBERS is refused.
@@ -45,6 +46,7 @@ func TestBanUser_RequiresBanPermission(t *testing.T) {
 }
 
 func TestBanUser_HierarchyEnforced(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestModerationService(t)
 
 	// Equal rank: mod cannot ban mod.
@@ -62,6 +64,7 @@ func TestBanUser_HierarchyEnforced(t *testing.T) {
 }
 
 func TestBanUser_AuthorizedSucceeds(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestModerationService(t)
 
 	mustDo(t, "authorized ban", svc.BanUser(context.Background(), 2, 3, "spam", nil))
@@ -113,6 +116,7 @@ func roleIDOf(t *testing.T, database *db.DB, userID int64) int64 {
 }
 
 func TestChangeUserRole_RequiresManageRoles(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestRoleService(t)
 
 	// A member without MANAGE_ROLES is refused...
@@ -129,6 +133,7 @@ func TestChangeUserRole_RequiresManageRoles(t *testing.T) {
 }
 
 func TestChangeUserRole_CannotAssignAtOrAboveOwnRank(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestRoleService(t)
 
 	// The hole this closes: an Administrator could promote anyone to Owner.
@@ -156,6 +161,7 @@ func TestChangeUserRole_CannotAssignAtOrAboveOwnRank(t *testing.T) {
 }
 
 func TestChangeUserRole_HierarchyAndValidation(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestRoleService(t)
 
 	// A moderator holding MANAGE_ROLES still cannot touch a higher-ranked user.
@@ -184,6 +190,7 @@ func TestChangeUserRole_HierarchyAndValidation(t *testing.T) {
 }
 
 func TestChangeUserRole_AuditWritten(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestRoleService(t)
 
 	if _, err := svc.ChangeUserRole(context.Background(), 1, 4, 3); err != nil {
@@ -202,6 +209,7 @@ func TestChangeUserRole_AuditWritten(t *testing.T) {
 }
 
 func TestForceLogout_AuthorizationMatrix(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestRoleService(t)
 
 	ctx := context.Background()
@@ -237,6 +245,7 @@ func TestForceLogout_AuthorizationMatrix(t *testing.T) {
 }
 
 func TestUnbanUser_AuthorizationMatrix(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestModerationService(t)
 
 	mustDo(t, "setup ban", svc.BanUser(context.Background(), 1, 3, "setup", nil))

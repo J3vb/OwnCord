@@ -23,6 +23,7 @@ func setupFixture(t *testing.T) (*SetupService, *db.DB, context.Context) {
 }
 
 func TestSetupService_BootstrapMakesAServerUsable(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := setupFixture(t)
 
 	needs, err := svc.NeedsSetup(ctx)
@@ -83,6 +84,7 @@ func TestSetupService_BootstrapMakesAServerUsable(t *testing.T) {
 // is unauthenticated, so this refusal is the only thing between it and anyone
 // who can reach the port.
 func TestSetupService_BootstrapIsRefusedOnceAnAccountExists(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := setupFixture(t)
 
 	first, err := svc.Bootstrap(ctx, BootstrapInput{Username: "owner", Password: "first-password-here"})
@@ -112,6 +114,7 @@ func TestSetupService_BootstrapIsRefusedOnceAnAccountExists(t *testing.T) {
 // and no invite. Forced here by removing the invites table so exactly one
 // downstream step fails while the rest succeed.
 func TestSetupService_DownstreamFailureWarnsRatherThanOrphansTheAccount(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := setupFixture(t)
 	if _, err := database.ExecContext(ctx, `DROP TABLE invites`); err != nil {
 		t.Fatalf("dropping invites: %v", err)
@@ -141,6 +144,7 @@ func TestSetupService_DownstreamFailureWarnsRatherThanOrphansTheAccount(t *testi
 // A long User-Agent is truncated rather than rejected: the device string is
 // cosmetic, and refusing a first run over it would be absurd.
 func TestSetupService_BootstrapTruncatesTheDeviceString(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := setupFixture(t)
 
 	res, err := svc.Bootstrap(ctx, BootstrapInput{
@@ -161,6 +165,7 @@ func TestSetupService_BootstrapTruncatesTheDeviceString(t *testing.T) {
 }
 
 func TestSetupService_ApplyWizardSettings(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := setupFixture(t)
 	settings := NewSettingsService(database)
 
@@ -185,6 +190,7 @@ func TestSetupService_ApplyWizardSettings(t *testing.T) {
 }
 
 func TestSetupService_FailsLoudBeforeTheAccountExists(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := setupFixture(t)
 	mustDo(t, "Close", database.Close())
 
@@ -211,6 +217,7 @@ func TestSetupService_FailsLoudBeforeTheAccountExists(t *testing.T) {
 // returning the secret once. A lockout with no kit is the one failure an owner
 // cannot fix from inside the server, so the wizard offers it at setup.
 func TestSetupService_BootstrapIssuesARecoveryKit(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := setupFixture(t)
 
 	res, err := svc.Bootstrap(ctx, BootstrapInput{
@@ -243,6 +250,7 @@ func TestSetupService_BootstrapIssuesARecoveryKit(t *testing.T) {
 // TestSetupService_BootstrapWithoutRecoveryKitStoresNone: the kit is opt-in, so
 // a run that does not ask for one leaves no row.
 func TestSetupService_BootstrapWithoutRecoveryKitStoresNone(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := setupFixture(t)
 
 	res, err := svc.Bootstrap(ctx, BootstrapInput{Username: "owner", Password: "a-good-password-here"})
@@ -258,6 +266,7 @@ func TestSetupService_BootstrapWithoutRecoveryKitStoresNone(t *testing.T) {
 }
 
 func TestSetupService_BootstrapFirstSessionIsSeen(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := setupFixture(t)
 	res, err := svc.Bootstrap(ctx, BootstrapInput{Username: "owner", Password: "correct horse battery staple", Device: "d", Host: "127.0.0.1"})
 	if err != nil || res.Token == "" {

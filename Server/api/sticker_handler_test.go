@@ -134,6 +134,7 @@ func decodeSticker(t *testing.T, rec *httptest.ResponseRecorder) stickerJSON {
 // ─── GET ─────────────────────────────────────────────────────────────────────
 
 func TestStickerList_RequiresAuth(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	if rec := h.do(t, http.MethodGet, "/api/v1/stickers", "", nil, ""); rec.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rec.Code)
@@ -141,6 +142,7 @@ func TestStickerList_RequiresAuth(t *testing.T) {
 }
 
 func TestStickerList_EmptyIsJSONArray(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	rec := h.do(t, http.MethodGet, "/api/v1/stickers", h.memberToken, nil, "")
 	if rec.Code != http.StatusOK || strings.TrimSpace(rec.Body.String()) != "[]" {
@@ -149,6 +151,7 @@ func TestStickerList_EmptyIsJSONArray(t *testing.T) {
 }
 
 func TestStickerList_AnyMemberSeesIdNameEmojiUrl(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	if rec := h.upload(t, h.ownerToken, "Wave", "👋", pngBytes(t, 64, 64)); rec.Code != http.StatusCreated {
 		t.Fatalf("upload status = %d (%s)", rec.Code, rec.Body.String())
@@ -172,6 +175,7 @@ func TestStickerList_AnyMemberSeesIdNameEmojiUrl(t *testing.T) {
 // ─── POST ────────────────────────────────────────────────────────────────────
 
 func TestStickerUpload_PermissionGate(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	if rec := h.upload(t, h.memberToken, "Wave", "", pngBytes(t, 64, 64)); rec.Code != http.StatusForbidden {
 		t.Fatalf("member status = %d, want 403 (%s)", rec.Code, rec.Body.String())
@@ -190,6 +194,7 @@ func TestStickerUpload_PermissionGate(t *testing.T) {
 }
 
 func TestStickerUpload_AcceptsPNGGIFWebPAndRejectsTheRest(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	ok := map[string][]byte{
 		"apng":  pngBytes(t, 320, 320),
@@ -220,6 +225,7 @@ func TestStickerUpload_AcceptsPNGGIFWebPAndRejectsTheRest(t *testing.T) {
 }
 
 func TestStickerUpload_DimensionAndSizeCaps(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	for name, content := range map[string][]byte{
 		"wide":    pngBytes(t, 321, 64),
@@ -242,6 +248,7 @@ func TestStickerUpload_DimensionAndSizeCaps(t *testing.T) {
 }
 
 func TestStickerUpload_RejectsBadNameEmojiAndMissingFile(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	img := pngBytes(t, 32, 32)
 	for _, name := range []string{"", "a", strings.Repeat("x", 31), "dot.name", "emojié"} {
@@ -263,6 +270,7 @@ func TestStickerUpload_RejectsBadNameEmojiAndMissingFile(t *testing.T) {
 }
 
 func TestStickerUpload_DuplicateNameIsConflictAndLeavesNoOrphan(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	if rec := h.upload(t, h.ownerToken, "Wave", "", pngBytes(t, 32, 32)); rec.Code != http.StatusCreated {
 		t.Fatalf("first upload status = %d", rec.Code)
@@ -286,6 +294,7 @@ func TestStickerUpload_DuplicateNameIsConflictAndLeavesNoOrphan(t *testing.T) {
 // Edge case (b): two admins upload the same name at once. One wins with 201,
 // the other gets 409, and no orphan file is left in storage.
 func TestStickerUpload_ConcurrentSameNameOneWinsNoOrphan(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	const racers = 6
 	codes := make([]int, racers)
@@ -339,6 +348,7 @@ func TestStickerUpload_ConcurrentSameNameOneWinsNoOrphan(t *testing.T) {
 }
 
 func TestStickerUpload_CapIsEnforcedWithoutAnOrphan(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	for i := range service.MaxStickerCount {
 		if _, err := h.database.CreateSticker(context.Background(), fmt.Sprintf("seed-%02d", i), nil, "f", "image/png", 1); err != nil {
@@ -355,6 +365,7 @@ func TestStickerUpload_CapIsEnforcedWithoutAnOrphan(t *testing.T) {
 // ─── GET image ───────────────────────────────────────────────────────────────
 
 func TestStickerImage_ServesStoredBytesToAnyMember(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	content := gifBytes(t, 40, 40)
 	created := decodeSticker(t, h.upload(t, h.ownerToken, "Wave", "", content))
@@ -377,6 +388,7 @@ func TestStickerImage_ServesStoredBytesToAnyMember(t *testing.T) {
 // ─── PATCH ───────────────────────────────────────────────────────────────────
 
 func TestStickerPatch_RenamesSetsEmojiAndBroadcasts(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	created := decodeSticker(t, h.upload(t, h.ownerToken, "Wave", "👋", pngBytes(t, 32, 32)))
 
@@ -397,6 +409,7 @@ func TestStickerPatch_RenamesSetsEmojiAndBroadcasts(t *testing.T) {
 }
 
 func TestStickerPatch_Refusals(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	first := decodeSticker(t, h.upload(t, h.ownerToken, "Wave", "", pngBytes(t, 32, 32)))
 	second := decodeSticker(t, h.upload(t, h.ownerToken, "Other", "", pngBytes(t, 32, 32)))
@@ -436,6 +449,7 @@ func TestStickerPatch_Refusals(t *testing.T) {
 // ─── DELETE ──────────────────────────────────────────────────────────────────
 
 func TestStickerDelete_RemovesRowFileAndBroadcasts(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	created := decodeSticker(t, h.upload(t, h.ownerToken, "Wave", "", pngBytes(t, 32, 32)))
 	stored, err := h.database.GetSticker(context.Background(), created.ID)
@@ -476,6 +490,7 @@ func TestStickerDelete_RemovesRowFileAndBroadcasts(t *testing.T) {
 // The fan-out runs after the commit, so it must survive a request context that
 // was canceled in between, as the emoji fan-out does.
 func TestBroadcastStickerSet_SurvivesCanceledRequestContext(t *testing.T) {
+	t.Parallel()
 	h := newStickerHarness(t)
 	if _, err := h.database.CreateSticker(context.Background(), "Wave", nil, "stored-1", "image/png", 1); err != nil {
 		t.Fatalf("CreateSticker: %v", err)

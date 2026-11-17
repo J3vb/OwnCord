@@ -117,6 +117,7 @@ func simpleFS(pairs ...string) fstest.MapFS {
 // TestMigrate_SchemaVersionsTableCreated verifies that MigrateFS creates the
 // schema_versions tracking table on first run.
 func TestMigrate_SchemaVersionsTableCreated(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsys := simpleFS(
@@ -133,6 +134,7 @@ func TestMigrate_SchemaVersionsTableCreated(t *testing.T) {
 // TestMigrate_AllMigrationsRecorded verifies that every applied .sql file
 // gets a row inserted into schema_versions.
 func TestMigrate_AllMigrationsRecorded(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsys := simpleFS(
@@ -153,6 +155,7 @@ func TestMigrate_AllMigrationsRecorded(t *testing.T) {
 // TestMigrate_SkipsAlreadyApplied verifies that a second call to MigrateFS
 // with the same FS does not re-execute already-applied migrations.
 func TestMigrate_SkipsAlreadyApplied(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	// This migration inserts a row; if re-run it would violate UNIQUE.
@@ -179,6 +182,7 @@ func TestMigrate_SkipsAlreadyApplied(t *testing.T) {
 // TestMigrate_AppliesNewMigrationsOnly verifies that when a new file is added
 // to the FS, only that file is applied on the second call.
 func TestMigrate_AppliesNewMigrationsOnly(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsFirst := simpleFS(
@@ -218,6 +222,7 @@ func TestMigrate_AppliesNewMigrationsOnly(t *testing.T) {
 // TestMigrate_OrderIsLexicographic verifies that migrations are applied in
 // sorted filename order, not insertion or readdir order.
 func TestMigrate_OrderIsLexicographic(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	// 002 creates the table; 001 tries to insert into it.
@@ -244,6 +249,7 @@ func TestMigrate_OrderIsLexicographic(t *testing.T) {
 // tracking was added), all current migration filenames are seeded so they are
 // not re-executed.
 func TestMigrate_SeedExistingDatabase(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	// Manually create a table to simulate a previously-migrated database
@@ -283,6 +289,7 @@ func TestMigrate_SeedExistingDatabase(t *testing.T) {
 // The seeding heuristic triggers on the presence of the "users" sentinel table,
 // so we create that table to simulate a pre-tracking database.
 func TestMigrate_SeedDoesNotReRunMigrations(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	// Simulate an existing DB: create the "users" sentinel table so the seeding
@@ -336,6 +343,7 @@ func TestMigrate_SeedDoesNotReRunMigrations(t *testing.T) {
 // calls MigrateFS a second time, verifying that seeding — not destructive
 // execution — is what happens.
 func TestMigrate_InterruptedSeedDoesNotOrphanTrackingTable(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 
@@ -405,6 +413,7 @@ func TestMigrate_InterruptedSeedDoesNotOrphanTrackingTable(t *testing.T) {
 // TestMigrate_SchemaVersionsAppliedAtRecorded verifies that applied_at is
 // populated for every recorded migration.
 func TestMigrate_SchemaVersionsAppliedAtRecorded(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsys := simpleFS(
@@ -427,6 +436,7 @@ func TestMigrate_SchemaVersionsAppliedAtRecorded(t *testing.T) {
 
 // TestMigrate_AppliedAtIsISO8601 verifies applied_at is a parseable datetime.
 func TestMigrate_AppliedAtIsISO8601(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsys := simpleFS(
@@ -462,6 +472,7 @@ func TestMigrate_AppliedAtIsISO8601(t *testing.T) {
 // TestMigrate_EmptyFSSucceeds verifies that an empty FS returns no error and
 // still creates the schema_versions table.
 func TestMigrate_EmptyFSSucceeds(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsys := fstest.MapFS{}
@@ -480,6 +491,7 @@ func TestMigrate_EmptyFSSucceeds(t *testing.T) {
 // TestMigrate_InvalidSQLReturnsError verifies that a migration with invalid
 // SQL causes MigrateFS to return a non-nil error.
 func TestMigrate_InvalidSQLReturnsError(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsys := simpleFS(
@@ -495,6 +507,7 @@ func TestMigrate_InvalidSQLReturnsError(t *testing.T) {
 // TestMigrate_ReadFileErrorReturnsError verifies that an FS read failure
 // surfaces as an error from MigrateFS.
 func TestMigrate_ReadFileErrorReturnsError(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	err := db.MigrateFS(database, failReadFS{})
@@ -506,6 +519,7 @@ func TestMigrate_ReadFileErrorReturnsError(t *testing.T) {
 // TestMigrate_PartialRunRecordsOnlyApplied verifies that if the second
 // migration in a set fails, only the first is recorded in schema_versions.
 func TestMigrate_PartialRunRecordsOnlyApplied(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsys := simpleFS(
@@ -526,6 +540,7 @@ func TestMigrate_PartialRunRecordsOnlyApplied(t *testing.T) {
 // TestMigrate_NonSQLFilesSkipped verifies that files without a .sql extension
 // are skipped and not recorded in schema_versions.
 func TestMigrate_NonSQLFilesSkipped(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsys := fstest.MapFS{
@@ -551,6 +566,7 @@ func TestMigrate_NonSQLFilesSkipped(t *testing.T) {
 // production migration set through the tracked MigrateFS and verify the
 // schema_versions table contains exactly one row per .sql file in the FS.
 func TestMigrate_WithRealMigrations(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -570,6 +586,7 @@ func TestMigrate_WithRealMigrations(t *testing.T) {
 // TestMigrate_WithRealMigrationsIdempotent verifies the production migration
 // set can be run twice without error via the tracked path.
 func TestMigrate_WithRealMigrationsIdempotent(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() first run error", db.Migrate(database))
@@ -580,6 +597,7 @@ func TestMigrate_WithRealMigrationsIdempotent(t *testing.T) {
 // must detect an existing DB by the presence of a known table (e.g. "users"),
 // not by an arbitrary table name.
 func TestMigrate_SeedDetectionUsesKnownTable(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	// Create only an unrelated table — not one of the known sentinel tables.
@@ -605,6 +623,7 @@ func TestMigrate_SeedDetectionUsesKnownTable(t *testing.T) {
 // TestMigrate_ErrorMessageContainsFilename verifies that when a migration
 // fails, the returned error message includes the filename for easier debugging.
 func TestMigrate_ErrorMessageContainsFilename(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsys := simpleFS(
@@ -624,6 +643,7 @@ func TestMigrate_ErrorMessageContainsFilename(t *testing.T) {
 // TestMigrate_ReadDirErrorReturnsError verifies that when the FS returns an
 // error from ReadDir, MigrateFS propagates it as a non-nil error.
 func TestMigrate_ReadDirErrorReturnsError(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	err := db.MigrateFS(database, failReadDirFS{})
@@ -635,6 +655,7 @@ func TestMigrate_ReadDirErrorReturnsError(t *testing.T) {
 // TestMigrate_SchemaVersionsHasPrimaryKey verifies the schema_versions table
 // uses version as PRIMARY KEY, preventing duplicate rows for the same file.
 func TestMigrate_SchemaVersionsHasPrimaryKey(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsys := simpleFS(
@@ -655,6 +676,7 @@ func TestMigrate_SchemaVersionsHasPrimaryKey(t *testing.T) {
 // TestMigrate_SeedRecordsAllFilesFromFS verifies that seeding writes a row for
 // every .sql file in the FS, including when there are multiple files.
 func TestMigrate_SeedRecordsAllFilesFromFS(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	// Create the users sentinel to trigger seeding on first call.
@@ -688,6 +710,7 @@ func TestMigrate_SeedRecordsAllFilesFromFS(t *testing.T) {
 // TestMigrate_FreshDatabaseRunsAllMigrations verifies that a completely fresh
 // database (no tables at all) runs every migration without seeding.
 func TestMigrate_FreshDatabaseRunsAllMigrations(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	fsys := simpleFS(
@@ -711,6 +734,7 @@ func TestMigrate_FreshDatabaseRunsAllMigrations(t *testing.T) {
 // TestMigrate_LargeNumberOfMigrations verifies that MigrateFS can handle
 // a large set of migrations without degrading or skipping any.
 func TestMigrate_LargeNumberOfMigrations(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	const n = 50
@@ -735,6 +759,7 @@ func TestMigrate_LargeNumberOfMigrations(t *testing.T) {
 // seeded roles gain MENTION_EVERYONE (bit 21) and the plain Member role does
 // not, so @everyone stays gated after an upgrade of an existing database.
 func TestMigrate_022SeedsMentionEveryone(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	mustDo(t, "Migrate() error", db.Migrate(database))
 
@@ -743,6 +768,7 @@ func TestMigrate_022SeedsMentionEveryone(t *testing.T) {
 
 // TestMigrate_022CreatesMentionSchema locks the storage phase 3 relies on.
 func TestMigrate_022CreatesMentionSchema(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	mustDo(t, "Migrate() error", db.Migrate(database))
 	if !tableExists(t, database, "message_mentions") {
@@ -763,6 +789,7 @@ func TestMigrate_022CreatesMentionSchema(t *testing.T) {
 // server records migrations this binary does not carry, and MigrateFS must
 // refuse to run rather than serve on a schema it has never seen.
 func TestMigrate_RefusesSchemaAhead(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	fsys := simpleFS("001_a.sql", "CREATE TABLE a (id INTEGER);")
 	mustDo(t, "first MigrateFS", db.MigrateFS(database, fsys))
@@ -788,6 +815,7 @@ func TestMigrate_RefusesSchemaAhead(t *testing.T) {
 // database whose schema_versions rows all exist in the binary still migrates
 // (the supported manual rollback deletes its own row, so no false refusal).
 func TestMigrate_SchemaAheadAllowsKnownMigrationsOnly(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	fsys := simpleFS(
 		"001_a.sql", "CREATE TABLE a (id INTEGER);",
@@ -801,6 +829,7 @@ func TestMigrate_SchemaAheadAllowsKnownMigrationsOnly(t *testing.T) {
 // REL-02: a backup file migrated by a newer server reports exactly the
 // migrations this binary does not carry, and none of the ones it does.
 func TestCheckBackupSchemaAhead_NamesUnknownMigrations(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "newer.db")
 	database, err := db.Open(path)
 	mustDo(t, "Open", err)
@@ -821,6 +850,7 @@ func TestCheckBackupSchemaAhead_NamesUnknownMigrations(t *testing.T) {
 // TestCheckBackupSchemaAhead_NoSchemaVersionsTable: a file with no
 // schema_versions table (pre-tracking) has nothing ahead of this binary.
 func TestCheckBackupSchemaAhead_NoSchemaVersionsTable(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "untracked.db")
 	conn, err := sql.Open("sqlite", path)
 	mustDo(t, "sql.Open", err)
@@ -839,6 +869,7 @@ func TestCheckBackupSchemaAhead_NoSchemaVersionsTable(t *testing.T) {
 // TestCheckBackupSchemaAhead_NotADatabase: a file SQLite cannot read is an
 // error, never a silent "nothing ahead" that would let the restore proceed.
 func TestCheckBackupSchemaAhead_NotADatabase(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "garbage.db")
 	mustDo(t, "WriteFile", os.WriteFile(path, []byte(strings.Repeat("not a database ", 100)), 0o600))
 	if _, err := db.CheckBackupSchemaAhead(context.Background(), path); err == nil {

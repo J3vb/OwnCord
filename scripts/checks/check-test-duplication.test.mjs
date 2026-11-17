@@ -49,8 +49,20 @@ test("selectTargets runs every target unless one is named", () => {
 
 test("the server target scans only Go test files", () => {
   assert.equal(TARGETS.server.scan, "Server");
-  assert.deepEqual(TARGETS.server.extraArgs, ["--pattern", "**/*_test.go"]);
+  assert.deepEqual(TARGETS.server.extraArgs, [
+    "--pattern",
+    "**/*_test.go",
+    "--ignore-pattern",
+    "t\\.Parallel\\(\\)",
+  ]);
   assert.notEqual(TARGETS.server.baselinePath, TARGETS.client.baselinePath);
+});
+
+test("the server target ignores only the t.Parallel() marker line", () => {
+  const pattern = new RegExp(TARGETS.server.extraArgs.at(-1));
+  assert.ok(pattern.test("\tt.Parallel()"));
+  assert.ok(!pattern.test("\tdatabase := newTestDB(t)"));
+  assert.ok(!pattern.test("\ttParallel()"));
 });
 
 test("every target keeps its own baseline file", () => {

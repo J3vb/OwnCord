@@ -294,6 +294,7 @@ func TestGIFResultURLsAreHTTPSWithoutCredentials(t *testing.T) {
 // ─── Default-off contract ────────────────────────────────────────────────────
 
 func TestGIFDisabledWhenNoKeyConfigured(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	token := profileCreateToken(t, database, "gifuser", 4)
 	router := buildGIFRouter(database, "")
@@ -349,6 +350,7 @@ func TestGIFRejectsInvalidToken(t *testing.T) {
 // Auth is checked before the disabled check, so an anonymous caller cannot
 // probe whether the operator configured a GIF key.
 func TestGIFAuthCheckedBeforeDisabledCheck(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildGIFRouter(database, "")
 

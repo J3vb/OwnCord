@@ -25,6 +25,7 @@ func secondFactorDB(t *testing.T) *db.DB {
 }
 
 func TestSecondFactor_ChallengeAndReplayWindowSurviveRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := secondFactorDB(t)
 	key := make([]byte, 32)
@@ -69,6 +70,7 @@ func TestSecondFactor_ChallengeAndReplayWindowSurviveRestart(t *testing.T) {
 }
 
 func TestSecondFactor_PendingEnrolmentSurvivesRestart(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := secondFactorDB(t)
 	key := make([]byte, 32)

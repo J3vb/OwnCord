@@ -65,6 +65,7 @@ func newRetention(t *testing.T, database *db.DB, dir string) *RetentionService {
 // Indefinite by default: with no policy a tick removes nothing, on a fresh
 // server and on the alpha snapshot (the upgraded-server case).
 func TestRetention_IndefiniteByDefault(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	dir := t.TempDir()
@@ -112,6 +113,7 @@ func TestRetention_IndefiniteByDefault(t *testing.T) {
 // treating it as keep-forever is just as wrong: it activates a live
 // 10-year deletion window from a row that was never validated.
 func TestRetention_OutOfRangeServerWindowDeletesNothing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	dir := t.TempDir()
@@ -138,6 +140,7 @@ func TestRetention_OutOfRangeServerWindowDeletesNothing(t *testing.T) {
 // the server, pinned and DM content untouched, files removed, a marker per
 // swept channel, and the effect preview matching what the tick removes.
 func TestRetention_TickAppliesTheEffectivePolicy(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	dir := t.TempDir()
@@ -238,6 +241,7 @@ func TestRetention_TickAppliesTheEffectivePolicy(t *testing.T) {
 // files were never removed is resumed on the next tick.
 // P4-08: a retention purge removes the purged attachment's thumbnail too.
 func TestRetention_PurgeRemovesThumbnails(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	dir := t.TempDir()
@@ -255,6 +259,7 @@ func TestRetention_PurgeRemovesThumbnails(t *testing.T) {
 }
 
 func TestRetention_BudgetAndResume(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	dir := t.TempDir()
@@ -330,6 +335,7 @@ func TestRetention_BudgetAndResume(t *testing.T) {
 // The external marker is what prevents an older backup from resurrecting a
 // retention deletion. If it cannot be written, fail before deleting rows.
 func TestRetention_MarkerFailureDeletesNothing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	dir := t.TempDir()
@@ -358,6 +364,7 @@ func TestRetention_MarkerFailureDeletesNothing(t *testing.T) {
 // messages older than a channel's recorded cutoff loses them again on
 // ReplayMarkers, files included.
 func TestRetention_ReplayMarkersResweepsARestoredBackup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	dbPath := filepath.Join(t.TempDir(), "main.sqlite")
 	database, err := db.Open(dbPath)
@@ -414,6 +421,7 @@ func TestRetention_ReplayMarkersResweepsARestoredBackup(t *testing.T) {
 }
 
 func TestSettings_RetentionDaysValidatedAndAudited(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	uid, _ := database.CreateUser(ctx, "settings-owner", "hash", 1)
@@ -477,6 +485,7 @@ func replayAtStartup(t *testing.T, database *db.DB, dir string, markers *db.Mark
 }
 
 func TestRetention_ReplayKeepsAMessageUnpinnedAfterRetentionWasTurnedOff(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, dir, markers, chID, pinnedID := pinnedRetentionFixture(t)
 	mustDo(t, "off", database.ApplySettings(ctx, map[string]string{db.RetentionDaysKey: "0"}))
@@ -493,6 +502,7 @@ func TestRetention_ReplayKeepsAMessageUnpinnedAfterRetentionWasTurnedOff(t *test
 }
 
 func TestRetention_ReplayStillSweepsWhenTheDatabaseHasNoRecordOfTheSweep(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, dir, markers, chID, pinnedID := pinnedRetentionFixture(t)
 	// A restored older backup (or a sweep interrupted before it was recorded)
@@ -553,6 +563,7 @@ func tickingRetention(t *testing.T, database *db.DB, dir string, markers *db.Mar
 // still gets the start-up replay: the marker names the second sweep and the
 // backup names the first.
 func TestRetention_ReplayResweepsABackupTakenBeforeASweepThatKeptTheCutoff(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, dbPath := fileRetentionDB(t)
 	dir := t.TempDir()
@@ -597,6 +608,7 @@ func TestRetention_ReplayResweepsABackupTakenBeforeASweepThatKeptTheCutoff(t *te
 // an erasure key since replaced. The replay decides once for the channel, so
 // finishing the older marker's sweep does not make the newer one look done.
 func TestRetention_ReplayRunsEveryMarkerOfAChannelOnARestoredBackup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database, dbPath := fileRetentionDB(t)
 	dir := t.TempDir()

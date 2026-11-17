@@ -11,6 +11,7 @@ import (
 // A shortened idle period can make a thread due before the planned wake-up;
 // Wake makes Run re-read the due time and archive it now, not at the cap.
 func TestThreadArchiver_WakeRereadsTheDueTime(t *testing.T) {
+	t.Parallel()
 	st := &recordingStore{dueOK: true, due: time.Now().Add(time.Hour), batches: [][]db.DueThread{{{ID: 7, ParentID: 1}}}, listed: []int{1}}
 	a := fastArchiver(st)
 	a.maxSleep = time.Hour
@@ -42,6 +43,7 @@ func TestThreadArchiver_WakeRereadsTheDueTime(t *testing.T) {
 }
 
 func TestThreadService_UpdateWakesTheArchiverOnlyForAPeriodChange(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	th := f.start(t, thrOwner, "wake")
 	wakes := 0

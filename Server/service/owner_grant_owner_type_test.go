@@ -33,6 +33,7 @@ const (
 func otOwnerMsg(bit int64) string { return "only the owner can change " + permissions.Name(bit) }
 
 func TestOwnerTypeBits_RoleCreateAndEdit(t *testing.T) {
+	t.Parallel()
 	for _, bit := range append(slices.Clone(ownerTierBits), administratorTierBits...) {
 		ownerTier := slices.Contains(ownerTierBits, bit)
 		t.Run(permissions.Name(bit), func(t *testing.T) {
@@ -80,6 +81,7 @@ func TestOwnerTypeBits_RoleCreateAndEdit(t *testing.T) {
 }
 
 func TestOwnerTypeBits_RoleDelete(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, bit := range []int64{permissions.RestoreBackups, permissions.ViewDiagnostics} {
 		ownerTier := slices.Contains(ownerTierBits, bit)
@@ -96,6 +98,7 @@ func TestOwnerTypeBits_RoleDelete(t *testing.T) {
 }
 
 func TestOwnerTypeBits_RoleAssignment(t *testing.T) {
+	t.Parallel()
 	for _, bit := range append(slices.Clone(ownerTierBits), administratorTierBits...) {
 		ownerTier := slices.Contains(ownerTierBits, bit)
 		t.Run(permissions.Name(bit), func(t *testing.T) {
@@ -150,6 +153,7 @@ func TestOwnerTypeBits_RoleAssignment(t *testing.T) {
 }
 
 func TestOwnerTypeBits_Overrides(t *testing.T) {
+	t.Parallel()
 	for _, bit := range append(slices.Clone(ownerTierBits), administratorTierBits...) {
 		ownerTier := slices.Contains(ownerTierBits, bit)
 		t.Run(permissions.Name(bit), func(t *testing.T) {
@@ -184,6 +188,7 @@ func TestOwnerTypeBits_Overrides(t *testing.T) {
 // role that carries an owner-tier bit is a way to hand that bit to them: an
 // Administrator (not the owner) is refused, the owner is not.
 func TestOwnerTypeBits_RoleDeleteFallbackCarriesOwnerTierBit(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name  string
 		actor int64

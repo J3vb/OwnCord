@@ -17,6 +17,7 @@ import (
 // The router must hand the app's background group and shutdown signal to the
 // admin API: the update apply tail runs on one and aborts on the other.
 func TestAdminSetupOptions_CarryBackgroundAndShutdown(t *testing.T) {
+	t.Parallel()
 	bg := syncutil.NewGroup(context.Background())
 	shutdown := make(chan struct{})
 	rt := Runtime{Background: bg, Shutdown: shutdown, SetupToken: "tok"}
@@ -35,6 +36,7 @@ func TestAdminSetupOptions_CarryBackgroundAndShutdown(t *testing.T) {
 // The import routes get the configured cap, a long-transfer deadline and the
 // data-directory scratch folder.
 func TestAdminSetupOptions_CarryDiscordImportSettings(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{}
 	cfg.Upload.ImportMaxMB = 7
 	cfg.Server.DataDir = t.TempDir()
@@ -53,6 +55,7 @@ func TestAdminSetupOptions_CarryDiscordImportSettings(t *testing.T) {
 // The Dashboard health row gets the runtime's sampler, the data volume and the
 // start time; the slow requests card gets the router's tracker.
 func TestAdminSetupOptions_CarrySystemSources(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{}
 	cfg.Server.DataDir = t.TempDir()
 	sampler := sysstats.NewSampler()
@@ -80,6 +83,7 @@ func TestAdminSetupOptions_CarrySystemSources(t *testing.T) {
 
 // Leftovers of an earlier run are removed at start-up.
 func TestImportTempDir_ClearsLeftovers(t *testing.T) {
+	t.Parallel()
 	cfg := &config.Config{}
 	cfg.Server.DataDir = t.TempDir()
 	dir := filepath.Join(cfg.Server.DataDir, admin.ImportDirName)

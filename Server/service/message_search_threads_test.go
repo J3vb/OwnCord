@@ -32,6 +32,7 @@ func threadAndPost(t *testing.T, f *forumPostFixture) (threadID, postID int64) {
 }
 
 func TestSearchMessages_FindsThreadsAndForumPosts(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	threadID, postID := threadAndPost(t, f)
 
@@ -88,6 +89,7 @@ func TestSearchMessages_FindsThreadsAndForumPosts(t *testing.T) {
 
 // A thread is read through its parent: a member who cannot read the parent finds nothing in it.
 func TestSearchMessages_ThreadOfUnreadableParentHidden(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	threadID, postID := threadAndPost(t, f)
 	for _, parent := range []int64{thrParent, frmForum} {
@@ -110,6 +112,7 @@ func TestSearchMessages_ThreadOfUnreadableParentHidden(t *testing.T) {
 
 // An NSFW parent the member has not acknowledged hides its threads too; acknowledging reveals them.
 func TestSearchMessages_ThreadOfUnacknowledgedNSFWParentHidden(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: srchNSFWParent, Name: "spicy", Type: "text"})
 	if _, err := f.database.ExecContext(bg(), `UPDATE channels SET nsfw = 1 WHERE id = ?`, srchNSFWParent); err != nil {

@@ -21,6 +21,7 @@ import (
 // detail names the appeal's public id; neither row ever carries the appeal
 // body or the decision note.
 func TestAppeal_OverturnAuditsBothTheDecisionAndTheReversalWithDistinctActors(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -61,6 +62,7 @@ func TestAppeal_OverturnAuditsBothTheDecisionAndTheReversalWithDistinctActors(t 
 // ── Effects ──────────────────────────────────────────────────────────────
 
 func TestAppeal_OverturnLiftsTimeoutUnbansAcknowledgesWarning(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("timeout", func(t *testing.T) {
@@ -125,6 +127,7 @@ func TestAppeal_OverturnLiftsTimeoutUnbansAcknowledgesWarning(t *testing.T) {
 // active timeout" instead of the appealed action's own id, and would have
 // wrongly lifted the newer one here.
 func TestAppeal_OverturnReversesOnlyTheSpecificAppealedTimeout(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 	f.mod.SetVoiceMuter(&dbBackedVoiceMuter{database: f.database})
@@ -181,6 +184,7 @@ func TestAppeal_OverturnReversesOnlyTheSpecificAppealedTimeout(t *testing.T) {
 // still call FinalizeTimeoutLift and leave the target genuinely unmuted, the
 // same as a moderator lifting it directly.
 func TestAppeal_OverturnedTimeoutLiftsVoiceMuteWhenItApplied(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 	f.mod.SetVoiceMuter(&dbBackedVoiceMuter{database: f.database})
@@ -228,6 +232,7 @@ func TestAppeal_OverturnedTimeoutLiftsVoiceMuteWhenItApplied(t *testing.T) {
 // overturning the appeal must not create or otherwise touch any voice
 // state, though the ledger/notification side of the lift still applies.
 func TestAppeal_OverturnedTimeoutWithNoVoiceHalfChangesNoVoiceState(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 	f.mod.SetVoiceMuter(&dbBackedVoiceMuter{database: f.database})
@@ -268,6 +273,7 @@ func TestAppeal_OverturnedTimeoutWithNoVoiceHalfChangesNoVoiceState(t *testing.T
 // their current state. applyAppealReversalTx's ban reversal only unbans
 // when no newer ban action exists for the target; here one does.
 func TestAppeal_OverturnFirstBanDoesNotUnbanAfterReban(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -297,6 +303,7 @@ func TestAppeal_OverturnFirstBanDoesNotUnbanAfterReban(t *testing.T) {
 // overturning a removal appeal must still commit cleanly as a record-only
 // decision — no error, no panic, just the appeal's own state flipping.
 func TestAppeal_OverturnRemovalIsRecordOnly(t *testing.T) {
+	t.Parallel()
 	f := newAppealFixture(t)
 	ctx := context.Background()
 
@@ -354,6 +361,7 @@ func latestActionOfKind(t *testing.T, ctx context.Context, f *appealFixture, tar
 // timeout/warning a higher-ranked moderator issued, or clear a ban without
 // BAN_MEMBERS, because Decide only checked CanModerate.
 func TestAppeal_OverturnRequiresOutrankAndKindPermission(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	t.Run("equal-rank target", func(t *testing.T) {

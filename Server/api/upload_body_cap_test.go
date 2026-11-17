@@ -62,6 +62,7 @@ func cappedHarness(t *testing.T, maxSizeMB int) *quotaHarness {
 }
 
 func TestUpload_AboveHundredMiBAcceptedWhenConfigured(t *testing.T) {
+	t.Parallel()
 	if testing.Short() {
 		t.Skip("writes a 120 MB file")
 	}
@@ -71,6 +72,7 @@ func TestUpload_AboveHundredMiBAcceptedWhenConfigured(t *testing.T) {
 }
 
 func TestUpload_OverSmallCapKeepsTheSizeRejection(t *testing.T) {
+	t.Parallel()
 	h := cappedHarness(t, 10)
 	rr := streamedUpload(t, h.router, h.token, 11<<20)
 	assertErrorCode(t, rr, http.StatusBadRequest, "BAD_REQUEST")
@@ -85,6 +87,7 @@ func TestUpload_OverSmallCapKeepsTheSizeRejection(t *testing.T) {
 // upload.max_size_mb: 0 disables uploads: storage.Save refuses every
 // non-empty file with the ordinary size rejection and keeps nothing.
 func TestUpload_ZeroMaxSizeRefusesUploads(t *testing.T) {
+	t.Parallel()
 	h := cappedHarness(t, 0)
 	rr := streamedUpload(t, h.router, h.token, 1)
 	assertErrorCode(t, rr, http.StatusBadRequest, "BAD_REQUEST")
@@ -94,6 +97,7 @@ func TestUpload_ZeroMaxSizeRefusesUploads(t *testing.T) {
 }
 
 func TestUploadBodyCap(t *testing.T) {
+	t.Parallel()
 	const hundredMiB = int64(100 << 20)
 	for _, tc := range []struct {
 		name    string

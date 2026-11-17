@@ -32,6 +32,7 @@ func mustCreatePoll(t *testing.T, f *forwardFixture, p PollCreateParams) *SendMe
 }
 
 func TestCreatePoll_StoresFallbackAndBlock(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	res := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
 
@@ -63,6 +64,7 @@ func TestCreatePoll_StoresFallbackAndBlock(t *testing.T) {
 }
 
 func TestCreatePoll_Multiselect(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	p := f.pollParams(fwdBob, fwdDstChan)
 	p.AllowMultiselect = true
@@ -73,6 +75,7 @@ func TestCreatePoll_Multiselect(t *testing.T) {
 }
 
 func TestCreatePoll_CapsTable(t *testing.T) {
+	t.Parallel()
 	long := func(n int) string { return strings.Repeat("x", n) }
 	answers := func(n int) []PollAnswerParam {
 		out := make([]PollAnswerParam, n)
@@ -161,6 +164,7 @@ func TestCreatePoll_CapsTable(t *testing.T) {
 }
 
 func TestCreatePoll_GatesAreSendGates(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	tests := []struct {
 		name    string
@@ -206,6 +210,7 @@ func TestCreatePoll_GatesAreSendGates(t *testing.T) {
 }
 
 func TestCreatePoll_AnnouncementWithManageSucceeds(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	seedChannel(t, f.database, &db.Channel{ID: 40, Name: "news", Type: "announcement"})
 	if _, err := f.database.ExecContext(context.Background(),
@@ -219,6 +224,7 @@ func TestCreatePoll_AnnouncementWithManageSucceeds(t *testing.T) {
 }
 
 func TestCreatePoll_RetryNoSecondPoll(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	p := f.pollParams(fwdBob, fwdDstChan)
 	first := mustCreatePoll(t, f, p)
@@ -263,6 +269,7 @@ func TestCreatePoll_RetryNoSecondPoll(t *testing.T) {
 }
 
 func TestCreatePoll_RetryAfterPermissionLossIsAnswered(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	p := f.pollParams(fwdBob, fwdDstChan)
 	first := mustCreatePoll(t, f, p)
@@ -275,6 +282,7 @@ func TestCreatePoll_RetryAfterPermissionLossIsAnswered(t *testing.T) {
 }
 
 func TestCreatePoll_NoMentionsNoChannelPush(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	push := &countingPush{}
 	f.svc.SetPushNotifier(push)
@@ -301,6 +309,7 @@ func TestCreatePoll_NoMentionsNoChannelPush(t *testing.T) {
 }
 
 func TestCreatePoll_UntrustedDMIsStagedAsARequest(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	f.svc.SetMessageRequests(NewMessageRequestService(f.database, NewBlockService(f.database)))
 	res := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDM))
@@ -316,6 +325,7 @@ func TestCreatePoll_UntrustedDMIsStagedAsARequest(t *testing.T) {
 }
 
 func TestCreatePoll_Limiter(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, auth.NewRateLimiter())
 	first := f.pollParams(fwdBob, fwdDstChan)
 	mustCreatePoll(t, f, first)
@@ -339,6 +349,7 @@ func TestCreatePoll_Limiter(t *testing.T) {
 }
 
 func TestForward_PollRefused(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	poll := mustCreatePoll(t, f, f.pollParams(fwdAlice, fwdSrcChan))
 	_, err := f.forward(fwdDstChan, poll.MessageID)
@@ -361,6 +372,7 @@ func TestForward_PollRefused(t *testing.T) {
 }
 
 func TestEditMessage_PollRefused(t *testing.T) {
+	t.Parallel()
 	f := newForwardFixture(t, nil)
 	poll := mustCreatePoll(t, f, f.pollParams(fwdBob, fwdDstChan))
 	if _, err := f.svc.EditMessage(context.Background(), fwdBob, poll.MessageID, "rewritten"); err == nil {

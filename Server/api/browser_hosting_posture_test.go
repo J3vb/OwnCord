@@ -185,6 +185,7 @@ func assertWalkedTheRealTree(t *testing.T, total, adminRoutes int) {
 // 2's route half: with the shipped configuration, no route in the production
 // tree hosts a browser client.
 func TestBrowserHostingPosture_DefaultMountsNoBrowserClientRoute(t *testing.T) {
+	t.Parallel()
 	total, adminRoutes, hits := walkBrowserHostingRoutes(t, fullRouter(t))
 	assertWalkedTheRealTree(t, total, adminRoutes)
 	if len(hits) > 0 {
@@ -196,6 +197,7 @@ func TestBrowserHostingPosture_DefaultMountsNoBrowserClientRoute(t *testing.T) {
 // TestBrowserHostingPosture_DefaultServesNoBrowserClientAsset is BG-01 clause
 // 2's asset half, checked on the wire rather than in the route table.
 func TestBrowserHostingPosture_DefaultServesNoBrowserClientAsset(t *testing.T) {
+	t.Parallel()
 	h := fullRouter(t)
 	// The probe cannot tell a server that hosts nothing from a stub that
 	// answers nothing, so it borrows the walk's guard before trusting a
@@ -258,6 +260,7 @@ var portalRouteHits = []string{"* /assets/*", "GET /"}
 // serves / and its real assets, and every other candidate path still answers
 // as an unmounted route.
 func TestBrowserHostingPosture_EnabledMountsExactlyPortalRoutes(t *testing.T) {
+	t.Parallel()
 	bundle := fstest.MapFS{
 		"index.html":           {Data: []byte("<!doctype html><div id=root>")},
 		"assets/index-abc.js":  {Data: []byte("// bundle")},
@@ -316,6 +319,7 @@ func TestBrowserHostingPosture_EnabledMountsExactlyPortalRoutes(t *testing.T) {
 // mountedSubtreePatterns finds it. Without this, a green walk would prove only
 // that the walk ran.
 func TestBrowserHostingPosture_WalkNegativeControl(t *testing.T) {
+	t.Parallel()
 	r := chi.NewRouter()
 	r.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.Dir(bundleDir(t)))))
 	r.Get("/index.html", func(w http.ResponseWriter, _ *http.Request) {
@@ -356,6 +360,7 @@ func TestBrowserHostingPosture_WalkNegativeControl(t *testing.T) {
 // justifies having two checkers. If it ever disappears, one of them has
 // stopped doing its job.
 func TestBrowserHostingPosture_WireProbeNegativeControl(t *testing.T) {
+	t.Parallel()
 	assets := bundleDir(t)
 	for _, tc := range []struct {
 		name string
@@ -457,6 +462,7 @@ func bundleDir(t *testing.T) string {
 // like any other rather than exempted: a mount helper added beside the
 // declaration is the likeliest place for one to appear.
 func TestBrowserHostingPosture_PluginAssetHandlerStaysUnmounted(t *testing.T) {
+	t.Parallel()
 	const (
 		selector = ".AssetHandler"
 		declFile = "plugin/host_ui.go"

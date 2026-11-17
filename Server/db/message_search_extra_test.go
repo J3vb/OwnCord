@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"slices"
+	"sync/atomic"
 	"testing"
 
 	"github.com/J3vb/OwnCord/Server/db"
@@ -23,13 +24,13 @@ func seedAttached(t *testing.T, database *db.DB, ch, user int64, content, mime s
 	return id
 }
 
-var attachSeq int
+var attachSeq atomic.Int64
 
 // seedUnlinked uploads an attachment that no message owns yet.
 func seedUnlinked(t *testing.T, database *db.DB, user int64, mime string) string {
 	t.Helper()
-	attachSeq++
-	id := fmt.Sprintf("att-%d", attachSeq)
+	seq := attachSeq.Add(1)
+	id := fmt.Sprintf("att-%d", seq)
 	mustDo(t, "CreateAttachment", database.CreateAttachment(context.Background(), id, user, "f", id, mime, 10, nil, nil))
 	return id
 }
@@ -44,6 +45,7 @@ func searchIDs(t *testing.T, database *db.DB, q db.SearchQuery) []int64 {
 }
 
 func TestSearchFiltered_HasMime(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	u := seedUser(t, database, "hm")
 	ch := seedChannel(t, database, "hasmime")
@@ -74,6 +76,7 @@ func TestSearchFiltered_HasMime(t *testing.T) {
 }
 
 func TestSearchFiltered_HasLinkApprox(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	u := seedUser(t, database, "hl")
@@ -91,6 +94,7 @@ func TestSearchFiltered_HasLinkApprox(t *testing.T) {
 // Edge case 1: an attachment not yet linked, or on a deleted message, never
 // satisfies has:.
 func TestSearchFiltered_HasExcludesUnlinkedAttachments(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	u := seedUser(t, database, "hu")
@@ -109,6 +113,7 @@ func TestSearchFiltered_HasExcludesUnlinkedAttachments(t *testing.T) {
 }
 
 func TestSearchFiltered_HasValuesAnd(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	u := seedUser(t, database, "ha")
@@ -123,6 +128,7 @@ func TestSearchFiltered_HasValuesAnd(t *testing.T) {
 }
 
 func TestSearchFiltered_HasUnknownKindRefused(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ch := seedChannel(t, database, "hasbad")
 	_, err := database.SearchMessagesFiltered(context.Background(),
@@ -133,6 +139,7 @@ func TestSearchFiltered_HasUnknownKindRefused(t *testing.T) {
 }
 
 func TestSearchFiltered_Pinned(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	u := seedUser(t, database, "pn")
@@ -154,6 +161,7 @@ func TestSearchFiltered_Pinned(t *testing.T) {
 }
 
 func TestSearchFiltered_MentionsExcludesReplyPingAndEveryone(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	author, bob, cat := seedUser(t, database, "ma"), seedUser(t, database, "mb"), seedUser(t, database, "mc")
@@ -179,6 +187,7 @@ func TestSearchFiltered_MentionsExcludesReplyPingAndEveryone(t *testing.T) {
 // Edge case 2: an edit that removes the mention stops the match, and the
 // reply-ping row kept across the edit never matches.
 func TestSearchFiltered_MentionsFollowsEdit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	author, bob := seedUser(t, database, "ea"), seedUser(t, database, "eb")

@@ -15,6 +15,7 @@ import (
 // into an archive indefinitely, with nobody able to see or moderate the result.
 // Archived channels are now read-only.
 func TestSendMessage_RefusedInArchivedChannel(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, database := newMentionFixture(t)
 
@@ -41,6 +42,7 @@ func TestSendMessage_RefusedInArchivedChannel(t *testing.T) {
 // The gate must be scoped to the archive flag alone: un-archiving restores
 // posting, and an ordinary channel is unaffected.
 func TestSendMessage_AllowedAfterUnarchive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	svc, _, database := newMentionFixture(t)
 
@@ -73,6 +75,7 @@ func TestSendMessage_AllowedAfterUnarchive(t *testing.T) {
 // out to every reader as chat_edited — even though a fresh chat_send was
 // refused. The gate must be shared, not re-implemented per sink.
 func TestEditMessage_RefusedInArchivedChannel(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ctx := context.Background()
 
@@ -102,6 +105,7 @@ func TestEditMessage_RefusedInArchivedChannel(t *testing.T) {
 // checkSendPermission entirely, so it needs its own archived gate. A reaction
 // fans a live reaction_update out to every reader just like a send or edit.
 func TestAddReaction_RefusedInArchivedChannel(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	ctx := context.Background()
 
@@ -128,6 +132,7 @@ func TestAddReaction_RefusedInArchivedChannel(t *testing.T) {
 // OC-0022: SetMessagePinned also bypasses checkSendPermission, so a
 // MANAGE_MESSAGES holder could still pin/unpin in an archived channel.
 func TestSetMessagePinned_RefusedInArchivedChannel(t *testing.T) {
+	t.Parallel()
 	svc, database := newPurgeService(t) // seeds user 2 with MANAGE_MESSAGES on channel 10
 	ctx := context.Background()
 
@@ -155,6 +160,7 @@ func TestSetMessagePinned_RefusedInArchivedChannel(t *testing.T) {
 // MANAGE_MESSAGES holder could still bulk-delete an archived channel's
 // history.
 func TestPurgeMessages_RefusedInArchivedChannel(t *testing.T) {
+	t.Parallel()
 	svc, database := newPurgeService(t)
 	ctx := context.Background()
 	ids := seedPurgeMessages(t, database, 10, 3)

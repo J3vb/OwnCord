@@ -39,6 +39,7 @@ func (s *afterAudienceListingStore) ListPushSubscriptionsForDispatch(ctx context
 }
 
 func TestPushDispatch_Condition6_WithdrawnAuthorityGovernsEveryAttempt(t *testing.T) {
+	t.Parallel()
 	const (
 		author    = int64(1)
 		withdrawn = int64(2)

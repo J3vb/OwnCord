@@ -26,6 +26,7 @@ func newSettingsService(t *testing.T) (*SettingsService, *db.DB) {
 }
 
 func TestSettings_ListContainsMigratedDefaults(t *testing.T) {
+	t.Parallel()
 	svc, _ := newSettingsService(t)
 	all, err := svc.List(context.Background())
 	mustDo(t, "List", err)
@@ -35,6 +36,7 @@ func TestSettings_ListContainsMigratedDefaults(t *testing.T) {
 }
 
 func TestSettings_PatchRejectsUnknownKeyWritingNothing(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	before, _ := database.GetSetting(context.Background(), "server_name")
 
@@ -55,6 +57,7 @@ func TestSettings_PatchRejectsUnknownKeyWritingNothing(t *testing.T) {
 }
 
 func TestSettings_PatchNormalizesBooleans(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	// require_2fa's preconditions hold on a closed, user-less server.
 	if _, err := svc.Patch(context.Background(), 1, map[string]string{
@@ -79,6 +82,7 @@ func TestSettings_PatchNormalizesBooleans(t *testing.T) {
 }
 
 func TestSettings_PatchNormalizesRegistrationMode(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	if _, err := svc.Patch(context.Background(), 1, map[string]string{
 		"registration_mode": "  APPROVAL ",
@@ -92,6 +96,7 @@ func TestSettings_PatchNormalizesRegistrationMode(t *testing.T) {
 }
 
 func TestSettings_PatchRejectsInvalidBoolean(t *testing.T) {
+	t.Parallel()
 	svc, _ := newSettingsService(t)
 	_, err := svc.Patch(context.Background(), 1, map[string]string{
 		"require_2fa": "maybe",
@@ -105,6 +110,7 @@ func TestSettings_PatchRejectsInvalidBoolean(t *testing.T) {
 }
 
 func TestSettings_PatchRejectsUnknownRegistrationMode(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	before, _ := database.GetSetting(context.Background(), "registration_mode")
 	_, err := svc.Patch(context.Background(), 1, map[string]string{
@@ -122,6 +128,7 @@ func TestSettings_PatchRejectsUnknownRegistrationMode(t *testing.T) {
 }
 
 func TestSettings_Require2FARejectedUnlessRegistrationClosed(t *testing.T) {
+	t.Parallel()
 	svc, _ := newSettingsService(t)
 	for _, mode := range []string{"invite", "approval", "open"} {
 		_, err := svc.Patch(context.Background(), 1, map[string]string{
@@ -138,6 +145,7 @@ func TestSettings_Require2FARejectedUnlessRegistrationClosed(t *testing.T) {
 }
 
 func TestSettings_RegistrationCannotReopenWhileRequire2FAOn(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	if _, err := svc.Patch(context.Background(), 1, map[string]string{
 		"registration_mode": "closed",
@@ -155,6 +163,7 @@ func TestSettings_RegistrationCannotReopenWhileRequire2FAOn(t *testing.T) {
 }
 
 func TestSettings_Require2FARejectedUntilAllEnrolled(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "un-enrolled"})
 
@@ -171,6 +180,7 @@ func TestSettings_Require2FARejectedUntilAllEnrolled(t *testing.T) {
 }
 
 func TestSettings_Require2FAAllowedWithNoUnenrolledUsers(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	if _, err := svc.Patch(context.Background(), 1, map[string]string{
 		"require_2fa":       "1",
@@ -185,6 +195,7 @@ func TestSettings_Require2FAAllowedWithNoUnenrolledUsers(t *testing.T) {
 }
 
 func TestSettings_UnrelatedKeyNotBlockedByRequire2FAGate(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	// require_2fa already on, and a user without TOTP exists: an unrelated
 	// PATCH must not inherit the gate (the wedged-settings-page regression).
@@ -201,6 +212,7 @@ func TestSettings_UnrelatedKeyNotBlockedByRequire2FAGate(t *testing.T) {
 }
 
 func TestSettings_PatchAppliesAllKeysAndAudits(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	after, err := svc.Patch(context.Background(), 7, map[string]string{
 		"server_name": "Renamed",
@@ -226,6 +238,7 @@ func TestSettings_PatchAppliesAllKeysAndAudits(t *testing.T) {
 }
 
 func TestSettings_SettingWrapsErrNotFound(t *testing.T) {
+	t.Parallel()
 	svc, _ := newSettingsService(t)
 	if _, err := svc.Setting(context.Background(), "no_such_key"); !errors.Is(err, db.ErrNotFound) {
 		t.Fatalf("err = %v, want db.ErrNotFound", err)
@@ -240,6 +253,7 @@ func TestSettings_SettingWrapsErrNotFound(t *testing.T) {
 // each row's new mode is the next row's old mode, from the migrated default
 // to the value that finally stuck — whatever order the racers landed in.
 func TestSettings_RegistrationModeTransitionsChainUnderConcurrency(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	rec := audittest.Install(t, database)
 	ctx := context.Background()
@@ -295,6 +309,7 @@ func TestSettings_RegistrationModeTransitionsChainUnderConcurrency(t *testing.T)
 }
 
 func TestVoiceOwnerMovable_OwnerOnlyKeyAndDefault(t *testing.T) {
+	t.Parallel()
 	if !IsOwnerOnlySettingKey(VoiceOwnerMovableKey) {
 		t.Error("voice_owner_movable must be an owner-only setting key")
 	}
@@ -308,6 +323,7 @@ func TestVoiceOwnerMovable_OwnerOnlyKeyAndDefault(t *testing.T) {
 // WP 8.3e-2: the game activity switch is the admin's (MANAGE_SERVER), not the
 // owner's, and a missing row means on.
 func TestGameActivityEnabled_BlankTrueGarbageFalse(t *testing.T) {
+	t.Parallel()
 	if IsOwnerOnlySettingKey(GameActivityEnabledKey) {
 		t.Error("game_activity_enabled must not be an owner-only setting key")
 	}
@@ -319,6 +335,7 @@ func TestGameActivityEnabled_BlankTrueGarbageFalse(t *testing.T) {
 }
 
 func TestSettingsPatch_GameActivityEnabled_Normalizes(t *testing.T) {
+	t.Parallel()
 	svc, database := newSettingsService(t)
 	ctx := context.Background()
 	for in, want := range map[string]string{"FALSE": "false", "0": "false", "true": "true", "1": "true"} {
@@ -335,6 +352,7 @@ func TestSettingsPatch_GameActivityEnabled_Normalizes(t *testing.T) {
 }
 
 func TestGameActivityEnabledFromRead(t *testing.T) {
+	t.Parallel()
 	boom := errors.New("read failed")
 	cases := []struct {
 		name        string

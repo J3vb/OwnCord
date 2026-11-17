@@ -10,6 +10,7 @@ import (
 // package grows).
 
 func TestDeleteOtherSessions_KeepsTheCurrentOne(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "multi", "hash", 4)
@@ -31,6 +32,7 @@ func TestDeleteOtherSessions_KeepsTheCurrentOne(t *testing.T) {
 }
 
 func TestGetRoleForUser_ReadsTheRole(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "member", "hash", 4)
@@ -44,6 +46,7 @@ func TestGetRoleForUser_ReadsTheRole(t *testing.T) {
 }
 
 func TestDMChannel_ParticipantsAndLookup(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	a, _ := database.CreateUser(ctx, "alice", "hash", 4)
@@ -65,6 +68,7 @@ func TestDMChannel_ParticipantsAndLookup(t *testing.T) {
 }
 
 func TestCountEventsInRange(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	for seq := int64(1); seq <= 3; seq++ {

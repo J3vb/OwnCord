@@ -56,6 +56,7 @@ func (c *cancelOnCommitStore) GetUserByID(ctx context.Context, id int64) (*db.Us
 }
 
 func TestUpdateProfile_SurvivesRequestCancelAfterCommit(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice", PasswordHash: "h"})
 
@@ -83,6 +84,7 @@ func TestUpdateProfile_SurvivesRequestCancelAfterCommit(t *testing.T) {
 }
 
 func TestUpdateProfileWithIdentityKey_SurvivesRequestCancelAfterCommit(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice", PasswordHash: "h"})
 

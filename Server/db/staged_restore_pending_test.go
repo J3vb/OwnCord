@@ -8,6 +8,7 @@ import (
 )
 
 func TestRestorePending_MarkerOrRollback(t *testing.T) {
+	t.Parallel()
 	f := newStagedFixture(t)
 	if err := RestorePending(f.live); err != nil {
 		t.Fatalf("nothing staged: RestorePending = %v, want nil", err)
@@ -30,6 +31,7 @@ func TestRestorePending_MarkerOrRollback(t *testing.T) {
 // The staged copy takes the live database's mode, so the renamed-in file is
 // as usable by the service as the one it replaces.
 func TestStageRestore_StagedCopyKeepsLiveMode(t *testing.T) {
+	t.Parallel()
 	if runtime.GOOS == "windows" {
 		t.Skip("no Unix file modes on Windows")
 	}
@@ -49,6 +51,7 @@ func TestStageRestore_StagedCopyKeepsLiveMode(t *testing.T) {
 
 // With no live database there is nothing to match: the copy keeps its own mode.
 func TestMatchLiveOwner_NoLiveDatabase(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	out, err := os.CreateTemp(dir, "staged")
 	if err != nil {

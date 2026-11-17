@@ -39,6 +39,7 @@ func newOwnerGrantRoleService(t *testing.T) (*RoleService, *db.DB) {
 }
 
 func TestCreateRole_OwnerGrantOnlyBit(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		actor   int64
@@ -74,6 +75,7 @@ func TestCreateRole_OwnerGrantOnlyBit(t *testing.T) {
 }
 
 func TestUpdateRole_OwnerGrantOnlyBit_AddRefusedForManageRoles(t *testing.T) {
+	t.Parallel()
 	svc, database := newOwnerGrantRoleService(t)
 	_, _, err := svc.UpdateRole(context.Background(), 2, ownerGrantPlainRoleID,
 		RoleInput{Permissions: new(ownerGrantNonMoverBits | permissions.MoveMembers)})
@@ -87,6 +89,7 @@ func TestUpdateRole_OwnerGrantOnlyBit_AddRefusedForManageRoles(t *testing.T) {
 }
 
 func TestUpdateRole_OwnerGrantOnlyBit_RemoveRefusedForManageRoles(t *testing.T) {
+	t.Parallel()
 	svc, database := newOwnerGrantRoleService(t)
 	_, _, err := svc.UpdateRole(context.Background(), 2, ownerGrantVoiceRoleID,
 		RoleInput{Permissions: new(permissions.ReadMessages)})
@@ -100,6 +103,7 @@ func TestUpdateRole_OwnerGrantOnlyBit_RemoveRefusedForManageRoles(t *testing.T) 
 }
 
 func TestUpdateRole_OwnerGrantOnlyBit_UnrelatedEditOfCarrierAllowed(t *testing.T) {
+	t.Parallel()
 	svc, _ := newOwnerGrantRoleService(t)
 	// Same bits re-sent, a different bit added the actor holds: the owner-grant
 	// bit does not change, so MANAGE_ROLES is enough.
@@ -110,6 +114,7 @@ func TestUpdateRole_OwnerGrantOnlyBit_UnrelatedEditOfCarrierAllowed(t *testing.T
 }
 
 func TestUpdateRole_OwnerGrantOnlyBit_OwnerAndAdministratorAllowed(t *testing.T) {
+	t.Parallel()
 	for name, actor := range map[string]int64{"owner": 1, "administrator": ownerGrantSuperUserID} {
 		t.Run(name, func(t *testing.T) {
 			svc, database := newOwnerGrantRoleService(t)
@@ -145,6 +150,7 @@ func newOwnerGrantModerationFixture(t *testing.T) (*ModerationService, *db.DB) {
 }
 
 func TestAddUserRole_RoleCarryingOwnerGrantOnlyBit(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		actor   int64
@@ -178,6 +184,7 @@ func TestAddUserRole_RoleCarryingOwnerGrantOnlyBit(t *testing.T) {
 }
 
 func TestRemoveUserRole_RoleCarryingOwnerGrantOnlyBit(t *testing.T) {
+	t.Parallel()
 	svc, database := newOwnerGrantModerationFixture(t)
 	ctx := context.Background()
 	if _, err := svc.AddUserRole(ctx, 1, 5, ownerGrantVoiceRoleID); err != nil {
@@ -201,6 +208,7 @@ func TestRemoveUserRole_RoleCarryingOwnerGrantOnlyBit(t *testing.T) {
 }
 
 func TestChangeUserRole_RoleCarryingOwnerGrantOnlyBit_NeedsTheBit(t *testing.T) {
+	t.Parallel()
 	svc, _ := newOwnerGrantModerationFixture(t)
 	if _, err := svc.ChangeUserRole(context.Background(), 3, 5, ownerGrantVoiceRoleID); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("ChangeUserRole err = %v, want ErrForbidden", err)
@@ -213,6 +221,7 @@ func TestChangeUserRole_RoleCarryingOwnerGrantOnlyBit_NeedsTheBit(t *testing.T) 
 // Replacing a member's roles clears the ones they hold now: a MANAGE_ROLES
 // non-owner cannot strip a carrier role that way either.
 func TestChangeUserRole_CannotStripACarrierRole(t *testing.T) {
+	t.Parallel()
 	svc, database := newOwnerGrantModerationFixture(t)
 	ctx := context.Background()
 	if _, err := svc.AddUserRole(ctx, 1, 5, ownerGrantVoiceRoleID); err != nil {
@@ -233,6 +242,7 @@ func TestChangeUserRole_CannotStripACarrierRole(t *testing.T) {
 }
 
 func TestDeleteRole_CarryingOwnerGrantOnlyBit(t *testing.T) {
+	t.Parallel()
 	for name, tc := range map[string]struct {
 		actor   int64
 		wantErr bool
@@ -261,6 +271,7 @@ func TestDeleteRole_CarryingOwnerGrantOnlyBit(t *testing.T) {
 // A default role that carries the bit would hand it to members left with no
 // other role, so deleting any role then needs the owner too.
 func TestDeleteRole_FallbackCarryingOwnerGrantOnlyBit(t *testing.T) {
+	t.Parallel()
 	svc, database := newOwnerGrantRoleService(t)
 	if _, err := database.ExecContext(context.Background(),
 		`UPDATE roles SET permissions = permissions | ? WHERE is_default = 1`, permissions.MoveMembers); err != nil {

@@ -8,6 +8,7 @@ import (
 // The marker file keeps the id counters as floors: written with every
 // account marker, only ever rising, one per table.
 func TestMarkerStore_SequenceFloorsOnlyRise(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := openTestMarkers(t, testMarkerKey(6))
 	if floors, err := m.SequenceFloors(ctx); err != nil || len(floors) != 0 {
@@ -38,6 +39,7 @@ func TestMarkerStore_SequenceFloorsOnlyRise(t *testing.T) {
 // a table that never had a row a counter so its first id lands above the
 // floor too.
 func TestRaiseSequences_MovesCountersUpOnly(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemoryInternal(t)
 	if _, err := database.CreateUser(ctx, "seq-a", "hash", 4); err != nil {

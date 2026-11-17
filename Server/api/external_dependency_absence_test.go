@@ -123,6 +123,7 @@ func scanColumns(ctx context.Context, sqlDB *sql.DB) (tables int, hits []string,
 }
 
 func TestAbsenceContract_NoMailTransportImport(t *testing.T) {
+	t.Parallel()
 	files, hits, err := scanImports("..")
 	if err != nil {
 		t.Fatalf("scanning Server/: %v", err)
@@ -175,6 +176,7 @@ func scanRoutes(routes chi.Routes) (total int, hits []string, err error) {
 }
 
 func TestAbsenceContract_NoMailModuleRequirement(t *testing.T) {
+	t.Parallel()
 	raw, err := os.ReadFile(filepath.Join("..", "go.mod"))
 	if err != nil {
 		t.Fatalf("read go.mod: %v", err)
@@ -185,6 +187,7 @@ func TestAbsenceContract_NoMailModuleRequirement(t *testing.T) {
 }
 
 func TestAbsenceContract_NoMailConfigKeyOrRoute(t *testing.T) {
+	t.Parallel()
 	keys := configKeys(reflect.TypeFor[config.Config](), "")
 	if len(keys) < 30 {
 		t.Fatalf("collected only %d config keys; expected the full config surface (>= 30)", len(keys))
@@ -210,6 +213,7 @@ func TestAbsenceContract_NoMailConfigKeyOrRoute(t *testing.T) {
 }
 
 func TestAbsenceContract_NoEmailColumn(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	tables, hits, err := scanColumns(context.Background(), database.SQLDb())
 	if err != nil {
@@ -227,6 +231,7 @@ func TestAbsenceContract_NoEmailColumn(t *testing.T) {
 // green run above proves only that the scanner ran.
 
 func TestAbsenceContract_ImportScannerNegativeControl(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	probe := "package probe\n\nimport _ \"net/smtp\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "probe.go"), []byte(probe), 0o600); err != nil {
@@ -242,6 +247,7 @@ func TestAbsenceContract_ImportScannerNegativeControl(t *testing.T) {
 }
 
 func TestAbsenceContract_ColumnScannerNegativeControl(t *testing.T) {
+	t.Parallel()
 	database, err := db.Open(":memory:")
 	if err != nil {
 		t.Fatalf("db.Open: %v", err)
@@ -261,6 +267,7 @@ func TestAbsenceContract_ColumnScannerNegativeControl(t *testing.T) {
 }
 
 func TestAbsenceContract_ModuleScannerNegativeControl(t *testing.T) {
+	t.Parallel()
 	// A conventional transport name that carries neither "smtp" nor a vendor
 	// name — exactly what the bare-word boundary rule in mailPattern is for.
 	gomod := "module example.com/probe\n\ngo 1.26\n\nrequire (\n\tgithub.com/go-chi/chi/v5 v5.2.0\n\tgithub.com/wneessen/go-mail v0.6.2\n)\n"
@@ -271,6 +278,7 @@ func TestAbsenceContract_ModuleScannerNegativeControl(t *testing.T) {
 }
 
 func TestAbsenceContract_ConfigKeyScannerNegativeControl(t *testing.T) {
+	t.Parallel()
 	hits := scanConfigKeys([]string{"server.port", "auth.mail_address", "storage.dir"})
 	if len(hits) != 1 || hits[0] != "config key auth.mail_address" {
 		t.Fatalf("negative control: hits=%v, want the planted mail_address key reported once", hits)
@@ -278,6 +286,7 @@ func TestAbsenceContract_ConfigKeyScannerNegativeControl(t *testing.T) {
 }
 
 func TestAbsenceContract_RouteScannerNegativeControl(t *testing.T) {
+	t.Parallel()
 	r := chi.NewRouter()
 	noContent := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusNoContent) }
 	r.Get("/api/v1/health", noContent)
@@ -292,6 +301,7 @@ func TestAbsenceContract_RouteScannerNegativeControl(t *testing.T) {
 }
 
 func TestAbsenceContract_MailPatternBoundaries(t *testing.T) {
+	t.Parallel()
 	// The bare word matches at name boundaries only; the vendor and mailbox
 	// terms carry the rest. Pinned so a later edit cannot quietly drop either.
 	for _, s := range []string{"github.com/wneessen/go-mail", "mail_address", "/mail/recovery", "net/mail", "MAIL", "email", "e-mail", "net/smtp", "mailer", "gomail"} {

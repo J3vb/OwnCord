@@ -39,6 +39,7 @@ func (b *orderRecordingCloseDMBroadcaster) SendToUser(userID int64, msg []byte) 
 // can never be redelivered to it: the client keeps rendering a DM that was
 // already closed.
 func TestCloseDM_WatermarkBumpsBeforeTheNotifySend(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	bc := &orderRecordingCloseDMBroadcaster{mockBroadcaster: &mockBroadcaster{}}
 	router := buildDMRouter(database, bc)

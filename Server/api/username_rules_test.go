@@ -27,6 +27,7 @@ func registerWithInvite(t *testing.T, router http.Handler, ownerID int64, databa
 }
 
 func TestRegister_RefusesStrictInvalidUsername(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	ownerID := seedUser(t, database, "owner_x", "securePass1", 1)
 
@@ -41,6 +42,7 @@ func TestRegister_RefusesStrictInvalidUsername(t *testing.T) {
 
 // Edge case 2: a precomposed and a decomposed accent both pass.
 func TestRegister_AcceptsNFCAndNFDAccents(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	ownerID := seedUser(t, database, "owner_y", "securePass1", 1)
@@ -53,6 +55,7 @@ func TestRegister_AcceptsNFCAndNFDAccents(t *testing.T) {
 }
 
 func TestUpdateProfile_RenameRefusesStrictInvalidUsername(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "renamer", 4)
@@ -75,6 +78,7 @@ func TestUpdateProfile_RenameRefusesStrictInvalidUsername(t *testing.T) {
 // directly, as every account made before 3C-9 is) still logs in and recovers,
 // can still edit the rest of its profile, and is refused only a rename.
 func TestLegacyUsername_StillLogsInRecoversAndEditsProfile(t *testing.T) {
+	t.Parallel()
 	database, _, router := newAuthEnv(t)
 	profileRouter := buildProfileRouter(database)
 	const legacy = "old name"
@@ -106,6 +110,7 @@ func TestLegacyUsername_StillLogsInRecoversAndEditsProfile(t *testing.T) {
 }
 
 func TestUpdateProfile_DisplayNameCharacterRules(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildProfileRouter(database)
 	token := profileCreateToken(t, database, "dnrules", 4)
@@ -139,6 +144,7 @@ func TestUpdateProfile_DisplayNameCharacterRules(t *testing.T) {
 // working: it can be resent while editing the display name, and recovery
 // accepts it.
 func TestLegacyApostropheUsername_ProfileEditAndRecovery(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router := buildAuthRouter(database, auth.NewRateLimiter())
 	profileRouter := buildProfileRouter(database)

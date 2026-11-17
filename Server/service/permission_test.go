@@ -33,6 +33,7 @@ func (errOverrideStore) GetMemberGrants(context.Context, int64) (permissions.Mem
 // restores every bit a channel-level deny had stripped — and PermissionService
 // would then cache that degraded snapshot for permCacheTTL.
 func TestHasChannelPerm_OverrideFetchErrorDenies(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
@@ -58,6 +59,7 @@ func newTestPermService(t *testing.T) (*PermissionService, *db.DB) {
 }
 
 func TestHasChannelPerm_Allowed(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestPermService(t)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
@@ -71,6 +73,7 @@ func TestHasChannelPerm_Allowed(t *testing.T) {
 }
 
 func TestHasChannelPerm_Denied(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestPermService(t)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
@@ -81,6 +84,7 @@ func TestHasChannelPerm_Denied(t *testing.T) {
 }
 
 func TestHasChannelPerm_OverrideDeny(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestPermService(t)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "readonly", Type: "text"})
 	// Deny SendMessages for this channel.
@@ -98,6 +102,7 @@ func TestHasChannelPerm_OverrideDeny(t *testing.T) {
 }
 
 func TestHasChannelPerm_OverrideAllow(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestPermService(t)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "special", Type: "text"})
 	// Allow ManageMessages (not in base role) via channel override.
@@ -110,6 +115,7 @@ func TestHasChannelPerm_OverrideAllow(t *testing.T) {
 }
 
 func TestHasChannelPerm_AdminBypass(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedRole(t, database, &db.Role{
 		ID:          permissions.AdminRoleID,
@@ -138,6 +144,7 @@ func TestHasChannelPerm_AdminBypass(t *testing.T) {
 // channel check anyway. Without the skip, an override-fetch outage would
 // deny admins everything instead of nothing.
 func TestHasChannelPerm_AdminSkipsOverrideFetch(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedRole(t, database, &db.Role{
 		ID:          permissions.AdminRoleID,
@@ -156,6 +163,7 @@ func TestHasChannelPerm_AdminSkipsOverrideFetch(t *testing.T) {
 }
 
 func TestInvalidateUser_ClearsCacheForUser(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestPermService(t)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
@@ -178,6 +186,7 @@ func TestInvalidateUser_ClearsCacheForUser(t *testing.T) {
 }
 
 func TestInvalidateAll_ClearsEntireCache(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestPermService(t)
 	// Add a second user.
 	seedUserRole(t, database, 2, permissions.MemberRoleID)
@@ -210,6 +219,7 @@ func TestInvalidateAll_ClearsEntireCache(t *testing.T) {
 }
 
 func TestPermCacheTTLExpiry(t *testing.T) {
+	t.Parallel()
 	// This test verifies the cache TTL mechanism. We cannot easily wait 30s
 	// in a unit test, so we verify the structural behavior: after manually
 	// backdating the populatedAt field the cache should be stale and the
@@ -237,6 +247,7 @@ func TestPermCacheTTLExpiry(t *testing.T) {
 }
 
 func TestHasChannelPerm_UnknownUserReturnsFalse(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestPermService(t)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 
@@ -268,6 +279,7 @@ func (s *raceHookStore) GetMemberRoles(ctx context.Context, userID int64) (*db.M
 // permission keeps being served for up to permCacheTTL (30s). All three
 // invalidation entry points bump the generation, so each is locked separately.
 func TestGetOrPopulate_InvalidationDuringPopulateNotLost(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name       string
 		invalidate func(*PermissionService)

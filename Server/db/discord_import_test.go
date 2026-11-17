@@ -35,6 +35,7 @@ func importMessages(n int, prefix string) []db.ImportMessage {
 }
 
 func TestEnsureImportAccount_IsOneRowAndNeverAMember(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	member := seedUser(t, database, "alice")
@@ -68,6 +69,7 @@ func TestEnsureImportAccount_IsOneRowAndNeverAMember(t *testing.T) {
 }
 
 func TestImportAccount_HiddenFromEveryListing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	seedUser(t, database, "alice")
@@ -111,6 +113,7 @@ func TestImportAccount_HiddenFromEveryListing(t *testing.T) {
 }
 
 func TestImportAccount_NotMentionable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	alice := seedUser(t, database, "alice")
@@ -145,6 +148,7 @@ func TestImportAccount_NotMentionable(t *testing.T) {
 }
 
 func TestPendingChannel_HiddenFromClientReads(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	member := seedUser(t, database, "alice")
@@ -187,6 +191,7 @@ func TestPendingChannel_HiddenFromClientReads(t *testing.T) {
 }
 
 func TestStartImport_SecondStartIsRefusedWhileRunning(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	ch, job := startTestImport(ctx, t, database, "one")
@@ -208,6 +213,7 @@ func TestStartImport_SecondStartIsRefusedWhileRunning(t *testing.T) {
 }
 
 func TestImportChunk_MapsRepliesAndPublishMarksRead(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	member := seedUser(t, database, "alice")
@@ -288,6 +294,7 @@ func TestImportChunk_MapsRepliesAndPublishMarksRead(t *testing.T) {
 // on the way down, so the boot clean-up has to remove the channel, its messages
 // and the attachment links, and fail the job.
 func TestFailInterruptedImports_RestartAfterChunkTwoOfFive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	author, err := database.EnsureImportAccount(ctx)
@@ -357,6 +364,7 @@ func TestFailInterruptedImports_RestartAfterChunkTwoOfFive(t *testing.T) {
 }
 
 func TestFailInterruptedImports_LeavesPublishedChannelAlone(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	author, _ := database.EnsureImportAccount(ctx)
@@ -385,6 +393,7 @@ func TestFailInterruptedImports_LeavesPublishedChannelAlone(t *testing.T) {
 }
 
 func TestStartImport_UnknownCategoryWritesNothing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	_, _, err := database.StartImport(ctx, db.StartImportParams{Name: "x", CategoryID: 999})
@@ -401,6 +410,7 @@ func TestStartImport_UnknownCategoryWritesNothing(t *testing.T) {
 // First-run setup is gated on there being no users. The hidden account must not
 // make a server that has not been set up look set up.
 func TestImportAccount_DoesNotCountAsAUserForSetup(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	if _, err := database.EnsureImportAccount(ctx); err != nil {
@@ -415,6 +425,7 @@ func TestImportAccount_DoesNotCountAsAUserForSetup(t *testing.T) {
 // timestamps, so after an import publishes they must still find native
 // messages, and the imported ones must still answer a date filter.
 func TestDateBounds_SurviveAPublishedImportOfOlderMessages(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	spammer := seedUser(t, database, "spammer")
@@ -467,6 +478,7 @@ func TestDateBounds_SurviveAPublishedImportOfOlderMessages(t *testing.T) {
 // Imported messages follow server retention like any other message once the
 // import is published; a channel still being built is not swept at all.
 func TestRetention_ServerWindowCoversPublishedImportsNotPendingOnes(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	author, _ := database.EnsureImportAccount(ctx)
@@ -511,6 +523,7 @@ func TestRetention_ServerWindowCoversPublishedImportsNotPendingOnes(t *testing.T
 // A reopened setup whose only user is the import account is still an empty
 // server: the owner must be able to claim it.
 func TestCreateOwnerIfEmpty_IgnoresTheImportAccount(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	if _, err := database.EnsureImportAccount(ctx); err != nil {
@@ -527,6 +540,7 @@ func TestCreateOwnerIfEmpty_IgnoresTheImportAccount(t *testing.T) {
 
 // An applicant approved later must not find the whole import unread.
 func TestPublishImport_MarksReadForPendingApplicantsToo(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	author, _ := database.EnsureImportAccount(ctx)
@@ -549,6 +563,7 @@ func TestPublishImport_MarksReadForPendingApplicantsToo(t *testing.T) {
 }
 
 func TestEnsureImportAccount_ReservedNameAlreadyHeldIsAClearError(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	seedUser(t, database, "[imported]") // a row from before the name was reserved
@@ -559,6 +574,7 @@ func TestEnsureImportAccount_ReservedNameAlreadyHeldIsAClearError(t *testing.T) 
 
 // Two channels in one category must not share a name once the import shows up.
 func TestPublishImport_DuplicateNamesGetAnImportedSuffix(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	author, _ := database.EnsureImportAccount(ctx)
@@ -596,6 +612,7 @@ func TestPublishImport_DuplicateNamesGetAnImportedSuffix(t *testing.T) {
 // Names clash under full Unicode case folding, as the admin routes compare
 // them, not only under SQLite's ASCII-only NOCASE.
 func TestPublishImport_NameClashFoldsNonASCIICase(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	author, _ := database.EnsureImportAccount(ctx)
@@ -616,6 +633,7 @@ func TestPublishImport_NameClashFoldsNonASCIICase(t *testing.T) {
 // A job no live importer owns (its cleanup failed) must not block imports until
 // the next boot.
 func TestStartImport_AdoptStaleTakesOverAnOrphanedRunningJob(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	oldCh, oldJob := startTestImport(ctx, t, database, "orphan")
@@ -643,6 +661,7 @@ func TestStartImport_AdoptStaleTakesOverAnOrphanedRunningJob(t *testing.T) {
 // While an import runs, its committed chunks already carry old dates under new
 // ids. A native date search must not be thrown off by them.
 func TestDateBounds_SurviveARunningImport(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	user := seedUser(t, database, "poster")
@@ -680,6 +699,7 @@ func TestDateBounds_SurviveARunningImport(t *testing.T) {
 }
 
 func TestGetLatestImportJob_ReturnsNewestAndNotFoundWhenEmpty(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	if _, err := database.GetLatestImportJob(ctx); !errors.Is(err, db.ErrNotFound) {

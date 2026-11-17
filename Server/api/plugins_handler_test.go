@@ -33,6 +33,7 @@ func openPluginTestDB(t *testing.T) *db.DB {
 }
 
 func TestPluginsHandlerListEmptyWhenRegistryNil(t *testing.T) {
+	t.Parallel()
 	h := NewPluginAdminHandler(nil, nil, nil)
 	req := httptest.NewRequest("GET", "/", nil)
 	rec := serveRequest(h, req)
@@ -45,6 +46,7 @@ func TestPluginsHandlerListEmptyWhenRegistryNil(t *testing.T) {
 }
 
 func TestPluginsHandlerInstallRejectsWhenRegistryNil(t *testing.T) {
+	t.Parallel()
 	h := NewPluginAdminHandler(nil, nil, nil)
 	body, contentType := buildZipUpload(t, validPluginZip(t))
 	req := httptest.NewRequest("POST", "/install", body)
@@ -56,6 +58,7 @@ func TestPluginsHandlerInstallRejectsWhenRegistryNil(t *testing.T) {
 }
 
 func TestPluginsHandlerInstallRejectsNonZipContentType(t *testing.T) {
+	t.Parallel()
 	reg := newTestPluginRegistry(t)
 	h := NewPluginAdminHandler(reg, nil, nil)
 
@@ -83,6 +86,7 @@ func TestPluginsHandlerInstallRejectsNonZipContentType(t *testing.T) {
 }
 
 func TestPluginsHandlerInstallRejectsNonZipMagic(t *testing.T) {
+	t.Parallel()
 	reg := newTestPluginRegistry(t)
 	h := NewPluginAdminHandler(reg, nil, nil)
 
@@ -96,6 +100,7 @@ func TestPluginsHandlerInstallRejectsNonZipMagic(t *testing.T) {
 }
 
 func TestPluginsHandlerInstallHappyPath(t *testing.T) {
+	t.Parallel()
 	reg := newTestPluginRegistry(t)
 	mem := openPluginTestDB(t)
 	// Wire the store into the handler so /list can show the new row. The
@@ -116,6 +121,7 @@ func TestPluginsHandlerInstallHappyPath(t *testing.T) {
 // The admin panel's empty state distinguishes "no plugins installed" from
 // "the runtime is off", which it can only do from this header.
 func TestPluginsHandlerListReportsRuntimeState(t *testing.T) {
+	t.Parallel()
 	off := NewPluginAdminHandler(nil, nil, nil)
 	rec := httptest.NewRecorder()
 	off.ServeHTTP(rec, httptest.NewRequest("GET", "/", nil))
@@ -134,6 +140,7 @@ func TestPluginsHandlerListReportsRuntimeState(t *testing.T) {
 // The panel reads snake_case fields; without JSON tags these marshal as
 // Go field names and every column renders empty.
 func TestPluginsHandlerListUsesSnakeCaseJSON(t *testing.T) {
+	t.Parallel()
 	reg, mem := newTestPluginRegistryWithStore(t)
 	h := NewPluginAdminHandler(reg, mem, nil)
 
@@ -165,6 +172,7 @@ func TestPluginsHandlerListUsesSnakeCaseJSON(t *testing.T) {
 }
 
 func TestPluginsHandlerEnableDisableUninstallReturn503WhenRegistryNil(t *testing.T) {
+	t.Parallel()
 	h := NewPluginAdminHandler(nil, nil, nil)
 	for _, tc := range []struct{ method, path string }{
 		{"POST", "/1/enable"},
@@ -180,6 +188,7 @@ func TestPluginsHandlerEnableDisableUninstallReturn503WhenRegistryNil(t *testing
 }
 
 func TestPluginsHandlerLifecycleInvalidID(t *testing.T) {
+	t.Parallel()
 	reg := newTestPluginRegistry(t)
 	h := NewPluginAdminHandler(reg, nil, nil)
 	req := httptest.NewRequest("POST", "/not-an-int/enable", nil)
@@ -190,6 +199,7 @@ func TestPluginsHandlerLifecycleInvalidID(t *testing.T) {
 }
 
 func TestIsZipContentType(t *testing.T) {
+	t.Parallel()
 	cases := map[string]bool{
 		"application/zip":                 true,
 		"application/zip; charset=binary": true,
@@ -209,6 +219,7 @@ func TestIsZipContentType(t *testing.T) {
 }
 
 func TestHasZipMagic(t *testing.T) {
+	t.Parallel()
 	cases := map[string]bool{
 		"PK\x03\x04rest": true,
 		"PK\x05\x06":     true,

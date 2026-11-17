@@ -67,6 +67,7 @@ func mintSession(t *testing.T, database *db.DB, userID int64) (token string, ses
 }
 
 func TestAuthPosture_DeadCredentialsFailUniformly(t *testing.T) {
+	t.Parallel()
 	handler, database := fullRouterWithDB(t)
 	ctx := context.Background()
 	userID := mintUser(t, database, "posture-user")

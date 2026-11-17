@@ -11,6 +11,7 @@ import (
 )
 
 func TestRecoveryKit_UpsertReplacesAndUnspends(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "kitholder", "hash", 4)
@@ -33,6 +34,7 @@ func TestRecoveryKit_UpsertReplacesAndUnspends(t *testing.T) {
 }
 
 func TestRedeemRecoveryKit_IsOneTransaction(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "recovering", "oldhash", 4)
@@ -73,6 +75,7 @@ func TestRedeemRecoveryKit_IsOneTransaction(t *testing.T) {
 // enrolled after that compare is a different secret and stays unspent, and
 // nothing else of the redeem happens.
 func TestRedeemRecoveryKit_SpendsOnlyTheComparedKit(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "rotating", "oldhash", 4)
@@ -108,6 +111,7 @@ func TestRedeemRecoveryKit_SpendsOnlyTheComparedKit(t *testing.T) {
 // Data-lifecycle O8 axis A1: a failure anywhere inside the redeem leaves
 // the kit unspent, the password unchanged and the sessions live.
 func TestRedeemRecoveryKit_RollsBackAsAWhole(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	uid, _ := database.CreateUser(ctx, "unlucky", "oldhash", 4)
@@ -141,6 +145,7 @@ func TestRedeemRecoveryKit_RollsBackAsAWhole(t *testing.T) {
 }
 
 func TestEraseAccount_PurgesTheRecoveryKit(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	mustCreateUser(t, database, "owner", "hash", 1)
@@ -157,6 +162,7 @@ func TestEraseAccount_PurgesTheRecoveryKit(t *testing.T) {
 // A recovery revokes the account's API tokens with its sessions, and the
 // audit row carries both counts; another account's token stays live.
 func TestRedeemRecovery_RevokesTheAccountsAPITokens(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for _, tc := range []struct {
 		name   string

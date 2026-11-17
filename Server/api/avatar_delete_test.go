@@ -35,6 +35,7 @@ func doDeleteAvatar(router http.Handler, token string) *httptest.ResponseRecorde
 }
 
 func TestDeleteAvatar_ClearsAndBroadcastsNull(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	spy := &userUpdateSpy{}
@@ -75,6 +76,7 @@ func TestDeleteAvatar_ClearsAndBroadcastsNull(t *testing.T) {
 // A rename that landed on another device after this request authenticated
 // must survive: the route sends no username snapshot.
 func TestDeleteAvatar_KeepsConcurrentRename(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildAvatarDeleteRouter(database, nil, &userUpdateSpy{})
 	token := uploadCreateToken(t, database, "old_name", 4)
@@ -99,6 +101,7 @@ func TestDeleteAvatar_KeepsConcurrentRename(t *testing.T) {
 }
 
 func TestDeleteAvatar_IdempotentWithoutAvatar(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	router := buildAvatarDeleteRouter(database, nil, &userUpdateSpy{})
 	token := uploadCreateToken(t, database, "no_avatar", 4)

@@ -8,6 +8,7 @@ import (
 // attachThreads issues no query when a page has no live user message to carry
 // a thread, and one batched query when it has.
 func TestAttachThreads_QueryOnlyWithCandidates(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemoryInternal(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel() // any query now fails

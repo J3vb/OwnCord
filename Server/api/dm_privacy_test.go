@@ -11,6 +11,7 @@ import (
 // WP 6.8c over REST: POST /dms refuses a recipient who has DMs off with the
 // same status and body as a block in either direction.
 func TestDMPrivacy_RefusalMatchesBlock_CreateDM(t *testing.T) {
+	t.Parallel()
 	scenarios := []struct {
 		name  string
 		setup func(t *testing.T, database *db.DB, alice, bob int64)

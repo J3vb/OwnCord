@@ -39,6 +39,7 @@ func bearerJSON(t *testing.T, h http.Handler, method, path, token string, body a
 // nothing, while the same account's API token keeps working on the routes
 // that do not need a login session.
 func TestAccountSecurityRoutes_RequireLoginSession(t *testing.T) {
+	t.Parallel()
 	router, database := fullRouterWithDB(t)
 	ctx := context.Background()
 

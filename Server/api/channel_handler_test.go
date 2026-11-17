@@ -177,12 +177,14 @@ func chGet(t *testing.T, router http.Handler, path, token string) *httptest.Resp
 // ─── GET /api/v1/channels ─────────────────────────────────────────────────────
 
 func TestChannelList_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	router := buildChannelRouter(newChannelTestDB(t))
 	rr := chGet(t, router, "/api/v1/channels", "")
 	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestChannelList_Empty(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "alice", 1)
 
@@ -195,6 +197,7 @@ func TestChannelList_Empty(t *testing.T) {
 }
 
 func TestChannelList_WithChannels(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "bob", 1)
 
@@ -212,12 +215,14 @@ func TestChannelList_WithChannels(t *testing.T) {
 // ─── GET /api/v1/channels/{id}/messages ──────────────────────────────────────
 
 func TestChannelMessages_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	router := buildChannelRouter(newChannelTestDB(t))
 	rr := chGet(t, router, "/api/v1/channels/1/messages", "")
 	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestChannelMessages_InvalidID(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "carol", 1)
 
@@ -226,6 +231,7 @@ func TestChannelMessages_InvalidID(t *testing.T) {
 }
 
 func TestChannelMessages_ChannelNotFound(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "dave", 1)
 
@@ -234,6 +240,7 @@ func TestChannelMessages_ChannelNotFound(t *testing.T) {
 }
 
 func TestChannelMessages_EmptyChannel(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "eve", 1)
 	chID := mustCreateChannel(t, database, "general", "text")
@@ -248,6 +255,7 @@ func TestChannelMessages_EmptyChannel(t *testing.T) {
 }
 
 func TestChannelMessages_ReturnsMessages(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "frank", 1, "ch", "text")
 
 	for i := range 3 {
@@ -264,6 +272,7 @@ func TestChannelMessages_ReturnsMessages(t *testing.T) {
 }
 
 func TestChannelMessages_LimitCappedAt100(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "grace", 1)
 	chID := mustCreateChannel(t, database, "ch", "text")
@@ -274,6 +283,7 @@ func TestChannelMessages_LimitCappedAt100(t *testing.T) {
 }
 
 func TestChannelMessages_HasMore(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "henry", 1, "ch", "text")
 
 	for i := range 60 {
@@ -289,6 +299,7 @@ func TestChannelMessages_HasMore(t *testing.T) {
 }
 
 func TestChannelMessages_HasMoreFalse(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "ivan", 1, "ch", "text")
 
 	for i := range 5 {
@@ -306,12 +317,14 @@ func TestChannelMessages_HasMoreFalse(t *testing.T) {
 // ─── GET /api/v1/search ───────────────────────────────────────────────────────
 
 func TestSearch_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	router := buildChannelRouter(newChannelTestDB(t))
 	rr := chGet(t, router, "/api/v1/search?q=hello", "")
 	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestSearch_MissingQuery(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "julia", 1)
 
@@ -320,6 +333,7 @@ func TestSearch_MissingQuery(t *testing.T) {
 }
 
 func TestSearch_ReturnsResults(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "kim", 1, "searchable", "text")
 	_ = mustCreateMessage(t, database, chID, user.ID, "uniqueterm in message")
 
@@ -333,6 +347,7 @@ func TestSearch_ReturnsResults(t *testing.T) {
 }
 
 func TestSearch_NoResults(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "larry", 1)
 
@@ -346,6 +361,7 @@ func TestSearch_NoResults(t *testing.T) {
 }
 
 func TestSearch_WithChannelID(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "searchch", 1, "filtered", "text")
 	_ = mustCreateMessage(t, database, chID, user.ID, "filtered message here")
 
@@ -354,6 +370,7 @@ func TestSearch_WithChannelID(t *testing.T) {
 }
 
 func TestSearch_InvalidChannelID(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "badchid", 1)
 
@@ -362,6 +379,7 @@ func TestSearch_InvalidChannelID(t *testing.T) {
 }
 
 func TestSearch_NegativeChannelID(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "negchid", 1)
 
@@ -370,6 +388,7 @@ func TestSearch_NegativeChannelID(t *testing.T) {
 }
 
 func TestSearch_WithLimit(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "limituser", 1)
 
@@ -378,6 +397,7 @@ func TestSearch_WithLimit(t *testing.T) {
 }
 
 func TestSearch_InvalidLimit(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "badlimit", 1)
 
@@ -386,6 +406,7 @@ func TestSearch_InvalidLimit(t *testing.T) {
 }
 
 func TestSearch_InvalidFTSQuery(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "badfts", 1, "fts", "text")
 	_ = mustCreateMessage(t, database, chID, user.ID, "search seed")
 
@@ -396,6 +417,7 @@ func TestSearch_InvalidFTSQuery(t *testing.T) {
 }
 
 func TestSearch_ZeroLimit(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "zerolimit", 1)
 
@@ -404,6 +426,7 @@ func TestSearch_ZeroLimit(t *testing.T) {
 }
 
 func TestSearch_LimitCappedAt100(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "highlimit", 1)
 
@@ -431,6 +454,7 @@ func searchPage(t *testing.T, rr *httptest.ResponseRecorder) (ids []int64, nextB
 // DP-20: sort=recent pages newest first through next_before; every page
 // holds only ids strictly below the cursor it was asked with.
 func TestSearch_SortRecentPagesWithBefore(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "recentpager", 1, "pager", "text")
 	ids := make([]int64, 5)
 	for i := range ids {
@@ -462,6 +486,7 @@ func TestSearch_SortRecentPagesWithBefore(t *testing.T) {
 }
 
 func TestSearch_InvalidSortOrCursor(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "badcursor", 1)
 
@@ -481,6 +506,7 @@ func TestSearch_InvalidSortOrCursor(t *testing.T) {
 }
 
 func TestSearch_ChannelTypeLookupFailure_FailsClosed(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "searchfailclosed", 1, "searchable", "text")
 	_ = mustCreateMessage(t, database, chID, user.ID, "closedlookupterm")
 
@@ -505,6 +531,7 @@ func TestSearch_ChannelTypeLookupFailure_FailsClosed(t *testing.T) {
 }
 
 func TestSearch_ChannelOverrideLookupFailure_ReturnsError(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "searchoverridefail", 4, "searchable", "text")
 	_ = mustCreateMessage(t, database, chID, user.ID, "overridefailterm")
 
@@ -518,6 +545,7 @@ func TestSearch_ChannelOverrideLookupFailure_ReturnsError(t *testing.T) {
 }
 
 func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	r := chi.NewRouter()
 	limiter := auth.NewRateLimiter()
@@ -545,6 +573,7 @@ func TestSearch_TrustedProxyRateLimitUsesForwardedIP(t *testing.T) {
 // ─── Messages — before/after cursor ─────────────────────────────────────────
 
 func TestChannelMessages_BeforeCursor(t *testing.T) {
+	t.Parallel()
 	database, router, token, user, chID := newChannelEnv(t, "cursoruser", 1, "cursor", "text")
 
 	var lastID int64
@@ -557,6 +586,7 @@ func TestChannelMessages_BeforeCursor(t *testing.T) {
 }
 
 func TestChannelMessages_InvalidLimit(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "badlimituser", 1)
 	chID := mustCreateChannel(t, database, "lim", "text")
@@ -618,12 +648,14 @@ func newPinTestDB(t *testing.T) *db.DB {
 }
 
 func TestGetPins_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	router := buildChannelRouter(newPinTestDB(t))
 	rr := chGet(t, router, "/api/v1/channels/1/pins", "")
 	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestGetPins_ChannelNotFound(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinuser1", 1)
@@ -633,6 +665,7 @@ func TestGetPins_ChannelNotFound(t *testing.T) {
 }
 
 func TestGetPins_EmptyPins(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinuser2", 1)
@@ -654,6 +687,7 @@ func TestGetPins_EmptyPins(t *testing.T) {
 }
 
 func TestGetPins_ReturnsPinnedMessages(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router, token, user, chID := newChannelEnvOn(t, database, "pinuser3", 1, "general", "text")
 
@@ -678,6 +712,7 @@ func TestGetPins_ReturnsPinnedMessages(t *testing.T) {
 // TestGetPins_HasMoreOnlyPastCap: exactly MaxPinnedMessages pins is the whole
 // list (has_more false); one more pin is truncated to the cap (has_more true).
 func TestGetPins_HasMoreOnlyPastCap(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router, token, user, chID := newChannelEnvOn(t, database, "pincap", 1, "general", "text")
 
@@ -713,6 +748,7 @@ func TestGetPins_HasMoreOnlyPastCap(t *testing.T) {
 }
 
 func TestGetPins_DMChannel_NonParticipantForbidden(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -732,6 +768,7 @@ func TestGetPins_DMChannel_NonParticipantForbidden(t *testing.T) {
 }
 
 func TestGetPins_MemberNoReadPermission(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	// Role 4 = Member with permissions 1635 (0x663).
@@ -762,6 +799,7 @@ func chDelete(t *testing.T, router http.Handler, path, token string) *httptest.R
 }
 
 func TestSetPinned_PinSuccessfully(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router, token, user, chID := newChannelEnvOn(t, database, "pinner1", 1, "general", "text")
 	msgID := mustCreateMessage(t, database, chID, user.ID, "pin me")
@@ -777,6 +815,7 @@ func TestSetPinned_PinSuccessfully(t *testing.T) {
 }
 
 func TestSetPinned_UnpinSuccessfully(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router, token, user, chID := newChannelEnvOn(t, database, "unpinner1", 1, "general", "text")
 	msgID := mustCreateMessage(t, database, chID, user.ID, "unpin me")
@@ -794,6 +833,7 @@ func TestSetPinned_UnpinSuccessfully(t *testing.T) {
 }
 
 func TestSetPinned_MessageNotFound(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinner2", 1)
@@ -804,6 +844,7 @@ func TestSetPinned_MessageNotFound(t *testing.T) {
 }
 
 func TestSetPinned_ChannelNotFound(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	token := chTestCreateToken(t, database, "pinner3", 1)
@@ -813,6 +854,7 @@ func TestSetPinned_ChannelNotFound(t *testing.T) {
 }
 
 func TestSetPinned_NoPermission(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 	// Member role (4) has permissions 1635 — does not include MANAGE_MESSAGES (0x2000).
@@ -826,6 +868,7 @@ func TestSetPinned_NoPermission(t *testing.T) {
 }
 
 func TestSetPinned_Idempotent(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router, token, user, chID := newChannelEnvOn(t, database, "pinner4", 1, "general", "text")
 	msgID := mustCreateMessage(t, database, chID, user.ID, "already pinned")
@@ -921,6 +964,7 @@ type purgeResponseBody struct {
 }
 
 func TestPurgeMessages_ModeratorSucceedsAndBroadcastsOnce(t *testing.T) {
+	t.Parallel()
 	router, database, broadcaster := buildPurgeRouter(t)
 	token := chTestCreateToken(t, database, "purgemod", 3) // Moderator: MANAGE_MESSAGES
 	chID, ids := seedPurgeChannel(t, database, "purgemod", 5)
@@ -964,6 +1008,7 @@ func TestPurgeMessages_ModeratorSucceedsAndBroadcastsOnce(t *testing.T) {
 }
 
 func TestPurgeMessages_MemberForbidden(t *testing.T) {
+	t.Parallel()
 	router, database, broadcaster := buildPurgeRouter(t)
 	token := chTestCreateToken(t, database, "purgemember", 4) // Member: no MANAGE_MESSAGES
 	chID, ids := seedPurgeChannel(t, database, "purgemember", 3)
@@ -982,6 +1027,7 @@ func TestPurgeMessages_MemberForbidden(t *testing.T) {
 }
 
 func TestPurgeMessages_DMForbidden(t *testing.T) {
+	t.Parallel()
 	router, database, broadcaster := buildPurgeRouter(t)
 	token := chTestCreateToken(t, database, "purgedmmod", 1) // Owner — every bit set
 	user, _ := database.GetUserByUsername(context.Background(), "purgedmmod")
@@ -1004,6 +1050,7 @@ func TestPurgeMessages_DMForbidden(t *testing.T) {
 }
 
 func TestPurgeMessages_LimitClampedToHundred(t *testing.T) {
+	t.Parallel()
 	router, database, _ := buildPurgeRouter(t)
 	token := chTestCreateToken(t, database, "purgeclamp", 3)
 	chID, _ := seedPurgeChannel(t, database, "purgeclamp", 105)
@@ -1017,6 +1064,7 @@ func TestPurgeMessages_LimitClampedToHundred(t *testing.T) {
 }
 
 func TestPurgeMessages_BadRequests(t *testing.T) {
+	t.Parallel()
 	router, database, _ := buildPurgeRouter(t)
 	token := chTestCreateToken(t, database, "purgebad", 3)
 	chID, _ := seedPurgeChannel(t, database, "purgebad", 2)
@@ -1039,6 +1087,7 @@ func TestPurgeMessages_BadRequests(t *testing.T) {
 }
 
 func TestPurgeMessages_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	router, database, _ := buildPurgeRouter(t)
 	chTestCreateToken(t, database, "purgeanon", 3)
 	chID, _ := seedPurgeChannel(t, database, "purgeanon", 2)
@@ -1048,6 +1097,7 @@ func TestPurgeMessages_Unauthenticated(t *testing.T) {
 }
 
 func TestPurgeMessages_EmptyChannelDoesNotBroadcast(t *testing.T) {
+	t.Parallel()
 	router, database, broadcaster := buildPurgeRouter(t)
 	token := chTestCreateToken(t, database, "purgeempty", 3)
 	chID, _ := seedPurgeChannel(t, database, "purgeempty", 0)
@@ -1064,6 +1114,7 @@ func TestPurgeMessages_EmptyChannelDoesNotBroadcast(t *testing.T) {
 }
 
 func TestPurgeMessages_NilBroadcasterStillPurges(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database) // mounted with a nil broadcaster
 	token := chTestCreateToken(t, database, "purgenilbc", 3)
@@ -1082,6 +1133,7 @@ func TestPurgeMessages_NilBroadcasterStillPurges(t *testing.T) {
 // ─── pin row fan-out (WP 6.12) ──────────────────────────────────────────────
 
 func TestHandleSetPinned_EmitsRowOnce(t *testing.T) {
+	t.Parallel()
 	router, database, broadcaster := buildPurgeRouter(t)
 	token := chTestCreateToken(t, database, "pinrow", 1)
 	user, _ := database.GetUserByUsername(context.Background(), "pinrow")

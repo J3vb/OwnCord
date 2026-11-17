@@ -15,6 +15,7 @@ import (
 // outside the transaction, run before a marker is written, and
 // CountAdminClassAccounts is what the replay reports on afterwards.
 func TestReplayEraseAccount_BypassesTheLastAdminGuard(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	owner := seedUser(t, database, "sole-owner")

@@ -23,6 +23,7 @@ func withReplyPing(t *testing.T, f *searchFixture) *searchFixture {
 }
 
 func TestSearch_HasMentionsPinned(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := withReplyPing(t, newSearchFixture(t, "hmp"))
 	ch := f.channel(t, "main", 0)
@@ -61,6 +62,7 @@ func TestSearch_HasMentionsPinned(t *testing.T) {
 }
 
 func TestSearch_BadHasAndPinned400(t *testing.T) {
+	t.Parallel()
 	f := newSearchFixture(t, "bhp")
 	f.channel(t, "main", 0)
 	for q, name := range map[string]string{"has:embed": "has:", "has:poll x": "has:", "pinned:maybe": "pinned:"} {
@@ -73,6 +75,7 @@ func TestSearch_BadHasAndPinned400(t *testing.T) {
 
 // has:, mentions: and pinned: narrow the readable set; they never widen it.
 func TestSearch_HasMentionsPinnedNeverLeakUnreadable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := withReplyPing(t, newSearchFixture(t, "hmpl"))
 	secret := f.channel(t, "secret", 0)

@@ -44,6 +44,7 @@ func expireSession(t *testing.T, database *db.DB, hash string) {
 }
 
 func TestSessionService_ResolveSocketPrincipalRefusalsAreDistinct(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := sessionFixture(t)
 	seedSessionUser(t, database, 1, "alice")
 
@@ -101,6 +102,7 @@ func TestSessionService_ResolveSocketPrincipalRefusalsAreDistinct(t *testing.T) 
 // non-recoverable auth error, and the client would delete a credential that was
 // never revoked.
 func TestSessionService_OutageIsNeverABadCredential(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := sessionFixture(t)
 	seedSessionUser(t, database, 1, "alice")
 	mustCreateSession(t, database, 1, "live-hash", "web", "127.0.0.1")
@@ -123,6 +125,7 @@ func TestSessionService_OutageIsNeverABadCredential(t *testing.T) {
 }
 
 func TestSessionService_SweepSessionsClassifies(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := sessionFixture(t)
 	seedSessionUser(t, database, 1, "live")
 	seedSessionUser(t, database, 2, "expired")
@@ -161,6 +164,7 @@ func TestSessionService_SweepSessionsClassifies(t *testing.T) {
 // map of revocations would turn one transient error into a server-wide
 // disconnect, so it must be an error the caller can skip the tick on.
 func TestSessionService_SweepSessionsFailsRatherThanRevokingEveryone(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := sessionFixture(t)
 	seedSessionUser(t, database, 1, "alice")
 	mustCreateSession(t, database, 1, "h-live", "web", "127.0.0.1")
@@ -180,6 +184,7 @@ func TestSessionService_SweepSessionsFailsRatherThanRevokingEveryone(t *testing.
 // API token, so a headless credential reaches the routes its owning user can.
 // It passes the auth package's sentinels through rather than restating them.
 func TestSessionService_ResolveBearerFallsBackToAPITokens(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := sessionFixture(t)
 	seedSessionUser(t, database, 1, "alice")
 

@@ -11,6 +11,7 @@ import (
 // attachments, both nullable, and an attachment that existed before it keeps
 // every value with both new columns NULL.
 func TestMigration084_AddsVoiceColumns(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 	mustDo(t, "MigrateFS up to 083", db.MigrateFS(database, migrationsUpTo(t, "084_")))

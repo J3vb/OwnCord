@@ -12,6 +12,7 @@ import (
 // default).
 
 func TestGetRoleByName_IsCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	for _, name := range []string{"Member", "member", "MEMBER"} {
@@ -31,6 +32,7 @@ func TestGetRoleByName_IsCaseInsensitive(t *testing.T) {
 }
 
 func TestRoleNameUniquenessIsEnforcedCaseInsensitively(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	// Migration 023's index is what makes "moderator" and "Moderator" the same
@@ -44,6 +46,7 @@ func TestRoleNameUniquenessIsEnforcedCaseInsensitively(t *testing.T) {
 }
 
 func TestGetDefaultRole(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 
 	role, err := database.GetDefaultRole(context.Background())
@@ -54,6 +57,7 @@ func TestGetDefaultRole(t *testing.T) {
 }
 
 func TestCreateAndUpdateRole(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -79,6 +83,7 @@ func TestCreateAndUpdateRole(t *testing.T) {
 }
 
 func TestSetRolePositions(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -101,6 +106,7 @@ func TestSetRolePositions(t *testing.T) {
 }
 
 func TestListRoles_OrdersByPositionThenIDDeterministically(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -155,6 +161,7 @@ func TestListRoles_OrdersByPositionThenIDDeterministically(t *testing.T) {
 }
 
 func TestCountRoleMembersAndListUserIDsByRole(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -189,6 +196,7 @@ func TestCountRoleMembersAndListUserIDsByRole(t *testing.T) {
 }
 
 func TestDeleteRoleReassigning(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 

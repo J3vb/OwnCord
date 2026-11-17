@@ -23,6 +23,7 @@ func migratedAt079(t *testing.T) *db.DB {
 }
 
 func TestMigration080_DefaultRolesLoseTheUnusedBit(t *testing.T) {
+	t.Parallel()
 	database := migratedAt079(t)
 	for _, id := range []int64{2, 3} {
 		if rolePerms(t, database, id)&bit13 == 0 {
@@ -45,6 +46,7 @@ func TestMigration080_DefaultRolesLoseTheUnusedBit(t *testing.T) {
 }
 
 func TestMigration080_CustomRoles(t *testing.T) {
+	t.Parallel()
 	database := migratedAt079(t)
 	ctx := context.Background()
 	exec := func(q string, args ...any) {

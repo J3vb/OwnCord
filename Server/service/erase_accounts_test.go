@@ -13,6 +13,7 @@ import (
 // WP 8.4d: ERASE_ACCOUNTS lets a role without ADMINISTRATOR erase an account.
 // The rank rule is unchanged: the actor must strictly outrank the target.
 func TestModerationService_EraseUser_EraseAccountsBit(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()

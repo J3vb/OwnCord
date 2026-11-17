@@ -41,6 +41,7 @@ func newSchemaTestDB(t *testing.T, schema []byte) *db.DB {
 }
 
 func TestOpenInMemory(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	if database == nil {
 		t.Fatal("Open returned nil DB")
@@ -48,6 +49,7 @@ func TestOpenInMemory(t *testing.T) {
 }
 
 func TestOpenCreatesFile(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "test.db")
 
@@ -61,6 +63,7 @@ func TestOpenCreatesFile(t *testing.T) {
 }
 
 func TestOpenInvalidPath(t *testing.T) {
+	t.Parallel()
 	// A path to a non-existent directory should return an error.
 	_, err := db.Open("/nonexistent/dir/that/does/not/exist/test.db")
 	if err == nil {
@@ -69,6 +72,7 @@ func TestOpenInvalidPath(t *testing.T) {
 }
 
 func TestWALModeEnabled(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	var journalMode string
@@ -83,6 +87,7 @@ func TestWALModeEnabled(t *testing.T) {
 }
 
 func TestWALModeEnabledOnFile(t *testing.T) {
+	t.Parallel()
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "wal_test.db")
 
@@ -98,6 +103,7 @@ func TestWALModeEnabledOnFile(t *testing.T) {
 }
 
 func TestForeignKeysEnabled(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	var fkEnabled int
@@ -108,6 +114,7 @@ func TestForeignKeysEnabled(t *testing.T) {
 }
 
 func TestMigrateCreatesAllTables(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -135,6 +142,7 @@ func TestMigrateCreatesAllTables(t *testing.T) {
 }
 
 func TestMigrateCreatesFTSTable(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -151,6 +159,7 @@ func TestMigrateCreatesFTSTable(t *testing.T) {
 }
 
 func TestMigrateIsIdempotent(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	// Run migration twice — should not error.
@@ -159,6 +168,7 @@ func TestMigrateIsIdempotent(t *testing.T) {
 }
 
 func TestMigrateInsertsDefaultRoles(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -171,6 +181,7 @@ func TestMigrateInsertsDefaultRoles(t *testing.T) {
 }
 
 func TestMigrateInsertsDefaultSettings(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -191,6 +202,7 @@ func TestMigrateInsertsDefaultSettings(t *testing.T) {
 }
 
 func TestMigrateCreatesIndexes(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -243,6 +255,7 @@ func TestMigrateCreatesIndexes(t *testing.T) {
 }
 
 func TestMigrateCreatesAuditActionIndex(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -263,6 +276,7 @@ func TestMigrateCreatesAuditActionIndex(t *testing.T) {
 }
 
 func TestMigrateScopesFTSUpdateTriggerToContent(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -284,6 +298,7 @@ func TestMigrateScopesFTSUpdateTriggerToContent(t *testing.T) {
 }
 
 func TestCloseIdempotent(t *testing.T) {
+	t.Parallel()
 	database, err := db.Open(":memory:")
 	mustDo(t, "Open error", err)
 
@@ -293,6 +308,7 @@ func TestCloseIdempotent(t *testing.T) {
 }
 
 func TestQueryRow(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -307,6 +323,7 @@ func TestQueryRow(t *testing.T) {
 }
 
 func TestExec(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -323,6 +340,7 @@ func TestExec(t *testing.T) {
 }
 
 func TestQuery(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -343,6 +361,7 @@ func TestQuery(t *testing.T) {
 }
 
 func TestBegin(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	mustDo(t, "Migrate() error", db.Migrate(database))
@@ -367,6 +386,7 @@ func TestBegin(t *testing.T) {
 }
 
 func TestSQLDb(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	sqlDB := database.SQLDb()
 	if sqlDB == nil {
@@ -427,6 +447,7 @@ func (fakeFileInfo) IsDir() bool        { return false }
 func (fakeFileInfo) Sys() any           { return nil }
 
 func TestMigrateFSReadFileError(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	err := db.MigrateFS(database, failReadFS{})
@@ -436,6 +457,7 @@ func TestMigrateFSReadFileError(t *testing.T) {
 }
 
 func TestMigrateFSInvalidSQL(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	// Create an in-memory FS with invalid SQL to trigger an exec error.
@@ -452,6 +474,7 @@ func TestMigrateFSInvalidSQL(t *testing.T) {
 }
 
 func TestMigrateFSSkipsNonSQL(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 
 	// FS with non-.sql files should be skipped without error.
@@ -474,6 +497,7 @@ func TestMigrateFSSkipsNonSQL(t *testing.T) {
 }
 
 func TestOpenPingFails(t *testing.T) {
+	t.Parallel()
 	// Providing a path in a non-existent directory should fail.
 	_, err := db.Open("/no/such/directory/db.sqlite")
 	if err == nil {
@@ -482,6 +506,7 @@ func TestOpenPingFails(t *testing.T) {
 }
 
 func TestMigrateWALAndFKOnFile(t *testing.T) {
+	t.Parallel()
 	// Verify Open sets WAL and foreign_keys on a file-backed DB, then migrate.
 	tmpDir := t.TempDir()
 	dbPath := filepath.Join(tmpDir, "migrate_test.db")
@@ -583,6 +608,7 @@ func TestMigrateFS_LogsEachMigrationWithDuration(t *testing.T) {
 }
 
 func TestWALBytes_FileBackedGrowsAndInMemoryIsZero(t *testing.T) {
+	t.Parallel()
 	mem := openMemory(t)
 	if n, err := mem.WALBytes(); n != 0 || err != nil {
 		t.Errorf("in-memory WALBytes = %d, %v; want 0, nil", n, err)
@@ -613,6 +639,7 @@ func TestWALBytes_FileBackedGrowsAndInMemoryIsZero(t *testing.T) {
 }
 
 func TestWALBytes_MissingFileIsZero(t *testing.T) {
+	t.Parallel()
 	database, err := db.Open(filepath.Join(t.TempDir(), "gone.db"))
 	mustDo(t, "Open", err)
 	t.Cleanup(func() { _ = database.Close() })

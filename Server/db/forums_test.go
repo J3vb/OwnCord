@@ -96,6 +96,7 @@ func (f forumFixture) count(t *testing.T, q string, args ...any) int {
 // that breaks the forum model, and still allows the writes the model needs.
 // 6.9c-a1's TestThreadRowShapeTrigger table runs unchanged beside it.
 func TestForumShapeTriggers(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	voice, err := f.db.CreateChannel(ctx, "voice", "voice", "", "", 2)
@@ -220,6 +221,7 @@ func (f forumFixture) must(t *testing.T, q string, args ...any) {
 // TestMessageInForumRefused proves the schema makes a message in a forum row
 // impossible, on insert and on a move.
 func TestMessageInForumRefused(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	refusal := func(what string, err error) {
@@ -243,6 +245,7 @@ func TestMessageInForumRefused(t *testing.T) {
 // TestThreadTagMustMatchForum proves a tag links only to a post of its own
 // forum, and never moves between forums.
 func TestThreadTagMustMatchForum(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	otherForum, err := f.db.CreateChannel(ctx, "other-forum", "forum", "", "", 3)
@@ -288,6 +291,7 @@ func TestThreadTagMustMatchForum(t *testing.T) {
 // TestForumDeleteCascades proves deleting a forum removes its posts, their
 // messages, its tags and the links, and nothing outside it.
 func TestForumDeleteCascades(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	f.must(t, `INSERT INTO thread_tags (thread_id, tag_id) VALUES (?, ?)`, f.post, f.tag)
@@ -320,6 +324,7 @@ func TestForumDeleteCascades(t *testing.T) {
 // TestTagDeleteCascadesLinksOnly proves deleting a tag removes its links and
 // leaves the post, its messages and its other tags alone.
 func TestTagDeleteCascadesLinksOnly(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	tags, err := f.db.ReplaceForumSettings(ctx, f.forum, db.ForumSettingsWrite{
@@ -349,6 +354,7 @@ func TestTagDeleteCascadesLinksOnly(t *testing.T) {
 // TestListChannelsCarriesForumSettings proves the channel reads return a
 // forum's settings and tags in order, and nothing on any other channel.
 func TestListChannelsCarriesForumSettings(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	if _, err := f.db.ReplaceForumSettings(ctx, f.forum, db.ForumSettingsWrite{
@@ -401,6 +407,7 @@ func TestListChannelsCarriesForumSettings(t *testing.T) {
 // reorder, swap names, delete by omission, and every refusal leaving the
 // stored tags as they were.
 func TestReplaceForumSettings(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	tagsOf := func() []db.ForumTag {

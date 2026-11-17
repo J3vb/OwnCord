@@ -39,6 +39,7 @@ func postCounts(t *testing.T, d *db.DB) (threads, msgs, links, receipts int) {
 // TestForumPostDelivery commits a post: the thread, its opening message, the
 // pointer, the tags, the receipt and the author's read state in one commit.
 func TestForumPostDelivery(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	got, err := f.db.CreateMessageDelivery(ctx, postParams(f.user, f.forum, "p1", "hello forum", f.tag))
@@ -73,6 +74,7 @@ func TestForumPostDelivery(t *testing.T) {
 // TestForumPostRetryAfterDelete: a deleted opening message, or a post a
 // moderator deleted, answers "deleted" to the retry and recreates nothing.
 func TestForumPostRetryAfterDelete(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	for name, remove := range map[string]func(post *db.MessageDelivery){
@@ -108,6 +110,7 @@ func TestForumPostRetryAfterDelete(t *testing.T) {
 // message, no link and no receipt, for an unknown tag, a duplicate id, a tag of
 // another forum and a forum that is not a forum.
 func TestForumPostUnknownTagWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	other, err := f.db.CreateChannel(ctx, "other", "forum", "", "", 5)
@@ -151,6 +154,7 @@ func TestForumPostUnknownTagWritesNothing(t *testing.T) {
 // refused with nothing written. Never a post without its opening message, and
 // never a link to a missing tag.
 func TestForumPostTagDeleteRace(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	for round := range 25 {
 		f := newForumFixture(t)
@@ -200,6 +204,7 @@ func TestForumPostTagDeleteRace(t *testing.T) {
 // preview cut, a deleted opening message, a hard-deleted one, tags in tag
 // order, and no block at all on a thread under a text channel.
 func TestThreadPostBlock(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	long := strings.Repeat("é", db.ForumPostPreviewRunes+50)
@@ -248,6 +253,7 @@ func TestThreadPostBlock(t *testing.T) {
 // transaction, refuses a tag of another forum, and a locked post to a
 // non-moderator.
 func TestUpdateThreadTags(t *testing.T) {
+	t.Parallel()
 	f := newForumFixture(t)
 	ctx := context.Background()
 	tags, err := f.db.ReplaceForumSettings(ctx, f.forum, db.ForumSettingsWrite{

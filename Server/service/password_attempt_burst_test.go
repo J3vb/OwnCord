@@ -10,6 +10,7 @@ import (
 // A burst of wrong passwords must be capped at what a sequential guesser gets: each attempt
 // is counted before its compare, so concurrent requests cannot all pass the lockout check.
 func TestPasswordConfirm_BurstIsCappedAtTheSequentialBudget(t *testing.T) {
+	t.Parallel()
 	const attempts = 12
 	sites := []struct {
 		name  string

@@ -14,6 +14,7 @@ import (
 // --- isWebSocketUpgrade tests ---
 
 func TestIsWebSocketUpgrade_ValidUpgrade(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Connection", "Upgrade")
 	r.Header.Set("Upgrade", "websocket")
@@ -23,6 +24,7 @@ func TestIsWebSocketUpgrade_ValidUpgrade(t *testing.T) {
 }
 
 func TestIsWebSocketUpgrade_CaseInsensitive(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Connection", "upgrade")
 	r.Header.Set("Upgrade", "WebSocket")
@@ -32,6 +34,7 @@ func TestIsWebSocketUpgrade_CaseInsensitive(t *testing.T) {
 }
 
 func TestIsWebSocketUpgrade_MissingConnectionHeader(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Upgrade", "websocket")
 	if isWebSocketUpgrade(r) {
@@ -40,6 +43,7 @@ func TestIsWebSocketUpgrade_MissingConnectionHeader(t *testing.T) {
 }
 
 func TestIsWebSocketUpgrade_MissingUpgradeHeader(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Connection", "Upgrade")
 	if isWebSocketUpgrade(r) {
@@ -48,6 +52,7 @@ func TestIsWebSocketUpgrade_MissingUpgradeHeader(t *testing.T) {
 }
 
 func TestIsWebSocketUpgrade_NonWebsocketUpgrade(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Connection", "Upgrade")
 	r.Header.Set("Upgrade", "h2c")
@@ -57,6 +62,7 @@ func TestIsWebSocketUpgrade_NonWebsocketUpgrade(t *testing.T) {
 }
 
 func TestIsWebSocketUpgrade_ConnectionKeepAlive(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Connection", "keep-alive")
 	r.Header.Set("Upgrade", "websocket")
@@ -68,6 +74,7 @@ func TestIsWebSocketUpgrade_ConnectionKeepAlive(t *testing.T) {
 // --- isOriginAllowed tests ---
 
 func TestIsOriginAllowed_EmptyOriginAllowed(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	// No Origin header = same-origin or non-browser
 	if !isOriginAllowed(r, []string{"https://example.com"}) {
@@ -79,6 +86,7 @@ func TestIsOriginAllowed_EmptyOriginAllowed(t *testing.T) {
 // (example.com) so these exercise the allowlist path, not the same-origin
 // allowance.
 func TestIsOriginAllowed_MatchingOrigin(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Origin", "https://app.example.net")
 	if !isOriginAllowed(r, []string{"https://app.example.net"}) {
@@ -87,6 +95,7 @@ func TestIsOriginAllowed_MatchingOrigin(t *testing.T) {
 }
 
 func TestIsOriginAllowed_CaseInsensitive(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Origin", "HTTPS://APP.EXAMPLE.NET")
 	if !isOriginAllowed(r, []string{"https://app.example.net"}) {
@@ -95,6 +104,7 @@ func TestIsOriginAllowed_CaseInsensitive(t *testing.T) {
 }
 
 func TestIsOriginAllowed_NonMatchingOrigin(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Origin", "https://evil.com")
 	if isOriginAllowed(r, []string{"https://example.com"}) {
@@ -103,6 +113,7 @@ func TestIsOriginAllowed_NonMatchingOrigin(t *testing.T) {
 }
 
 func TestIsOriginAllowed_WildcardAllowsAll(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Origin", "https://anything.com")
 	if !isOriginAllowed(r, []string{"*"}) {
@@ -111,6 +122,7 @@ func TestIsOriginAllowed_WildcardAllowsAll(t *testing.T) {
 }
 
 func TestIsOriginAllowed_EmptyAllowlistDenies(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Origin", "https://cross.example.net")
 	if isOriginAllowed(r, []string{}) {
@@ -119,6 +131,7 @@ func TestIsOriginAllowed_EmptyAllowlistDenies(t *testing.T) {
 }
 
 func TestIsOriginAllowed_MultipleAllowedOrigins(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "/livekit/", nil)
 	r.Header.Set("Origin", "https://b.com")
 	allowed := []string{"https://a.com", "https://b.com", "https://c.com"}
@@ -132,6 +145,7 @@ func TestIsOriginAllowed_MultipleAllowedOrigins(t *testing.T) {
 // must pass even on the default empty allowlist — otherwise voice 403s on
 // every fresh install for any client not on the server machine.
 func TestIsOriginAllowed_FirstPartyDesktopOrigins(t *testing.T) {
+	t.Parallel()
 	for _, origin := range []string{
 		"http://tauri.localhost",  // WebView2 (Windows)
 		"https://tauri.localhost", // WebView2, https variant
@@ -152,6 +166,7 @@ func TestIsOriginAllowed_FirstPartyDesktopOrigins(t *testing.T) {
 // default same-origin policy, which the chat WS endpoint already applies —
 // without it a same-origin client can chat but voice 403s.
 func TestIsOriginAllowed_SameOriginAllowed(t *testing.T) {
+	t.Parallel()
 	for _, origin := range []string{
 		"https://192.168.0.125:8443",
 		"HTTPS://192.168.0.125:8443", // case-insensitive
@@ -166,6 +181,7 @@ func TestIsOriginAllowed_SameOriginAllowed(t *testing.T) {
 
 // Same host but a different port is a different origin and must not pass.
 func TestIsOriginAllowed_SameHostDifferentPortDenied(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "https://192.168.0.125:8443/livekit/", nil)
 	r.Header.Set("Origin", "https://192.168.0.125:9999")
 	if isOriginAllowed(r, nil) {
@@ -177,6 +193,7 @@ func TestIsOriginAllowed_SameHostDifferentPortDenied(t *testing.T) {
 // reverse proxy that strips the port from Host, e.g. nginx's $host) must be
 // treated as equivalent to the implicit default port, on either side.
 func TestIsOriginAllowed_ExplicitDefaultPortMatchesImplicit(t *testing.T) {
+	t.Parallel()
 	r := httptest.NewRequest("GET", "https://chat.example.com/livekit/", nil)
 	r.Header.Set("Origin", "https://chat.example.com:443")
 	if !isOriginAllowed(r, nil) {
@@ -186,6 +203,7 @@ func TestIsOriginAllowed_ExplicitDefaultPortMatchesImplicit(t *testing.T) {
 
 // A lookalike origin must NOT ride along with the first-party allowance.
 func TestIsOriginAllowed_FirstPartyLookalikesDenied(t *testing.T) {
+	t.Parallel()
 	for _, origin := range []string{
 		"http://tauri.localhost.evil.com",
 		"http://eviltauri.localhost",
@@ -203,6 +221,7 @@ func TestIsOriginAllowed_FirstPartyLookalikesDenied(t *testing.T) {
 // --- NewLiveKitProxy HTTP routing tests ---
 
 func TestLiveKitProxy_BlocksAdminPath(t *testing.T) {
+	t.Parallel()
 	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"}, AdmitAllVoiceSessionsForTest)
 	r := httptest.NewRequest("GET", "/admin/dashboard", nil)
 	w := serveRequest(proxy, r)
@@ -212,6 +231,7 @@ func TestLiveKitProxy_BlocksAdminPath(t *testing.T) {
 }
 
 func TestLiveKitProxy_BlocksMetricsPath(t *testing.T) {
+	t.Parallel()
 	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"}, AdmitAllVoiceSessionsForTest)
 	r := httptest.NewRequest("GET", "/metrics", nil)
 	w := serveRequest(proxy, r)
@@ -221,6 +241,7 @@ func TestLiveKitProxy_BlocksMetricsPath(t *testing.T) {
 }
 
 func TestLiveKitProxy_BlocksDebugPath(t *testing.T) {
+	t.Parallel()
 	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"}, AdmitAllVoiceSessionsForTest)
 	r := httptest.NewRequest("GET", "/debug/pprof", nil)
 	w := serveRequest(proxy, r)
@@ -230,6 +251,7 @@ func TestLiveKitProxy_BlocksDebugPath(t *testing.T) {
 }
 
 func TestLiveKitProxy_BlocksTwirpPath(t *testing.T) {
+	t.Parallel()
 	proxy := NewLiveKitProxy("http://localhost:7880", []string{"*"}, AdmitAllVoiceSessionsForTest)
 	r := httptest.NewRequest("POST", "/twirp/livekit.RoomService/ListRooms", nil)
 	w := serveRequest(proxy, r)
@@ -241,6 +263,7 @@ func TestLiveKitProxy_BlocksTwirpPath(t *testing.T) {
 // A plain GET on a signalling path reaches LiveKit with the issued credential
 // in place of the client's.
 func TestLiveKitProxy_ForwardsSignalPathWithIssuedCredential(t *testing.T) {
+	t.Parallel()
 	var gotAuthz, gotQuery string
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		gotAuthz, gotQuery = r.Header.Get("Authorization"), r.URL.RawQuery
@@ -261,6 +284,7 @@ func TestLiveKitProxy_ForwardsSignalPathWithIssuedCredential(t *testing.T) {
 }
 
 func TestLiveKitProxy_BlocksCrossOriginHTTP(t *testing.T) {
+	t.Parallel()
 	proxy := NewLiveKitProxy("http://localhost:7880", []string{"https://myapp.com"}, AdmitAllVoiceSessionsForTest)
 	r := httptest.NewRequest("GET", "/rtc", nil)
 	r.Header.Set("Origin", "https://evil.com")
@@ -271,6 +295,7 @@ func TestLiveKitProxy_BlocksCrossOriginHTTP(t *testing.T) {
 }
 
 func TestLiveKitProxy_AllowsSameOriginHTTP(t *testing.T) {
+	t.Parallel()
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -291,6 +316,7 @@ func TestLiveKitProxy_AllowsSameOriginHTTP(t *testing.T) {
 // or the backend is asked, with a 403 (the SDK reads a 404 as "not this
 // signalling version").
 func TestLiveKitProxy_ForwardsOnlySignalPaths(t *testing.T) {
+	t.Parallel()
 	var backendHits, gateCalls int
 	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		backendHits++
@@ -394,6 +420,7 @@ func TestProxyWebSocket_DialFailureDoesNotLogAccessToken(t *testing.T) {
 }
 
 func TestLiveKitProxy_InvalidURL_FallsBackToLocalhost(t *testing.T) {
+	t.Parallel()
 	// Should not panic with invalid URL
 	proxy := NewLiveKitProxy("://invalid", []string{"*"}, AdmitAllVoiceSessionsForTest)
 	r := httptest.NewRequest("GET", "/rtc/validate?access_token=client", nil)

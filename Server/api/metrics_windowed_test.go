@@ -89,6 +89,7 @@ func windowFixture(d time.Duration) (metrics.WindowSnapshot, bool) {
 }
 
 func TestHandleMetrics_WindowsBlock(t *testing.T) {
+	t.Parallel()
 	src := fullMetricsSources()
 	src.Windows = windowFixture
 	resp := getMetrics(t, src)
@@ -141,6 +142,7 @@ func TestHandleMetrics_WindowsBlock(t *testing.T) {
 }
 
 func TestHandleMetrics_WindowsOmittedWithoutSource(t *testing.T) {
+	t.Parallel()
 	if _, ok := getMetrics(t, fullMetricsSources())["windows"]; ok {
 		t.Fatal("windows present with no windowed source")
 	}
@@ -167,6 +169,7 @@ func TestHandleMetrics_WindowsOmittedWithoutSource(t *testing.T) {
 // its JSON type, including each one the k6 observer (scripts/k6/ws-load.js)
 // reads, and proves that adding the windows block changes none of them.
 func TestHandleMetrics_LegacyKeysUnchanged(t *testing.T) {
+	t.Parallel()
 	const (
 		num     = "number"
 		str     = "string"
@@ -244,6 +247,7 @@ func TestHandleMetrics_LegacyKeysUnchanged(t *testing.T) {
 // A snapshot missing a voice phase leaves voice_join_ms out instead of
 // panicking on a nil dereference.
 func TestHandleMetrics_WindowsWithoutAllVoicePhases(t *testing.T) {
+	t.Parallel()
 	src := fullMetricsSources()
 	src.Windows = func(d time.Duration) (metrics.WindowSnapshot, bool) {
 		s, _ := windowFixture(d)
@@ -263,6 +267,7 @@ func TestHandleMetrics_WindowsWithoutAllVoicePhases(t *testing.T) {
 // db_wal_mb and the Prometheus owncord_db_wal_bytes report the same figure. A
 // failing stat leaves the field out on both surfaces and never a 500.
 func TestHandleMetrics_WALSize(t *testing.T) {
+	t.Parallel()
 	const walBytes = 7<<20 + 512<<10 // 7.5 MiB
 
 	src := api.MetricsSources{WALBytes: func() (int64, error) { return walBytes, nil }}

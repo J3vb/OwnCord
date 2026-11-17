@@ -87,6 +87,7 @@ func unfurled(t *testing.T, database *db.DB, reader *countingReader, id int64, r
 }
 
 func TestHistory_AttachesCardsInOneReadAndBackfillsTheRest(t *testing.T) {
+	t.Parallel()
 	svc, database, reader, q := linkPreviewHistory(t)
 	ctx := context.Background()
 	done := mustCreateMessage(t, database, 10, 1, "see https://a.example/x", nil)
@@ -123,6 +124,7 @@ func TestHistory_AttachesCardsInOneReadAndBackfillsTheRest(t *testing.T) {
 }
 
 func TestHistory_NoLinksMeansNoReadAndNoBackfill(t *testing.T) {
+	t.Parallel()
 	svc, database, reader, q := linkPreviewHistory(t)
 	mustCreateMessage(t, database, 10, 1, "just words", nil)
 	_, _, err := svc.GetMessages(context.Background(), 1, 10, 0, 50)
@@ -134,6 +136,7 @@ func TestHistory_NoLinksMeansNoReadAndNoBackfill(t *testing.T) {
 
 // An edit that swapped the link hides the old card at once, and queues the message again.
 func TestHistory_StaleCardHiddenAfterEditAndRequeued(t *testing.T) {
+	t.Parallel()
 	svc, database, reader, q := linkPreviewHistory(t)
 	ctx := context.Background()
 	id := mustCreateMessage(t, database, 10, 1, "https://old.example/", nil)
@@ -152,6 +155,7 @@ func TestHistory_StaleCardHiddenAfterEditAndRequeued(t *testing.T) {
 }
 
 func TestHistory_BackfillIsCappedPerPageNewestFirst(t *testing.T) {
+	t.Parallel()
 	svc, database, _, q := linkPreviewHistory(t)
 	ids := make([]int64, 0, 30)
 	for i := range 30 {
@@ -168,6 +172,7 @@ func TestHistory_BackfillIsCappedPerPageNewestFirst(t *testing.T) {
 }
 
 func TestHistory_DeletedAndSystemRowsAreLeftAlone(t *testing.T) {
+	t.Parallel()
 	svc, database, _, q := linkPreviewHistory(t)
 	id := mustCreateMessage(t, database, 10, 1, "https://gone.example/", nil)
 	mustDo(t, "DeleteMessage", database.DeleteMessage(context.Background(), id, 1, false))
@@ -179,6 +184,7 @@ func TestHistory_DeletedAndSystemRowsAreLeftAlone(t *testing.T) {
 }
 
 func TestHistory_WithoutAStoreNothingIsAttached(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	mustCreateMessage(t, database, 10, 1, "https://a.example/", nil)
 	msgs, _, err := svc.GetMessages(context.Background(), 1, 10, 0, 50)
@@ -191,6 +197,7 @@ func TestHistory_WithoutAStoreNothingIsAttached(t *testing.T) {
 // The send and the edit hand back the job instead of queueing it: the caller queues it after the
 // message's own events are out, so a cached card is sequenced behind the message.
 func TestSendAndEdit_ReturnTheJobAndQueueNothingThemselves(t *testing.T) {
+	t.Parallel()
 	svc, database, _, q := linkPreviewHistory(t)
 	ctx := context.Background()
 	res := mustSendMessage(ctx, t, svc, SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", Content: "hi https://a.example/"})
@@ -229,6 +236,7 @@ func TestSendAndEdit_ReturnTheJobAndQueueNothingThemselves(t *testing.T) {
 }
 
 func TestNoteLinkImageShown_ReachesTheUnfurler(t *testing.T) {
+	t.Parallel()
 	svc, _, _, q := linkPreviewHistory(t)
 	svc.NoteLinkImageShown("abc")
 	if len(q.images) != 1 || q.images[0] != "abc" {
@@ -238,6 +246,7 @@ func TestNoteLinkImageShown_ReachesTheUnfurler(t *testing.T) {
 
 // A message whose only record is a failed fetch older than the failure window is queued again.
 func TestHistory_StaleFailureRowsAreRequeuedFreshOnesAreNot(t *testing.T) {
+	t.Parallel()
 	svc, database, reader, q := linkPreviewHistory(t)
 	ctx := context.Background()
 	stale := mustCreateMessage(t, database, 10, 1, "https://stale.example/", nil)
@@ -274,6 +283,7 @@ func versionOf(t *testing.T, database *db.DB, id int64) string {
 }
 
 func TestLinkPreviewAudience(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedAliceBobDM(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})

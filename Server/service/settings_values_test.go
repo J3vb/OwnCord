@@ -11,6 +11,7 @@ import (
 // the settings PATCH at the service seam: a bad value is ErrBadRequest with
 // the key's own message, and nothing is written.
 func TestSettingsPatch_ValueLimits(t *testing.T) {
+	t.Parallel()
 	svc := NewSettingsService(newTestDB(t))
 	ctx := context.Background()
 	bad := map[string]string{

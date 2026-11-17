@@ -13,6 +13,7 @@ import (
 // read. SendMessage now advances the author's read state past the message it
 // just committed.
 func TestSendMessage_AdvancesAuthorReadState(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	const author = int64(1)
@@ -44,6 +45,7 @@ func TestSendMessage_AdvancesAuthorReadState(t *testing.T) {
 // unread for the author: advancing the read state on send must move it to the
 // sent message, never past it.
 func TestSendMessage_AuthorStillSeesLaterMessagesAsUnread(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newMentionFixture(t)
 
 	const author = int64(1)

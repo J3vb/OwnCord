@@ -8,6 +8,7 @@ import (
 // ─── UpdateReadState ──────────────────────────────────────────────────────────
 
 func TestUpdateReadState_Upsert(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "ella")
 	chID := seedChannel(t, database, "ch")
@@ -23,6 +24,7 @@ func TestUpdateReadState_Upsert(t *testing.T) {
 // ─── GetChannelUnreadCounts ─────────────────────────────────────────────────
 
 func TestGetChannelUnreadCounts_NoMessages(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "unreaduser")
 	_ = seedChannel(t, database, "unreadchan")
@@ -36,6 +38,7 @@ func TestGetChannelUnreadCounts_NoMessages(t *testing.T) {
 }
 
 func TestGetChannelUnreadCounts_WithUnreadMessages(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "unreaduser2")
 	chID := seedChannel(t, database, "unreadchan2")
@@ -63,6 +66,7 @@ func TestGetChannelUnreadCounts_WithUnreadMessages(t *testing.T) {
 // huge never-read channel from scanning every message row on every connect.
 // A small channel is unaffected.
 func TestGetChannelUnreadCounts_CapsAt100(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "unreadcap")
 	bigChID := seedChannel(t, database, "bigchan")
@@ -89,6 +93,7 @@ func TestGetChannelUnreadCounts_CapsAt100(t *testing.T) {
 // subquery rewrite must not silently drop empty channels from the ready
 // payload's unread map.
 func TestGetChannelUnreadCounts_ZeroMessageChannelYieldsZeros(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "unreadzero")
 	chID := seedChannel(t, database, "emptychan")
@@ -105,6 +110,7 @@ func TestGetChannelUnreadCounts_ZeroMessageChannelYieldsZeros(t *testing.T) {
 }
 
 func TestGetChannelUnreadCounts_IncludesAnnouncementChannels(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "unreadann")
 	annID := mustCreateChannel(t, database, "announcements", "announcement", "", "", 0)
@@ -127,6 +133,7 @@ func TestGetChannelUnreadCounts_IncludesAnnouncementChannels(t *testing.T) {
 
 // Deleted messages count neither toward unread nor toward last_msg_id.
 func TestGetChannelUnreadCounts_ExcludesDeleted(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "unreaddel")
 	chID := seedChannel(t, database, "unreaddelchan")
@@ -149,6 +156,7 @@ func TestGetChannelUnreadCounts_ExcludesDeleted(t *testing.T) {
 // ─── GetLatestMessageID ─────────────────────────────────────────────────────
 
 func TestGetLatestMessageID_Empty(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	chID := seedChannel(t, database, "latestchan")
 
@@ -160,6 +168,7 @@ func TestGetLatestMessageID_Empty(t *testing.T) {
 }
 
 func TestGetLatestMessageID_ReturnsHighest(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "latestuser")
 	chID := seedChannel(t, database, "latestchan2")
@@ -176,6 +185,7 @@ func TestGetLatestMessageID_ReturnsHighest(t *testing.T) {
 }
 
 func TestGetLatestMessageID_ExcludesDeleted(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "latestdel")
 	chID := seedChannel(t, database, "latestdelchan")
@@ -197,6 +207,7 @@ func TestGetLatestMessageID_ExcludesDeleted(t *testing.T) {
 // ship a real mention_count for them instead of resetting the badge to 0 on
 // every reconnect.
 func TestGetChannelUnreadCounts_IncludesParticipatingDMs(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	alice := seedUser(t, database, "dmunreadalice")
 	bob := seedUser(t, database, "dmunreadbob")
@@ -224,6 +235,7 @@ func TestGetChannelUnreadCounts_IncludesParticipatingDMs(t *testing.T) {
 }
 
 func TestGetChannelUnreadCounts_ExcludesForeignDMs(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	alice := seedUser(t, database, "dmforeignalice")
 	bob := seedUser(t, database, "dmforeignbob")
@@ -243,6 +255,7 @@ func TestGetChannelUnreadCounts_ExcludesForeignDMs(t *testing.T) {
 // LastReadMessageID is the caller's own read pointer, distinct from the
 // channel's newest message, and 0 for a channel with no read_states row.
 func TestGetChannelUnreadCounts_LastReadMessageID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	reader := seedUser(t, database, "pointerreader")

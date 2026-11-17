@@ -29,6 +29,7 @@ func (errDMChannelIDsStore) GetUserDMChannelIDs(context.Context, int64) ([]int64
 // successful-but-DM-stripped result — exactly the hole the ws sibling
 // (computeAllowedChannels in ws/serve.go) was deliberately hardened against.
 func TestGetAccessibleChannelIDs_DMLookupErrorFailsClosed(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})

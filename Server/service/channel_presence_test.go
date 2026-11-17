@@ -51,6 +51,7 @@ func (f *faultyStore) UpdateUserPresence(ctx context.Context, id int64, status s
 // wipe every client's copy of text the DB still holds. Regression for
 // finding v78.
 func TestHandlePresenceUpdate_BareStatusReadFailureAbortsBeforeCommit(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
 	ctx := context.Background()
@@ -87,6 +88,7 @@ func TestHandlePresenceUpdate_BareStatusReadFailureAbortsBeforeCommit(t *testing
 // two autocommits (P5-O08, folded into P5-S07): the status and the text commit
 // together.
 func TestHandlePresenceUpdate_CustomStatusIsOneWriterTransaction(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h"})
 	ctx := context.Background()
@@ -114,6 +116,7 @@ func TestHandlePresenceUpdate_CustomStatusIsOneWriterTransaction(t *testing.T) {
 // an error with nothing committed and nothing to broadcast: the stored status
 // and text are untouched.
 func TestHandlePresenceUpdate_CombinedWriteFailureCommitsNothing(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedUser(t, database, &db.User{ID: 1, Username: "ada", PasswordHash: "h", Status: db.StatusOnline})
 	ctx := context.Background()

@@ -16,6 +16,7 @@ import (
 // database plus its WAL plus the reserve, names the numbers, and goes ahead
 // once the space is there. An unreadable volume is not treated as full.
 func TestBackupToSafe_RefusesWhenShortOfSpace(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 	backupDir := filepath.Join(tmpDir, "backups")
 	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))
@@ -54,6 +55,7 @@ func TestBackupToSafe_RefusesWhenShortOfSpace(t *testing.T) {
 // The default (no reserve set) still refuses a copy that cannot fit, and an
 // in-memory database is never checked.
 func TestBackupToSafe_SpaceCheckDefaultsAndMemory(t *testing.T) {
+	t.Parallel()
 	database, tmpDir := newBackupFileDB(t)
 	backupDir := filepath.Join(tmpDir, "backups")
 	mustDo(t, "MkdirAll", os.MkdirAll(backupDir, 0o755))

@@ -35,6 +35,7 @@ func fileReport(t *testing.T, database *db.DB, reporterID, subjectID int64, targ
 }
 
 func TestReportQueries_InsertGetAndDedupe(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-reporter")
@@ -87,6 +88,7 @@ func TestReportQueries_InsertGetAndDedupe(t *testing.T) {
 // violates idx_reports_active_unique, and the violation must surface as
 // db.ErrConflict, not a raw driver error.
 func TestReportQueries_FileReportUniqueConstraintIsConflict(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-race-reporter")
@@ -104,6 +106,7 @@ func TestReportQueries_FileReportUniqueConstraintIsConflict(t *testing.T) {
 // TestReportQueries_FileReportWritesEvidenceInTheSameTransaction pins P1-4:
 // the report row and every evidence row land together, or none do.
 func TestReportQueries_FileReportWritesEvidenceInTheSameTransaction(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-tx-reporter")
@@ -131,6 +134,7 @@ func TestReportQueries_FileReportWritesEvidenceInTheSameTransaction(t *testing.T
 // leave the report row orphaned with no evidence — this is what would go red
 // if FileReport were split back into separate statements.
 func TestReportQueries_FileReportRollsBackOnEvidenceFailure(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-tx-fail-reporter")
@@ -159,6 +163,7 @@ func TestReportQueries_FileReportRollsBackOnEvidenceFailure(t *testing.T) {
 // the token mapping (strOrEmpty): after an erasure, GetReport's Report value
 // must surface the marker token through the same wrapper Queue/Mine use.
 func TestReportQueries_GetReportCarriesTokens(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-token-reporter")
@@ -182,6 +187,7 @@ func TestReportQueries_GetReportCarriesTokens(t *testing.T) {
 }
 
 func TestReportQueries_QueueFilters(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-queue-reporter")
@@ -255,6 +261,7 @@ func TestReportQueries_QueueFilters(t *testing.T) {
 }
 
 func TestReportQueries_AssignAndCloseAreGuarded(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-guard-reporter")
@@ -283,6 +290,7 @@ func TestReportQueries_AssignAndCloseAreGuarded(t *testing.T) {
 // observed value — even though the report is still open/assigned — must
 // not match, exactly as if a concurrent reassignment had raced in first.
 func TestReportQueries_AssignReportObservedMismatch(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-observed-reporter")
@@ -309,6 +317,7 @@ func TestReportQueries_AssignReportObservedMismatch(t *testing.T) {
 // new assignee, even though the state and observed-assignee guards would
 // otherwise pass.
 func TestReportQueries_AssignReportRefusesAnErasedModerator(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-ghost-reporter")
@@ -324,6 +333,7 @@ func TestReportQueries_AssignReportRefusesAnErasedModerator(t *testing.T) {
 // TestReportQueries_InsertReportNoteRefusesAnErasedModerator is
 // AssignReport's sibling for notes.
 func TestReportQueries_InsertReportNoteRefusesAnErasedModerator(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-note-ghost-reporter")
@@ -350,6 +360,7 @@ func TestReportQueries_InsertReportNoteRefusesAnErasedModerator(t *testing.T) {
 // new row — the guarded INSERT ... SELECT ... WHERE EXISTS turns that into
 // a zero-row RETURNING, mapped to db.ErrNotFound, and no report is created.
 func TestReportQueries_FileReportRefusesAGoneReporterOrSubject(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	const noSuchUser = int64(999999)
@@ -373,6 +384,7 @@ func TestReportQueries_FileReportRefusesAGoneReporterOrSubject(t *testing.T) {
 // same race window is silently dropped, not an abort of the whole report —
 // the snapshot is simply short one context row.
 func TestReportQueries_FileReportDropsEvidenceFromAGoneAuthor(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-drop-reporter")
@@ -402,6 +414,7 @@ func TestReportQueries_FileReportDropsEvidenceFromAGoneAuthor(t *testing.T) {
 // as the EXISTS(users) check — not a separate read-then-write that a
 // concurrent Close could slip between.
 func TestReportQueries_InsertReportNoteRefusesOnClosedReport(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-note-closed-reporter")
@@ -429,6 +442,7 @@ func TestReportQueries_InsertReportNoteRefusesOnClosedReport(t *testing.T) {
 // assignee (read fresh, inside the same transaction as the write), and
 // ErrForbidden when they do not.
 func TestReportQueries_AssignReportForced(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-forced-reporter")
@@ -481,6 +495,7 @@ func TestReportQueries_AssignReportForced(t *testing.T) {
 // resolves to a role at all (erased mid-race) — nothing to outrank, so the
 // call refuses rather than erroring.
 func TestReportQueries_AssignReportForcedRefusesAnErasedCurrentAssignee(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-forced-ghost-reporter")
@@ -498,6 +513,7 @@ func TestReportQueries_AssignReportForcedRefusesAnErasedCurrentAssignee(t *testi
 // n != 1 branch: the actor genuinely outranks, but the report is no longer
 // open/assigned by the time the guarded UPDATE runs.
 func TestReportQueries_AssignReportForcedZeroRowsWhenReportClosed(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-forced-closed-reporter")
@@ -530,6 +546,7 @@ func TestReportQueries_AssignReportForcedZeroRowsWhenReportClosed(t *testing.T) 
 // service-level test drives the same calls through a real *db.DB, but
 // per-package coverage only counts a package's own tests.
 func TestReportQueries_InsertAndListReportEvents(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-events-reporter")
@@ -564,6 +581,7 @@ func TestReportQueries_InsertAndListReportEvents(t *testing.T) {
 }
 
 func TestReportQueries_EvidenceAndNotes(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-ev-reporter")
@@ -607,6 +625,7 @@ func TestReportQueries_EvidenceAndNotes(t *testing.T) {
 // here — the EXISTS clause is on users, not reports — so this exercises
 // the evidence FK error and the note author-existence guard together).
 func TestReportQueries_EvidenceAndNoteErrorsPropagate(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	const noSuchReport = int64(999999)
@@ -626,6 +645,7 @@ func TestReportQueries_EvidenceAndNoteErrorsPropagate(t *testing.T) {
 // every method wraps and returns whatever the connection reports, and a
 // closed connection is the simplest way to make that a real error.
 func TestReportQueries_ErrorsPropagateOnClosedDB(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-closed-reporter")
@@ -676,6 +696,7 @@ func TestReportQueries_ErrorsPropagateOnClosedDB(t *testing.T) {
 }
 
 func TestReportQueries_PruneContentOlderThan(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-prune-reporter")
@@ -731,6 +752,7 @@ func TestReportQueries_PruneContentOlderThan(t *testing.T) {
 // assign, force-assign and note each write their report_events row inside the
 // mutation itself, so a caller can no longer lose or reorder the history.
 func TestReportQueries_MutationsRecordTheirEventInTheSameTransaction(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-evtx-reporter")
@@ -763,6 +785,7 @@ func TestReportQueries_MutationsRecordTheirEventInTheSameTransaction(t *testing.
 // TestReportQueries_CloseReportRefusesAnErasedModerator is AssignReport's
 // sibling for closing, and pins the "closed" event rides the same write.
 func TestReportQueries_CloseReportRefusesAnErasedModerator(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rq-close-ghost-reporter")
@@ -787,6 +810,7 @@ func TestReportQueries_CloseReportRefusesAnErasedModerator(t *testing.T) {
 // ListReportLinks resolves several ids in one read, keyed by internal id; an
 // id with no row is absent and an empty list reads nothing.
 func TestListReportLinks_ResolvesManyInOneRead(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	reporter := seedUser(t, database, "rl-reporter")

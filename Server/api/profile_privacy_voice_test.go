@@ -28,6 +28,7 @@ func (b *privacyEvictBroadcaster) DisconnectFromVoiceInChannel(_ context.Context
 // voice call at once, the way a block does; a trusted counterpart, a
 // counterpart not in the call and a group call are left alone.
 func TestPutPrivacy_DMsOffEvictsUntrustedCounterpartFromVoice(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newMigratedAuthTestDB(t)
 	bc := &privacyEvictBroadcaster{}

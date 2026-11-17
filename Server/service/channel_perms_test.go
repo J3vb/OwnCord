@@ -32,6 +32,7 @@ func seedOverrideFixture(t *testing.T) (*ChannelService, *db.DB, *db.Role, *db.R
 }
 
 func TestPutRoleOverride_ClampsAndPersists(t *testing.T) {
+	t.Parallel()
 	svc, database, mod, low, ch := seedOverrideFixture(t)
 	garbage := int64(1) << 62 // undefined bit must not persist
 	res, err := svc.PutRoleOverride(context.Background(), 7, mod, ch, low.ID,
@@ -52,6 +53,7 @@ func TestPutRoleOverride_ClampsAndPersists(t *testing.T) {
 }
 
 func TestPutRoleOverride_EscalationRefusedPrefixFree(t *testing.T) {
+	t.Parallel()
 	svc, _, mod, low, ch := seedOverrideFixture(t)
 	_, err := svc.PutRoleOverride(context.Background(), 7, mod, ch, low.ID,
 		permissions.ManageServer, 0)
@@ -64,6 +66,7 @@ func TestPutRoleOverride_EscalationRefusedPrefixFree(t *testing.T) {
 }
 
 func TestDeleteRoleOverride_ZeroMaskUnionGuard(t *testing.T) {
+	t.Parallel()
 	// Clearing a deny the actor's own role lacks is a grant: seed a
 	// MANAGE_SERVER deny as an admin would, then have the non-admin actor
 	// try to clear it — the union guard must refuse.
@@ -75,6 +78,7 @@ func TestDeleteRoleOverride_ZeroMaskUnionGuard(t *testing.T) {
 }
 
 func TestRoleOverride_HierarchyRefusedAtOrAbove(t *testing.T) {
+	t.Parallel()
 	svc, database, mod, _, ch := seedOverrideFixture(t)
 	peer := &db.Role{ID: 23, Name: "chan-peer", Position: mod.Position, Permissions: permissions.ReadMessages}
 	seedRole(t, database, peer)
@@ -85,6 +89,7 @@ func TestRoleOverride_HierarchyRefusedAtOrAbove(t *testing.T) {
 }
 
 func TestRoleOverride_UnknownRoleNotFound(t *testing.T) {
+	t.Parallel()
 	svc, _, mod, _, ch := seedOverrideFixture(t)
 	_, err := svc.PutRoleOverride(context.Background(), 7, mod, ch, 9999, 0, 0)
 	if !errors.Is(err, ErrNotFound) || err.Error() != "role not found" {
@@ -93,6 +98,7 @@ func TestRoleOverride_UnknownRoleNotFound(t *testing.T) {
 }
 
 func TestUserOverride_HierarchyAndAudit(t *testing.T) {
+	t.Parallel()
 	svc, database, mod, low, ch := seedOverrideFixture(t)
 	seedUser(t, database, &db.User{ID: 31, Username: "low-user"})
 	seedUserRole(t, database, 31, low.ID)
@@ -131,6 +137,7 @@ func TestUserOverride_HierarchyAndAudit(t *testing.T) {
 }
 
 func TestChannelPermissions_ListsRolesAndOnlyOverriddenUsers(t *testing.T) {
+	t.Parallel()
 	svc, database, mod, low, ch := seedOverrideFixture(t)
 	seedUser(t, database, &db.User{ID: 31, Username: "listed"})
 	seedUserRole(t, database, 31, low.ID)

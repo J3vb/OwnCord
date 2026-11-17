@@ -51,6 +51,7 @@ func (r *shortReadReader) Read(p []byte) (int, error) {
 // once enough bytes are in hand — here, WEBP's 12-byte "RIFF????WEBP" pattern,
 // split across two 10-byte reads.
 func TestUploadStoreFile_ShortReadStillSniffsFullHeader(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	svc := testUploadSvc(database)
@@ -95,6 +96,7 @@ func TestUploadStoreFile_ShortReadStillSniffsFullHeader(t *testing.T) {
 // A 3GPP clip stores its brand in the ftyp box; without the sniff it lands as
 // application/octet-stream and chat offers only a download.
 func TestUploadSniff_ThreeGPPBrands(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct{ brand, want string }{
 		{"3gp4", "video/3gpp"},
 		{"3gp5", "video/3gpp"},

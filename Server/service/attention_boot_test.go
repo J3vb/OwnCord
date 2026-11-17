@@ -9,6 +9,7 @@ import (
 // and the attention panel says so — naming when the previous run started and
 // the last panic it recovered.
 func TestAttention_UncleanExitWarns(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	started := f.now.Add(-2 * time.Hour)
 	panicked := f.now.Add(-90 * time.Minute)
@@ -36,6 +37,7 @@ func TestAttention_UncleanExitWarns(t *testing.T) {
 // A clean previous shutdown is ok and raises nothing; the first start on a
 // service that never read a marker is unknown, never a false warning.
 func TestAttention_BootStatusCleanAndUnknown(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	wantStatus(t, f.step(), "last_exit", AttentionStatusUnknown)
 
@@ -49,6 +51,7 @@ func TestAttention_BootStatusCleanAndUnknown(t *testing.T) {
 
 // The warning recovers on a later clean restart.
 func TestAttention_UncleanExitRecovers(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.s.RecordBootStatus(BootStatus{Recorded: true, Unclean: true, StartedAt: f.now.Add(-time.Hour)})
 	rep := f.step()

@@ -73,6 +73,7 @@ func roleProbe(t *testing.T, perms *PermissionService, userID int64) func() any 
 }
 
 func TestUpdateRole_ServiceInvalidatesThenNotifies(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	created, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Bots"), Permissions: new(permissions.ReadMessages)})
@@ -112,6 +113,7 @@ func TestUpdateRole_ServiceInvalidatesThenNotifies(t *testing.T) {
 }
 
 func TestUpdateRole_ColorOnlyEditSkipsVisibilityAndMemberUpdate(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	created, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Bots")})
@@ -138,6 +140,7 @@ func (failingMemberList) ListUserIDsByRole(context.Context, int64) ([]int64, err
 }
 
 func TestUpdateRole_UnreadableMemberListFlushesAllAndFansOutToEveryone(t *testing.T) {
+	t.Parallel()
 	base, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	created, err := base.CreateRole(ctx, 1, RoleInput{Name: new("Bots")})
@@ -169,6 +172,7 @@ func TestUpdateRole_UnreadableMemberListFlushesAllAndFansOutToEveryone(t *testin
 }
 
 func TestUpdateRole_FailedUpdateNotifiesNobody(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 	rec := &permNotifyRecorder{}
 	svc.SetPermissionNotifier(rec)
@@ -181,6 +185,7 @@ func TestUpdateRole_FailedUpdateNotifiesNobody(t *testing.T) {
 }
 
 func TestCreateRole_NotifiesRolesOnly(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 	rec := &permNotifyRecorder{}
 	svc.SetPermissionNotifier(rec)
@@ -193,6 +198,7 @@ func TestCreateRole_NotifiesRolesOnly(t *testing.T) {
 }
 
 func TestReorderRoles_FlushesCacheThenNotifies(t *testing.T) {
+	t.Parallel()
 	svc, _ := newRoleCRUDService(t)
 	ctx := context.Background()
 	rec := &permNotifyRecorder{probe: roleProbe(t, svc.perms, 3)}
@@ -214,6 +220,7 @@ func TestReorderRoles_FlushesCacheThenNotifies(t *testing.T) {
 }
 
 func TestDeleteRole_RevokesInlineThenNotifies(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	role, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Contractor"), Position: new(30)})
@@ -243,6 +250,7 @@ func TestDeleteRole_RevokesInlineThenNotifies(t *testing.T) {
 }
 
 func TestDeleteRole_InlineRevokeIsCappedAndWorkerGetsEveryone(t *testing.T) {
+	t.Parallel()
 	svc, database := newRoleCRUDService(t)
 	ctx := context.Background()
 	role, err := svc.CreateRole(ctx, 1, RoleInput{Name: new("Crowd"), Position: new(30)})
@@ -275,6 +283,7 @@ func TestDeleteRole_InlineRevokeIsCappedAndWorkerGetsEveryone(t *testing.T) {
 }
 
 func TestChangeUserRole_InvalidatesRevokesThenNotifies(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestRoleService(t)
 	ctx := context.Background()
 	rec := &permNotifyRecorder{probe: roleProbe(t, svc.perms, 5)}
@@ -302,6 +311,7 @@ func TestChangeUserRole_InvalidatesRevokesThenNotifies(t *testing.T) {
 }
 
 func TestChangeUserRole_RefusedNotifiesNobody(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestRoleService(t)
 	rec := &permNotifyRecorder{}
 	svc.SetPermissionNotifier(rec)
@@ -322,6 +332,7 @@ func channelPermProbe(perms *PermissionService, userID, channelID int64) func() 
 }
 
 func TestPutRoleOverride_ServiceAloneRevokesAccessAndNotifiesAfter(t *testing.T) {
+	t.Parallel()
 	svc, database, mod, low, ch := seedOverrideFixture(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 31})
@@ -358,6 +369,7 @@ func TestPutRoleOverride_ServiceAloneRevokesAccessAndNotifiesAfter(t *testing.T)
 }
 
 func TestUserOverride_ServiceAloneInvalidatesTargetAndNotifies(t *testing.T) {
+	t.Parallel()
 	svc, database, mod, low, ch := seedOverrideFixture(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 32})
@@ -381,6 +393,7 @@ func TestUserOverride_ServiceAloneInvalidatesTargetAndNotifies(t *testing.T) {
 }
 
 func TestRoleOverride_UnreadableMemberListFlushesEveryCachedMask(t *testing.T) {
+	t.Parallel()
 	base, database, mod, low, ch := seedOverrideFixture(t)
 	ctx := context.Background()
 	svc := NewChannelService(failingMemberList{database}, base.perms)
@@ -407,6 +420,7 @@ func TestRoleOverride_UnreadableMemberListFlushesEveryCachedMask(t *testing.T) {
 }
 
 func TestRefusedOverrideNeitherInvalidatesNorNotifies(t *testing.T) {
+	t.Parallel()
 	svc, _, mod, low, ch := seedOverrideFixture(t)
 	rec := &permNotifyRecorder{}
 	svc.SetPermissionNotifier(rec)

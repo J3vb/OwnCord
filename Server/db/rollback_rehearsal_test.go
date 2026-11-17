@@ -297,6 +297,7 @@ func checkGroupIconReversed(t *testing.T, d *DB, seed iconSeed) {
 }
 
 func TestMigrationRollbackRehearsalOnAlphaSnapshot(t *testing.T) {
+	t.Parallel()
 	database := openSnapshotCopy(t)
 
 	baseSchema := schemaFingerprint(t, database)
@@ -416,6 +417,7 @@ func firstSchemaDiff(want, got string) string {
 // checks the server rebuilds it on the next open — the marker file is applied
 // by OpenMarkerStore, not by a migration, so its reversal is separate.
 func TestMarkerFileRollback(t *testing.T) {
+	t.Parallel()
 	path := t.TempDir() + "/markers.sqlite"
 	key := []byte("rehearsal-marker-key-32-bytes!!!")
 
@@ -505,6 +507,7 @@ func sqlText(stmt string) string {
 }
 
 func TestReversalFilesAreOperatorSafe(t *testing.T) {
+	t.Parallel()
 	txnControl := []string{"begin", "commit", "rollback", "savepoint", "release", "end"}
 
 	for _, name := range append(slices.Clone(rollback.Order), rollback.MarkerFile) {

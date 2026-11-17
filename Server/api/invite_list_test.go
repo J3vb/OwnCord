@@ -46,6 +46,7 @@ func listInvitesAt(t *testing.T, router http.Handler, token, query string) []lis
 }
 
 func TestListInvites_OldLiveInviteSurvivesManyDeadOnes(t *testing.T) {
+	t.Parallel()
 	router, database, token, uid := inviteTestAdmin(t, "listadmin1")
 	oldLive := mustInvite(t, database, uid, 0, nil)
 	for range 250 {
@@ -70,6 +71,7 @@ func TestListInvites_OldLiveInviteSurvivesManyDeadOnes(t *testing.T) {
 }
 
 func TestListInvites_DeadPagedByCursor(t *testing.T) {
+	t.Parallel()
 	router, database, token, uid := inviteTestAdmin(t, "listadmin2")
 	for range 25 {
 		code := mustInvite(t, database, uid, 0, nil)
@@ -105,6 +107,7 @@ func TestListInvites_DeadPagedByCursor(t *testing.T) {
 }
 
 func TestListInvites_ExpiringInviteIsOnExactlyOneSide(t *testing.T) {
+	t.Parallel()
 	router, database, token, uid := inviteTestAdmin(t, "listadmin3")
 	soon := time.Now().Add(4 * time.Second)
 	code := mustInvite(t, database, uid, 0, &soon)
@@ -141,6 +144,7 @@ func TestListInvites_ExpiringInviteIsOnExactlyOneSide(t *testing.T) {
 }
 
 func TestListInvites_BadParams(t *testing.T) {
+	t.Parallel()
 	router, _, token, _ := inviteTestAdmin(t, "listadmin4")
 	for _, q := range []string{"?state=nope", "?before=x", "?before=-1", "?limit=-1", "?limit=x"} {
 		rr := getWithToken(t, router, "/api/v1/invites"+q, token)
@@ -149,6 +153,7 @@ func TestListInvites_BadParams(t *testing.T) {
 }
 
 func TestRevokeInviteByID(t *testing.T) {
+	t.Parallel()
 	router, database, token, uid := inviteTestAdmin(t, "revadmin1")
 	code := mustInvite(t, database, uid, 0, nil)
 	inv, err := database.GetInvite(context.Background(), code)
@@ -167,6 +172,7 @@ func TestRevokeInviteByID(t *testing.T) {
 }
 
 func TestRevokeInviteByID_UnknownAndMalformed(t *testing.T) {
+	t.Parallel()
 	router, _, token, _ := inviteTestAdmin(t, "revadmin2")
 	for _, id := range []string{"99999", "0", "abc"} {
 		rr := doAPI(t, router, http.MethodDelete, "/api/v1/invites/id/"+id, token, nil)
@@ -175,6 +181,7 @@ func TestRevokeInviteByID_UnknownAndMalformed(t *testing.T) {
 }
 
 func TestRevokeInviteByID_MemberForbidden(t *testing.T) {
+	t.Parallel()
 	router, database, adminToken, uid := inviteTestAdmin(t, "revadmin3")
 	_ = adminToken
 	code := mustInvite(t, database, uid, 0, nil)
@@ -189,6 +196,7 @@ func TestRevokeInviteByID_MemberForbidden(t *testing.T) {
 }
 
 func TestCreateInvite_RateLimitedPerUser(t *testing.T) {
+	t.Parallel()
 	router, database, token, _ := inviteTestAdmin(t, "rateadmin1")
 	other := loginAndGetToken(t, router, database, "rateadmin2", 2)
 

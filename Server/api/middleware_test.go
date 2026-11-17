@@ -44,6 +44,7 @@ func withBearer(req *http.Request, token string) *http.Request {
 // ─── AuthMiddleware tests ─────────────────────────────────────────────────────
 
 func TestAuthMiddleware_ValidToken(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	_, token, _ := seedLoginSession(t, database, "alice", 4)
 
@@ -61,6 +62,7 @@ func TestAuthMiddleware_ValidToken(t *testing.T) {
 // a hot session costs at most one write per interval instead of one per
 // request.
 func TestAuthMiddleware_TouchSessionThrottled(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	_, token, hash := seedLoginSession(t, database, "touchy", 4)
 
@@ -162,6 +164,7 @@ func TestAuthMiddleware_TouchSlidesExpiry(t *testing.T) {
 }
 
 func TestAuthMiddleware_MissingToken(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
@@ -172,6 +175,7 @@ func TestAuthMiddleware_MissingToken(t *testing.T) {
 }
 
 func TestAuthMiddleware_ValidAPIToken(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	uid := mustCreateUser(t, database, "botuser", "hash", 4)
 	token, _ := auth.GenerateToken()
@@ -200,6 +204,7 @@ func TestAuthMiddleware_ValidAPIToken(t *testing.T) {
 }
 
 func TestAuthMiddleware_RevokedAPIToken(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	uid := mustCreateUser(t, database, "botuser2", "hash", 4)
 	token, _ := auth.GenerateToken()
@@ -216,6 +221,7 @@ func TestAuthMiddleware_RevokedAPIToken(t *testing.T) {
 }
 
 func TestAuthMiddleware_InvalidToken(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
@@ -227,6 +233,7 @@ func TestAuthMiddleware_InvalidToken(t *testing.T) {
 }
 
 func TestAuthMiddleware_ExpiredSession(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	uid := mustCreateUser(t, database, "bob", "hash", 4)
 	token, _ := auth.GenerateToken()
@@ -246,6 +253,7 @@ func TestAuthMiddleware_ExpiredSession(t *testing.T) {
 }
 
 func TestAuthMiddleware_MalformedAuthHeader(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 
 	h := api.AuthMiddleware(service.NewSessionService(database))(http.HandlerFunc(ok))
@@ -271,6 +279,7 @@ func TestAuthMiddleware_MalformedAuthHeader(t *testing.T) {
 // later, at RequirePermission's own nil check (403) — or not at all on routes
 // that have no RequirePermission.
 func TestAuthMiddleware_DanglingRoleUnauthorized(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 
 	// users.role_id has a FK to roles(id), so the dangling row can only be
@@ -312,6 +321,7 @@ func TestAuthMiddleware_DanglingRoleUnauthorized(t *testing.T) {
 // outage is not a bad token, so it must surface as a server-side failure
 // (503) instead of tearing down a perfectly valid session.
 func TestAuthMiddleware_DBErrorIsNotUnauthorized(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	_, token, _ := seedLoginSession(t, database, "erin", 4)
 
@@ -409,6 +419,7 @@ func TestAuthMiddleware_BackgroundWritesAreBounded(t *testing.T) {
 // ─── RequirePermission tests ──────────────────────────────────────────────────
 
 func TestRequirePermission_Allowed(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	_, token, _ := seedLoginSession(t, database, "carol", 4)
 
@@ -421,6 +432,7 @@ func TestRequirePermission_Allowed(t *testing.T) {
 }
 
 func TestRequirePermission_Forbidden(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	_, token, _ := seedLoginSession(t, database, "dave", 4)
 
@@ -433,6 +445,7 @@ func TestRequirePermission_Forbidden(t *testing.T) {
 }
 
 func TestRequirePermission_Administrator_Bypass(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	// Owner role (id=1) has permissions 0x7FFFFFFF which includes ADMINISTRATOR (0x40000000)
 	_, token, _ := seedLoginSession(t, database, "owner", 1)
@@ -451,6 +464,7 @@ func TestRequirePermission_Administrator_Bypass(t *testing.T) {
 // The previous raw `role.Permissions&perm == 0` test returned 200 here because
 // Member holds SendMessages, which was enough to make the mask non-zero.
 func TestRequirePermission_MultiBitRequiresAllBits(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	_, token, _ := seedLoginSession(t, database, "multibit", 4)
 
@@ -468,6 +482,7 @@ func TestRequirePermission_MultiBitRequiresAllBits(t *testing.T) {
 // which always installs a non-nil role, so without this the guard could be
 // rewritten to `if !ok { next.ServeHTTP(w, r); return }` and stay green.
 func TestRequirePermission_NoRoleInContext(t *testing.T) {
+	t.Parallel()
 	var nilRole *db.Role
 
 	tests := []struct {
@@ -507,6 +522,7 @@ func TestRequirePermission_NoRoleInContext(t *testing.T) {
 // ─── RateLimitMiddleware tests ────────────────────────────────────────────────
 
 func TestRateLimitMiddleware_UnderLimit(t *testing.T) {
+	t.Parallel()
 	limiter := auth.NewRateLimiter()
 
 	h := api.RateLimitMiddleware(limiter, "test:", 5, time.Minute)(http.HandlerFunc(ok))
@@ -518,6 +534,7 @@ func TestRateLimitMiddleware_UnderLimit(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_OverLimit(t *testing.T) {
+	t.Parallel()
 	limiter := auth.NewRateLimiter()
 	limit := 3
 
@@ -538,6 +555,7 @@ func TestRateLimitMiddleware_OverLimit(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_RetryAfterHeader(t *testing.T) {
+	t.Parallel()
 	limiter := auth.NewRateLimiter()
 
 	h := api.RateLimitMiddleware(limiter, "test:", 1, time.Minute)(http.HandlerFunc(ok))
@@ -559,6 +577,7 @@ func TestRateLimitMiddleware_RetryAfterHeader(t *testing.T) {
 }
 
 func TestRateLimitMiddleware_XRealIPIgnoredWithoutTrustedProxy(t *testing.T) {
+	t.Parallel()
 	// Without trusted proxies configured, X-Real-IP must be ignored.
 	// Each request with the same RemoteAddr host counts as the same IP regardless
 	// of what the X-Real-IP header says.
@@ -639,6 +658,7 @@ func TestRateLimitMiddleware_InvalidCIDRWarnsAtConstructionNotPerRequest(t *test
 }
 
 func TestRateLimitMiddleware_XRealIPHonouredFromTrustedProxy(t *testing.T) {
+	t.Parallel()
 	// With a trusted proxy configured, X-Real-IP from that proxy is used.
 	limiter := auth.NewRateLimiter()
 	limit := 2
@@ -668,6 +688,7 @@ func TestRateLimitMiddleware_XRealIPHonouredFromTrustedProxy(t *testing.T) {
 // TestAuthMiddleware_BannedUserBlocked verifies that an actively banned user
 // with no expiry cannot pass the auth middleware.
 func TestAuthMiddleware_BannedUserBlocked(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	uid := mustCreateUser(t, database, "banneduser", "hash", 4)
 	_ = database.BanUser(context.Background(), uid, "rule violation", nil) // permanent ban
@@ -684,6 +705,7 @@ func TestAuthMiddleware_BannedUserBlocked(t *testing.T) {
 // TestAuthMiddleware_ExpiredBanAllowed verifies that a user whose ban has
 // expired in the past can pass the auth middleware.
 func TestAuthMiddleware_ExpiredBanAllowed(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	uid := mustCreateUser(t, database, "expbanned", "hash", 4)
 
@@ -704,6 +726,7 @@ func TestAuthMiddleware_ExpiredBanAllowed(t *testing.T) {
 // TestAuthMiddleware_ActiveTemporaryBanBlocked verifies that a user with a
 // temporary ban whose expiry is in the future is still blocked.
 func TestAuthMiddleware_ActiveTemporaryBanBlocked(t *testing.T) {
+	t.Parallel()
 	database := newAPITestDB(t)
 	uid := mustCreateUser(t, database, "tempbanned", "hash", 4)
 
@@ -724,6 +747,7 @@ func TestAuthMiddleware_ActiveTemporaryBanBlocked(t *testing.T) {
 // ─── SecurityHeaders tests ───────────────────────────────────────────────────
 
 func TestSecurityHeaders_AllHeadersPresent(t *testing.T) {
+	t.Parallel()
 	h := api.SecurityHeaders(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := serveRequest(h, req)
@@ -745,6 +769,7 @@ func TestSecurityHeaders_AllHeadersPresent(t *testing.T) {
 }
 
 func TestSecurityHeaders_PassesThrough(t *testing.T) {
+	t.Parallel()
 	// Middleware must not swallow the response — downstream handler must be called.
 	called := false
 	h := api.SecurityHeaders(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -763,6 +788,7 @@ func TestSecurityHeaders_PassesThrough(t *testing.T) {
 }
 
 func TestSecurityHeaders_DoesNotOverrideExistingHeaders(t *testing.T) {
+	t.Parallel()
 	// If a downstream handler sets its own CSP, SecurityHeaders should not clobber it
 	// because it runs before the handler writes. The middleware sets headers first,
 	// the handler can then override them — that is the correct layering.
@@ -784,6 +810,7 @@ func TestSecurityHeaders_DoesNotOverrideExistingHeaders(t *testing.T) {
 // ─── MaxBodySize tests ────────────────────────────────────────────────────────
 
 func TestMaxBodySize_UnderLimit(t *testing.T) {
+	t.Parallel()
 	// A body smaller than the limit must be read successfully by the handler.
 	const limit = 10                   // bytes
 	body := strings.NewReader("hello") // 5 bytes — under limit
@@ -804,6 +831,7 @@ func TestMaxBodySize_UnderLimit(t *testing.T) {
 }
 
 func TestMaxBodySize_ExactLimit(t *testing.T) {
+	t.Parallel()
 	// A body exactly at the limit must be read without error.
 	const limit = 5
 	body := strings.NewReader("hello") // exactly 5 bytes
@@ -824,6 +852,7 @@ func TestMaxBodySize_ExactLimit(t *testing.T) {
 }
 
 func TestMaxBodySize_OverLimit(t *testing.T) {
+	t.Parallel()
 	// Reading beyond the limit must return an error from MaxBytesReader.
 	const limit = 5
 	body := strings.NewReader("hello world") // 11 bytes — over limit
@@ -844,6 +873,7 @@ func TestMaxBodySize_OverLimit(t *testing.T) {
 }
 
 func TestMaxBodySize_NilBody(t *testing.T) {
+	t.Parallel()
 	// GET requests with no body must pass through without panic.
 	h := api.MaxBodySize(1024)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -859,6 +889,7 @@ func TestMaxBodySize_NilBody(t *testing.T) {
 }
 
 func TestMaxBodySize_PassesThrough(t *testing.T) {
+	t.Parallel()
 	// Downstream handler must be called and its status code preserved.
 	h := api.MaxBodySize(1024)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusCreated)
@@ -873,6 +904,7 @@ func TestMaxBodySize_PassesThrough(t *testing.T) {
 // ─── AdminIPRestrict tests ──────────────────────────────────────────────────
 
 func TestAdminIPRestrict_AllowedCIDR(t *testing.T) {
+	t.Parallel()
 	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"127.0.0.0/8"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -882,6 +914,7 @@ func TestAdminIPRestrict_AllowedCIDR(t *testing.T) {
 }
 
 func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
+	t.Parallel()
 	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"10.0.0.0/8"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -897,6 +930,7 @@ func TestAdminIPRestrict_BlockedCIDR(t *testing.T) {
 // address the server saw. Without the name the operator sees a bare "access
 // denied" and has no way to tell a firewall from this setting.
 func TestAdminIPRestrict_BlockedNamesTheSetting(t *testing.T) {
+	t.Parallel()
 	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"10.0.0.0/8"}, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -913,6 +947,7 @@ func TestAdminIPRestrict_BlockedNamesTheSetting(t *testing.T) {
 }
 
 func TestAdminIPRestrict_EmptyAllowsAll(t *testing.T) {
+	t.Parallel()
 	h := api.AdminIPRestrict("server.admin_allowed_cidrs", nil, nil)(http.HandlerFunc(ok))
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
@@ -923,6 +958,7 @@ func TestAdminIPRestrict_EmptyAllowsAll(t *testing.T) {
 }
 
 func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
+	t.Parallel()
 	// Invalid CIDR should fail closed: the entry is skipped at construction,
 	// leaving a non-empty allowed list with zero parsed networks — nothing
 	// matches, so access is denied.
@@ -935,6 +971,7 @@ func TestAdminIPRestrict_InvalidCIDR(t *testing.T) {
 }
 
 func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
+	t.Parallel()
 	h := api.AdminIPRestrict("server.admin_allowed_cidrs", []string{"10.0.0.0/8", "192.168.0.0/16"}, nil)(http.HandlerFunc(ok))
 
 	// First CIDR matches.
@@ -962,6 +999,7 @@ func TestAdminIPRestrict_MultipleCIDRs(t *testing.T) {
 // connecting IP is a trusted proxy, the real client IP is extracted from
 // X-Forwarded-For and checked against admin CIDRs.
 func TestAdminIPRestrict_TrustedProxy_UsesXForwardedFor(t *testing.T) {
+	t.Parallel()
 	// Admin allowed: only 203.0.113.0/24. Trusted proxy: 127.0.0.1.
 	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"203.0.113.0/24"},
@@ -986,6 +1024,7 @@ func TestAdminIPRestrict_TrustedProxy_UsesXForwardedFor(t *testing.T) {
 // TestAdminIPRestrict_TrustedProxy_UsesXRealIP verifies X-Real-IP is preferred
 // over X-Forwarded-For when both are present from a trusted proxy.
 func TestAdminIPRestrict_TrustedProxy_UsesXRealIP(t *testing.T) {
+	t.Parallel()
 	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"203.0.113.0/24"},
 		[]string{"127.0.0.0/8"},
@@ -1001,6 +1040,7 @@ func TestAdminIPRestrict_TrustedProxy_UsesXRealIP(t *testing.T) {
 // TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders verifies that proxy headers
 // are ignored when the connecting IP is NOT a trusted proxy.
 func TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders(t *testing.T) {
+	t.Parallel()
 	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"203.0.113.0/24"},
 		[]string{"10.0.0.0/8"}, // only 10.x is trusted
@@ -1017,6 +1057,7 @@ func TestAdminIPRestrict_UntrustedProxy_IgnoresHeaders(t *testing.T) {
 // TestAdminIPRestrict_ProxyCollapse_WithoutTrusted verifies the original bug:
 // without trusted proxies, a proxy on localhost makes everything appear local.
 func TestAdminIPRestrict_ProxyCollapse_WithoutTrusted(t *testing.T) {
+	t.Parallel()
 	// Admin CIDR: private networks. No trusted proxies.
 	h := api.AdminIPRestrict("server.admin_allowed_cidrs",
 		[]string{"127.0.0.0/8", "10.0.0.0/8"},
@@ -1038,6 +1079,7 @@ func TestAdminIPRestrict_ProxyCollapse_WithoutTrusted(t *testing.T) {
 // ─── SecurityHeadersWithTLS tests ───────────────────────────────────────────
 
 func TestSecurityHeadersWithTLS_HSTS(t *testing.T) {
+	t.Parallel()
 	h := api.SecurityHeadersWithTLS("auto")(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := serveRequest(h, req)
@@ -1048,6 +1090,7 @@ func TestSecurityHeadersWithTLS_HSTS(t *testing.T) {
 }
 
 func TestSecurityHeadersWithTLS_NoHSTSWithoutTLS(t *testing.T) {
+	t.Parallel()
 	h := api.SecurityHeadersWithTLS("")(http.HandlerFunc(ok))
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rr := serveRequest(h, req)
@@ -1060,6 +1103,7 @@ func TestSecurityHeadersWithTLS_NoHSTSWithoutTLS(t *testing.T) {
 // ─── handleLiveKitHealth tests ──────────────────────────────────────────────
 
 func TestLiveKitHealth_Healthy(t *testing.T) {
+	t.Parallel()
 	h := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return true, nil
 	})
@@ -1079,6 +1123,7 @@ func TestLiveKitHealth_Healthy(t *testing.T) {
 }
 
 func TestLiveKitHealth_Unhealthy(t *testing.T) {
+	t.Parallel()
 	h := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return false, fmt.Errorf("connection refused")
 	})
@@ -1101,6 +1146,7 @@ func TestLiveKitHealth_Unhealthy(t *testing.T) {
 }
 
 func TestLiveKitHealth_UnhealthyNoError(t *testing.T) {
+	t.Parallel()
 	h := api.HandleLiveKitHealthForTest(func(_ context.Context) (bool, error) {
 		return false, nil
 	})
@@ -1247,6 +1293,7 @@ CREATE TABLE IF NOT EXISTS user_blocks (
 // one IPv6 /64 draw from the same per-IP budget: a single host usually holds
 // the whole /64, so keying the full /128 would give it unlimited budget.
 func TestRateLimitMiddleware_IPv6SharesSlash64Bucket(t *testing.T) {
+	t.Parallel()
 	limiter := auth.NewRateLimiter()
 	h := api.RateLimitMiddleware(limiter, "test:", 1, time.Minute)(http.HandlerFunc(ok))
 

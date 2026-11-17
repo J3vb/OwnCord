@@ -9,6 +9,7 @@ import (
 
 // Migration 077 resets user_roles to exactly the role users.role_id names.
 func TestMigrate_077ReconcilesUserRolesWithMirror(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	mustDo(t, "pre-077 schema", db.MigrateFS(database, migrationsUpTo(t, "077_")))
 	execAll(t, database,

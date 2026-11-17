@@ -12,6 +12,7 @@ import (
 // documents: a miss is any lookup that repopulated (first touch, TTL expiry,
 // post-invalidation), a hit is a fresh cached entry.
 func TestCacheStats_HitsAndMisses(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestPermService(t)
 	seedChannel(t, database, &db.Channel{ID: 10, Name: "general", Type: "text"})
 

@@ -9,6 +9,7 @@ import (
 )
 
 func TestGetMessagesForAPI_ReferencedMessageSnippet(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice")
@@ -38,6 +39,7 @@ func TestGetMessagesForAPI_ReferencedMessageSnippet(t *testing.T) {
 }
 
 func TestGetMessagesForAPI_ReferencedMessageRedactedWhenParentDeleted(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice")
@@ -56,6 +58,7 @@ func TestGetMessagesForAPI_ReferencedMessageRedactedWhenParentDeleted(t *testing
 }
 
 func TestGetMessagesForAPI_ReferencedMessageNeverCrossesChannels(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice")
@@ -73,6 +76,7 @@ func TestGetMessagesForAPI_ReferencedMessageNeverCrossesChannels(t *testing.T) {
 }
 
 func TestGetMessagesAroundAndPinned_ReferencedMessage(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice")

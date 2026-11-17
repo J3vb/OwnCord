@@ -17,6 +17,7 @@ import (
 // the panel has to be able to show and act on exactly such a user.
 
 func TestUserService_GetReportsMissingAsNotFound(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := NewUserService(database)
 	ctx := context.Background()
@@ -34,6 +35,7 @@ func TestUserService_GetReportsMissingAsNotFound(t *testing.T) {
 }
 
 func TestUserService_GetWithRoleName(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := NewUserService(database)
 	ctx := context.Background()
@@ -75,6 +77,7 @@ func TestUserService_GetWithRoleName(t *testing.T) {
 }
 
 func TestUserService_ListAllAndServerStats(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := NewUserService(database)
 	ctx := context.Background()
@@ -114,6 +117,7 @@ func TestUserService_ListAllAndServerStats(t *testing.T) {
 // A failed read is an internal error, never an empty result that would render
 // as "no users" or a zeroed dashboard.
 func TestUserService_AdminReadsFailLoud(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := NewUserService(database)
 	ctx := context.Background()
