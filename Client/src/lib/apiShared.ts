@@ -55,9 +55,18 @@ export class ApiClientError extends Error {
   readonly code: string;
   /** The response's Retry-After, in milliseconds, when it sent one. */
   readonly retryAfterMs: number | undefined;
+  /** The owner's appeal contact a banned sign-in refusal carried; shown as text only. */
+  readonly appealContact: string | undefined;
 
-  constructor(status: number, code: string, message: string, retryAfterMs?: number) {
+  constructor(
+    status: number,
+    code: string,
+    message: string,
+    retryAfterMs?: number,
+    appealContact?: string,
+  ) {
     super(message);
+    this.appealContact = appealContact;
     this.name = "ApiClientError";
     this.status = status;
     this.code = code;
@@ -95,9 +104,10 @@ export function httpError(
   code: string,
   message: string,
   retryAfterMs?: number,
+  appealContact?: string,
 ): Error {
   if (status === 502 && code === "UNKNOWN") return new TransportError(message);
-  return new ApiClientError(status, code, message, retryAfterMs);
+  return new ApiClientError(status, code, message, retryAfterMs, appealContact);
 }
 
 function isSessionExpired(message: string): boolean {
@@ -246,6 +256,28 @@ export function errorText(err: unknown, fallback: string): string {
   if (err instanceof TransportError) return connectText("session.connectTimeout");
   if (err instanceof ApiClientError) return serverErrorText(err.code, err.message, fallback);
   return err instanceof Error ? err.message : fallback;
+}
+
+/**
+ * The second line of a banned sign-in refusal: where to appeal, from the owner's
+ * contact setting. Null unless the error is the ban refusal and carried a contact.
+ * Text only: callers set it with textContent, never as markup.
+ */
+export function appealLine(err: unknown): string | null {
+  if (!(err instanceof ApiClientError)) return null;
+  if (err.code !== RestErrorCode.FORBIDDEN || err.message !== "your account has been suspended") {
+    return null;
+  }
+  const contact = err.appealContact?.trim();
+  if (contact === undefined || contact === "") return null;
+  return connectText("error.bannedAppeal", { contact });
+}
+
+/** `errorText`, plus the appeal line on a ban refusal, on its own line. */
+export function signInErrorText(err: unknown, fallback: string): string {
+  const line = appealLine(err);
+  const text = errorText(err, fallback);
+  return line === null ? text : `${text}\n${line}`;
 }
 
 /** The webview's JSON/stream failure for a body that is not JSON. */

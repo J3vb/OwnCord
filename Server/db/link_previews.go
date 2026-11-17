@@ -125,7 +125,7 @@ func (d *DB) ReplaceMessageLinkPreviews(ctx context.Context, messageID int64, co
 	if err != nil {
 		return false, fmt.Errorf("ReplaceMessageLinkPreviews begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	// The guarded marker write comes first: it is the transaction's first statement, so

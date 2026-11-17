@@ -57,6 +57,7 @@ var FuzzEntryPoints = map[string]FuzzEntry{
 	"ws.parseRoomChannelID":         {Source: "LiveKit webhook body", Targets: []string{"ws.FuzzParseRoomChannelID"}, Manual: true},
 
 	"api.imageDimensions":        {Source: "emoji and sticker uploads", Targets: []string{"api.FuzzImageDimensions"}},
+	"service.ValidateServerIcon": {Source: "server icon upload", Targets: []string{"service.FuzzValidateServerIcon"}},
 	"api.webpDimensions":         {Source: "emoji and sticker uploads", Targets: []string{"api.FuzzImageDimensions"}, Manual: true},
 	"api.makeThumbnail":          {Source: "uploaded images", Targets: []string{"api.FuzzMakeThumbnail"}},
 	"api.thumbOrientation":       {Source: "uploaded images", Targets: []string{"api.FuzzMakeThumbnail"}},

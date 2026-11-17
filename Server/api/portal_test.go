@@ -1,6 +1,7 @@
 package api_test
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -28,11 +29,13 @@ func portalBundle() fstest.MapFS {
 func portalRouter(bundle fstest.MapFS) http.Handler {
 	r := chi.NewRouter()
 	r.Use(api.SecurityHeadersWithTLS(""))
+	var ready <-chan struct{}
 	if bundle == nil {
-		api.MountPortal(r, nil)
+		ready = api.MountPortal(context.Background(), r, nil)
 	} else {
-		api.MountPortal(r, bundle)
+		ready = api.MountPortal(context.Background(), r, bundle)
 	}
+	<-ready
 	r.Get("/api/v1/health", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	return r
 }

@@ -49,7 +49,7 @@ func (d *DB) IncrementMentionCountsBatch(ctx context.Context, channelID int64, e
 	if err != nil {
 		return nil, fmt.Errorf("IncrementMentionCountsBatch begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	bumped := make(map[int64]int64)
 	for _, e := range entries {

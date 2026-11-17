@@ -34,6 +34,7 @@ func StartRuntime(cfg *config.Config, database *db.DB, pluginRegistry *plugin.Re
 	svc := service.New(database, limiter)
 	// Before NewHub: its first settings-cache fill reads the file-type lists auth_ok carries.
 	svc.Uploads.SetStorageLimits(storageLimits(cfg))
+	svc.Settings.SetServerIconDir(cfg.Server.DataDir)
 	if in.LinkPreviews != nil {
 		svc.Messages.SetLinkPreviews(in.LinkPreviews)
 	}
@@ -203,6 +204,7 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 			return admin.NewestBackup(admin.ResolveBackupDir(cfg.Backup.Dir), cfg.Database.Path)
 		},
 		Certificate: admin.ServedCertificate,
+		People:      service.PeopleSource(database),
 		VoiceHealth: func(ctx context.Context) service.VoiceHealth {
 			// A managed companion reports the supervisor's own state, which
 			// probes nothing; otherwise probe the external client's health

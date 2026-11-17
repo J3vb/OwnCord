@@ -36,7 +36,7 @@ func (d *DB) DecrementMentionCounts(ctx context.Context, channelID int64, msgIDs
 	if err != nil {
 		return nil, fmt.Errorf("DecrementMentionCounts begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	lowered := make(map[int64]int64)
 	for _, msgID := range msgIDs {

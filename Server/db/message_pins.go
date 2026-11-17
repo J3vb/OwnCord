@@ -129,7 +129,7 @@ func (d *DB) GetPinnedMessages(ctx context.Context, channelID int64, requestingU
 	if err != nil {
 		return nil, fmt.Errorf("GetPinnedMessages: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }

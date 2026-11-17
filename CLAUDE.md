@@ -121,9 +121,11 @@ and proceeds, so a reviewer can see what was assumed.
 - **Project threads skip `.claude/settings.json`.** A Claude project thread
   starts one folder above this repository, so the SessionStart hook never runs:
   the container keeps Node 22, no `node_modules` and no git hooks, and the
-  pre-commit gates silently do nothing. Before your first build, test or
+  pre-commit gates silently do nothing. The OwnCord cloud environment's
+  setup script runs it for you; on any other, before your first build, test or
   commit, run `(cd OwnCord && node scripts/claude-hook.mjs session-start)`
-  (about 15 s) and then the `export PATH=...` line it prints.
+  (about 15 s). It links Node 26 into `~/.local/bin`; if it prints an
+  `export PATH=...` line instead, run that too.
 - **Verify with the `ci-check` skill**, not with an ad-hoc `go build && go test`.
   CI compiles four Go build-tag variants and runs a deadlock-detection pass;
   the default build proves nothing about the tagged ones.

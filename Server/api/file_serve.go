@@ -15,6 +15,7 @@ import (
 
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/httperr"
+	"github.com/J3vb/OwnCord/Server/imgthumb"
 	"github.com/J3vb/OwnCord/Server/permissions"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/J3vb/OwnCord/Server/storage"
@@ -27,26 +28,25 @@ func handleServeFile(uploads *service.UploadService, store FileStore, allowedOri
 		if !ok {
 			return
 		}
-		f, err := store.Open(aa.StoredAs)
-		if err != nil {
-			http.NotFound(w, r)
-			return
-		}
-		defer f.Close() //nolint:errcheck
-		serveFileContent(w, r, aa, aa.MimeType, fileModTime(f), f, allowedOrigins)
+		serveStoredOriginal(w, r, aa, store, allowedOrigins)
 	}
 }
 
-// handleServeThumb serves an image's thumbnail, made on first request and kept beside the original. An
+// handleServeThumb serves an image's thumbnail (the optional size query selects a small one, see
+// serveSmallThumb), made on first request and kept beside the original. An
 // image the server does not shrink (inside thumbBox, a GIF, an animated WebP, no decoder, over
 // thumbMaxDecodeBytes, or undecodable) is served as the original; a failed generation is kept as an empty
 // thumbnail so it is never retried. A request finding no free slot within thumbSlotWait is served the
 // original without keeping anything. A non-image is a 404. HEIC, HEIF and TIFF previews are always a JPEG
 // and a failed conversion is a 404 (serveConvertedPreview).
 func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOrigins []string) http.HandlerFunc {
-	slots := newThumbSlots()
+	slots := sharedThumbSlots()
 	return func(w http.ResponseWriter, r *http.Request) {
 		aa, ok := authorizeFileRead(w, r, uploads)
+		if !ok {
+			return
+		}
+		size, ok := parseThumbSize(w, r)
 		if !ok {
 			return
 		}
@@ -56,6 +56,10 @@ func handleServeThumb(uploads *service.UploadService, store FileStore, allowedOr
 		}
 		if format := convertedFormat(aa.MimeType); format != "" {
 			serveConvertedPreview(w, r, aa, uploads, store, slots, format, allowedOrigins)
+			return
+		}
+		if size > 0 {
+			serveSmallThumb(w, r, aa, uploads, store, slots, size, allowedOrigins)
 			return
 		}
 		format := thumbFormat(aa.MimeType)
@@ -125,13 +129,11 @@ func serveKeptThumb(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAcc
 	defer t.Close() //nolint:errcheck
 	mimeType := aa.MimeType
 	if mimeType == mimeWebP {
-		var head [8]byte
-		n, _ := io.ReadFull(t, head[:])
-		if _, err := t.Seek(0, io.SeekStart); err != nil {
-			http.NotFound(w, r)
+		head, ok := peekHead(w, r, t)
+		if !ok {
 			return
 		}
-		mimeType = thumbMIME(mimeType, head[:n])
+		mimeType = thumbMIME(mimeType, head)
 	}
 	serveFileContent(w, r, aa, mimeType, fileModTime(t), t, allowedOrigins)
 }
@@ -196,7 +198,12 @@ func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.Attach
 // keptThumb reports what is kept for storedAs: its thumbnail, an empty one meaning the original is served
 // (t nil, found), or nothing yet.
 func keptThumb(store FileStore, storedAs string) (t storage.File, found bool) {
-	t, err := store.OpenThumb(storedAs)
+	return keptThumbSize(store, storedAs, 0)
+}
+
+// keptThumbSize is keptThumb for one thumbnail size (0 is the default one).
+func keptThumbSize(store FileStore, storedAs string, size int) (t storage.File, found bool) {
+	t, err := openThumbSize(store, storedAs, size)
 	if err != nil {
 		return nil, false
 	}
@@ -211,18 +218,115 @@ func keptThumb(store FileStore, storedAs string) (t storage.File, found bool) {
 // keepThumbnail stores a generated thumbnail, or an empty one when generation failed. It is a cache, but
 // still passes the disk-headroom floor like every write into upload storage.
 func keepThumbnail(ctx context.Context, uploads *service.UploadService, store FileStore, storedAs string, thumb []byte) {
+	keepThumbnailSize(ctx, uploads, store, storedAs, 0, thumb)
+}
+
+// keepThumbnailSize is keepThumbnail for one thumbnail size (0 is the default one).
+func keepThumbnailSize(ctx context.Context, uploads *service.UploadService, store FileStore, storedAs string, size int, thumb []byte) {
 	res, err := uploads.ReserveHeadroom(ctx, int64(len(thumb)))
 	if err != nil {
 		return
 	}
 	defer res.Settle(ctx)
-	if err := store.SaveThumb(storedAs, thumb); err != nil {
+	if err := saveThumbSize(store, storedAs, size, thumb); err != nil {
 		if !errors.Is(err, fs.ErrNotExist) {
 			slog.Warn("could not keep a thumbnail", "stored_as", storedAs, "error", err)
 		}
 		return
 	}
 	res.Commit()
+}
+
+// serveSmallThumb answers the thumbnail route for a size in storage.ThumbSizes: the original fitted in a
+// size by size box, kept as its own file and made once under the same slots as the default size. A type
+// with no decoder, an animated WebP, an undecodable or oversized original is served as the original (an
+// empty kept thumbnail records it). A GIF gets a still of its first frame, and the reply carries
+// X-Image-Animated: 1 when the GIF has more than one frame.
+func serveSmallThumb(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, uploads *service.UploadService, store FileStore, slots *thumbSlots, size int, allowedOrigins []string) {
+	if !smallThumbMIME[aa.MimeType] {
+		serveStoredOriginal(w, r, aa, store, allowedOrigins)
+		return
+	}
+	t, found := keptThumbSize(store, aa.StoredAs, size)
+	if t == nil && !found {
+		fresh, ok := generateSmallThumb(r, uploads, store, slots, aa.StoredAs, aa.MimeType, size)
+		if !ok {
+			return
+		}
+		if t, _ = keptThumbSize(store, aa.StoredAs, size); t == nil && fresh != nil {
+			serveSmallBytes(w, r, aa, store, size, fresh, allowedOrigins)
+			return
+		}
+	}
+	if t == nil {
+		serveStoredOriginal(w, r, aa, store, allowedOrigins)
+		return
+	}
+	defer t.Close() //nolint:errcheck
+	head, ok := peekHead(w, r, t)
+	if !ok {
+		return
+	}
+	if !markAnimated(w, aa, store, size) {
+		http.NotFound(w, r)
+		return
+	}
+	serveFileContent(w, r, aa, smallThumbContentType(head), fileModTime(t), t, allowedOrigins)
+}
+
+// peekHead reads a kept thumbnail's first bytes and rewinds it; on a failed rewind it answers 404 and
+// reports false.
+func peekHead(w http.ResponseWriter, r *http.Request, t storage.File) ([]byte, bool) {
+	var head [8]byte
+	n, _ := io.ReadFull(t, head[:])
+	if _, err := t.Seek(0, io.SeekStart); err != nil {
+		http.NotFound(w, r)
+		return nil, false
+	}
+	return head[:n], true
+}
+
+// serveSmallBytes serves a thumbnail that could not be kept (no disk headroom).
+func serveSmallBytes(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, store FileStore, size int, thumb []byte, allowedOrigins []string) {
+	if !markAnimated(w, aa, store, size) {
+		http.NotFound(w, r)
+		return
+	}
+	serveFileContent(w, r, aa, smallThumbContentType(thumb), time.Now(), bytes.NewReader(thumb), allowedOrigins)
+}
+
+// serveStoredOriginal serves the original file itself.
+func serveStoredOriginal(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, store FileStore, allowedOrigins []string) {
+	f, err := store.Open(aa.StoredAs)
+	if err != nil {
+		http.NotFound(w, r)
+		return
+	}
+	defer f.Close() //nolint:errcheck
+	serveFileContent(w, r, aa, aa.MimeType, fileModTime(f), f, allowedOrigins)
+}
+
+// markAnimated sets animatedHeader when the original is an animated GIF. The answer was recorded beside
+// the thumbnail when it was made; a thumbnail with no record (made before records existed) scans the
+// original once and records it. It reports false when the original is gone.
+func markAnimated(w http.ResponseWriter, aa *db.AttachmentAccess, store FileStore, size int) bool {
+	if aa.MimeType != "image/gif" {
+		return true
+	}
+	animated, known := store.ThumbAnimation(aa.StoredAs, size)
+	if !known {
+		f, err := store.Open(aa.StoredAs)
+		if err != nil {
+			return false
+		}
+		defer f.Close() //nolint:errcheck
+		animated = imgthumb.GIFAnimated(f)
+		_ = store.SetThumbAnimation(aa.StoredAs, size, animated)
+	}
+	if animated {
+		w.Header().Set(animatedHeader, "1")
+	}
+	return true
 }
 
 // authorizeFileRead resolves the {id} file and applies its access rule, writing the refusal itself.
@@ -284,7 +388,7 @@ func serveFileContent(w http.ResponseWriter, r *http.Request, aa *db.AttachmentA
 		for _, allowed := range allowedOrigins {
 			if allowed == "*" || strings.EqualFold(allowed, origin) {
 				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Access-Control-Expose-Headers", "Content-Type, Content-Length")
+				w.Header().Set("Access-Control-Expose-Headers", "Content-Type, Content-Length, "+animatedHeader)
 				break
 			}
 		}

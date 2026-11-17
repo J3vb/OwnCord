@@ -575,6 +575,7 @@
   display: none;
   align-items: flex-start;
   gap: 8px;
+  white-space: pre-line;
   animation: shakeX 0.4s ease-in-out;
 }
 .error-banner.visible {
@@ -731,6 +732,7 @@
   color: var(--text-danger);
   font-size: var(--font-size-sm);
   margin-top: 6px;
+  white-space: pre-line;
 }
 .form-status {
   color: var(--text-positive);

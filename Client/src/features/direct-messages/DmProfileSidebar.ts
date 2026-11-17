@@ -25,11 +25,8 @@ import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { avatarInitial, resolveDisplayName } from "@lib/ui/avatar";
 import { isRenderableAvatar, setAvatarSource } from "../profiles/avatar";
-import {
-  fetchImageAsObjectUrl,
-  recoverEvictedImage,
-  resolveServerUrl,
-} from "../messaging/content/attachments";
+import { recoverEvictedImage, resolveServerUrl } from "../messaging/content/attachments";
+import { avatarFetchUrl, fetchAvatarObjectUrl } from "../profiles/avatarSource";
 import { paintBanner } from "../profiles/banner";
 import { bannerImages } from "../profiles/bannerImages";
 import {
@@ -155,12 +152,16 @@ export function createDmProfileSidebar(
     if (isRenderableAvatar(user.avatar)) {
       const resolved = resolveServerUrl(user.avatar);
       const name = resolveDisplayName(user);
-      void fetchImageAsObjectUrl(resolved).then(async (objectUrl) => {
+      void fetchAvatarObjectUrl(resolved, 256).then(async (objectUrl) => {
         const current = (): boolean => wrapper.isConnected && gen === avatarGen;
         if (objectUrl === null || !current()) return;
         const img = createElement("img", { alt: name, class: "dps-avatar-img" });
-        recoverEvictedImage(img, { url: resolved });
-        if (!(await setAvatarSource(img, objectUrl, () => "always", current))) return;
+        recoverEvictedImage(img, { url: avatarFetchUrl(resolved, 256) });
+        if (
+          !(await setAvatarSource(img, objectUrl, () => "always", current, undefined, resolved))
+        ) {
+          return;
+        }
         letter.remove();
         wrapper.style.background = "transparent";
         wrapper.insertBefore(img, wrapper.firstChild);

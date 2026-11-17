@@ -223,7 +223,7 @@ func readHeader(ctx context.Context, ex Export) (Header, error) {
 	if err != nil {
 		return Header{}, fmt.Errorf("opening the export: %w", err)
 	}
-	defer rc.Close() //nolint:errcheck
+	defer rc.Close()
 	var h Header
 	_, err = Decode(ctx, rc, Visitor{Header: func(got Header) error { h = got; return errHeaderDone }})
 	if err != nil && !errors.Is(err, errHeaderDone) {
@@ -305,7 +305,7 @@ func (r *Runner) execute(ctx context.Context, ex Export, st *runState) error {
 	if err != nil {
 		return fmt.Errorf("opening the export: %w", err)
 	}
-	defer rc.Close() //nolint:errcheck
+	defer rc.Close()
 
 	sum, err := Decode(ctx, rc, Visitor{Message: func(m Message) error { return r.addMessage(ctx, ex, st, &m) }})
 	if err != nil {

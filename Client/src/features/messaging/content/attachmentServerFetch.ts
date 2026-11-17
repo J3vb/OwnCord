@@ -85,6 +85,22 @@ export function thumbnailUrl(fileUrl: string, mime: string): string {
   return parsed.toString();
 }
 
+/** The edge, in pixels, of the small previews the server keeps for avatar-sized slots. */
+export type SmallThumbSize = 128 | 256;
+
+/** The server's small preview of an uploaded avatar, `/api/v1/files/{id}/thumb?size=N`, or null for
+ *  anything else: an external or data: picture, another route, or a server that does not advertise
+ *  thumbnails. The preview is a still; a server that does not know `size` answers its default
+ *  preview, which is still far smaller than the original. */
+export function smallThumbnailUrl(fileUrl: string, size: SmallThumbSize): string | null {
+  if (authStore.getState().uploadPolicy?.thumbnails !== true || !isServerUrl(fileUrl)) return null;
+  const parsed = new URL(fileUrl);
+  if (parsed.search !== "" || !/^\/api\/v1\/files\/[^/]+$/.test(parsed.pathname)) return null;
+  parsed.pathname += "/thumb";
+  parsed.search = `?size=${size}`;
+  return parsed.toString();
+}
+
 /** The URL whose bytes a webview can show in full: the file itself, or for a
  *  HEIC, HEIF or TIFF its JPEG preview. */
 export function shownImageUrl(fileUrl: string, mime: string): string {

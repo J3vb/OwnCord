@@ -168,7 +168,7 @@ func linkAttachmentsToMessage(ctx context.Context, exec attachmentLinker, messag
 	if err != nil {
 		return nil, fmt.Errorf("LinkAttachmentsToMessage: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var linked []string
 	for rows.Next() {
 		var id string
@@ -201,7 +201,7 @@ func (d *DB) GetAttachmentsByMessageIDs(ctx context.Context, msgIDs []int64) (ma
 	if err != nil {
 		return nil, fmt.Errorf("GetAttachmentsByMessageIDs: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	result := make(map[int64][]AttachmentInfo)
 	for rows.Next() {

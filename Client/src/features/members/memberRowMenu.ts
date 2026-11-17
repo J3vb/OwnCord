@@ -163,7 +163,14 @@ export function createMemberItem(
   // row's own edge instead of a pointer position.
   /** The menu parameters that exist only when the owner supplied the matching handler. */
   const optionalMenuParams = (member: Member, voiceMod: VoiceModParam | undefined) => {
-    const { onTimeoutMember, onRemoveTimeout, onMessageUser, onCallUser, onChangeNickname } = opts;
+    const {
+      onTimeoutMember,
+      onRemoveTimeout,
+      onMessageUser,
+      onCallUser,
+      onChangeNickname,
+      onWarnMember,
+    } = opts;
     return {
       ...(canMention() ? {} : { mentionDisabledReason: shellText("member.mentionUnavailable") }),
       ...(onMessageUser === undefined ? {} : { onMessage: () => onMessageUser(member.id) }),
@@ -177,6 +184,9 @@ export function createMemberItem(
       ...(onRemoveTimeout === undefined
         ? {}
         : { onRemoveTimeout: () => onRemoveTimeout(member.id, member.username) }),
+      ...(onWarnMember === undefined
+        ? {}
+        : { onWarn: () => onWarnMember(member.id, member.username, memberDisplayName(member)) }),
       ...(onChangeNickname === undefined
         ? {}
         : {
@@ -228,6 +238,7 @@ export function createMemberItem(
         // roles from the profile popup's chips instead.
         canManageRoles: gates.canManageRoles && !multiRoleEnabled(),
         canTimeout: gates.canTimeout,
+        canWarn: gates.canWarn,
         canManageNicknames: gates.canManageNicknames,
         isSelf,
         isBlocked,

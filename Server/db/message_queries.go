@@ -107,7 +107,7 @@ func (d *DB) GetMessages(ctx context.Context, channelID, before int64, limit int
 	if err != nil {
 		return nil, fmt.Errorf("GetMessages: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	var msgs []MessageWithUser
 	for rows.Next() {
@@ -214,7 +214,7 @@ func (d *DB) GetMessagesForAPI(ctx context.Context, channelID, before int64, lim
 	if err != nil {
 		return nil, fmt.Errorf("GetMessagesForAPI: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
@@ -234,7 +234,7 @@ func (d *DB) GetMessagesAfterForAPI(ctx context.Context, channelID, after int64,
 	if err != nil {
 		return nil, fmt.Errorf("GetMessagesAfterForAPI: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }
@@ -276,7 +276,7 @@ func (d *DB) GetMessagesAroundForAPI(ctx context.Context, channelID, centerID in
 	if err != nil {
 		return nil, fmt.Errorf("GetMessagesAroundForAPI: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	return d.scanAndEnrichMessages(withCachedReads(ctx), rows, requestingUserID)
 }

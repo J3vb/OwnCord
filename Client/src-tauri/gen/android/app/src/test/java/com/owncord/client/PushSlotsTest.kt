@@ -38,6 +38,12 @@ class PushSlotsTest {
   }
 
   @Test
+  fun readsTheAttentionPushWhichCarriesNoChannel() {
+    assertEquals(PushPayload.ATTENTION, PushPayload.kindOf("""{"t":"attention"}"""))
+    assertNull(PushPayload.channelOf("""{"t":"attention"}"""))
+  }
+
+  @Test
   fun readsTheDmARingIsFor() {
     assertEquals(PushPayload.RING, PushPayload.kindOf("""{"t":"ring","c":42}"""))
     assertEquals(42L, PushPayload.channelOf("""{"t":"ring","c":42}"""))

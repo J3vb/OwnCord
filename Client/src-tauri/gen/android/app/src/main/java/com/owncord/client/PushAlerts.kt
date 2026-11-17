@@ -110,6 +110,10 @@ object PushAlerts {
       PushRing.onMessage(context, instance, kind, content)
       return
     }
+    if (kind == PushPayload.ATTENTION) {
+      PushAttention.onMessage(context, instance)
+      return
+    }
     if (kind != PushPayload.ACTIVITY) return
     if (appOnScreen()) return
     val id = PushStore.id(context, instance) ?: return
@@ -155,7 +159,7 @@ object PushAlerts {
     manager.createNotificationChannel(channel)
   }
 
-  private fun open(context: Context, instance: String, id: Int): PendingIntent {
+  fun open(context: Context, instance: String, id: Int): PendingIntent {
     val intent = Intent(ACTION_OPEN)
       .setClass(context, MainActivity::class.java)
       .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
@@ -163,6 +167,40 @@ object PushAlerts {
     return PendingIntent.getActivity(
       context, id, intent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT,
     )
+  }
+}
+
+// The server telling its owner that something on it needs fixing. The push
+// says nothing about what (the admin panel does), so the words are fixed. It
+// has its own quiet channel, apart from messages and calls, and is shown even
+// with the app open: nothing else in the app carries it. A tap opens the app.
+object PushAttention {
+  private const val CHANNEL = "attention"
+  private const val TITLE = "Your OwnCord server needs attention"
+  private const val BODY = "Open the admin panel to see what needs fixing."
+  // Clear of the message slots (4200-4299) and the call notifications; the
+  // tap's request code is the instance's hash so servers never share one.
+  private const val ID = 4300
+
+  fun onMessage(context: Context, instance: String) {
+    val manager = context.getSystemService(NotificationManager::class.java)
+    if (manager.getNotificationChannel(CHANNEL) == null) {
+      val channel = NotificationChannel(CHANNEL, "Server attention", NotificationManager.IMPORTANCE_LOW).apply {
+        lockscreenVisibility = Notification.VISIBILITY_PRIVATE
+      }
+      manager.createNotificationChannel(channel)
+    }
+    val notification = Notification.Builder(context, CHANNEL)
+      .setSmallIcon(R.drawable.ic_message_notification)
+      .setContentTitle(TITLE)
+      .setContentText(BODY)
+      .setCategory(Notification.CATEGORY_STATUS)
+      .setVisibility(Notification.VISIBILITY_PRIVATE)
+      .setAutoCancel(true)
+      .setContentIntent(PushAlerts.open(context, instance, instance.hashCode()))
+      .build()
+    // One per server, replaced by the next rather than stacked.
+    manager.notify(instance, ID, notification)
   }
 }
 

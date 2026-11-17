@@ -11,6 +11,7 @@ const chunks = vi.hoisted(() => ({
   openUserReport: vi.fn(),
   openBanDialog: vi.fn(),
   openNicknameDialog: vi.fn(),
+  openWarnDialog: vi.fn(),
   toggleBlock: vi.fn(),
   confirmAndToggleBlock: vi.fn(),
 }));
@@ -30,6 +31,10 @@ vi.mock("../../src/features/moderation/BanDialog", () => {
 vi.mock("../../src/features/moderation/NicknameDialog", () => {
   arrive();
   return { openNicknameDialog: chunks.openNicknameDialog };
+});
+vi.mock("../../src/features/moderation/WarnDialog", () => {
+  arrive();
+  return { openWarnDialog: chunks.openWarnDialog };
 });
 vi.mock("../../src/features/blocks/blockActions", () => {
   arrive();
@@ -62,6 +67,7 @@ interface Harness {
     adminListUsers: ReturnType<typeof vi.fn>;
     adminUnbanMember: ReturnType<typeof vi.fn>;
     setMemberNickname: ReturnType<typeof vi.fn>;
+    warnMember: ReturnType<typeof vi.fn>;
   };
   ui: {
     createMemberList: ReturnType<typeof vi.fn>;
@@ -113,6 +119,7 @@ function mount(extra: Partial<MemberPanelOptions> = {}, users: object[] = []): H
     adminListUsers: vi.fn().mockResolvedValue(users),
     adminUnbanMember: vi.fn().mockResolvedValue(undefined),
     setMemberNickname: vi.fn().mockResolvedValue(undefined),
+    warnMember: vi.fn().mockResolvedValue({ id: 9 }),
   };
   let list: MemberListOptions | undefined;
   const ui = {
@@ -164,6 +171,7 @@ beforeEach(() => {
     chunks.openUserReport,
     chunks.openBanDialog,
     chunks.openNicknameDialog,
+    chunks.openWarnDialog,
     chunks.toggleBlock,
     chunks.confirmAndToggleBlock,
   ]) {
@@ -185,9 +193,10 @@ describe("member panel dialog chunks that cannot load", () => {
     h.list.onReportUser?.(5, "bob");
     h.list.onBan?.(5, "bob", "Bob");
     h.list.onChangeNickname?.(5, "bob", null);
+    h.list.onWarnMember?.(5, "bob", "Bob");
     await h.list.onToggleBlock?.(5, "bob", true);
     h.list.onBlockFromPopup?.(5, "bob", false);
-    await vi.waitFor(() => expect(h.show).toHaveBeenCalledTimes(5));
+    await vi.waitFor(() => expect(h.show).toHaveBeenCalledTimes(6));
     const shown = h.show.mock.calls.map((c) => c.join("|"));
     expect(
       shown.filter((s) => s === "Couldn't open the report form. Try again.|error"),
@@ -195,6 +204,9 @@ describe("member panel dialog chunks that cannot load", () => {
     expect(shown.filter((s) => s === "Failed to ban member|error")).toHaveLength(1);
     expect(
       shown.filter((s) => s === "Could not change the nickname. Try again.|error"),
+    ).toHaveLength(1);
+    expect(
+      shown.filter((s) => s === "Could not load the warning form. Try again.|error"),
     ).toHaveLength(1);
     // Blocking from the menu and unblocking from the popup each say so.
     expect(shown.filter((s) => s === "Failed to block user|error")).toHaveLength(1);
@@ -390,6 +402,24 @@ describe("member panel list wiring", () => {
     call.fallbackFocus();
     expect(h.focusMember).toHaveBeenCalledWith(5);
     expect(call.signal.aborted).toBe(false);
+    h.panel.destroy();
+    expect(call.signal.aborted).toBe(true);
+  });
+
+  it("opens the Warn dialog with a submit that warns the member", async () => {
+    const h = mount();
+    h.list.onWarnMember?.(5, "bob", "Bobby");
+    await vi.waitFor(() => expect(chunks.openWarnDialog).toHaveBeenCalledTimes(1));
+    const call = chunks.openWarnDialog.mock.calls[0]![0] as {
+      name: string;
+      username: string;
+      submit: (reason: string) => Promise<unknown>;
+      signal: AbortSignal;
+    };
+    expect(call.name).toBe("Bobby");
+    expect(call.username).toBe("bob");
+    await call.submit("Be kind");
+    expect(h.api.warnMember).toHaveBeenCalledWith(5, "Be kind");
     h.panel.destroy();
     expect(call.signal.aborted).toBe(true);
   });

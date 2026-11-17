@@ -24,7 +24,7 @@ import (
 // ─── tests ──────────────────────────────────────────────────────────────────
 
 // TestPushDispatch_OffByDefaultSendsNothing proves the compiled-default
-// state (both push.enabled and push.dispatch_enabled false) at the point
+// state (push.enabled false) at the point
 // that matters: MessageService never calls a PushNotifier it was never
 // given. Storage, the dispatcher and a real subscriber all exist and work
 // (proved by the other tests below) — only the composition root's

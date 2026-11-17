@@ -70,7 +70,7 @@ func (d *DB) EraseAccountPreflight(ctx context.Context, userID int64) error {
 	if err != nil {
 		return fmt.Errorf("EraseAccountPreflight begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	var one int
 	if err := tx.QueryRowContext(ctx, `SELECT 1 FROM users WHERE id = ?`, userID).Scan(&one); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -220,7 +220,7 @@ func (d *DB) DeleteOrphanMessageEvents(ctx context.Context, jobID int64) ([]int6
 	if err != nil {
 		return nil, fmt.Errorf("DeleteOrphanMessageEvents: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var ids []int64
 	for rows.Next() {
 		var id sql.NullInt64
@@ -291,7 +291,7 @@ func erasureCollectFiles(ctx context.Context, tx *sql.Tx, userID int64) ([]strin
 	if err != nil {
 		return nil, fmt.Errorf("EraseAccount list files: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	files := []string{}
 	for rows.Next() {
 		var name string
@@ -401,7 +401,7 @@ func erasureDeleteAssetRows(ctx context.Context, tx *sql.Tx, table string, userI
 	if err != nil {
 		return nil, fmt.Errorf("EraseAccount delete %s: %w", table, err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var files []string
 	for rows.Next() {
 		var name string

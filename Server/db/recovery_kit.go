@@ -66,7 +66,7 @@ func (d *DB) RedeemRecoveryKit(ctx context.Context, userID int64, verifier, newP
 	if err != nil {
 		return 0, fmt.Errorf("RedeemRecoveryKit begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	q := d.q.WithTx(tx)
 
 	now := time.Now().UTC().Format(dbtime.ISOLayout)

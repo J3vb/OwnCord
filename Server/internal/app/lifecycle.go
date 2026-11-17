@@ -198,11 +198,10 @@ func (a *App) startPlugins() error {
 	return nil
 }
 
-// pushDispatchEnabled requires both push.enabled and push.dispatch_enabled:
-// storage on with dispatch off (what an upgraded install starts in) must never
-// dispatch. TestPushDispatchGate_RequiresBothKeys pins the "&&".
+// pushDispatchEnabled is push.enabled alone: one switch turns on device
+// registration and sending. The deprecated push.dispatch_enabled is ignored.
 func pushDispatchEnabled(cfg *config.Config) bool {
-	return cfg.Push.Enabled && cfg.Push.DispatchEnabled
+	return cfg.Push.Enabled
 }
 
 // startHub builds the hub and the collaborators it shares with the router, here
@@ -236,18 +235,19 @@ func (a *App) startHub() error {
 		rt.Services.Push.SetSubscriptionTTL(time.Duration(a.cfg.Push.SubscriptionTTLDays) * 24 * time.Hour)
 		rt.Services.Push.SetContact(a.cfg.Push.Contact)
 	}
-	// Phones can register while nothing is sent to them: say so once, since the
-	// owner sees only "push on" in the config.
-	if a.cfg.Push.Enabled && !a.cfg.Push.DispatchEnabled {
-		a.log.Warn("push: devices can register but push.dispatch_enabled is off, so no push notification is sent")
-	}
-	// Second opt-in on top of push.enabled, so an upgraded install does not acquire dispatch.
+	// push.enabled alone builds the dispatcher.
 	if pushDispatchEnabled(a.cfg) &&
 		rt.Services != nil && rt.Services.Messages != nil && rt.Services.Push != nil && rt.Services.Permissions != nil {
 		dispatcher := service.NewPushDispatcher(a.database, rt.Services.Permissions, rt.Services.Push, a.hub.IsUserConnected, nil)
 		rt.Services.Messages.SetPushNotifier(dispatcher)
 		a.hub.SetRingPusher(dispatcher)
 		rt.Services.PushDispatch = dispatcher
+		if rt.Services.Attention != nil {
+			// The group is created by startBackgroundJobs below and is read when a sample first turns critical.
+			rt.Services.Attention.SetCriticalNotifier(func(ctx context.Context) {
+				a.background.Go(ctx, dispatcher.SendAttention)
+			})
+		}
 	}
 	a.onClose("hub", func(ctx context.Context) error {
 		return stopHub(ctx, a.runtime.Hub, a.deps.Restart.noticeReason())

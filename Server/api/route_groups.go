@@ -38,6 +38,10 @@ type routeDeps struct {
 	// mount-time nil checks.
 	files      FileStore
 	slowRoutes *metrics.SlowRoutes
+	// bgCtx bounds background work a mount starts; NewRouter's cleanup cancels it.
+	bgCtx context.Context
+	// portalReady closes when the portal's background encoding has stopped; nil without a portal.
+	portalReady <-chan struct{}
 }
 
 func newRouteDeps(cfg *config.Config, database *db.DB, ver string, logBuf *admin.RingBuffer, plugins *plugin.Registry, rt Runtime, slowRoutes *metrics.SlowRoutes) *routeDeps {
@@ -144,7 +148,7 @@ func mountAdminRoutes(r chi.Router, d *routeDeps) {
 	// gate: they accept only a session or API token issued by this server, plus permission and rank checks.
 	r.Mount("/api/v1/moderation/members", admin.NewMemberAPI(svc, hub, svc.Permissions))
 	r.Mount("/api/v1/moderation/channels", admin.NewChannelAPI(svc, hub))
-	mountBrowserClient(r, cfg, d.rt.WebClient)
+	d.portalReady = mountBrowserClient(d.bgCtx, r, cfg, d.rt.WebClient)
 	r.Group(func(r chi.Router) {
 		r.Use(AdminIPRestrict("server.admin_allowed_cidrs", cfg.Server.AdminAllowedCIDRs, cfg.Server.TrustedProxies))
 		r.Mount("/admin", adminHandler)

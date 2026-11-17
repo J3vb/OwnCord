@@ -64,7 +64,7 @@ func (d *DB) MoveReadPointer(ctx context.Context, userID, channelID int64, op Re
 	if err != nil {
 		return ReadPointer{}, fmt.Errorf("MoveReadPointer begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	// Only QueryRow or Exec here, so no rows cursor is open while the next statement runs
 	// on the one writer connection.

@@ -15,7 +15,7 @@
 // Exit code 2 from a PreToolUse hook blocks the tool call and shows stderr to
 // the model; anything else lets it through.
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, readFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, symlinkSync } from "node:fs";
 import { homedir } from "node:os";
 
 const mode = process.argv[2];
@@ -48,20 +48,27 @@ function cloudToolchain() {
       return;
     }
     const line = `export PATH="${bin}:$PATH"`;
-    // Subagent shells get no CLAUDE_ENV_FILE and ran the container's Node 22,
-    // so the same line goes to ~/.bashrc, once.
-    try {
-      const rc = `${homedir()}/.bashrc`;
-      if (!(existsSync(rc) && readFileSync(rc, "utf8").split("\n").includes(line))) {
-        appendFileSync(rc, `${line}\n`);
+    // The Bash tool and subagent shells take PATH from the container, not from
+    // ~/.bashrc or CLAUDE_ENV_FILE, but that PATH lists ~/.local/bin ahead of
+    // the container's Node, so links there reach every later shell.
+    const local = `${homedir()}/.local/bin`;
+    let linked = false;
+    if ((process.env.PATH ?? "").split(":").includes(local)) {
+      try {
+        mkdirSync(local, { recursive: true });
+        for (const tool of ["node", "npm", "npx"]) {
+          rmSync(`${local}/${tool}`, { force: true });
+          symlinkSync(`${bin}/${tool}`, `${local}/${tool}`);
+        }
+        linked = true;
+      } catch {
+        console.log(`WARNING: could not link Node ${NODE_MAJOR} into ${local}.`);
       }
-    } catch {
-      console.log(
-        `WARNING: could not add Node ${NODE_MAJOR} to ~/.bashrc; subagent shells may use an older Node.`,
-      );
     }
     if (process.env.CLAUDE_ENV_FILE) {
       appendFileSync(process.env.CLAUDE_ENV_FILE, `${line}\n`);
+    }
+    if (linked || process.env.CLAUDE_ENV_FILE) {
       console.log(`Cloud session: Node ${NODE_MAJOR} is on PATH (${bin}).`);
     } else {
       console.log(

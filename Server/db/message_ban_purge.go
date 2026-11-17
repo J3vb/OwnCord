@@ -29,7 +29,7 @@ func (d *DB) ListUserMessageChannelsSince(ctx context.Context, userID int64, sin
 	if err != nil {
 		return nil, fmt.Errorf("ListUserMessageChannelsSince: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	ids := []int64{}
 	for rows.Next() {
@@ -64,7 +64,7 @@ func (d *DB) PurgeUserChannelMessagesSince(ctx context.Context, channelID, userI
 	if err != nil {
 		return nil, fmt.Errorf("PurgeUserChannelMessagesSince begin tx: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 
 	rows, err := tx.QueryContext(ctx,
 		`SELECT id FROM messages

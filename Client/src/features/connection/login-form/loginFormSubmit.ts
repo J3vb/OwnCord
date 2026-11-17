@@ -3,7 +3,14 @@
  * busy-server retry, the two-factor step and account recovery.
  */
 import { setText, setOwnedTimeout, focusIsOurs } from "@lib/dom";
-import { ApiClientError, TLS_CERT_CODE, TransportError, errorText } from "@lib/api";
+import {
+  ApiClientError,
+  TLS_CERT_CODE,
+  TransportError,
+  appealLine,
+  errorText,
+  signInErrorText,
+} from "@lib/api";
 import { isValidHost } from "@lib/net/hostValidation";
 import { normaliseInviteCode } from "@lib/nav/deepLink";
 import { connectText } from "../../../i18n/connect";
@@ -46,7 +53,10 @@ function submitErrorMessage(err: unknown): string {
     message = String(err);
   }
   // Cap length to prevent phishing via server-controlled error messages
-  return message.length > 200 ? message.slice(0, 200) + "..." : message;
+  const capped = message.length > 200 ? message.slice(0, 200) + "..." : message;
+  // The owner's appeal contact (itself capped) goes on its own line after the cap.
+  const appeal = appealLine(err);
+  return appeal === null ? capped : `${capped}\n${appeal}`;
 }
 
 export function createLoginFormSubmit(st: LoginFormState, lf: LoginFormInternals) {
@@ -325,7 +335,7 @@ export function createLoginFormSubmit(st: LoginFormState, lf: LoginFormInternals
         err.code === RestErrorCode.RATE_LIMITED &&
         err.message === "too many failed attempts, try again later"
           ? connectText("error.totpTooManyAttempts")
-          : errorText(err, connectText("totp.failed"));
+          : signInErrorText(err, connectText("totp.failed"));
       lf.transitionTo("error", message);
     } finally {
       st.totpSubmitBtn.disabled = false;

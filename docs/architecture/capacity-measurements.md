@@ -945,6 +945,41 @@ fills in this table.
 | burst  | not yet measured | not yet measured     | not yet measured | not yet measured |
 | login  | not yet measured | not yet measured     | not yet measured | not yet measured |
 
+### CPU profile for the server build
+
+`go build` reads `Server/default.pgo`, when it is there, as a CPU profile and
+optimises the hot paths it names (profile-guided optimisation). Every build of
+the server package would pick it up with no flag: the release, the Docker image, CI
+and the load runs. The profile comes from the scale profile, so it describes
+the server under the load this page measures.
+
+```
+gh workflow run load-baseline.yml -f profile=scale-pgo -f scale_connections=1000 --ref dev
+```
+
+- **What it does.** The plain scale run, with the server's pprof listener on
+  (block and mutex samplers off). While k6 runs, the workflow takes CPU
+  profiles of 25 s back to back, keeps those with samples, and merges them into
+  `default.pgo`. Fewer than 10 usable captures fails the step, so a run that
+  broke early cannot produce a profile of its start alone.
+- **Not a capacity run.** pprof costs a little CPU, so its latency figures are
+  not published. The artifact carries a `-pgo` suffix.
+- **Refreshing it.** Download `default.pgo` from the artifact and commit it as
+  `Server/default.pgo`. A stale profile never breaks a build: code it no longer
+  matches is simply built without the profile's hints. Refresh it after a
+  large change to the hot paths (the WebSocket hub, fan-out, the database
+  layer), or when the measured gain below shrinks.
+- **Turning it off.** `go build -pgo=off` builds without it; deleting the file
+  turns it off everywhere.
+
+**No profile is committed yet.** The first `scale-pgo` run (1,000 online,
+2026-11-14) spent half of the server's CPU in bcrypt during the login burst,
+a leaf loop that profile-guided optimisation cannot speed up, and 15% in
+socket write syscalls. Outside the login window the server used 0.12-0.19 of
+its 2 cores. A profile would cost build time for no gain a user could see, so
+the option is kept for a later look, first at a valid 2,000-online run, where
+fan-out may matter more.
+
 ### Measured
 
 Two runs, both dispatched on `dev` on 2026-10-17 from the same commit with

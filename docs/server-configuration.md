@@ -131,16 +131,14 @@ start-up output. This also applies after you re-open setup by clearing the
 Disabled by default: with `push.enabled` false, every `/api/v1/push/*` route
 answers `503 PUSH_DISABLED` after authenticating the caller, and nothing is
 written. Turning it off again later keeps existing subscription rows —
-nothing dispatches to them either way — but the staleness sweep keeps
-running.
+nothing is sent to them — but the staleness sweep keeps running.
 
-Dispatch (sending an actual push to a stored subscription) has its **own,
-second** opt-in: `push.dispatch_enabled`, false by default and independent
-of `push.enabled`, so an operator who enabled subscription storage before
-dispatch existed does not acquire dispatch on upgrade. **Turning dispatch on
-makes the server open outbound HTTPS connections to the push service named
-in each stored subscription's endpoint** — see
-[diagnostics.md](architecture/diagnostics.md)'s egress table. With dispatch
+One switch, `push.enabled`, turns on both device registration and sending
+(the older second switch, `push.dispatch_enabled`, is deprecated and ignored;
+a config file or settings override that still names it loads fine).
+**Turning push on makes the server open outbound HTTPS connections to the
+push service named in each stored subscription's endpoint** — see
+[diagnostics.md](architecture/diagnostics.md)'s egress table. With push
 on, a new message in a channel or DM sends a generic `{"t":"activity"}`
 payload (no message text, channel name or sender) to every offline,
 permitted recipient's subscriptions, coalesced to at most one push per user
@@ -162,8 +160,7 @@ the phone instead of being taken down.
 The Android app registers through UnifiedPush: each member's own push app
 (ntfy, or another distributor) receives the pushes, so no Google service is
 involved, and the phone shows "New messages on <server>" while the app is
-closed. With `push.enabled` on and `push.dispatch_enabled` off, phones can
-register but nothing is sent; the server logs a warning at start-up saying so.
+closed.
 
 A phone's subscription belongs to the session that made it: signing out,
 "sign out everywhere", an expired session, a ban or an admin revoke deletes it
@@ -176,9 +173,9 @@ ntfy.sh, or one published on a public address.
 
 | Key                          | Type   | Default | Description                                                                                                                                                                                                |
 | ---------------------------- | ------ | ------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `push.enabled`               | bool   | `false` | Owner opt-in for Web Push subscription storage. Routes are always mounted; this only gates whether they do anything.                                                                                       |
+| `push.enabled`               | bool   | `false` | Owner opt-in for Web Push: devices may register and the server sends to them. Opens outbound connections to the push service named in each subscription's endpoint. Routes are always mounted.             |
 | `push.subscription_ttl_days` | int    | `90`    | A subscription whose `last_seen_at` is older than this many days is removed by the maintenance sweep. Clients keep a row alive by re-POSTing the same endpoint. Clamped to 1–3650; `0` falls back to `90`. |
-| `push.dispatch_enabled`      | bool   | `false` | Owner opt-in for actually sending pushes, separate from `push.enabled`. Dispatch runs only when both are true. Opens outbound connections to the push service named in each subscription's endpoint.       |
+| `push.dispatch_enabled`      | bool   | `false` | Deprecated and ignored: `push.enabled` alone turns on sending. A config file or settings override that still sets it loads without error; the server logs one Info line at start-up.                       |
 | `push.contact`               | string | `""`    | Operator contact for VAPID JWTs (RFC 8292), sent as `mailto:<contact>` in the token's `sub` claim. Empty omits the claim; some push services require one and will refuse a request without it.             |
 
 **VAPID key and rotation.** The server generates (or loads) a P-256 VAPID key

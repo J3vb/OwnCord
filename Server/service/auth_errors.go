@@ -64,6 +64,19 @@ type authError struct {
 func (e *authError) Error() string        { return e.msg }
 func (e *authError) Is(target error) bool { return target == e.kind }
 
+// erasingError is the sign-in refusal for an account whose deletion is in progress. It reads and matches
+// exactly like ErrBanned (same 403 body, errors.Is(err, ErrBanned) is true), but the API layer can tell it
+// apart and adds no appeal contact: nothing is left to appeal.
+type erasingError struct{}
+
+func (*erasingError) Error() string { return ErrBanned.Error() }
+func (*erasingError) Is(target error) bool {
+	return target == ErrBanned || target == ErrForbidden
+}
+
+// ErrBannedErasing is returned where a session cannot be issued because the account is being erased.
+var ErrBannedErasing error = &erasingError{}
+
 // Every refusal is returned bare, never wrapped: the transport echoes Error() to the
 // client and the cause is logged instead.
 var (

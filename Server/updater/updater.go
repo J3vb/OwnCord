@@ -265,7 +265,7 @@ func (u *Updater) fetchLatestRelease(ctx context.Context) (UpdateInfo, error) {
 	if err != nil {
 		return UpdateInfo{}, fmt.Errorf("fetching latest release: %w", err)
 	}
-	defer resp.Body.Close() //nolint:errcheck
+	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		return UpdateInfo{}, fmt.Errorf("github API returned status %d", resp.StatusCode)

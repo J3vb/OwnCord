@@ -123,6 +123,21 @@ export function createModerationApi(t: ApiTransport) {
       );
     },
 
+    /** Warn a member (MODERATE_MEMBERS, outrank). Reason at most 500 characters, no control characters; 403/404/400 carry a message. */
+    warnMember(
+      userId: number,
+      reason: string,
+      signal?: AbortSignal,
+    ): Promise<{ readonly id: number }> {
+      return t.request(
+        "WarnResult",
+        "POST",
+        `/moderation/users/${userId}/warn`,
+        { reason },
+        signal,
+      );
+    },
+
     /**
      * Set (or, with null, clear) another member's nickname (MANAGE_NICKNAMES,
      * outrank). Idempotent: the same name twice answers 200 both times. 400

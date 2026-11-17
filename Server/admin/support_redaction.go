@@ -40,7 +40,6 @@ func supportConfig(cfg *config.Config) map[string]any {
 		"telemetry.exporter":                  supportEnum(cfg.Telemetry.Exporter, "none", "prometheus", "otlp"),
 		"plugins.enabled":                     cfg.Plugins.Enabled,
 		"push.enabled":                        cfg.Push.Enabled,
-		"push.dispatch_enabled":               cfg.Push.DispatchEnabled,
 		"logging.level":                       supportEnum(cfg.Logging.Level, "debug", "info", "warn", "error"),
 	}
 }

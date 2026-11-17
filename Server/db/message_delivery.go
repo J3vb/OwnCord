@@ -117,7 +117,7 @@ func (d *DB) CreateMessageDelivery(ctx context.Context, p MessageDeliveryParams)
 	if err != nil {
 		return nil, fmt.Errorf("message delivery begin: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	if p.ExpiresAtMS <= time.Now().UnixMilli() {
 		return nil, ErrMessageDeliveryExpired
 	}

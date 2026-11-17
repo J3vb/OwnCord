@@ -35,6 +35,8 @@ export interface ApiError {
   /** UNKNOWN: the client's own fallback for a reply with no JSON error body. */
   readonly error: RestErrorCodeValue | "UNKNOWN";
   readonly message: string;
+  /** Only on a banned member's sign-in refusal: the owner's contact line, when one is set. */
+  readonly appeal_contact?: string;
 }
 
 /** Single invite object from GET/POST /api/invites. */
@@ -144,6 +146,11 @@ export interface RecoveryCodesResponse {
 export interface TimeoutResult {
   readonly id: number;
   readonly voice: "applied" | "skipped";
+}
+
+/** A warning's answer: the id of its moderation record. */
+export interface WarnResult {
+  readonly id: number;
 }
 
 /** A report-linked action's answer; `voice` is set for a timeout only. */

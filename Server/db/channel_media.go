@@ -70,7 +70,7 @@ func (d *DB) ListChannelMedia(ctx context.Context, q ChannelMediaQuery) ([]Chann
 	if err != nil {
 		return nil, fmt.Errorf("ListChannelMedia: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	items := []ChannelMediaItem{}
 	for rows.Next() {
@@ -126,7 +126,7 @@ func (d *DB) ChannelMediaBuckets(ctx context.Context, q ChannelMediaQuery) ([]Me
 	if err != nil {
 		return nil, fmt.Errorf("ChannelMediaBuckets: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	var buckets []MediaBucket
 	for rows.Next() {

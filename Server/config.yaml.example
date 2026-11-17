@@ -81,17 +81,14 @@ upload:
 
 # Web Push subscriptions. Disabled by default: with push.enabled false,
 # every /api/v1/push/* route answers 503 PUSH_DISABLED after authentication
-# and nothing is written. push.dispatch_enabled is a SECOND, separate
-# opt-in: with it false (the default) nothing is ever dispatched to a
-# stored subscription, even with push.enabled true. Turning dispatch on
-# makes the server open outbound HTTPS connections to the push service
-# named in each stored subscription's endpoint.
+# and nothing is written. Turning push.enabled on lets devices register
+# and makes the server send push notifications: it opens outbound HTTPS
+# connections to the push service named in each stored subscription's
+# endpoint.
 # push:
 #   enabled: false
 #   subscription_ttl_days: 90  # a subscription not refreshed in this many
 #                              # days is removed by the maintenance sweep
-#   dispatch_enabled: false    # opens outbound connections to push services
-#                              # when enabled together with push.enabled
 #   contact: ""                # operator contact for VAPID JWTs, sent as
 #                              # "mailto:<contact>"; empty omits the claim
 

@@ -309,19 +309,25 @@ func NewAdminAPI(database *db.DB, version string, hub HubBroadcaster, u *updater
 		gates.route(r, gateManageTokens, http.MethodPost, "/tokens", handleCreateAPIToken(svc.Tokens))
 		gates.route(r, gateManageTokens, http.MethodDelete, "/tokens/{id}", handleRevokeAPIToken(svc.Tokens))
 		registerConfigOverrideRoutes(r, gates, database, setupOpts, configPending)
-		r.Group(func(r chi.Router) {
-			r.Use(requirePerm(permissions.ManageServer))
-			r.Get("/settings", handleGetSettings(settings))
-			r.Patch("/settings", handlePatchSettings(settings, svc.Retention, hub))
-			r.Put("/afk-channel", handlePutAFKChannel(channels, hub))
-			r.Get("/config", handleGetConfigFacts(setupOpts.RunningCfg))
-		})
+		r.Group(func(r chi.Router) { mountServerSettingsRoutes(r, svc, hub, setupOpts) })
 		mountBackupRoutes(r, gates, backups, database, svc.Attention, setupOpts, paths)
 		gates.route(r, gateManageUpdates, http.MethodGet, "/updates", handleCheckUpdate(u))
 		gates.route(r, gateManageUpdates, http.MethodPost, "/updates/apply", handleApplyUpdate(database, u, hub, version, setupOpts.Background, setupOpts.Shutdown))
 	})
 
 	return api
+}
+
+// mountServerSettingsRoutes registers the MANAGE_SERVER group: server settings, the server
+// icon, the AFK channel and the read-only config facts.
+func mountServerSettingsRoutes(r chi.Router, svc *service.Services, hub HubBroadcaster, setupOpts SetupOptions) {
+	r.Use(requirePerm(permissions.ManageServer))
+	r.Get("/settings", handleGetSettings(svc.Settings))
+	r.Patch("/settings", handlePatchSettings(svc.Settings, svc.Retention, hub))
+	r.Put("/server-icon", handlePutServerIcon(svc.Settings, hub))
+	r.Delete("/server-icon", handleDeleteServerIcon(svc.Settings, hub))
+	r.Put("/afk-channel", handlePutAFKChannel(svc.Channels, hub))
+	r.Get("/config", handleGetConfigFacts(setupOpts.RunningCfg))
 }
 
 // mountDiscordImportRoutes registers the Discord import routes behind MANAGE_CHANNELS (import creates a

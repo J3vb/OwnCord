@@ -10,8 +10,9 @@ Two workflows with a human gate between them. The ledger at
 functions of their `args` — **the session does all file I/O**, because workflow
 scripts have no filesystem access.
 
-`.superpowers/` is gitignored. This repo is public and unfixed defects must never
-reach a commit, an issue, or a PR body.
+Only the ledger is tracked; everything else under `.superpowers/` is gitignored
+scratch. This repo is public and unfixed defects must never reach a commit, an
+issue, or a PR body.
 
 ## 1. Hunt
 
@@ -22,62 +23,33 @@ ceiling at all**. The workflow's first log line echoes the state: `budget=25M` m
 armed; `budget=NONE - cost ceiling disarmed` means stop the run and relaunch with a
 directive.
 
-Before launching, in order:
-
-1. **Build the inventory**: `node .superpowers/rank-explore.mjs` — writes
-   `.superpowers/explore-ranking.json`: EVERY non-test source file (~419 rows), each with
-   `examined` (already carries a ledger finding or a LIVE explored-clean record → the hunt
-   pre-seeds its covered set), `risky` (top coupling ∪ past-bug clusters ∪ top churn,
-   capped at 40 → they get an extra pass through all 5 bug-class lenses), and `churn`.
-   Explored-clean records carry content hashes: editing a file expires its clean record,
-   so re-runs automatically re-hunt what changed. The hunt cannot stop while any inventory
-   file is uncovered, so a full run now takes ~10-20 rounds and ~8-12M tokens — the `+25M`
-   directive still covers it. Regenerate the inventory and read `known` from the ledger in
-   the SAME session step: both derive from `findings-ledger.json`, and every `known` file
-   must be `examined` in the inventory — a `known` file the inventory does not mark
-   examined can never be drawn (the seen-filter blocks it) nor covered, which would
-   strand `uncoveredCount()` above zero and block convergence.
-2. Read the ledger and pass every record in as `known`, so the hunt does not
-   re-derive anything already found, fixed, declined, or refuted.
+Before launching, read the ledger and pass every record in as `known`, so the
+hunt does not re-derive anything already found, fixed, declined, or refuted.
 
 ```
 Workflow({
   name: "bughunt",
   args: {
     known: <every record from findings-ledger.json, as {file, line, title, status}>,
-    graph: <the rows of .superpowers/explore-ranking.json>,
     lenses: [ {key, prompt}, ... ],   // optional: scope the hunt to one subsystem
-    maxRounds: 30,   // safety backstop only - coverage + dry is the real stop
+    maxRounds: 30,   // safety backstop only
     dryThreshold: 2,
   },
 })
 ```
 
-If `graph` is omitted or empty the hunt logs
+Without a `graph` inventory the hunt logs
 `explore: args.graph absent/empty - falling back to churn-based fresh eyes` and
-still runs — degraded targeting, never a smaller lens family.
+targets by churn. That is the expected mode: the inventory script that built
+`graph` is not in the repo.
 
-`converged: true` now means: every inventory file was covered by a completed
-explicit-file lens (or carries a verdict), the risky class sweep ran, and then
-`dryThreshold` consecutive eligible rounds confirmed nothing (a round where the
-lens family comes up empty with the pool drained counts as dry — family
-`exhausted`). Rows without the `examined` field fall back to the old
-quietness-only stop. Two new run outcomes: `stalledCoverage: true` means adaptive
-rounds stopped shrinking the uncovered pool (usually mass finder failures —
-investigate before re-running); a budget stop now reports
-`coverage.uncoveredAtStop` so the next run knows exactly what remains (re-run
-with the ledger as `known`; live explored-clean records pre-cover what was
-finished, so the sweep naturally continues where it stopped).
+`converged: true` means `dryThreshold` consecutive eligible rounds confirmed
+nothing (a round where the lens family comes up empty with the pool drained
+counts as dry — family `exhausted`). `stalledCoverage: true` means adaptive
+rounds stopped making progress (usually mass finder failures — investigate
+before re-running).
 
 Omit `lenses` for a general hunt across the rotating families.
-
-**Scoping a hunt while coverage mode is armed is a budget trap:** `lenses` only
-replaces round 1, and inventory rows with `examined` force the coverage stop
-rule — from round 2 the run sweeps the ENTIRE uncovered pool and the risky
-sweep before it may converge, at general-hunt cost. For a true scoped hunt,
-pass a subsystem-filtered inventory as `graph` (only the rows you want swept),
-or rows without the `examined` field to fall back to the legacy quietness-only
-stop.
 
 Each lens object is `{key, prompt}`. `key` must match `^[a-z0-9-]+$` —
 lowercase letters, digits, and hyphens only. Keys get interpolated into agent
@@ -88,18 +60,10 @@ silently degrading that lens instead of failing loudly. Check your lens
 objects before passing them.
 
 When it returns, first save the raw result verbatim to
-`.superpowers/hunts/<YYYY-MM-DD>-raw.json`, then:
-
-```bash
-node .superpowers/render-run-stats.mjs .superpowers/hunts/<YYYY-MM-DD>-raw.json <hunt-name>
-```
-
-This validates the result shape, appends the run's telemetry to
-`.superpowers/run-history.json`, updates `.superpowers/explored-clean.json`, and
-checks **every** confirmed finding's coordinates against the working tree (file
-exists, line within length — the report agent that used to spot-check two findings
-is gone). Resolve any `COORD` warnings before appending to the ledger: stale
-coordinates poison `bughunt-fix`.
+`.superpowers/hunts/<YYYY-MM-DD>-raw.json`, then check **every** confirmed
+finding's coordinates against the working tree (file exists, line within
+length). Fix or drop stale coordinates before appending to the ledger: they
+poison `bughunt-fix`.
 
 Then append each entry of `result.confirmed` to the ledger with
 `status: "open"`, an id from `nextId`, and today's date. Bump `nextId`. The
@@ -160,8 +124,7 @@ can never disagree:
   file with anything already selected, regardless of severity — a same-file
   finding left behind is a future cross-cluster block.
 - **Re-check coordinates against the working tree** (file exists, line within
-  length) before launching. render-run-stats checked them at hunt time only;
-  merges since then can stale them.
+  length) before launching; merges since the hunt can stale them.
 - **Scan fix-touchpoints, then read only the hits.** Token-scan each finding's
   `suggestedFix`/`why` for path-like tokens owned by another cluster, then read
   just the flagged records to separate evidence citations from actual fix
@@ -173,13 +136,10 @@ can never disagree:
 
 ### Security findings
 
-Fixed security findings ship in normal PRs at this project's stage (alpha,
-~zero external deployments): the fix and its disclosure land atomically.
-Commit subjects and PR text describe the fix, never the exploit — no
-severity labels, repro steps, or attack narratives in public text — and a
-release should follow soon after merge. The GHSA advisory route is reserved
-for coordinated disclosure once there is a real deployed user base. Never
-decline a finding merely for routing.
+Fixed security findings ship as ordinary PRs to `dev` with neutral wording:
+commit subjects and PR text say what was fixed, never the weakness — no
+severity labels, repro steps, or attack narratives in public text. Never a
+public issue or advisory. Never decline a finding merely for routing.
 
 ## When a run trips the breaker
 
@@ -245,53 +205,30 @@ lines) locates the mechanism in minutes.
 
 The workflow's prove agent _self-reports_ that each test went RED with the fix
 reverted. Nothing inside the workflow can verify that: workflow scripts have no
-filesystem access. You do. Run the independent proof over every commit the
-workflow made:
+filesystem access. You do. For every commit the workflow made, prove it by hand
+from the branch tip:
 
-```bash
-node .superpowers/verify-fixes.mjs <sha> <sha> ...
-```
+1. Reverse-apply only the commit's source changes onto the current tree
+   (`git show <sha> -- <source files> | git apply -R`), run that commit's
+   tests, and require them to FAIL.
+2. Restore to HEAD (`git checkout HEAD -- <source files>`) and require the same
+   tests to PASS.
 
-It reverse-applies each commit's own source diff onto the current tree, runs
-that commit's tests, and requires them to FAIL — then restores to HEAD and
-requires them to PASS. This is the only check in the pipeline no agent can
-fabricate. The reverse-apply/restore-to-HEAD shape is load-bearing for
-**stacked waves**: sequential waves pile commits onto shared files, and an
-older per-commit-snapshot restore silently corrupts every later verification
-(a mid-branch snapshot left in the tree once made a whole package
-uncompilable for five subsequent runs). Rust commits with in-file
-`#[cfg(test)]` tests fail the file-level source/test split entirely — prove
-those by hand at hunk level, splitting at the `mod tests` boundary.
+Reverse-apply onto the tip, never check out a mid-branch snapshot: stacked
+waves pile commits onto shared files, and a snapshot restore corrupts every
+later check. Rust commits with in-file `#[cfg(test)]` tests need the split at
+the `mod tests` boundary. Race/deadlock-class fixes prove under their detector
+(`go test -race ./<pkg>/`); a cross-stack commit (e.g. a vitest file pinning a
+`src-tauri/` config) proves with the test file's own runner.
 
-While it runs it checkouts and restores source files, so the working tree is
-not a stable read surface: anything reading concurrently — review agents,
-scanners, hooks — must read committed objects (`git show HEAD:<path>`) or
-pre-taken snapshots, and any live-tree scanner finding from that window needs
-re-verification against HEAD before it is believed.
+While you do this the working tree is not a stable read surface: anything
+reading concurrently must read committed objects (`git show HEAD:<path>`).
 
-Any `FAIL ... VACUOUS TEST` means the fix was committed behind a test that
-proves nothing. Revert that commit and set its findings back to `open`; do not
-talk yourself into keeping it because the code change looks right.
-
-Two classes are exempt from the insta-revert, both artifacts of the verifier
-choosing the wrong detector rather than of a vacuous test:
-
-- **Race/deadlock-class fixes** whose test only fails under its detector.
-  verify-fixes escalates to `-race` before declaring vacuity; if an older copy
-  reports VACUOUS on such a fix, re-prove red/green by hand under the class's
-  detector (`go test -race ./<pkg>/`) before reverting anything.
-- **Cross-stack commits** whose test files belong to a different stack than
-  their source files (e.g. a vitest file pinning a `src-tauri/` config). The
-  script now keys the runner off the TEST files; an older copy keyed it off
-  the sources and ran the wrong stack's suite, which never executes the proof.
-  On any VACUOUS verdict for a cross-stack commit, re-prove by hand with the
-  test file's own runner before reverting.
-
-For every commit `verify-fixes.mjs` reports `PASS`, upgrade that commit's
-findings' `fix.revertProof` from `"self-reported"` to `"pass"` — this
-independent run is the only check in the pipeline no agent can fabricate, and
-it is what earns the upgrade. A `FAIL` commit needs no further edit here — it
-was already reverted and its findings set back to `open` above.
+A test that still passes with the fix reverted proves nothing. Revert that
+commit and set its findings back to `open`; do not talk yourself into keeping
+it because the code change looks right. For every commit that passed both
+steps, upgrade its findings' `fix.revertProof` from `"self-reported"` to
+`"pass"`.
 
 Re-render. Before you review the branch and open the PR, inspect the working
 tree: a blocked or declined cluster can leave its edits and any new failing
@@ -304,7 +241,7 @@ file the cluster never named must now implement (without it the committed
 package does not even compile). The decisive test: `git stash push -- <file>`,
 then compile/test the committed state alone — if it fails, the modification is
 a companion; fold it into the causing commit (fixup + autosquash keeps the
-history coherent for verify-fixes) or commit it with attribution. Only then
+history coherent) or commit it with attribution. Only then
 discard true debris — a reflexive `git add -A` would commit tests that
 describe unfixed defects into a public repo.
 
@@ -343,10 +280,7 @@ pushes and never opens a PR.
 node .claude/workflows/bughunt.harness.mjs
 node .claude/workflows/bughunt-fix.harness.mjs
 node .superpowers/render-ledger.mjs --selftest
-node .superpowers/verify-fixes.mjs --selftest
-node .superpowers/rank-explore.mjs --selftest
-node .superpowers/render-run-stats.mjs --selftest
 ```
 
-All six run offline with zero API calls. Run them after any edit to the
+All three run offline with zero API calls. Run them after any edit to the
 relevant script.

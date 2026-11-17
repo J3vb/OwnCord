@@ -329,7 +329,7 @@ func (d *DB) ListCategoryRoleOverrides(ctx context.Context, categoryID int64) ([
 	if err != nil {
 		return nil, fmt.Errorf("ListCategoryRoleOverrides: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	result := []ChannelRoleOverride{}
 	for rows.Next() {
@@ -358,7 +358,7 @@ func (d *DB) ListCategoryUserOverrides(ctx context.Context, categoryID int64) ([
 	if err != nil {
 		return nil, fmt.Errorf("ListCategoryUserOverrides: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	result := []ChannelUserOverride{}
 	for rows.Next() {

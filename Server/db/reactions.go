@@ -105,7 +105,7 @@ func (d *DB) getReactionsBatch(ctx context.Context, msgIDs []int64, requestingUs
 	if err != nil {
 		return nil, fmt.Errorf("getReactionsBatch: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 
 	result := make(map[int64][]ReactionInfo)
 	for rows.Next() {

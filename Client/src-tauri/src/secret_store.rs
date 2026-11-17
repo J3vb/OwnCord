@@ -23,10 +23,12 @@
 //! Credential Manager. Downstream, the identity keypair was regenerated on
 //! every reconnect, the published key stopped matching the key that signed the
 //! voice announce, and peers correctly rejected the announce as a forged
-//! signature. `Cargo.toml` now names the backend features explicitly and
-//! [`tests::compiled_keyring_backend_is_persistent`] fails the build if they
-//! are ever dropped again — but a store that lies about a write is exactly the
-//! failure a `Result` cannot express, so writes are read back regardless.
+//! signature. The client now names one store crate per target (`os_store`), a
+//! target without one does not compile, and
+//! [`tests::compiled_keyring_backend_is_persistent`] fails the build if the
+//! compiled store stops persisting — but a store that lies about a write is
+//! exactly the failure a `Result` cannot express, so writes are read back
+//! regardless.
 //!
 //! # Fallback policy
 //!
@@ -296,28 +298,53 @@ fn delete_with(
 // Compiled-backend introspection
 // ---------------------------------------------------------------------------
 
-/// Whether the `keyring` backend compiled into this build keeps secrets on disk.
-///
-/// `keyring` picks its backend at compile time and falls back to the in-memory
-/// mock when a platform's feature is missing, so this is a property of the
-/// build, not of the machine. `CredentialPersistence` is `#[non_exhaustive]`
-/// and carries no `Debug`, hence the explicit description.
-#[cfg(not(target_os = "android"))]
-fn compiled_backend_persistence() -> (bool, &'static str) {
-    // `CredentialBuilderApi` needs no import: `default_credential_builder`
-    // returns a `dyn` trait object, whose methods resolve without it.
-    use keyring::credential::CredentialPersistence;
+#[cfg(not(any(
+    windows,
+    target_os = "macos",
+    target_os = "linux",
+    target_os = "android"
+)))]
+compile_error!("secret_store has no OS credential store for this target");
 
-    match keyring::default::default_credential_builder().persistence() {
+/// Whether a credential store's persistence class keeps secrets on disk.
+/// `CredentialPersistence` is `#[non_exhaustive]` and carries no `Debug`,
+/// hence the explicit description.
+#[cfg(not(target_os = "android"))]
+fn describe_persistence(persistence: keyring_core::CredentialPersistence) -> (bool, &'static str) {
+    use keyring_core::CredentialPersistence;
+
+    match persistence {
         CredentialPersistence::UntilDelete => (true, "persists until deleted (on disk)"),
+        CredentialPersistence::UntilLogout => (false, "vanishes on logout (user memory)"),
         CredentialPersistence::UntilReboot => (false, "vanishes on reboot (kernel memory)"),
         CredentialPersistence::ProcessOnly => (false, "vanishes when the process exits"),
         CredentialPersistence::EntryOnly => (
             false,
-            "vanishes with the entry object (the in-memory mock store)",
+            "vanishes with the entry object (an in-memory mock store)",
         ),
         _ => (false, "unrecognized persistence class"),
     }
+}
+
+/// Whether the credential store compiled into this build keeps secrets on disk.
+///
+/// The store is named per target in `os_store`, so this is a property of the
+/// build, not of the machine. Windows and macOS stores are built without any
+/// I/O and are asked directly. Building the Secret Service store opens a
+/// D-Bus session, which startup must not do just to log a line, so on Linux
+/// the answer is the store crate's own: it keeps `keyring_core`'s default
+/// class, `UntilDelete`.
+#[cfg(any(windows, target_os = "macos"))]
+fn compiled_backend_persistence() -> (bool, &'static str) {
+    match os_store() {
+        Ok(store) => describe_persistence(store.persistence()),
+        Err(_) => (false, "the OS credential store could not be built"),
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn compiled_backend_persistence() -> (bool, &'static str) {
+    describe_persistence(keyring_core::CredentialPersistence::UntilDelete)
 }
 
 /// Record the compiled credential backend in the log file at startup.
@@ -384,27 +411,46 @@ fn os_delete(app: &AppHandle, account: &str) -> Result<(), String> {
     crate::android_secrets::delete(app, account)
 }
 
+/// A fresh handle on this platform's OS credential store, built per call as
+/// the keyring 3 backends did: on Linux each call opens its own Secret Service
+/// session, so a provider that starts (or restarts) after launch is found by
+/// the next call instead of a stale connection failing every later one.
+#[cfg(windows)]
+fn os_store() -> keyring_core::Result<std::sync::Arc<keyring_core::CredentialStore>> {
+    Ok(windows_native_keyring_store::Store::new()?)
+}
+
+#[cfg(target_os = "macos")]
+fn os_store() -> keyring_core::Result<std::sync::Arc<keyring_core::CredentialStore>> {
+    Ok(apple_native_keyring_store::keychain::Store::new()?)
+}
+
+#[cfg(target_os = "linux")]
+fn os_store() -> keyring_core::Result<std::sync::Arc<keyring_core::CredentialStore>> {
+    Ok(dbus_secret_service_keyring_store::Store::new()?)
+}
+
+/// The entry for `account`. Its name is the one keyring 3 used on every
+/// desktop store (Windows target `{account}.{SERVICE}`, the Keychain's
+/// service/account pair, the Secret Service's service and username
+/// attributes), so secrets saved by earlier builds are found unchanged.
 #[cfg(not(target_os = "android"))]
-fn entry(account: &str) -> Result<keyring::Entry, String> {
-    keyring::Entry::new(SERVICE, account).map_err(|e| format!("keyring entry error: {e}"))
+fn entry(account: &str) -> keyring_core::Result<keyring_core::Entry> {
+    os_store()?.build(SERVICE, account, None)
 }
 
 #[cfg(not(target_os = "android"))]
 fn keyring_set(account: &str, secret: &str) -> Result<(), String> {
-    entry(account)?
-        .set_password(secret)
+    entry(account)
+        .and_then(|entry| entry.set_password(secret))
         .map_err(|e| format!("{e}"))
 }
 
 #[cfg(not(target_os = "android"))]
 fn keyring_get(account: &str) -> Result<Option<String>, ReadFailure> {
-    let entry = entry(account).map_err(|message| ReadFailure {
-        message,
-        no_store: false,
-    })?;
-    match entry.get_password() {
+    match entry(account).and_then(|entry| entry.get_password()) {
         Ok(secret) => Ok(Some(secret)),
-        Err(keyring::Error::NoEntry) => Ok(None),
+        Err(keyring_core::Error::NoEntry) => Ok(None),
         Err(e) => Err(ReadFailure {
             message: format!("{e}"),
             no_store: no_os_store(&e),
@@ -418,8 +464,8 @@ fn keyring_get(account: &str) -> Result<Option<String>, ReadFailure> {
 /// KeePassXC). A locked collection, a dismissed prompt or a provider whose
 /// start failed is a different error and stays a failure.
 #[cfg(target_os = "linux")]
-fn no_os_store(err: &keyring::Error) -> bool {
-    let keyring::Error::PlatformFailure(inner) = err else {
+fn no_os_store(err: &keyring_core::Error) -> bool {
+    let keyring_core::Error::PlatformFailure(inner) = err else {
         return false;
     };
     let mut source: Option<&(dyn std::error::Error + 'static)> = Some(inner.as_ref());
@@ -435,7 +481,7 @@ fn no_os_store(err: &keyring::Error) -> bool {
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "android")))]
-fn no_os_store(_err: &keyring::Error) -> bool {
+fn no_os_store(_err: &keyring_core::Error) -> bool {
     false
 }
 
@@ -492,8 +538,8 @@ fn secret_service_absent() -> bool {
 
 #[cfg(not(target_os = "android"))]
 fn keyring_delete(account: &str) -> Result<(), String> {
-    match entry(account)?.delete_credential() {
-        Ok(()) | Err(keyring::Error::NoEntry) => Ok(()),
+    match entry(account).and_then(|entry| entry.delete_credential()) {
+        Ok(()) | Err(keyring_core::Error::NoEntry) => Ok(()),
         Err(e) => Err(format!("delete failed: {e}")),
     }
 }
@@ -743,9 +789,8 @@ mod tests {
         let (persistent, description) = compiled_backend_persistence();
         assert!(
             persistent,
-            "keyring compiled a non-persistent backend ({description}); the platform backend \
-             features in Cargo.toml (windows-native / apple-native / sync-secret-service) are \
-             missing or a platform arm fell through to `mock`"
+            "the compiled credential store is not persistent ({description}); check the \
+             per-target store crates in Cargo.toml and `os_store`"
         );
     }
 
@@ -951,18 +996,18 @@ mod tests {
             }
         }
         let wrap = |name: &str| {
-            keyring::Error::PlatformFailure(Box::new(Wrapper(dbus::Error::new_custom(
+            keyring_core::Error::PlatformFailure(Box::new(Wrapper(dbus::Error::new_custom(
                 name, "test",
             ))))
         };
         assert!(no_os_store(&wrap("org.freedesktop.DBus.Error.NoServer")));
         assert!(!no_os_store(&wrap("org.freedesktop.DBus.Error.NoReply")));
-        assert!(!no_os_store(&keyring::Error::NoStorageAccess(Box::new(
-            Wrapper(dbus::Error::new_custom(
+        assert!(!no_os_store(&keyring_core::Error::NoStorageAccess(
+            Box::new(Wrapper(dbus::Error::new_custom(
                 "org.freedesktop.DBus.Error.ServiceUnknown",
                 "test"
-            ))
-        ))));
+            )))
+        )));
     }
 
     // -- set_with: finding "a failed keyring write must not leave a stale entry" --

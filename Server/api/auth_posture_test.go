@@ -37,6 +37,7 @@ var publicSurface = map[string]string{
 	// the description behind. Corrected in B6-7, which adds the endpoint that
 	// does carry the epoch rather than quietly widening this one.
 	"GET /api/v1/info":        "server name only, for the client's handshake; no version (C-2) and no user data (TestAPIV1Info*)",
+	"GET /api/v1/server-icon": "the owner-uploaded server icon PNG, same exposure as server-info; 404 when none, nosniff, five-minute cache (TestServerIcon*)",
 	"GET /api/v1/server-info": "server name, protocol epoch, browser-hosting flag, registration mode, server-default message retention (B7-15a) and the upload transfer lifetime; no channel overrides, version (C-2) or user data (TestAPIV1ServerInfo*)",
 
 	"POST /api/v1/auth/login":       "the credential entry point; rate-limited and lockout-guarded (TestLogin_*)",

@@ -17,8 +17,6 @@ import {
   reconcile,
   renameFolder,
   saveLayout,
-  isIpAddressName,
-  serverInitials,
   toggleCollapsed,
   type ItemRef,
   type RailItem,
@@ -29,6 +27,7 @@ import { authStore } from "@stores/auth.store";
 import { dmStore, type DmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
+import { loadServerIcons, pruneServerIcons, SERVER_ICON_CHANGED } from "@lib/prefs/serverIcons";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
 import { formatBadgeCount } from "@lib/text/formatting";
 import { serverRailText } from "../../i18n/serverRail";
@@ -42,6 +41,7 @@ import {
   railIcon,
   roundButton,
   sameItem,
+  serverAvatar,
   zoneOf,
   type ServerLook,
 } from "./serverRailParts";
@@ -271,13 +271,11 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
 
   // --- Rendering ----------------------------------------------------------
 
+  let icons: ReturnType<typeof loadServerIcons> = new Map();
+
   function avatar(host: string, mini: boolean): HTMLElement {
     const { name, color } = describe(host);
-    const el = createElement("span", { class: mini ? "server-rail-mini" : "server-rail-avatar" });
-    el.style.background = color;
-    if (!mini && isIpAddressName(name)) el.appendChild(railIcon("server"));
-    else setText(el, serverInitials(name));
-    return el;
+    return serverAvatar(name, color, mini, icons.get(host)?.dataUrl);
   }
 
   function serverItem(host: string, inFolder: boolean): HTMLElement {
@@ -352,6 +350,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
 
   function render(): void {
     if (list === null) return;
+    icons = loadServerIcons();
     clearChildren(list);
     for (const item of reconciled()) {
       list.appendChild(item.kind === "server" ? serverItem(item.host, false) : folderItem(item));
@@ -450,6 +449,7 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
       () => renderDms?.(),
     );
     window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDms?.(), { signal });
+    window.addEventListener(SERVER_ICON_CHANGED, render, { signal });
     const unsubRequests = options.pendingRequests?.subscribe(() => renderDms?.());
     if (unsubRequests !== undefined) disposable.addCleanup(unsubRequests);
     render();
@@ -468,6 +468,8 @@ export function createServerRail(options: ServerRailOptions): MountableComponent
         if (signal.aborted) return;
         profiles = loaded;
         serversKnown = true;
+        // The saved list is known, so a removed server's cached icon can go.
+        pruneServerIcons([options.currentHost, ...loaded.map((p) => p.host)]);
         const pending = pendingLayout;
         pendingLayout = null;
         if (pending !== null) commit(pending);

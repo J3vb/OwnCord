@@ -21,7 +21,7 @@ func (m *MarkerStore) Markers(ctx context.Context) ([]DeletionMarker, error) {
 	if err != nil {
 		return nil, fmt.Errorf("marker store: list: %w", err)
 	}
-	defer rows.Close() //nolint:errcheck
+	defer rows.Close()
 	var out []DeletionMarker
 	for rows.Next() {
 		var mk DeletionMarker
@@ -138,7 +138,7 @@ func (m *MarkerStore) RecordMessagesSweep(ctx context.Context, channelID int64, 
 	if err != nil {
 		return fmt.Errorf("marker store: record messages sweep: %w", err)
 	}
-	defer tx.Rollback() //nolint:errcheck
+	defer tx.Rollback()
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO deletion_markers (subject_token, scope, channel_id, cutoff, state, sweep_id)
 		 VALUES (?, 'messages', ?, ?, 'recorded', ?)
