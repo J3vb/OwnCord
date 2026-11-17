@@ -96,7 +96,7 @@ services:
     logging: *default-logging
     # Uncomment and size to your host to keep a runaway process from starving
     # the machine (values are a starting point for a small community; a burst
-    # of sign-ins alone can briefly take the server to about 0.55 GB):
+    # of sign-ins alone can briefly add about 0.6 GB):
     # mem_limit: 1g
     # cpus: "2.0"
     depends_on:

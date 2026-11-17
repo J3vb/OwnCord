@@ -55,7 +55,7 @@ const (
 
 // argon2MemoryBudgetKiB bounds the working memory all argon2id computations
 // hold at once: four checks at 64 MiB. The process footprint runs to about
-// twice this until the GC returns it (~0.55 GB measured), so it stays inside a
+// twice this until the GC returns it (~0.6 GB measured however many wait), so it stays inside a
 // 1 GB container. The admission budget counts computations, and an admin may
 // raise it far past what the host's memory allows; past this many,
 // computations wait for one to finish.

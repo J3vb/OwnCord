@@ -80,7 +80,7 @@ documents. Any disagreement is a bug in this page.
   the same work whether the account exists or which format it holds. All
   argon2id work together uses at most 256 MiB of working memory (four checks
   at once); past that it waits. Under a burst of sign-ins the process can
-  briefly reach about 0.55 GB before memory is returned. TOTP codes are compared in
+  briefly use about 0.6 GB on top of normal use before memory is returned. TOTP codes are compared in
   constant time (`subtle.ConstantTimeCompare`).
 - **One shared budget for password hashing.** Every hash computation on a sign-in
   route goes through one process-wide limit. This covers password checks,
