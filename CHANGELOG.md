@@ -114,6 +114,7 @@ release changes the database, and anything an operator must do first.)
 - **Listeners set the music apart from voices.** Right-click someone who is sharing music for a Music volume slider and Mute music. Deafening yourself silences it too.
 - **Windows and Linux only.** The button says why it is off on a computer or a server that cannot share an app's sound.
 - **A music share ends with the call.** After a dropped connection the app shares the same player again when it can, and says so when it cannot.
+- **Zoom into a screen share or camera with your fingers.** On a phone or touch screen, pinch a video tile to zoom, drag with one finger to look around, and double tap to go back.
 
 ### Messages & files
 

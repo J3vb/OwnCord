@@ -5,8 +5,8 @@
  * A swipe starts only when the finger has moved sideways clearly more than
  * up or down, so a vertical scroll keeps working exactly as before. It never
  * starts from a text field, from something that scrolls sideways itself (a
- * code block, a wide embed), from the image viewer or a dialog or sheet, nor
- * while text is selected. Only touch pointers count; a second finger cancels.
+ * code block, a wide embed), from the image viewer, a zoomed-in video (one
+ * finger pans it) or a dialog or sheet, nor while text is selected. Only touch pointers count; a second finger cancels.
  *
  * The surface should carry `touch-action: pan-y` so the browser leaves
  * horizontal moves to the page instead of cancelling the pointer.
@@ -27,7 +27,7 @@ export function isHorizontalSwipe(dx: number, dy: number): boolean {
 }
 
 const TEXT_ENTRY = 'input, textarea, select, [contenteditable=""], [contenteditable="true"]';
-const OWN_SURFACE = ".image-lightbox, .bottom-sheet-overlay";
+const OWN_SURFACE = ".image-lightbox, .bottom-sheet-overlay, .video-zoomed";
 
 function scrollsSideways(el: Element): boolean {
   if (el.scrollWidth <= el.clientWidth) return false;

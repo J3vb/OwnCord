@@ -223,6 +223,15 @@ describe("what a swipe never starts from", () => {
     expect(rec.begin).not.toHaveBeenCalled();
   });
 
+  it("not from a zoomed-in video, whose finger pans it; at 1x it may", () => {
+    const { root, rec } = surface('<div class="video-cell video-zoomed"><video></video></div>');
+    swipe(root.querySelector("video")!, [100, 100], [200, 100]);
+    expect(rec.begin).not.toHaveBeenCalled();
+    root.querySelector(".video-cell")!.classList.remove("video-zoomed");
+    swipe(root.querySelector("video")!, [100, 100], [200, 100]);
+    expect(rec.begin).toHaveBeenCalledTimes(1);
+  });
+
   it("not from inside a bottom sheet, nor anywhere while one is open", () => {
     const { root, rec } = surface("<p>text</p>");
     const content = document.createElement("div");
