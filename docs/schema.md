@@ -447,7 +447,7 @@ every message a Discord import writes (see
 [Discord import](#import_jobs-and-message_import_authors)). The first import
 creates it, named `[imported]` (the `[imported` prefix is reserved at
 registration), and a unique index allows at most one. Its `password` is `!`,
-which is not a bcrypt hash, so no password check can match it, and the sign-in
+which is not a password hash, so no password check can match it, and the sign-in
 path refuses the account kind as well. It has no `user_roles` row, no session
 and no token. It is not in the member list, the admin member list, role or
 `@everyone` mentions, name lookups for mentions and search, a direct message

@@ -12,6 +12,8 @@ func init() {
 	maps.Copy(supportEventCodes, map[string]string{ //nolint:gosec // G101: false positive — log messages and event codes, not credentials
 		"login: reading require_2fa failed":                     "login_require_2fa_read_failed",
 		"login: session issue failed":                           "login_session_issue_failed",
+		"login: password hash upgrade failed":                   "login_password_hash_upgrade_failed",
+		"login: storing upgraded password hash failed":          "login_password_hash_upgrade_store_failed",
 		"logout: session delete failed":                         "logout_session_delete_failed",
 		"recovery assist: secret generation failed":             "recovery_assist_secret_generation_failed",
 		"recovery assist: verifier hashing failed":              "recovery_assist_verifier_hashing_failed",

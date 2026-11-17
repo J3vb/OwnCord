@@ -277,9 +277,9 @@ type SecurityConfig struct {
 	// about one person per IP, so a shared NAT hits them collectively. 0 or unset = 1.0; clamped to [0.1,
 	// 100].
 	AuthRateLimitMultiplier float64 `yaml:"auth_rate_limit_multiplier"`
-	// ExpensiveAuthConcurrency bounds concurrent bcrypt computations (the admission budget). Login,
-	// registration and recovery-code checks over it queue for up to 10 s; a refused attempt gets 429
-	// AUTH_BUSY, runs no bcrypt and consumes no lockout attempt. 0 or unset = twice the CPU count (min 4);
+	// ExpensiveAuthConcurrency bounds concurrent password-hash computations (the admission budget).
+	// Login, registration and recovery-code checks over it queue for up to 10 s; a refused attempt
+	// gets 429 AUTH_BUSY, runs no hash and consumes no lockout attempt. 0 or unset = twice the CPU count (min 4);
 	// clamped to [1, 4096].
 	ExpensiveAuthConcurrency int `yaml:"expensive_auth_concurrency"`
 }

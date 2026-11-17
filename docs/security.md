@@ -42,6 +42,18 @@ your members ask for, such as update checks.
 
 ## Accounts
 
+### Passwords
+
+Account passwords are stored as argon2id hashes (64 MiB, 4 passes, 1 thread),
+which costs about what the earlier bcrypt hashes at cost 12 did. Accounts made
+before 2.10.0 keep their bcrypt hash until their next sign-in, which replaces
+it with an argon2id one; both formats keep working. Voice channel passwords and
+second-factor recovery codes stay on bcrypt.
+
+Once members have signed in on 2.10.0 or later, do not roll the server back to
+an older version: it cannot read the new hashes, so those members could not
+sign in until you upgrade again.
+
 ### Two-factor sign-in
 
 Members turn it on in **Settings → Account** with an authenticator app. They

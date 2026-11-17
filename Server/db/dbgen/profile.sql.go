@@ -178,3 +178,24 @@ func (q *Queries) UpdateUserProfile(ctx context.Context, arg UpdateUserProfilePa
 		arg.ID,
 	)
 }
+
+const upgradeUserPasswordHash = `-- name: UpgradeUserPasswordHash :execrows
+UPDATE users SET password = ?1
+WHERE id = ?2 AND password = ?3
+`
+
+type UpgradeUserPasswordHashParams struct {
+	NewHash string `json:"newHash"`
+	ID      int64  `json:"id"`
+	OldHash string `json:"oldHash"`
+}
+
+// Swaps the hash only while it is still the one the caller checked, so a
+// password changed in between is never overwritten.
+func (q *Queries) UpgradeUserPasswordHash(ctx context.Context, arg UpgradeUserPasswordHashParams) (int64, error) {
+	result, err := q.db.ExecContext(ctx, upgradeUserPasswordHash, arg.NewHash, arg.ID, arg.OldHash)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
