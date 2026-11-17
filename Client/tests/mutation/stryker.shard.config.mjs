@@ -166,7 +166,7 @@ export const shards = {
     "src/features/voice/native/screenPickerSlot.ts",
     "src/features/voice/routeButton.ts",
     "src/features/voice/shareGate.ts",
-    "src/lib/prefs/serverIcons.ts",
+    "src/features/server-rail/serverIcons.ts",
     "src/lib/voice/appAudioTrack.ts",
     "src/lib/voice/audioMusicState.ts",
   ],
