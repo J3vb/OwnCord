@@ -300,9 +300,12 @@ export const DOUBLE_TAP_PX = 40;
  * A double tap on a zoomed-in picture goes back to 1x. The two taps' clicks
  * and the browser's own double click are the reset's, so the tile neither
  * loses its focus nor goes full screen. At 1x a double tap is left alone.
+ * A pinch that ends short of panning (under PAN_MIN_SCALE) settles at 1x,
+ * so the tile is never zoomed in too little to pan and yet out of the swipes.
  */
 function bindDoubleTapReset(host: HTMLElement, view: ZoomPan, signal: AbortSignal): void {
-  let fingers = 0;
+  // The fingers of this gesture by pointer id; a finger on a control is not one.
+  const fingers = new Set<number>();
   let pinched = false;
   let down = { x: 0, y: 0 };
   let lastTap: { x: number; y: number; at: number } | null = null;
@@ -324,25 +327,27 @@ function bindDoubleTapReset(host: HTMLElement, view: ZoomPan, signal: AbortSigna
     "pointerdown",
     (e) => {
       if (e.pointerType !== "touch" || (e.target as Element).closest(NO_PAN) !== null) return;
-      fingers += 1;
-      if (fingers > 1) pinched = true;
+      // A new gesture: drop a finger whose lift never reached the host.
+      if (e.isPrimary) fingers.clear();
+      fingers.add(e.pointerId);
+      if (fingers.size > 1) pinched = true;
       else down = { x: e.clientX, y: e.clientY };
     },
     { signal },
   );
   const lift = (e: PointerEvent, tapped: boolean): void => {
-    if (e.pointerType !== "touch" || fingers === 0) return;
-    fingers -= 1;
-    if (fingers > 0) return;
+    if (!fingers.delete(e.pointerId) || fingers.size > 0) return;
     const still = Math.hypot(e.clientX - down.x, e.clientY - down.y) <= CLICK_SLOP;
     if (tapped && still && !pinched) onTap(e);
     else lastTap = null;
+    if (pinched && view.scale > 1 && view.scale <= PAN_MIN_SCALE) view.reset();
     pinched = false;
   };
   host.addEventListener("pointerup", (e) => lift(e, true), { signal });
   host.addEventListener("pointercancel", (e) => lift(e, false), { signal });
+  // Only the picture's clicks: a tap on a control right after still counts.
   const swallow = (e: MouseEvent): void => {
-    if (e.timeStamp > swallowUntil) return;
+    if (e.timeStamp > swallowUntil || (e.target as Element).closest(NO_PAN) !== null) return;
     if (e.type === "dblclick") swallowUntil = Number.NEGATIVE_INFINITY;
     e.stopPropagation();
     e.preventDefault();

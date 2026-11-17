@@ -227,12 +227,10 @@ video[hidden] + .video-surface {
 }
 /* Pinch, pan and double tap on a touch screen (bindVideoZoom): the fingers are
    the tile's, not the browser's. A swipe at 1x still opens the drawer
-   (lib/ui/swipe.ts). The participant strip scrolls under the finger. */
-.video-touch-zoom {
+   (lib/ui/swipe.ts). A person's card has no picture to zoom, and the
+   participant strip and the cards view scroll under the finger. */
+.video-touch-zoom:not(.video-cell--avatar) {
   touch-action: none;
-}
-.video-people-strip .video-cell {
-  touch-action: auto;
 }
 
 /* A camera fills its grid tile, cropped at the edges as Discord does. Focused

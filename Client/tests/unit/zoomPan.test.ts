@@ -309,6 +309,37 @@ describe("bindVideoZoom", () => {
     expect(zp.scale).toBeGreaterThan(1);
   });
 
+  it("a pinch that stops short of panning settles at 1x", () => {
+    const { select, zp } = host();
+    select.dispatchEvent(touch("pointerdown", 1, 190, 100));
+    select.dispatchEvent(touch("pointerdown", 2, 210, 100));
+    select.dispatchEvent(touch("pointermove", 2, 211, 100));
+    expect(zp.scale).toBeGreaterThan(1);
+    select.dispatchEvent(touch("pointerup", 2, 211, 100));
+    select.dispatchEvent(touch("pointerup", 1, 190, 100));
+    expect(zp.scale).toBe(1);
+  });
+
+  it("after a reset, a tap on a control still clicks, and a control's finger is no tap", () => {
+    const { select, other, zp } = host();
+    const controlClicks = vi.fn();
+    other.addEventListener("click", controlClicks);
+    zp.setScale(3);
+    // A lift from a finger that went down on a control ends nothing.
+    select.dispatchEvent(touch("pointerdown", 1, 200, 100, 0));
+    other.dispatchEvent(touch("pointerdown", 2, 20, 100, 10));
+    other.dispatchEvent(touch("pointerup", 2, 20, 100, 20));
+    select.dispatchEvent(touch("pointermove", 1, 260, 100, 30));
+    select.dispatchEvent(touch("pointerup", 1, 260, 100, 40));
+    tap(select, 200, 1000);
+    tap(select, 200, 1100);
+    expect(zp.scale).toBe(1);
+    const click = mouse("click", 20, 100);
+    Object.defineProperty(click, "timeStamp", { value: 1200 });
+    other.dispatchEvent(click);
+    expect(controlClicks).toHaveBeenCalledTimes(1);
+  });
+
   it("stops listening and ends a drag when its signal aborts", () => {
     const { el, select, zp } = host();
     zp.setScale(2);
