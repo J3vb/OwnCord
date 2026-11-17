@@ -30,6 +30,7 @@ func TestVerifyPassword_FailuresDoTheSameWork(t *testing.T) {
 		{"unknown user", "", "wrong-password", false, map[string]int{"bcrypt": 1, "argon2id": 1}},
 		{"bcrypt mismatch", string(legacy), "wrong-password", false, map[string]int{"bcrypt": 1, "argon2id": 1}},
 		{"argon2id mismatch", current, "wrong-password", false, map[string]int{"bcrypt": 1, "argon2id": 1}},
+		{"placeholder hash", "!", "wrong-password", false, map[string]int{"bcrypt": 1, "argon2id": 1}},
 		{"bcrypt match", string(legacy), "right-password", true, map[string]int{"bcrypt": 1}},
 		{"argon2id match", current, "right-password", true, map[string]int{"argon2id": 1}},
 	}
