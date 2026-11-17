@@ -39,6 +39,23 @@ const LIST_KEY = "owncord:theme:custom:list";
 const ACTIVE_KEY = "owncord:theme:custom:active";
 const STYLE_ID = "owncord-custom-theme";
 const ID_PATTERN = /^[a-z0-9-]{1,64}$/;
+const BACKGROUND_PREFIX = "owncord:theme:custom:bg:";
+const BACKGROUND_STYLE_ID = "owncord-custom-theme-bg";
+
+/** A theme's picture: a resized image kept as a data URL, how much the
+ *  theme's own surface colour covers it (percent) and its blur (pixels). */
+export interface ThemeBackground {
+  readonly image: string;
+  readonly dim: number;
+  readonly blur: number;
+}
+
+export const MAX_BACKGROUND_CHARS = 2_000_000;
+export const MAX_BACKGROUND_DIM = 90;
+export const DEFAULT_BACKGROUND_DIM = 60;
+export const MAX_BACKGROUND_BLUR = 20;
+/** Base64 only, so the value can never close the CSS string it is painted in. */
+const BACKGROUND_DATA_URL = /^data:image\/(?:webp|jpeg|png);base64,[A-Za-z0-9+/]+={0,2}$/;
 
 /** Every way CSS can point at a file, lower case, as the decoded text spells it. */
 const BLOCKED = [
@@ -132,6 +149,68 @@ export function saveCustomThemes(themes: readonly CustomTheme[]): boolean {
 
 export function newCustomThemeId(): string {
   return crypto.randomUUID();
+}
+
+/** True for a data URL a theme picture may be painted from. */
+export function isBackgroundDataUrl(value: string): boolean {
+  return value.length <= MAX_BACKGROUND_CHARS && BACKGROUND_DATA_URL.test(value);
+}
+
+function clampWhole(value: unknown, max: number): number | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return Math.min(max, Math.max(0, Math.round(value)));
+}
+
+function parseBackground(value: unknown): ThemeBackground | null {
+  if (typeof value !== "object" || value === null) return null;
+  const { image, dim, blur } = value as Record<string, unknown>;
+  if (typeof image !== "string" || !isBackgroundDataUrl(image)) return null;
+  const cleanDim = clampWhole(dim, MAX_BACKGROUND_DIM);
+  if (cleanDim === null) return null;
+  return { image, dim: cleanDim, blur: clampWhole(blur, MAX_BACKGROUND_BLUR) ?? 0 };
+}
+
+/** The picture saved for theme `id`, or null when it has none. */
+export function loadThemeBackground(id: string): ThemeBackground | null {
+  return loadStoredJson(BACKGROUND_PREFIX + id, parseBackground, null);
+}
+
+/** Save (or with null, remove) theme `id`'s picture; false when storage is full. */
+export function saveThemeBackground(id: string, background: ThemeBackground | null): boolean {
+  if (background === null) return removeStored(BACKGROUND_PREFIX + id);
+  if (parseBackground(background) === null) return false;
+  return saveStoredJson(BACKGROUND_PREFIX + id, background);
+}
+
+/**
+ * Paint `background` behind the chat, faded into the theme's own surface
+ * colour so text stays readable, or remove it for null. The picture is also
+ * `--theme-background-image`, so theme CSS can place it anywhere without
+ * writing url( itself. The style goes before the theme's own, which wins.
+ */
+export function paintThemeBackground(background: ThemeBackground | null): void {
+  document.getElementById(BACKGROUND_STYLE_ID)?.remove();
+  const clean = background === null ? null : parseBackground(background);
+  if (clean === null) return;
+  const el = document.createElement("style");
+  el.id = BACKGROUND_STYLE_ID;
+  el.textContent = backgroundCss(clean);
+  const themeStyle = styleElement();
+  if (themeStyle === null) document.head.append(el);
+  else themeStyle.before(el);
+}
+
+function backgroundCss({ image, dim, blur }: ThemeBackground): string {
+  const cover = `color-mix(in srgb, var(--bg-primary) ${dim}%, transparent)`;
+  // i18n-exempt: CSS, not UI text
+  const base = `:root, body { --theme-background-image: url("${image}"); }
+.chat-area { background: linear-gradient(${cover}, ${cover}), var(--theme-background-image) center / cover no-repeat, var(--bg-primary); }`;
+  if (blur === 0) return base;
+  // The blur sits on a layer behind the chat's content, over its background.
+  // i18n-exempt: CSS, not UI text
+  return `${base}
+.chat-area { position: relative; isolation: isolate; }
+.chat-area::before { content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none; -webkit-backdrop-filter: blur(${blur}px); backdrop-filter: blur(${blur}px); }`;
 }
 
 /** The active theme's id, or null for none. */
@@ -249,18 +328,22 @@ function activate(id: string | null): boolean {
   if (theme === undefined) {
     removeStored(ACTIVE_KEY);
     paintCustomTheme(null);
+    paintThemeBackground(null);
     return id === null;
   }
   if (!paintCustomTheme(theme.css)) {
     removeStored(ACTIVE_KEY);
+    paintThemeBackground(null);
     return false;
   }
   // A theme that cannot be remembered as active is not left painted, so the
   // escape shortcut, which reads the stored id, can always turn it off.
   if (!writeStored(ACTIVE_KEY, theme.id)) {
     paintCustomTheme(null);
+    paintThemeBackground(null);
     return false;
   }
+  paintThemeBackground(loadThemeBackground(theme.id));
   return true;
 }
 
@@ -280,7 +363,13 @@ export function installCustomThemeEscape(signal: AbortSignal): void {
     "keydown",
     (e) => {
       if (e.code !== "Backspace" || !(e.ctrlKey || e.metaKey) || !e.shiftKey || e.altKey) return;
-      if (getActiveCustomThemeId() === null && styleElement() === null) return;
+      if (
+        getActiveCustomThemeId() === null &&
+        styleElement() === null &&
+        document.getElementById(BACKGROUND_STYLE_ID) === null
+      ) {
+        return;
+      }
       e.preventDefault();
       setActiveCustomTheme(null);
     },

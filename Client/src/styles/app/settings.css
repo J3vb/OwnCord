@@ -1246,6 +1246,48 @@ details.disclose[open] > summary .icon {
   color: var(--text-danger);
   font-size: var(--font-size-sm);
 }
+.custom-theme-bg {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.custom-theme-bg .setting-desc {
+  margin: 0;
+}
+.custom-theme-bg-preview {
+  width: 100%;
+  max-width: 320px;
+  aspect-ratio: 16 / 9;
+  object-fit: cover;
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
+}
+.custom-theme-bg-preview[hidden],
+.custom-theme-bg-controls[hidden],
+.custom-theme-bg .ac-btn[hidden] {
+  display: none;
+}
+.custom-theme-bg-controls {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 420px;
+}
+.custom-theme-bg-slider {
+  display: grid;
+  grid-template-columns: 4em 1fr 4em;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--font-size-sm);
+}
+.custom-theme-bg-status:empty {
+  display: none;
+}
+.custom-theme-bg-status {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
 /* Accent color picker */
 .accent-swatches {
   display: flex;

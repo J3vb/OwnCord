@@ -135,4 +135,57 @@ test.describe("Custom themes", () => {
     await page.getByRole("button", { name: "Use Paper" }).click();
     await expect.poll(accentText).toBe("");
   });
+
+  test("a background picture is re-encoded, painted behind the chat and survives a reload", async ({
+    page,
+  }) => {
+    const png = await page.evaluate(() => {
+      const canvas = document.createElement("canvas");
+      canvas.width = 3200;
+      canvas.height = 1800;
+      const ctx = canvas.getContext("2d");
+      if (ctx === null) throw new Error("no 2d context");
+      const grad = ctx.createLinearGradient(0, 0, 3200, 1800);
+      grad.addColorStop(0, "#1d2b64");
+      grad.addColorStop(1, "#f8cdda");
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, 3200, 1800);
+      return canvas.toDataURL("image/png").split(",")[1] ?? "";
+    });
+    await page.getByRole("button", { name: "New theme" }).click();
+    await page.getByTestId("custom-theme-name").fill("Dusk");
+    await page.getByTestId("custom-theme-bg-file").setInputFiles({
+      name: "dusk.png",
+      mimeType: "image/png",
+      buffer: Buffer.from(png, "base64"),
+    });
+    await expect(page.getByTestId("custom-theme-bg-preview")).toBeVisible();
+    await page.getByRole("slider", { name: "Blur" }).fill("6");
+    await page.getByTestId("custom-theme-save").click();
+    await page.getByRole("button", { name: "Use Dusk" }).click();
+
+    const stored = await page.evaluate(() => {
+      const key = Object.keys(localStorage).find((k) => k.startsWith("owncord:theme:custom:bg:"));
+      return key === undefined
+        ? null
+        : (JSON.parse(localStorage.getItem(key) ?? "null") as {
+            image: string;
+            blur: number;
+          });
+    });
+    expect(stored?.image).toMatch(/^data:image\/webp;base64,/);
+    expect(stored?.blur).toBe(6);
+
+    const chatBackground = (): Promise<string> =>
+      page.evaluate(() => {
+        const chat = document.querySelector(".chat-area");
+        return chat === null ? "" : getComputedStyle(chat).backgroundImage;
+      });
+    await page.reload();
+    await navigateToMainPageReady(page);
+    await expect.poll(chatBackground).toContain("data:image/webp");
+
+    await page.keyboard.press("Control+Shift+Backspace");
+    await expect.poll(chatBackground).not.toContain("data:image");
+  });
 });

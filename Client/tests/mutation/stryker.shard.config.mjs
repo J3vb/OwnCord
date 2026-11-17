@@ -423,6 +423,7 @@ export const shards = {
   ],
   "lib-rest-8": [
     "src/features/custom-themes/customThemeSection.ts",
+    "src/features/custom-themes/themeBackgroundEditor.ts",
     "src/lib/linkPreviewState.ts",
     "src/lib/presence/roleLookup.ts",
     "src/lib/presence/serverStatus.ts",
@@ -563,6 +564,7 @@ export const shards = {
   ],
   "lib-rest-22": [
     "src/features/custom-themes/customTheme.ts",
+    "src/features/custom-themes/themeBackground.ts",
     "src/features/messaging/fileDropGuard.ts",
     "src/features/messaging/forwardRequests.ts",
     "src/features/messaging/threadResume.ts",

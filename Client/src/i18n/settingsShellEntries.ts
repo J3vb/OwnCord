@@ -150,4 +150,21 @@ export const settingsShellEntries = {
   "appearance.customThemes.applyFailed": "This theme could not be applied.",
   "appearance.customThemes.imported": "Imported {name}",
   "appearance.customThemes.importFailed": "Could not read that file.",
+  "appearance.customThemes.background": "Background picture",
+  "appearance.customThemes.background.desc":
+    "Shown behind the chat. The picture is copied into the app, so it keeps working if you delete the file. Theme CSS can place it anywhere with var(--theme-background-image).",
+  "appearance.customThemes.background.choose": "Choose picture",
+  "appearance.customThemes.background.change": "Change picture",
+  "appearance.customThemes.background.remove": "Remove picture",
+  "appearance.customThemes.background.previewAlt": "Background picture preview",
+  "appearance.customThemes.background.dim": "Dim",
+  "appearance.customThemes.background.dimValue": "{percent}%",
+  "appearance.customThemes.background.blur": "Blur",
+  "appearance.customThemes.background.blurValue": "{px} px",
+  "appearance.customThemes.background.working": "Preparing the picture…",
+  "appearance.customThemes.background.type": "Pick a PNG, JPEG or WebP picture.",
+  "appearance.customThemes.background.tooBig": "That picture is too big. The limit is {limit} MB.",
+  "appearance.customThemes.background.unreadable": "Could not read that picture.",
+  "appearance.customThemes.background.notExported":
+    "Export and Copy only carry the CSS, not the background picture.",
 } as const;

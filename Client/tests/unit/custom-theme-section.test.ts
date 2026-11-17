@@ -1,20 +1,28 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { showToast, pickSaveLocation, writeFile, shareSheet } = vi.hoisted(() => ({
-  showToast: vi.fn(),
-  pickSaveLocation: vi.fn<(name: string) => Promise<string | null>>(),
-  writeFile: vi.fn<(path: string, data: Uint8Array) => Promise<null>>(),
-  shareSheet: {
-    available: false,
-    shareFile: vi.fn<(name: string, data: Uint8Array) => Promise<void>>(),
-  },
-}));
+const { showToast, pickSaveLocation, writeFile, shareSheet, prepareBackground } = vi.hoisted(
+  () => ({
+    prepareBackground: vi.fn<(file: File) => Promise<PreparedBackground>>(),
+    showToast: vi.fn(),
+    pickSaveLocation: vi.fn<(name: string) => Promise<string | null>>(),
+    writeFile: vi.fn<(path: string, data: Uint8Array) => Promise<null>>(),
+    shareSheet: {
+      available: false,
+      shareFile: vi.fn<(name: string, data: Uint8Array) => Promise<void>>(),
+    },
+  }),
+);
 
 vi.mock("@lib/ui/toast", () => ({ showToast }));
+vi.mock("../../src/features/custom-themes/themeBackground", async (original) => ({
+  ...(await original<typeof import("../../src/features/custom-themes/themeBackground")>()),
+  prepareBackground,
+}));
 vi.mock("../../src/platform/desktop", () => ({
   desktop: { fileSaver: { pickSaveLocation, writeFile }, shareSheet },
 }));
 
+import type { PreparedBackground } from "../../src/features/custom-themes/themeBackground";
 import { expectConsole } from "../helpers/console";
 import {
   buildCustomThemeSection,
@@ -24,7 +32,9 @@ import {
   MAX_CUSTOM_THEMES,
   getActiveCustomThemeId,
   loadCustomThemes,
+  loadThemeBackground,
   saveCustomThemes,
+  saveThemeBackground,
   setActiveCustomTheme,
 } from "../../src/features/custom-themes/customTheme";
 
@@ -251,6 +261,136 @@ describe("custom theme section", () => {
     mount();
     expect(buttonByText(section, "New theme").disabled).toBe(true);
     expect(buttonByText(section, "Import .css").disabled).toBe(true);
+  });
+});
+
+describe("custom theme background picture", () => {
+  const IMAGE = "data:image/webp;base64,UklGRg==";
+  const OTHER = "data:image/jpeg;base64,/9j/4A==";
+  let owner: AbortController;
+  let section: HTMLElement;
+
+  /** Theme a1, optionally with a stored picture, and the editor open on it. */
+  function editThemeA1(stored: boolean): void {
+    saveCustomThemes([{ id: "a1", name: "One", css: "" }]);
+    if (stored) saveThemeBackground("a1", { image: OTHER, dim: 60, blur: 0 });
+    section = buildCustomThemeSection(owner.signal);
+    document.body.appendChild(section);
+    buttonByText(section, "Edit").click();
+  }
+
+  function choose(result: PreparedBackground | Promise<PreparedBackground>): void {
+    prepareBackground.mockReturnValueOnce(Promise.resolve(result));
+    const input = q<HTMLInputElement>(section, "[data-testid='custom-theme-bg-file']");
+    Object.defineProperty(input, "files", {
+      configurable: true,
+      value: [new File(["x"], "pic.png", { type: "image/png" })],
+    });
+    input.dispatchEvent(new Event("change"));
+  }
+
+  async function settle(): Promise<void> {
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+  }
+
+  function save(): void {
+    q<HTMLButtonElement>(section, "[data-testid='custom-theme-save']").click();
+  }
+
+  function previewHidden(): boolean {
+    return q<HTMLElement>(section, "[data-testid='custom-theme-bg-preview']").hasAttribute(
+      "hidden",
+    );
+  }
+
+  beforeEach(() => {
+    localStorage.clear();
+    vi.clearAllMocks();
+    owner = new AbortController();
+  });
+
+  afterEach(() => {
+    setActiveCustomTheme(null);
+    owner.abort();
+    section.remove();
+    vi.restoreAllMocks();
+  });
+
+  it("saves a picked picture with its dim and blur, and paints it on the active theme", async () => {
+    editThemeA1(false);
+    setActiveCustomTheme("a1");
+    expect(previewHidden()).toBe(true);
+    choose({ ok: true, image: IMAGE });
+    await settle();
+    expect(q<HTMLImageElement>(section, "[data-testid='custom-theme-bg-preview']").src).toBe(IMAGE);
+    const [dim, blur] = section.querySelectorAll<HTMLInputElement>(
+      ".custom-theme-bg input[type='range']",
+    );
+    dim!.value = "30";
+    blur!.value = "5";
+    save();
+    expect(loadThemeBackground("a1")).toEqual({ image: IMAGE, dim: 30, blur: 5 });
+    expect(document.getElementById("owncord-custom-theme-bg")?.textContent).toContain(IMAGE);
+  });
+
+  it("shows why a picture was refused and keeps the old one", async () => {
+    editThemeA1(true);
+    choose({ ok: false, problem: "type" });
+    await settle();
+    expect(q(section, "[data-testid='custom-theme-bg-status']").textContent).toBe(
+      "Pick a PNG, JPEG or WebP picture.",
+    );
+    save();
+    expect(loadThemeBackground("a1")?.image).toBe(OTHER);
+  });
+
+  it("Remove picture clears it on save", () => {
+    editThemeA1(true);
+    q<HTMLButtonElement>(section, "[data-testid='custom-theme-bg-remove']").click();
+    save();
+    expect(loadThemeBackground("a1")).toBeNull();
+  });
+
+  it("saves nothing half-way when storage is full", async () => {
+    editThemeA1(true);
+    q<HTMLInputElement>(section, "[data-testid='custom-theme-name']").value = "Renamed";
+    choose({ ok: true, image: IMAGE });
+    await settle();
+    const realSet = Storage.prototype.setItem;
+    vi.spyOn(Storage.prototype, "setItem").mockImplementation(function (
+      this: Storage,
+      key: string,
+      value: string,
+    ) {
+      if (key === "owncord:theme:custom:list") throw new DOMException("full", "QuotaExceededError");
+      realSet.call(this, key, value);
+    });
+    save();
+    expect(q(section, "[data-testid='custom-theme-error']").textContent).toBe(
+      "Could not save the theme: this device's storage is full.",
+    );
+    expect(loadCustomThemes()[0]?.name).toBe("One");
+    expect(loadThemeBackground("a1")?.image).toBe(OTHER);
+  });
+
+  it("deleting the theme deletes its picture", () => {
+    editThemeA1(true);
+    setActiveCustomTheme("a1");
+    buttonByText(section, "Delete").click();
+    q<HTMLButtonElement>(document, "[data-testid='custom-theme-delete-confirm']").click();
+    expect(loadThemeBackground("a1")).toBeNull();
+    expect(document.getElementById("owncord-custom-theme-bg")).toBeNull();
+  });
+
+  it("drops a slow pick that finishes after the editor was closed", async () => {
+    editThemeA1(false);
+    let finish: (r: PreparedBackground) => void = () => {};
+    choose(new Promise<PreparedBackground>((resolve) => (finish = resolve)));
+    buttonByText(section, "Cancel").click();
+    buttonByText(section, "Edit").click();
+    finish({ ok: true, image: IMAGE });
+    await settle();
+    expect(previewHidden()).toBe(true);
   });
 });
 
