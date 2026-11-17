@@ -39,6 +39,7 @@ func (b *watermarkVoiceBroadcaster) DisconnectFromVoiceInChannel(ctx context.Con
 // ordinary seq-based resume, so warm reconnects must be forced onto the
 // full-ready path instead (v035).
 func TestCreateGroupDM_BumpsVisibilityWatermark(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
 	router := buildDMRouter(database, bc)
@@ -62,6 +63,7 @@ func TestCreateGroupDM_BumpsVisibilityWatermark(t *testing.T) {
 // that channel — otherwise they keep hearing and speaking to a room they are
 // no longer a member of (v031).
 func TestLeaveGroupDM_EvictsLeaverFromVoice(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
 	router := buildDMRouter(database, bc)
@@ -86,6 +88,7 @@ func TestLeaveGroupDM_EvictsLeaverFromVoice(t *testing.T) {
 // Closing a 1:1 DM is a hide, not a leave — the closer's DM membership is
 // unchanged, so their voice session (if any) must not be touched.
 func TestCloseDM_OneToOneDoesNotEvictVoice(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
 	router := buildDMRouter(database, bc)
@@ -112,6 +115,7 @@ func TestCloseDM_OneToOneDoesNotEvictVoice(t *testing.T) {
 // and voluntary voice_token_refresh, so a blocked user already in the call
 // would stay in it indefinitely.
 func TestBlockUser_EvictsBlockedUserFromSharedDMVoice(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
 	router := buildDMRouter(database, bc)
@@ -138,6 +142,7 @@ func TestBlockUser_EvictsBlockedUserFromSharedDMVoice(t *testing.T) {
 // A block between users with no shared 1:1 DM has no call to sever — the
 // eviction capability must not fire at all.
 func TestBlockUser_NoSharedDM_NoEviction(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
 	router := buildDMRouter(database, bc)
@@ -157,6 +162,7 @@ func TestBlockUser_NoSharedDM_NoEviction(t *testing.T) {
 // RequireDMReachable's group exemption), so blocking a co-member of a group
 // must not evict them from the group's call.
 func TestBlockUser_GroupDMOnly_NoEviction(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
 	router := buildDMRouter(database, bc)

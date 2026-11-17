@@ -16,6 +16,7 @@ import (
 )
 
 func TestVerifyTOTP_ExhaustedCapRefusesBeforeStoreRead(t *testing.T) {
+	t.Parallel()
 	database, limiter, router := newAuthEnv(t)
 	uid := seedUser(t, database, "capped", "correctPass1", 4)
 	secret := enrolTOTP(t, database, uid)

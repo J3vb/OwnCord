@@ -8,6 +8,7 @@ import (
 )
 
 func TestWalFilePath(t *testing.T) {
+	t.Parallel()
 	abs := "/srv/owncord/chat.db"
 	if runtime.GOOS == "windows" {
 		abs = "C:/srv/owncord/chat.db"
@@ -35,6 +36,7 @@ func TestWalFilePath(t *testing.T) {
 }
 
 func TestWalFilePath_FollowsSymlinkToTarget(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	target := filepath.Join(dir, "real.db")
 	if err := os.WriteFile(target, nil, 0o600); err != nil {

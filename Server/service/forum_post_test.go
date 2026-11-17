@@ -64,6 +64,7 @@ func (f *forumPostFixture) counts(t *testing.T) (threads, msgs, receipts int) {
 }
 
 func TestCreateForumPost_Happy(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	res, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, "  Dark mode  ", "please <b>add</b> it", 1, 0))
 	mustDo(t, "CreateForumPost", err)
@@ -96,6 +97,7 @@ func TestCreateForumPost_Happy(t *testing.T) {
 }
 
 func TestCreateForumPost_RefusalsWriteNothing(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 41, Name: "text", Type: "text"})
 	tooMany := make([]int, 0, 6)
@@ -137,6 +139,7 @@ func TestCreateForumPost_RefusalsWriteNothing(t *testing.T) {
 }
 
 func TestCreateForumPost_SendGate(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	seedChannelOverride(t, f.database, permissions.MemberRoleID, frmForum, 0, permissions.SendMessages)
 	if _, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, "t", "c")); !errors.Is(err, ErrForbidden) {
@@ -154,6 +157,7 @@ func TestCreateForumPost_SendGate(t *testing.T) {
 }
 
 func TestCreateForumPost_RequireTag(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	if _, err := f.database.ReplaceForumSettings(bg(), frmForum, db.ForumSettingsWrite{
 		RequireTag: true, DefaultAutoArchiveMinutes: 4320, Tags: []db.ForumTagWrite{{ID: f.tags[0].ID, Name: "bug"}},
@@ -174,6 +178,7 @@ func TestCreateForumPost_RequireTag(t *testing.T) {
 // a post without a tag goes through; with a tag present the rule still holds
 // (TestCreateForumPost_RequireTag).
 func TestCreateForumPost_RequireTagWithNoTagsAcceptsUntaggedPost(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	if _, err := f.database.ReplaceForumSettings(bg(), frmForum, db.ForumSettingsWrite{
 		RequireTag: true, DefaultAutoArchiveMinutes: 60,
@@ -186,6 +191,7 @@ func TestCreateForumPost_RequireTagWithNoTagsAcceptsUntaggedPost(t *testing.T) {
 
 // Pre-flight edge case 1: a lost forum_post_create_ok, retried.
 func TestCreateForumPost_RetryIsIdempotent(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	p := f.req(thrOwner, "once", "body", 0)
 	first, err := f.limited.CreateForumPost(bg(), p)
@@ -229,6 +235,7 @@ func TestCreateForumPost_RetryIsIdempotent(t *testing.T) {
 }
 
 func TestCreateForumPost_RetryAfterDelete(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	p := f.req(thrOwner, "gone", "body")
 	first, err := f.limited.CreateForumPost(bg(), p)
@@ -248,6 +255,7 @@ func TestCreateForumPost_RetryAfterDelete(t *testing.T) {
 // A retry of a post that has since been archived is still a retry: it gets the
 // same post back and nothing is written.
 func TestCreateForumPost_RetryAfterArchive(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	p := f.req(thrOwner, "quiet", "body")
 	first, err := f.limited.CreateForumPost(bg(), p)
@@ -269,6 +277,7 @@ func TestCreateForumPost_RetryAfterArchive(t *testing.T) {
 // A retry from a caller who has since lost the forum is acknowledged without
 // the post's body.
 func TestCreateForumPost_RetryAfterLosingView(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	p := f.req(thrOwner, "hidden", "body")
 	first, err := f.limited.CreateForumPost(bg(), p)
@@ -283,6 +292,7 @@ func TestCreateForumPost_RetryAfterLosingView(t *testing.T) {
 
 // A malformed request never spends the shared create budget.
 func TestCreateForumPost_ShapeErrorsCostNoToken(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	for range 8 {
 		if _, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, " ", "body")); !errors.Is(err, ErrBadRequest) {
@@ -295,6 +305,7 @@ func TestCreateForumPost_ShapeErrorsCostNoToken(t *testing.T) {
 }
 
 func TestCreateForumPost_SlowModeAndBudget(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	if _, err := f.database.ExecContext(bg(), `UPDATE channels SET slow_mode = 30 WHERE id = ?`, frmForum); err != nil {
 		t.Fatal(err)
@@ -322,6 +333,7 @@ func TestCreateForumPost_SlowModeAndBudget(t *testing.T) {
 }
 
 func TestSendAndThreadCreateRefuseAForum(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	if _, err := f.msgs.SendMessage(bg(), SendMessageParams{ChannelID: frmForum, UserID: thrOwner, Username: "u", Content: "x"}); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("chat_send into a forum: err = %v", err)
@@ -332,6 +344,7 @@ func TestSendAndThreadCreateRefuseAForum(t *testing.T) {
 }
 
 func TestCreateForumPost_MentionsRaiseABadgeOnThePost(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	res, err := f.msgs.CreateForumPost(bg(), f.req(thrOwner, "hey", "hello @bob"))
 	mustDo(t, "CreateForumPost", err)
@@ -344,6 +357,7 @@ func TestCreateForumPost_MentionsRaiseABadgeOnThePost(t *testing.T) {
 }
 
 func TestThreadUpdate_PostTags(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	res, err := f.limited.CreateForumPost(bg(), f.req(thrOwner, "p", "c", 0))
 	mustDo(t, "CreateForumPost", err)
@@ -406,6 +420,7 @@ func TestThreadUpdate_PostTags(t *testing.T) {
 }
 
 func TestEditOpeningMessageIsFlagged(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	res, err := f.msgs.CreateForumPost(bg(), f.req(thrOwner, "p", "first"))
 	mustDo(t, "CreateForumPost", err)
@@ -428,6 +443,7 @@ func TestEditOpeningMessageIsFlagged(t *testing.T) {
 }
 
 func TestDeletedOpeningMessageKeepsThePost(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	res, err := f.msgs.CreateForumPost(bg(), f.req(thrOwner, "p", "first"))
 	mustDo(t, "CreateForumPost", err)
@@ -441,6 +457,7 @@ func TestDeletedOpeningMessageKeepsThePost(t *testing.T) {
 }
 
 func TestMarkReadOnAForumWritesNoReadState(t *testing.T) {
+	t.Parallel()
 	f := newForumPostFixture(t)
 	for name, op := range map[string]db.ReadPointerOp{"read at latest": db.ReadAtLatest, "read up to": db.ReadUpTo, "mark unread": db.MarkUnread} {
 		if _, err := f.msgs.MoveReadPointer(bg(), thrOwner, frmForum, op, 1); !errors.Is(err, ErrNotFound) {

@@ -28,6 +28,7 @@ func openTestMarkers(t *testing.T, key []byte) *MarkerStore {
 }
 
 func TestMarkerStore_TokenIsKeyedAndUnlinkable(t *testing.T) {
+	t.Parallel()
 	a := openTestMarkers(t, testMarkerKey(1))
 	b := openTestMarkers(t, testMarkerKey(2))
 	tok := a.SubjectToken(42)
@@ -49,6 +50,7 @@ func TestMarkerStore_TokenIsKeyedAndUnlinkable(t *testing.T) {
 }
 
 func TestMarkerStore_PendingConfirmDiscard(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := openTestMarkers(t, testMarkerKey(3))
 	tok, created, err := m.RecordPendingAccount(ctx, 7, 0)
@@ -105,6 +107,7 @@ func TestMarkerStore_PendingConfirmDiscard(t *testing.T) {
 // authorised); a pending marker whose account is gone is confirmed;
 // recorded markers for absent accounts do nothing.
 func TestMarkerStore_ReplayAccounts(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemoryInternal(t)
 	m := openTestMarkers(t, testMarkerKey(4))
@@ -185,6 +188,7 @@ func openMigratedMemoryInternal(t *testing.T) *DB {
 }
 
 func TestMarkerStore_FileLivesOutsideTheDatabase(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	m, err := OpenMarkerStore(filepath.Join(dir, "data", "erasure", "markers.sqlite"), testMarkerKey(6))
 	if err != nil {
@@ -200,6 +204,7 @@ func TestMarkerStore_FileLivesOutsideTheDatabase(t *testing.T) {
 }
 
 func TestMarkerStore_MessagesMarkersMoveForwardAndReplay(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	m := openTestMarkers(t, testMarkerKey(7))
 	if m.MessagesToken(5) == m.SubjectToken(5) || m.MessagesToken(5) == m.MessagesToken(6) {
@@ -262,6 +267,7 @@ func TestMarkerStore_MessagesMarkersMoveForwardAndReplay(t *testing.T) {
 // A marker file written before sweeps were named is brought up to date on
 // open: its markers start with no sweep id and get one at the next sweep.
 func TestMarkerStore_OlderFileGainsTheSweepID(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	key := testMarkerKey(9)
 	path := filepath.Join(t.TempDir(), "erasure", "markers.sqlite")

@@ -65,6 +65,7 @@ func schemaSnapshot(t *testing.T, database *DB) map[string]string {
 // channel with its thread must be untouched. It runs with foreign keys off,
 // as the sqlite3 shell runs a reversal, so nothing may depend on a cascade.
 func TestForumsRollback(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 
 	// The baseline: every migration except 075 and 092, which indexes a 075

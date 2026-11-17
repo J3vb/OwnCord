@@ -6,6 +6,7 @@ import (
 )
 
 func TestRollback071_Rehearsal(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemoryInternal(t)
 	ctx := context.Background()
 	count := rowCounter(t, database)

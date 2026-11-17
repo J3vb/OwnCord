@@ -26,6 +26,7 @@ func (f *fakeNoteStore) DeleteUserNote(_ context.Context, o, t int64) error {
 func (f *fakeNoteStore) UserExists(context.Context, int64) (bool, error) { return f.exists, nil }
 
 func TestUserNoteService_PutBoundsBeforeCleaning(t *testing.T) {
+	t.Parallel()
 	st := &fakeNoteStore{notes: map[[2]int64]string{}, exists: true}
 	svc := NewUserNoteService(st)
 	if _, err := svc.Put(context.Background(), 1, 2, strings.Repeat(" ", MaxUserNoteRunes*4+1)); !errors.Is(err, ErrBadRequest) {

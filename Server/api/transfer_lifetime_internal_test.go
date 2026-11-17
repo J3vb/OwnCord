@@ -9,6 +9,7 @@ import (
 // size at the slowest supported rate and stays between the two bounds, so a
 // raised upload cap widens the window instead of tightening it.
 func TestTransferLifetimeFollowsUploadCap(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name string
 		size int64

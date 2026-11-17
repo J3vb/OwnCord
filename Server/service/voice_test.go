@@ -27,6 +27,7 @@ func voiceFixture(t *testing.T) (*VoiceService, *db.DB, context.Context) {
 }
 
 func TestVoiceService_JoinHonoursTheChannelCap(t *testing.T) {
+	t.Parallel()
 	svc, _, ctx := voiceFixture(t)
 
 	// maxUsers 0 is "uncapped" and takes the plain upsert.
@@ -59,6 +60,7 @@ func TestVoiceService_JoinHonoursTheChannelCap(t *testing.T) {
 // rejoin. An unconditional delete by user id would then remove the NEW row,
 // putting a live participant's membership out of existence.
 func TestVoiceService_LeaveIfMatchWillNotDeleteANewerRow(t *testing.T) {
+	t.Parallel()
 	svc, _, ctx := voiceFixture(t)
 
 	mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
@@ -91,6 +93,7 @@ func TestVoiceService_LeaveIfMatchWillNotDeleteANewerRow(t *testing.T) {
 }
 
 func TestVoiceService_RestoreModFlags(t *testing.T) {
+	t.Parallel()
 	svc, _, ctx := voiceFixture(t)
 	mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
 
@@ -122,6 +125,7 @@ func TestVoiceService_RestoreModFlags(t *testing.T) {
 // stamp the SAME owner onto the fresh session, not the old, ownerless
 // (manual-mute-shaped) restore — otherwise nothing can ever clear it again.
 func TestVoiceService_RestoreModFlags_CarriesTimeoutOwnership(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := voiceFixture(t)
 	mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
 	var actionID int64
@@ -143,6 +147,7 @@ func TestVoiceService_RestoreModFlags_CarriesTimeoutOwnership(t *testing.T) {
 // expired in the gap between the channel switch and this restore must not
 // have its mute resurrected with no owner left to ever clear it.
 func TestVoiceService_RestoreModFlags_DoesNotRestoreAnInactiveOwnersMute(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := voiceFixture(t)
 	mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
 	var actionID int64
@@ -164,6 +169,7 @@ func TestVoiceService_RestoreModFlags_DoesNotRestoreAnInactiveOwnersMute(t *test
 // the target moved — so which channel the undo may touch is the whole
 // question, and it differs by direction.
 func TestVoiceService_RollbackServerDeafenScopesByDirection(t *testing.T) {
+	t.Parallel()
 	t.Run("a deafen rolls back by clearing and follows the moved row", func(t *testing.T) {
 		svc, _, ctx := voiceFixture(t)
 		mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
@@ -237,6 +243,7 @@ func TestVoiceService_RollbackServerDeafenScopesByDirection(t *testing.T) {
 // that boolean is what lets a handler refuse rather than let a write follow a
 // target who moved between the authorization and the write (OC-0005).
 func TestVoiceService_ServerFlagsReportAMissedChannel(t *testing.T) {
+	t.Parallel()
 	svc, _, ctx := voiceFixture(t)
 	mustDo(t, "join", svc.Join(ctx, 1, 10, 0))
 
@@ -258,6 +265,7 @@ func TestVoiceService_ServerFlagsReportAMissedChannel(t *testing.T) {
 
 // The reads the sweep and the join sequence depend on.
 func TestVoiceService_Reads(t *testing.T) {
+	t.Parallel()
 	svc, _, ctx := voiceFixture(t)
 	if state, err := svc.State(ctx, 1); err != nil || state != nil {
 		t.Fatalf("State for a member not in voice = %+v, %v; want (nil, nil)", state, err)
@@ -279,6 +287,7 @@ func TestVoiceService_Reads(t *testing.T) {
 // sweep deletes every row it cannot match to a connected client, so "no rows"
 // from a broken read would evict everyone in voice.
 func TestVoiceService_ReadsFailLoud(t *testing.T) {
+	t.Parallel()
 	svc, database, ctx := voiceFixture(t)
 	mustDo(t, "Close", database.Close())
 

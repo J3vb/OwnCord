@@ -164,6 +164,7 @@ func TestEraseAccount_CrashMidDrainResumesOnReopen(t *testing.T) {
 // Two administrators erased at once, the last two admin-class accounts: the
 // second lock sees the first's queued job and is refused (edge case 2).
 func TestEraseAccount_GuardExcludesAccountsUnderErasure(t *testing.T) {
+	t.Parallel()
 	database := openErasureFile(t, filepath.Join(t.TempDir(), "guard.sqlite"))
 	ctx := context.Background()
 	first := seedUser(t, database, "admin-first")
@@ -245,6 +246,7 @@ func TestEraseAccount_WriterInterleavesBetweenChunks(t *testing.T) {
 // the one job row (the all-or-nothing test above stays for a fault at the
 // lock).
 func TestEraseAccount_FaultAfterFirstChunkLeavesQueuedJob(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
@@ -314,6 +316,7 @@ func TestEraseAccountDrain_DeadlineStopsBetweenChunks(t *testing.T) {
 // that was in flight at the lock) is swept by the finish stage, which looks
 // only at rows written since the lock.
 func TestEraseAccountFinish_SweepsEventsWrittenSinceTheLock(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)
@@ -338,6 +341,7 @@ func TestEraseAccountFinish_SweepsEventsWrittenSinceTheLock(t *testing.T) {
 // may already be past it, and its mention would then be reversed before it
 // was ever counted.
 func TestEraseAccountLock_RefusesLaterMessages(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	sub := seedEraseSubject(t, database)

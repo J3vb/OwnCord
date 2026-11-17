@@ -22,6 +22,7 @@ func (e *memberActionsEnv) heldRoles(t *testing.T, name string) []int64 {
 }
 
 func TestMemberRoles_AddAndRemove_BothSurfaces(t *testing.T) {
+	t.Parallel()
 	for _, base := range []string{"/api/v1/moderation/members/", "/admin/api/users/"} {
 		t.Run(base, func(t *testing.T) {
 			e := newMemberActionsEnv(t)
@@ -60,6 +61,7 @@ func TestMemberRoles_AddAndRemove_BothSurfaces(t *testing.T) {
 }
 
 func TestMemberRoles_RankChecksEnforced(t *testing.T) {
+	t.Parallel()
 	e := newMemberActionsEnv(t)
 	cases := []struct {
 		name   string

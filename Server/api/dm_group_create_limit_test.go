@@ -41,6 +41,7 @@ func requireRateLimited(t *testing.T, rr *httptest.ResponseRecorder, maxRetry ti
 }
 
 func TestCreateGroupDM_MinuteLimitPerUser(t *testing.T) {
+	t.Parallel()
 	router, _, tokens := createGroupLimitFixture(t)
 
 	for range api.DMGroupCreatePerMinute {
@@ -54,6 +55,7 @@ func TestCreateGroupDM_MinuteLimitPerUser(t *testing.T) {
 }
 
 func TestCreateGroupDM_BudgetSeparateFromGroupChanges(t *testing.T) {
+	t.Parallel()
 	router, limiter, tokens := createGroupLimitFixture(t)
 
 	group := decodeDMInfo(t, postGroup(t, router, tokens[1], []int64{1, 3}))
@@ -79,6 +81,7 @@ func TestCreateGroupDM_BudgetSeparateFromGroupChanges(t *testing.T) {
 }
 
 func TestCreateGroupDM_DailyCeilingKeepsMinuteSlot(t *testing.T) {
+	t.Parallel()
 	router, limiter, tokens := createGroupLimitFixture(t)
 
 	dayKey := auth.Key(api.DMGroupCreateDayKey, 1)
@@ -103,6 +106,7 @@ func TestCreateGroupDM_DailyCeilingKeepsMinuteSlot(t *testing.T) {
 }
 
 func TestCreateGroupDM_RefusedCallCreatesNothing(t *testing.T) {
+	t.Parallel()
 	router, _, tokens := createGroupLimitFixture(t)
 
 	for range api.DMGroupCreatePerMinute {

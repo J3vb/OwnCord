@@ -16,6 +16,7 @@ import (
 // malformed OWNCORD_TOTP_KEY is now refused by the totp-key stage
 // (internal/app TestApp_MalformedTOTPKeyFailsNamedStage), before any router.
 func TestNewRouter_ConstructsNothing(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	cfg := &config.Config{Server: config.ServerConfig{Name: "Test Server", Port: 8443}}
 

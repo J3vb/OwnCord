@@ -12,6 +12,7 @@ import (
 // pair that already exists at migration time is trusted in both directions
 // afterward, and a group DM's participants are not.
 func TestMigration046_GrandfathersEveryOneToOnePair(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 	mustDo(t, "migrate to 045", db.MigrateFS(database, migrationsBefore(t, "046")))
@@ -61,6 +62,7 @@ func TestMigration046_GrandfathersEveryOneToOnePair(t *testing.T) {
 // trust the blocker holds in a currently blocked sender is removed, while trust
 // without a block and the blocked user's trust in the blocker are kept.
 func TestMigration058_DropsTrustForBlockedPairsOnly(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 	mustDo(t, "migrate to 057", db.MigrateFS(database, migrationsBefore(t, "058")))

@@ -102,6 +102,7 @@ func buildClientUpdateRouter(u *updater.Updater) http.Handler {
 }
 
 func TestClientUpdate_NewVersionAvailable(t *testing.T) {
+	t.Parallel()
 	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/windows-x86_64-nsis/1.0.0")
 
 	requireStatus(t, rr, http.StatusOK)
@@ -117,12 +118,14 @@ func TestClientUpdate_NewVersionAvailable(t *testing.T) {
 }
 
 func TestClientUpdate_AlreadyLatest(t *testing.T) {
+	t.Parallel()
 	rr := getClientUpdateFrom(t, "v1.0.0", "/api/v1/client-update/windows-x86_64-nsis/1.0.0")
 
 	expectStatus(t, rr, http.StatusNoContent)
 }
 
 func TestClientUpdate_FutureVersion(t *testing.T) {
+	t.Parallel()
 	// Client has a newer version than the release.
 	rr := getClientUpdateFrom(t, "v1.0.0", "/api/v1/client-update/windows-x86_64-nsis/2.0.0")
 
@@ -130,6 +133,7 @@ func TestClientUpdate_FutureVersion(t *testing.T) {
 }
 
 func TestClientUpdate_WindowsTargetGetsNSISInstaller(t *testing.T) {
+	t.Parallel()
 	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/windows-x86_64-nsis/1.0.0")
 
 	requireStatus(t, rr, http.StatusOK)
@@ -141,6 +145,7 @@ func TestClientUpdate_WindowsTargetGetsNSISInstaller(t *testing.T) {
 }
 
 func TestClientUpdate_WindowsArm64TargetGetsArm64NSIS(t *testing.T) {
+	t.Parallel()
 	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/windows-aarch64-nsis/1.0.0")
 
 	requireStatus(t, rr, http.StatusOK)
@@ -157,6 +162,7 @@ func TestClientUpdate_WindowsArm64TargetGetsArm64NSIS(t *testing.T) {
 // A release that published only the arm64 signature (a staging slip) must
 // not offer the update: the plugin would download nothing verifiable.
 func TestClientUpdate_Arm64SignatureWithoutArchiveNoContent(t *testing.T) {
+	t.Parallel()
 	var srv *httptest.Server
 	mux := http.NewServeMux()
 	mux.HandleFunc("/repos/test/repo/releases/latest", func(w http.ResponseWriter, r *http.Request) {
@@ -181,6 +187,7 @@ func TestClientUpdate_Arm64SignatureWithoutArchiveNoContent(t *testing.T) {
 }
 
 func TestClientUpdate_LinuxTargetGetsAppImage(t *testing.T) {
+	t.Parallel()
 	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/linux-x86_64-appimage/1.0.0")
 
 	requireStatus(t, rr, http.StatusOK)
@@ -195,6 +202,7 @@ func TestClientUpdate_LinuxTargetGetsAppImage(t *testing.T) {
 }
 
 func TestClientUpdate_LinuxArm64TargetGetsAarch64AppImage(t *testing.T) {
+	t.Parallel()
 	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/linux-aarch64-appimage/1.0.0")
 
 	requireStatus(t, rr, http.StatusOK)
@@ -206,6 +214,7 @@ func TestClientUpdate_LinuxArm64TargetGetsAarch64AppImage(t *testing.T) {
 }
 
 func TestClientUpdate_AndroidTargetGetsSignedAPK(t *testing.T) {
+	t.Parallel()
 	rr := getClientUpdateFrom(t, "v2.0.0", "/api/v1/client-update/android-aarch64-apk/1.0.0")
 
 	requireStatus(t, rr, http.StatusOK)
@@ -220,6 +229,7 @@ func TestClientUpdate_AndroidTargetGetsSignedAPK(t *testing.T) {
 }
 
 func TestClientUpdate_UnsupportedTargetNoContent(t *testing.T) {
+	t.Parallel()
 	srv := fakeGitHubRelease(t, "v2.0.0")
 	u := updater.NewUpdater("1.0.0", "", "test", "repo")
 	u.SetBaseURL(srv.URL)
@@ -235,6 +245,7 @@ func TestClientUpdate_UnsupportedTargetNoContent(t *testing.T) {
 }
 
 func TestClientUpdate_DebTargetNoContent(t *testing.T) {
+	t.Parallel()
 	srv := fakeGitHubRelease(t, "v2.0.0")
 	u := updater.NewUpdater("1.0.0", "", "test", "repo")
 	u.SetBaseURL(srv.URL)
@@ -251,6 +262,7 @@ func TestClientUpdate_DebTargetNoContent(t *testing.T) {
 }
 
 func TestClientUpdate_GitHubError(t *testing.T) {
+	t.Parallel()
 	// Server that always returns 500.
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
@@ -280,6 +292,7 @@ func TestClientUpdate_GitHubError(t *testing.T) {
 // assertion that "pub_date" — omitempty, and never set by the handler —
 // stays absent.
 func TestClientUpdate_Epoch1ResponseShape(t *testing.T) {
+	t.Parallel()
 	srv := fakeGitHubRelease(t, "v2.0.0")
 	rr := getClientUpdate(t, srv.URL, "/api/v1/client-update/windows-x86_64-nsis/1.0.0")
 
@@ -319,6 +332,7 @@ func TestClientUpdate_Epoch1ResponseShape(t *testing.T) {
 // TestClientUpdate_ErrorIsJSONEnvelope pins MX-7 part 3: the update check's
 // error answers the standard JSON envelope, not plain text.
 func TestClientUpdate_ErrorIsJSONEnvelope(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusInternalServerError)
 	}))

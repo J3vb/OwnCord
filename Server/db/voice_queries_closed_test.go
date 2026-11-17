@@ -9,6 +9,7 @@ import (
 // surfaces the driver's error once the handle is closed, rather than panicking
 // or reporting "no voice state" as if the lookup had succeeded.
 func TestVoiceQueries_ReportClosedDatabaseErrors(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	mustDo(t, "Close", database.Close())
 	ctx := context.Background()

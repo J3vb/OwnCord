@@ -60,6 +60,7 @@ func readUntil(t *testing.T, conn *websocket.Conn, frameType string, want any, d
 }
 
 func TestNewRouter_DMRequestTransition_ReachesLiveConnection(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 
 	cfg := &config.Config{
@@ -152,6 +153,7 @@ func readSeqFrame(t *testing.T, conn *websocket.Conn) (frameType string, seq uin
 // nor the chat_message — his only signal is the dm_request his REST inbox
 // already carries independently of replay.
 func TestNewRouter_MessageRequest_CreationAndSendDoNotLeakToReplay(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 
 	cfg := &config.Config{

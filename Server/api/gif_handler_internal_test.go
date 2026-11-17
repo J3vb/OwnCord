@@ -12,6 +12,7 @@ import (
 // key containing such a character (common in base64-style keys: '+', '/',
 // '=') survived into the log line in its encoded form.
 func TestRedactKeyMatchesPercentEncodedForm(t *testing.T) {
+	t.Parallel()
 	apiKey := "ab+cd/ef="
 	encoded := url.QueryEscape(apiKey)
 	msg := `Get "https://api.klipy.com/v2/featured?key=` + encoded + `&limit=20": dial tcp: lookup api.klipy.com: no such host`

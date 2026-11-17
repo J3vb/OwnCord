@@ -16,6 +16,7 @@ import (
 // sessions when rows are stored in the normalized RFC3339-Z layout, and the
 // supporting index exists.
 func TestDeleteExpiredSessions_SargableFormat(t *testing.T) {
+	t.Parallel()
 	database, err := db.Open(":memory:")
 	mustDo(t, "db.Open", err)
 	t.Cleanup(func() { _ = database.Close() })
@@ -74,6 +75,7 @@ func TestDeleteExpiredSessions_SargableFormat(t *testing.T) {
 // space-separated and Z-less expires_at rows on it, then applies the full
 // chain so migration 031's one-time UPDATE pass is what normalizes them.
 func TestMigration031_NormalizesLegacyFormats(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	ctx := context.Background()
 
@@ -158,6 +160,7 @@ func parseExpiry(t *testing.T, s string) time.Time {
 // expiry to a full idle window from now, so a user who keeps opening the app
 // is not signed out by age alone.
 func TestTouchSession_SlidesIdleExpiry(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	seedAgedSession(t, database, "active", 29*24*time.Hour, time.Now().Add(24*time.Hour))
 
@@ -174,6 +177,7 @@ func TestTouchSession_SlidesIdleExpiry(t *testing.T) {
 // touch landing after a session lapsed must leave it lapsed, and the auth
 // check must still refuse it.
 func TestTouchSession_NeverRevivesExpired(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	seedAgedSession(t, database, "lapsed", 31*24*time.Hour, time.Now().Add(-time.Hour))
 	before := sessionExpiresAt(t, database, "lapsed")
@@ -192,6 +196,7 @@ func TestTouchSession_NeverRevivesExpired(t *testing.T) {
 // TestTouchSession_AbsoluteCap pins D-1's one-year cap from sign-in: a touch
 // never extends a session past created_at + 365 days, however active it is.
 func TestTouchSession_AbsoluteCap(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	const capAge = 365 * 24 * time.Hour
 
@@ -222,6 +227,7 @@ func TestTouchSession_AbsoluteCap(t *testing.T) {
 // touch: one call slides every live session it names, more than one
 // statement's worth of them included, and still never revives a lapsed one.
 func TestTouchSessions_OneBatchSlidesEveryLiveSession(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	tokens := make([]string, 0, 1201)
 	for i := range 1200 {

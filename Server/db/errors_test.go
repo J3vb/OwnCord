@@ -22,6 +22,7 @@ var sentinels = []struct {
 }
 
 func TestSentinelErrors_AreDistinct(t *testing.T) {
+	t.Parallel()
 
 	for i, a := range sentinels {
 		for j, b := range sentinels {
@@ -36,6 +37,7 @@ func TestSentinelErrors_AreDistinct(t *testing.T) {
 }
 
 func TestSentinelErrors_MatchThemselves(t *testing.T) {
+	t.Parallel()
 
 	for _, tc := range sentinels {
 		t.Run(tc.name, func(t *testing.T) {
@@ -47,6 +49,7 @@ func TestSentinelErrors_MatchThemselves(t *testing.T) {
 }
 
 func TestSentinelErrors_MatchWrapped(t *testing.T) {
+	t.Parallel()
 
 	for _, tc := range sentinels {
 		t.Run(tc.name, func(t *testing.T) {
@@ -59,6 +62,7 @@ func TestSentinelErrors_MatchWrapped(t *testing.T) {
 }
 
 func TestSentinelErrors_DoubleWrapped(t *testing.T) {
+	t.Parallel()
 	inner := fmt.Errorf("db query: %w", db.ErrNotFound)
 	outer := fmt.Errorf("handler: %w", inner)
 
@@ -68,6 +72,7 @@ func TestSentinelErrors_DoubleWrapped(t *testing.T) {
 }
 
 func TestSentinelErrors_HaveNonEmptyMessages(t *testing.T) {
+	t.Parallel()
 	sentinels := []error{
 		db.ErrNotFound,
 		db.ErrForbidden,
@@ -86,6 +91,7 @@ func TestSentinelErrors_HaveNonEmptyMessages(t *testing.T) {
 // ─── IsUniqueConstraintError ─────────────────────────────────────────────────
 
 func TestIsUniqueConstraintError_MatchesSQLiteMessage(t *testing.T) {
+	t.Parallel()
 	sqliteErr := errors.New("UNIQUE constraint failed: users.username")
 	if !db.IsUniqueConstraintError(sqliteErr) {
 		t.Error("should match SQLite UNIQUE constraint error")
@@ -93,6 +99,7 @@ func TestIsUniqueConstraintError_MatchesSQLiteMessage(t *testing.T) {
 }
 
 func TestIsUniqueConstraintError_CaseSensitive(t *testing.T) {
+	t.Parallel()
 	lower := errors.New("unique constraint failed: users.username")
 	if db.IsUniqueConstraintError(lower) {
 		t.Error("should be case-sensitive (SQLite always uses uppercase UNIQUE)")
@@ -100,12 +107,14 @@ func TestIsUniqueConstraintError_CaseSensitive(t *testing.T) {
 }
 
 func TestIsUniqueConstraintError_NilError(t *testing.T) {
+	t.Parallel()
 	if db.IsUniqueConstraintError(nil) {
 		t.Error("nil error should return false")
 	}
 }
 
 func TestIsUniqueConstraintError_UnrelatedError(t *testing.T) {
+	t.Parallel()
 	unrelated := errors.New("connection refused")
 	if db.IsUniqueConstraintError(unrelated) {
 		t.Error("unrelated error should return false")
@@ -113,6 +122,7 @@ func TestIsUniqueConstraintError_UnrelatedError(t *testing.T) {
 }
 
 func TestIsUniqueConstraintError_WrappedSQLiteError(t *testing.T) {
+	t.Parallel()
 	inner := errors.New("UNIQUE constraint failed: users.email")
 	wrapped := fmt.Errorf("insert user: %w", inner)
 	// The function uses strings.Contains on err.Error(), so wrapping preserves the substring.

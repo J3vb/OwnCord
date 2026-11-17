@@ -53,6 +53,7 @@ func generatedQueries(t *testing.T) map[string]struct{ kind, text string } {
 // RETURNING, so it must go to the reader; one with RETURNING must stay on
 // the writer.
 func TestIsReadOnlySQL_GeneratedQueries(t *testing.T) {
+	t.Parallel()
 	queries := generatedQueries(t)
 	if len(queries) < 300 {
 		t.Fatalf("found %d generated queries, want the full dbgen set", len(queries))

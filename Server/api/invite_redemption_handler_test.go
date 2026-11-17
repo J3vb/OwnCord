@@ -11,6 +11,7 @@ import (
 // GET /api/v1/invites/{code}/redemptions (O1): an owner can trace a leaked
 // invite to the account that redeemed it.
 func TestListInviteRedemptions_Success(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -47,6 +48,7 @@ func TestListInviteRedemptions_Success(t *testing.T) {
 
 // A member without MANAGE_INVITES is refused.
 func TestListInviteRedemptions_MemberForbidden(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)
@@ -61,6 +63,7 @@ func TestListInviteRedemptions_MemberForbidden(t *testing.T) {
 
 // An unknown code is 404.
 func TestListInviteRedemptions_UnknownCode(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	limiter := auth.NewRateLimiter()
 	router := buildInviteRouter(database, limiter)

@@ -48,6 +48,7 @@ func (s *cancelAfterBlockStore) FindDMChannelIDBetween(ctx context.Context, user
 // the eviction call itself already does — or the blocked user stays in the
 // blocker's live 1:1 DM call forever.
 func TestBlockUser_EvictsVoiceEvenIfRequestContextCanceledAfterCommit(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
 

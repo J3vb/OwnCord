@@ -11,6 +11,7 @@ import (
 // ─── GetRoleByID tests ────────────────────────────────────────────────────────
 
 func TestGetRoleByID_Found(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 4) // Member — inserted by migration
@@ -27,6 +28,7 @@ func TestGetRoleByID_Found(t *testing.T) {
 }
 
 func TestGetRoleByID_NotFound(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 9999)
@@ -37,6 +39,7 @@ func TestGetRoleByID_NotFound(t *testing.T) {
 }
 
 func TestGetRoleByID_OwnerHasAllPermissions(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	role, err := database.GetRoleByID(context.Background(), 1) // Owner
@@ -51,6 +54,7 @@ func TestGetRoleByID_OwnerHasAllPermissions(t *testing.T) {
 }
 
 func TestGetRoleByID_IsDefaultField(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	owner, _ := database.GetRoleByID(context.Background(), 1)
@@ -68,6 +72,7 @@ func TestGetRoleByID_IsDefaultField(t *testing.T) {
 // ─── ListRoles tests ──────────────────────────────────────────────────────────
 
 func TestListRoles_ReturnsFourDefaultRoles(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	roles, err := database.ListRoles(context.Background())
@@ -78,6 +83,7 @@ func TestListRoles_ReturnsFourDefaultRoles(t *testing.T) {
 }
 
 func TestListRoles_OrderedByPositionDesc(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	roles, err := database.ListRoles(context.Background())
@@ -94,6 +100,7 @@ func TestListRoles_OrderedByPositionDesc(t *testing.T) {
 // ─── ListInvites tests ────────────────────────────────────────────────────────
 
 func TestListInvites_Empty(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 
 	invites, err := listAllInvites(t, database)
@@ -104,6 +111,7 @@ func TestListInvites_Empty(t *testing.T) {
 }
 
 func TestListInvites_Multiple(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "listowner", "hash", 4)
 
@@ -119,6 +127,7 @@ func TestListInvites_Multiple(t *testing.T) {
 }
 
 func TestListInvites_IncludesRevokedInvites(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, testSchema)
 	uid, _ := database.CreateUser(context.Background(), "revokelistowner", "hash", 4)
 
@@ -146,6 +155,7 @@ func TestListInvites_IncludesRevokedInvites(t *testing.T) {
 // Invite.Expired names the expiry for the registration refusal log; it must
 // agree with the redemption query, which fails on an unparseable stamp.
 func TestInvite_Expired(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 29, 12, 0, 0, 0, time.UTC)
 	past := "2026-09-29T11:00:00Z"
 	future := "2026-09-29T13:00:00Z"

@@ -74,6 +74,7 @@ func decodeRevokeAll(t *testing.T, body []byte) (revoked int64, current bool) {
 }
 
 func TestRevokeAllSessions_DisconnectsTheAccountsLiveSockets(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	spy := &revokeSpy{}
 	router, _ := buildProfileRouterWithHub(database, spy)
@@ -98,6 +99,7 @@ func TestRevokeAllSessions_DisconnectsTheAccountsLiveSockets(t *testing.T) {
 }
 
 func TestRevokeAllSessions_NothingToRevokeWritesNoAuditRow(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	spy := &revokeSpy{}
 	router, _ := buildProfileRouterWithHub(database, spy)
@@ -138,6 +140,7 @@ func TestRevokeAllSessions_NothingToRevokeWritesNoAuditRow(t *testing.T) {
 }
 
 func TestRevokeAllSessions_IsRateLimitedPerAccount(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router, _ := buildProfileRouterWithHub(database, &revokeSpy{})
 	uid, err := database.CreateUser(context.Background(), "session-hammer", mustHash(t), 4)
@@ -158,6 +161,7 @@ func TestRevokeAllSessions_IsRateLimitedPerAccount(t *testing.T) {
 // Sign-out-everywhere takes the account's API tokens with its sessions, and
 // the audit row counts both.
 func TestRevokeAllSessions_RevokesTheAccountsAPITokens(t *testing.T) {
+	t.Parallel()
 	database := newAuthTestDB(t)
 	router, _ := buildProfileRouterWithHub(database, &revokeSpy{})
 	ctx := context.Background()
@@ -182,6 +186,7 @@ func TestRevokeAllSessions_RevokesTheAccountsAPITokens(t *testing.T) {
 // than (or besides) the caller's: the hub is asked, in the same request, to
 // drop the account's socket if its session was among them.
 func TestPartialSessionRevokes_CheckTheAccountsLiveSocket(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name string
 		call func(t *testing.T, router http.Handler, database *db.DB, token string, uid int64) int

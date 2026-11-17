@@ -6,6 +6,7 @@ import (
 )
 
 func TestMergeUserIDs(t *testing.T) {
+	t.Parallel()
 	got := mergeUserIDs([]int64{3, 1, 3}, []int64{1, 2})
 	if want := []int64{3, 1, 2}; !slices.Equal(got, want) {
 		t.Fatalf("mergeUserIDs = %v, want %v", got, want)

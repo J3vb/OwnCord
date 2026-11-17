@@ -29,6 +29,7 @@ func (s *countingReadStateStore) MarkChannelReadAtLatest(ctx context.Context, us
 // the single writer connection, while a new message (or outstanding mention)
 // must write again.
 func TestHandleChannelFocus_SkipsNoOpReadStateWrite(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)

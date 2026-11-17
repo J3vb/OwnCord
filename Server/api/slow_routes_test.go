@@ -16,6 +16,7 @@ import (
 // deadline exempts (a stream held open for minutes, the WebSocket) and paths
 // no route matched are left out, so they cannot crowd out real slowness.
 func TestRequestLogger_FeedsSlowRoutes(t *testing.T) {
+	t.Parallel()
 	slow := metrics.NewSlowRoutes(time.Now)
 	r := chi.NewRouter()
 	r.Use(requestLogger(nil, slow))

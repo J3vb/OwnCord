@@ -11,6 +11,7 @@ import (
 // ─── SearchMessages ───────────────────────────────────────────────────────────
 
 func TestSearchMessages_FindsMatch(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "zara")
 	chID := seedChannel(t, database, "searchch")
@@ -29,6 +30,7 @@ func TestSearchMessages_FindsMatch(t *testing.T) {
 }
 
 func TestSearchMessages_NFDQueryFindsNFCMessage(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "zara")
 	chID := seedChannel(t, database, "searchch")
@@ -43,6 +45,7 @@ func TestSearchMessages_NFDQueryFindsNFCMessage(t *testing.T) {
 }
 
 func TestSearchMessages_FilterByChannel(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "adam")
 	ch1 := seedChannel(t, database, "ch1")
@@ -61,6 +64,7 @@ func TestSearchMessages_FilterByChannel(t *testing.T) {
 }
 
 func TestSearchMessages_NoResults(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "beth")
 	chID := seedChannel(t, database, "ch")
@@ -73,6 +77,7 @@ func TestSearchMessages_NoResults(t *testing.T) {
 }
 
 func TestSearchMessages_LimitRespected(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "carl")
 	chID := seedChannel(t, database, "ch")
@@ -88,6 +93,7 @@ func TestSearchMessages_LimitRespected(t *testing.T) {
 }
 
 func TestSearchMessages_DeletedNotReturned(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "diana")
 	chID := seedChannel(t, database, "ch")
@@ -104,6 +110,7 @@ func TestSearchMessages_DeletedNotReturned(t *testing.T) {
 // Migration 019 narrows the messages_au trigger to AFTER UPDATE OF content;
 // an edit must still reindex the FTS table (old term gone, new term found).
 func TestSearchMessages_EditReindexes(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "edith")
 	chID := seedChannel(t, database, "ch")
@@ -126,6 +133,7 @@ func TestSearchMessages_EditReindexes(t *testing.T) {
 // Pinning updates a non-content column, which the narrowed trigger must
 // ignore — the message stays searchable and the FTS index stays consistent.
 func TestSearchMessages_PinnedMessageStaysSearchable(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "pinny")
 	chID := seedChannel(t, database, "ch")
@@ -147,6 +155,7 @@ func TestSearchMessages_PinnedMessageStaysSearchable(t *testing.T) {
 // "well-known" parses as "well" followed by a filter on a nonexistent column
 // "known" and SQLite raises "no such column: known" instead of matching.
 func TestSearchMessages_HyphenatedQuery(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "hyphenuser")
 	chID := seedChannel(t, database, "hyphench")
@@ -168,6 +177,7 @@ func TestSearchMessages_HyphenatedQuery(t *testing.T) {
 // "fts5: syntax error", which SearchMessages surfaces as an error (mapped by
 // the service layer to a 500) instead of returning zero results.
 func TestSearchMessages_BooleanKeywordQuery(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "booleanuser")
 	chID := seedChannel(t, database, "booleanch")
@@ -185,6 +195,7 @@ func TestSearchMessages_BooleanKeywordQuery(t *testing.T) {
 // SearchMessagesInChannels caller, which sanitizes with the same
 // sanitizeFTSQuery helper.
 func TestSearchMessagesInChannels_BooleanKeywordQuery(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "boolchanuser")
 	chID := seedChannel(t, database, "boolchanch")
@@ -202,6 +213,7 @@ func TestSearchMessagesInChannels_BooleanKeywordQuery(t *testing.T) {
 // finds the message ("deplo" finds "deploy"). Only the last term: earlier
 // ones were finished words when the user typed past them.
 func TestSearchMessages_LastTermIsAPrefix(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "prefixuser")
 	chID := seedChannel(t, database, "prefixch")
@@ -238,6 +250,7 @@ func TestSearchMessages_LastTermIsAPrefix(t *testing.T) {
 // so "de" does not find "deploy" but still finds the word "de"; three runes
 // are enough to prefix.
 func TestSearchMessages_ShortLastTermIsExact(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "shortuser")
 	chID := seedChannel(t, database, "shortch")
@@ -259,6 +272,7 @@ func TestSearchMessages_ShortLastTermIsExact(t *testing.T) {
 // DP-20: a Recent page is newest first, and Before keeps only ids strictly
 // below the cursor.
 func TestSearchMessages_RecentBeforeCursor(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	userID := seedUser(t, database, "cursoruser")
 	chID := seedChannel(t, database, "cursorch")

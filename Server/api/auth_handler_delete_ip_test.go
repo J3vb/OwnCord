@@ -28,6 +28,7 @@ func (d *deleteIPRecorder) DeleteAccount(_ context.Context, _ service.Principal,
 // Behind a trusted reverse proxy the account-deletion record must name the
 // forwarded client, exactly as login and register do, not the proxy hop.
 func TestDeleteAccount_ResolvesClientIPThroughTrustedProxy(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name    string
 		trusted []string

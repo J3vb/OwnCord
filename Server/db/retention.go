@@ -376,11 +376,11 @@ func collectAndDeleteAttachments(ctx context.Context, tx *sql.Tx, in string, arg
 // EventNamesMessagePredicate is the SQL deciding whether a persisted replay
 // event is about one of a set of messages, bound to a JSON array of ids as ?1:
 // a message-family frame (chat_message, chat_edited, chat_deleted,
-// chat_bulk_deleted, reaction_update, poll_update) whose payload.id,
+// chat_bulk_deleted, reaction_update, poll_update, message_link_previews) whose payload.id,
 // payload.referenced_message.id, payload.message_id or one of payload.ids is in
 // the set. ws.eventNamesMessage is the same rule over the ring buffer; the two
 // must stay in step.
-const EventNamesMessagePredicate = `(json_extract(payload, '$.type') IN ('chat_message', 'chat_edited', 'chat_deleted', 'chat_bulk_deleted', 'reaction_update', 'poll_update')
+const EventNamesMessagePredicate = `(json_extract(payload, '$.type') IN ('chat_message', 'chat_edited', 'chat_deleted', 'chat_bulk_deleted', 'reaction_update', 'poll_update', 'message_link_previews')
 	 AND (json_extract(payload, '$.payload.id') IN (SELECT value FROM json_each(?1))
 	   OR json_extract(payload, '$.payload.referenced_message.id') IN (SELECT value FROM json_each(?1))
 	   OR json_extract(payload, '$.payload.message_id') IN (SELECT value FROM json_each(?1))

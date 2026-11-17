@@ -40,6 +40,7 @@ func voiceJoinWSMsg(channelID int64) []byte {
 }
 
 func TestNewRouter_LiveKitProcessStartFailure_VoiceJoinFailsClosed(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 
 	cfg := &config.Config{

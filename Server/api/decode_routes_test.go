@@ -15,6 +15,7 @@ import (
 // messages (BAD_REQUEST "invalid request body", INVALID_INPUT "malformed JSON
 // body", ...) and an over-size one with 400. They now share one reply each.
 func TestJSONBodyRoutes_ShareOneReplyForTheSameBadBody(t *testing.T) {
+	t.Parallel()
 	var database *db.DB
 	router := setupRouterWithServices(t, func(_ *service.Services, d *db.DB) { database = d })
 	uid := seedUser(t, database, "decoder", "decoderPass1", 4)

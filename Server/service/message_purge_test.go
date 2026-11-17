@@ -43,6 +43,7 @@ func seedPurgeMessages(t *testing.T, database *db.DB, channelID int64, n int) []
 }
 
 func TestPurgeMessages_ModeratorPurgesNewest(t *testing.T) {
+	t.Parallel()
 	svc, database := newPurgeService(t)
 	ids := seedPurgeMessages(t, database, 10, 5)
 
@@ -60,6 +61,7 @@ func TestPurgeMessages_ModeratorPurgesNewest(t *testing.T) {
 }
 
 func TestPurgeMessages_TombstonesPreserved(t *testing.T) {
+	t.Parallel()
 	svc, database := newPurgeService(t)
 	ids := seedPurgeMessages(t, database, 10, 3)
 
@@ -73,6 +75,7 @@ func TestPurgeMessages_TombstonesPreserved(t *testing.T) {
 }
 
 func TestPurgeMessages_MissingManageMessagesDenied(t *testing.T) {
+	t.Parallel()
 	svc, database := newPurgeService(t)
 	seedPurgeMessages(t, database, 10, 3)
 
@@ -94,6 +97,7 @@ func TestPurgeMessages_MissingManageMessagesDenied(t *testing.T) {
 // A role with MANAGE_MESSAGES but READ_MESSAGES denied on the channel (what the
 // admin panel's "Can access" toggle writes) must not be able to wipe it.
 func TestPurgeMessages_DeniedReadCannotPurge(t *testing.T) {
+	t.Parallel()
 	svc, database := newPurgeService(t)
 	seedPurgeMessages(t, database, 10, 3)
 	seedChannelOverride(t, database, 20, 10, 0, permissions.ReadMessages)
@@ -105,6 +109,7 @@ func TestPurgeMessages_DeniedReadCannotPurge(t *testing.T) {
 }
 
 func TestPurgeMessages_DMRejected(t *testing.T) {
+	t.Parallel()
 	svc, database := newPurgeService(t)
 	seedPurgeMessages(t, database, 11, 3)
 
@@ -123,6 +128,7 @@ func TestPurgeMessages_DMRejected(t *testing.T) {
 }
 
 func TestPurgeMessages_LimitClampedToMax(t *testing.T) {
+	t.Parallel()
 	svc, database := newPurgeService(t)
 	seedPurgeMessages(t, database, 10, maxPurgeLimit+10)
 
@@ -142,6 +148,7 @@ func TestPurgeMessages_LimitClampedToMax(t *testing.T) {
 }
 
 func TestPurgeMessages_NonPositiveLimitRejected(t *testing.T) {
+	t.Parallel()
 	svc, database := newPurgeService(t)
 	seedPurgeMessages(t, database, 10, 2)
 
@@ -153,6 +160,7 @@ func TestPurgeMessages_NonPositiveLimitRejected(t *testing.T) {
 }
 
 func TestPurgeMessages_BeforeCursorHonored(t *testing.T) {
+	t.Parallel()
 	svc, database := newPurgeService(t)
 	ids := seedPurgeMessages(t, database, 10, 4)
 
@@ -170,6 +178,7 @@ func TestPurgeMessages_BeforeCursorHonored(t *testing.T) {
 }
 
 func TestPurgeMessages_ChannelNotFound(t *testing.T) {
+	t.Parallel()
 	svc, _ := newPurgeService(t)
 
 	if _, err := svc.PurgeMessages(context.Background(), 2, 9999, 10, 0); !errors.Is(err, ErrNotFound) {
@@ -181,6 +190,7 @@ func TestPurgeMessages_ChannelNotFound(t *testing.T) {
 }
 
 func TestPurgeMessages_EmptyChannelSucceedsWithNoIDs(t *testing.T) {
+	t.Parallel()
 	svc, _ := newPurgeService(t)
 
 	result, err := svc.PurgeMessages(context.Background(), 2, 10, 50, 0)
@@ -194,6 +204,7 @@ func TestPurgeMessages_EmptyChannelSucceedsWithNoIDs(t *testing.T) {
 }
 
 func TestPurgeMessages_WritesOneAuditEntry(t *testing.T) {
+	t.Parallel()
 	svc, database := newPurgeService(t)
 	seedPurgeMessages(t, database, 10, 4)
 

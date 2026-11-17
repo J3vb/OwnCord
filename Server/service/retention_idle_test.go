@@ -48,6 +48,7 @@ func newCountingRetention(t *testing.T, database *db.DB, dir string) (*Retention
 // record, whether it is empty or holds only pinned old messages; a channel with old messages still
 // sweeps in the same tick.
 func TestRetention_TickSkipsChannelsWithNothingDue(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	dir := t.TempDir()
@@ -91,6 +92,7 @@ func TestRetention_TickSkipsChannelsWithNothingDue(t *testing.T) {
 
 // A failing probe stops the tick with an error and deletes nothing.
 func TestRetention_TickProbeFailureDeletesNothing(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	dir := t.TempDir()
@@ -111,6 +113,7 @@ func TestRetention_TickProbeFailureDeletesNothing(t *testing.T) {
 // repairs that even when nothing is due, so a start-up replay never deletes at the older cutoff after the
 // window was lengthened.
 func TestRetention_IdleTickRepairsUnrecordedSweep(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newRetentionFixture(t)
 	_, err := f.database.ExecContext(ctx, `INSERT INTO messages (channel_id, user_id, content, timestamp, pinned) VALUES (?, ?, 'kept', ?, 1)`,

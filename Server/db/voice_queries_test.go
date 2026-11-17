@@ -138,6 +138,7 @@ func seedTimeoutAction(t *testing.T, database *db.DB, targetID int64, active boo
 // ─── JoinVoiceChannel ─────────────────────────────────────────────────────────
 
 func TestVoice_JoinVoiceChannel_Success(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "alice")
 	chanID := seedVoiceChannel(t, database, "general-voice")
@@ -163,6 +164,7 @@ func TestVoice_JoinVoiceChannel_Success(t *testing.T) {
 }
 
 func TestVoice_JoinVoiceChannel_ReplacesExistingState(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "bob")
 	chan1 := seedVoiceChannel(t, database, "voice-1")
@@ -182,6 +184,7 @@ func TestVoice_JoinVoiceChannel_ReplacesExistingState(t *testing.T) {
 }
 
 func TestVoice_JoinVoiceChannel_SameChannel_Idempotent(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "carol")
 	chanID := seedVoiceChannel(t, database, "voice-same")
@@ -194,6 +197,7 @@ func TestVoice_JoinVoiceChannel_SameChannel_Idempotent(t *testing.T) {
 // ─── LeaveVoiceChannel ────────────────────────────────────────────────────────
 
 func TestVoice_LeaveVoiceChannel_ClearsState(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "dave")
 	chanID := seedVoiceChannel(t, database, "voice-leave")
@@ -208,6 +212,7 @@ func TestVoice_LeaveVoiceChannel_ClearsState(t *testing.T) {
 }
 
 func TestVoice_LeaveVoiceChannel_NoState_NoError(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "eve")
 
@@ -218,6 +223,7 @@ func TestVoice_LeaveVoiceChannel_NoState_NoError(t *testing.T) {
 // ─── GetVoiceState ────────────────────────────────────────────────────────────
 
 func TestVoice_GetVoiceState_NotFound(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "frank")
 
@@ -228,6 +234,7 @@ func TestVoice_GetVoiceState_NotFound(t *testing.T) {
 }
 
 func TestVoice_GetVoiceState_IncludesUsername(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "grace")
 	chanID := seedVoiceChannel(t, database, "voice-username")
@@ -246,6 +253,7 @@ func TestVoice_GetVoiceState_IncludesUsername(t *testing.T) {
 // ─── GetChannelVoiceStates ────────────────────────────────────────────────────
 
 func TestVoice_GetChannelVoiceStates_Empty(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	chanID := seedVoiceChannel(t, database, "empty-voice")
 
@@ -257,6 +265,7 @@ func TestVoice_GetChannelVoiceStates_Empty(t *testing.T) {
 }
 
 func TestVoice_GetChannelVoiceStates_MultipleUsers(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "henry")
 	u2 := seedVoiceUser(t, database, "iris")
@@ -286,6 +295,7 @@ func TestVoice_GetChannelVoiceStates_MultipleUsers(t *testing.T) {
 // ─── UpdateVoiceMute ──────────────────────────────────────────────────────────
 
 func TestVoice_UpdateVoiceMute_True(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "kate")
 	chanID := seedVoiceChannel(t, database, "voice-mute")
@@ -300,6 +310,7 @@ func TestVoice_UpdateVoiceMute_True(t *testing.T) {
 }
 
 func TestVoice_UpdateVoiceMute_False(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "leo")
 	chanID := seedVoiceChannel(t, database, "voice-unmute")
@@ -315,6 +326,7 @@ func TestVoice_UpdateVoiceMute_False(t *testing.T) {
 }
 
 func TestVoice_UpdateVoiceMute_NotInChannel_NoError(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "mia")
 
@@ -325,6 +337,7 @@ func TestVoice_UpdateVoiceMute_NotInChannel_NoError(t *testing.T) {
 // ─── UpdateVoiceDeafen ────────────────────────────────────────────────────────
 
 func TestVoice_UpdateVoiceDeafen_True(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "noah")
 	chanID := seedVoiceChannel(t, database, "voice-deafen")
@@ -339,6 +352,7 @@ func TestVoice_UpdateVoiceDeafen_True(t *testing.T) {
 }
 
 func TestVoice_UpdateVoiceDeafen_False(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "olivia")
 	chanID := seedVoiceChannel(t, database, "voice-undeafen")
@@ -356,6 +370,7 @@ func TestVoice_UpdateVoiceDeafen_False(t *testing.T) {
 // ─── ClearVoiceState ──────────────────────────────────────────────────────────
 
 func TestVoice_ClearVoiceState_RemovesState(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "pedro")
 	chanID := seedVoiceChannel(t, database, "voice-clear")
@@ -370,6 +385,7 @@ func TestVoice_ClearVoiceState_RemovesState(t *testing.T) {
 }
 
 func TestVoice_ClearVoiceState_NotInChannel_NoError(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "quinn")
 
@@ -379,6 +395,7 @@ func TestVoice_ClearVoiceState_NotInChannel_NoError(t *testing.T) {
 // ─── Cascade delete ───────────────────────────────────────────────────────────
 
 func TestVoice_GetChannelVoiceStates_IncludesUsername(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "rachel")
 	chanID := seedVoiceChannel(t, database, "voice-name-check")
@@ -398,6 +415,7 @@ func TestVoice_GetChannelVoiceStates_IncludesUsername(t *testing.T) {
 // ─── UpdateVoiceCamera ────────────────────────────────────────────────────────
 
 func TestVoice_UpdateVoiceCamera_True(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "cam-on")
 	chanID := seedVoiceChannel(t, database, "voice-camera")
@@ -412,6 +430,7 @@ func TestVoice_UpdateVoiceCamera_True(t *testing.T) {
 }
 
 func TestVoice_UpdateVoiceCamera_False(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "cam-off")
 	chanID := seedVoiceChannel(t, database, "voice-camera-off")
@@ -427,6 +446,7 @@ func TestVoice_UpdateVoiceCamera_False(t *testing.T) {
 }
 
 func TestVoice_UpdateVoiceCamera_NotInChannel_NoError(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "cam-noop")
 
@@ -436,6 +456,7 @@ func TestVoice_UpdateVoiceCamera_NotInChannel_NoError(t *testing.T) {
 // ─── UpdateVoiceScreenshare ──────────────────────────────────────────────────
 
 func TestVoice_UpdateVoiceScreenshare_True(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "share-on")
 	chanID := seedVoiceChannel(t, database, "voice-screen")
@@ -450,6 +471,7 @@ func TestVoice_UpdateVoiceScreenshare_True(t *testing.T) {
 }
 
 func TestVoice_UpdateVoiceScreenshare_False(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "share-off")
 	chanID := seedVoiceChannel(t, database, "voice-screen-off")
@@ -467,6 +489,7 @@ func TestVoice_UpdateVoiceScreenshare_False(t *testing.T) {
 // ─── CountChannelVoiceUsers ──────────────────────────────────────────────────
 
 func TestVoice_CountChannelVoiceUsers_Empty(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	chanID := seedVoiceChannel(t, database, "count-empty")
 
@@ -478,6 +501,7 @@ func TestVoice_CountChannelVoiceUsers_Empty(t *testing.T) {
 }
 
 func TestVoice_CountChannelVoiceUsers_Multiple(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "count1")
 	u2 := seedVoiceUser(t, database, "count2")
@@ -500,6 +524,7 @@ func TestVoice_CountChannelVoiceUsers_Multiple(t *testing.T) {
 // ─── ClearAllVoiceStates ─────────────────────────────────────────────────────
 
 func TestVoice_ClearAllVoiceStates_RemovesAll(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	u1 := seedVoiceUser(t, database, "clear1")
 	u2 := seedVoiceUser(t, database, "clear2")
@@ -519,6 +544,7 @@ func TestVoice_ClearAllVoiceStates_RemovesAll(t *testing.T) {
 }
 
 func TestVoice_ClearAllVoiceStates_EmptyTable_NoError(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 
 	mustDo(t, "ClearAllVoiceStates on empty table", database.ClearAllVoiceStates(context.Background()))
@@ -527,6 +553,7 @@ func TestVoice_ClearAllVoiceStates_EmptyTable_NoError(t *testing.T) {
 // ─── JoinVoiceChannel resets camera/screenshare ──────────────────────────────
 
 func TestVoice_JoinVoiceChannel_ResetsCameraAndScreenshare(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "reset-av")
 	chan1 := seedVoiceChannel(t, database, "voice-reset1")
@@ -555,6 +582,7 @@ func TestVoice_JoinVoiceChannel_ResetsCameraAndScreenshare(t *testing.T) {
 // ─── Camera/Screenshare in GetVoiceState ─────────────────────────────────────
 
 func TestVoice_GetVoiceState_IncludesCameraAndScreenshare(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "av-fields")
 	chanID := seedVoiceChannel(t, database, "voice-av-fields")
@@ -592,6 +620,7 @@ func TestVoice_GetVoiceState_IncludesCameraAndScreenshare(t *testing.T) {
 // ─── Camera/Screenshare in GetChannelVoiceStates ─────────────────────────────
 
 func TestVoice_GetChannelVoiceStates_IncludesCameraAndScreenshare(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "chan-av")
 	chanID := seedVoiceChannel(t, database, "voice-chan-av")
@@ -613,6 +642,7 @@ func TestVoice_GetChannelVoiceStates_IncludesCameraAndScreenshare(t *testing.T) 
 }
 
 func TestVoice_JoinVoiceChannel_SameChannel_RefreshesJoinToken(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "same-channel-token")
 	chanID := seedVoiceChannel(t, database, "voice-same-token")
@@ -634,6 +664,7 @@ func TestVoice_JoinVoiceChannel_SameChannel_RefreshesJoinToken(t *testing.T) {
 }
 
 func TestVoice_LeaveVoiceChannelIfMatch_DoesNotDeleteSameChannelRejoin(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	userID := seedVoiceUser(t, database, "stale-delete")
 	chanID := seedVoiceChannel(t, database, "voice-stale-delete")
@@ -676,6 +707,7 @@ func TestVoice_LeaveVoiceChannelIfMatch_DoesNotDeleteSameChannelRejoin(t *testin
 // was never authorized against — the unscoped write still lands on it.
 
 func TestVoice_SetVoiceServerMute_ScopedToChannel(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	userID := seedVoiceUser(t, database, "scope-mute-user")
@@ -722,6 +754,7 @@ func TestVoice_SetVoiceServerMute_ScopedToChannel(t *testing.T) {
 }
 
 func TestVoice_SetVoiceServerDeafen_ScopedToChannel(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	userID := seedVoiceUser(t, database, "scope-deafen-user")
@@ -770,6 +803,7 @@ func TestVoice_SetVoiceServerDeafen_ScopedToChannel(t *testing.T) {
 // stricter, session-scoped mute: a write authorized against the channel a
 // stale read showed must not follow the user to wherever they moved next.
 func TestVoice_MuteForTimeoutSession_ChannelMismatch(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	userID := seedVoiceUser(t, database, "cas-mismatch-user")
@@ -805,6 +839,7 @@ func TestVoice_MuteForTimeoutSession_ChannelMismatch(t *testing.T) {
 // (JoinVoiceChannel's joined_at) changes even though channel_id does not,
 // which SetVoiceServerMute's own channel-only scoping would miss.
 func TestVoice_MuteForTimeoutSession_JoinedAtMismatch(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	userID := seedVoiceUser(t, database, "cas-rejoin-user")
@@ -839,6 +874,7 @@ func TestVoice_MuteForTimeoutSession_JoinedAtMismatch(t *testing.T) {
 // muting a target ALREADY server-muted BY THE SAME STILL-ACTIVE action
 // reports transitioned=false — nothing new to claim.
 func TestVoice_MuteForTimeoutSession_Transitioned(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	userID := seedVoiceUser(t, database, "cas-transition-user")
@@ -889,6 +925,7 @@ func TestVoice_MuteForTimeoutSession_Transitioned(t *testing.T) {
 // stamped ownership) can still be claimed by a different action's mute
 // call, so a later lift of the NEW owner is not left unable to find it.
 func TestVoice_MuteForTimeoutSession_ReclaimsFromInactiveOwner(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	userID := seedVoiceUser(t, database, "cas-reclaim-user")
@@ -930,6 +967,7 @@ func TestVoice_MuteForTimeoutSession_ReclaimsFromInactiveOwner(t *testing.T) {
 // TestVoice_MuteForTimeoutSession_NoSession is the no-such-row case: never
 // joined, or already left entirely.
 func TestVoice_MuteForTimeoutSession_NoSession(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	userID := seedVoiceUser(t, database, "cas-nosession-user")
@@ -948,6 +986,7 @@ func TestVoice_MuteForTimeoutSession_NoSession(t *testing.T) {
 // owned by a LIFTED action, and one owned by an EXPIRED-but-never-lifted
 // action, are both orphaned candidates.
 func TestVoice_FindOrphanedVoiceMutes_FindsLiftedAndExpiredOwners(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	chanA := seedVoiceChannel(t, database, "vc-orphan-a")
@@ -999,6 +1038,7 @@ func TestVoice_FindOrphanedVoiceMutes_FindsLiftedAndExpiredOwners(t *testing.T) 
 // session owned by a STILL-ACTIVE timeout, and a manual moderator mute
 // (server_muted_by NULL), are never candidates.
 func TestVoice_FindOrphanedVoiceMutes_ExcludesActiveOwnersAndManualMutes(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	chanA := seedVoiceChannel(t, database, "vc-orphan-exclude-a")
@@ -1031,6 +1071,7 @@ func TestVoice_FindOrphanedVoiceMutes_ExcludesActiveOwnersAndManualMutes(t *test
 // no actionIDs match anything — an ended or already-cleared session, or an
 // unmuted target.
 func TestVoice_ClearServerMuteOwnedBy_NoSession(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	userID := seedVoiceUser(t, database, "clr-nosession-user")
@@ -1047,6 +1088,7 @@ func TestVoice_ClearServerMuteOwnedBy_NoSession(t *testing.T) {
 // manual moderator mute (SetVoiceServerMute, server_muted_by always NULL)
 // is never cleared by a timeout's lift, no matter which action ids it names.
 func TestVoice_ClearServerMuteOwnedBy_ManualMuteNeverReclaimed(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	userID := seedVoiceUser(t, database, "clr-manual-user")
@@ -1071,6 +1113,7 @@ func TestVoice_ClearServerMuteOwnedBy_ManualMuteNeverReclaimed(t *testing.T) {
 // defensive lift-all can pass a whole supersede chain (P2-9) and the
 // SESSION's single owner (whichever one it currently is) still clears.
 func TestVoice_ClearServerMuteOwnedBy_MatchesAnyOfTheChain(t *testing.T) {
+	t.Parallel()
 	database := newVoiceTestDB(t)
 	ctx := context.Background()
 	userID := seedVoiceUser(t, database, "clr-chain-user")

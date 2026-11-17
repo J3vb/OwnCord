@@ -18,6 +18,7 @@ import (
 // evidence, notes and detail; the row and its outcome stay exactly as they
 // were.
 func TestReportRetention_PrunesContentKeepsRow(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	seedChannel(t, database, &db.Channel{ID: 1400, Name: "general"})

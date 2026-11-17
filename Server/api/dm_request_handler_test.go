@@ -77,6 +77,7 @@ func mustUserID(t *testing.T, database *db.DB, username string) int64 {
 // the pending request with the sender's profile and a preview of the held
 // message.
 func TestDMRequestHandler_ListPending_ReturnsShapeWithPreview(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router, svc := buildDMRequestRouter(database, &mockBroadcaster{})
 	_, recipientID, channelID, _, recipientTok := seedOneToOneDM(t, database, "alice", "bob")
@@ -135,6 +136,7 @@ func TestDMRequestHandler_ListPending_ReturnsShapeWithPreview(t *testing.T) {
 // assertion is the row count's actual 0 -> 1 transition, not just whether a
 // broadcast happened to fire.
 func TestDMRequestHandler_Accept_OpensChannelAndNotifies(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	broadcaster := &mockBroadcaster{}
 	router, svc := buildDMRequestRouter(database, broadcaster)
@@ -210,6 +212,7 @@ func TestDMRequestHandler_Accept_OpensChannelAndNotifies(t *testing.T) {
 // TestDMRequestHandler_TransitionThenTransitionAgainIsConflict: the second
 // decision on an already-decided row is 409.
 func TestDMRequestHandler_TransitionThenTransitionAgainIsConflict(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router, svc := buildDMRequestRouter(database, &mockBroadcaster{})
 	senderID, _, channelID, _, recipientTok := seedOneToOneDM(t, database, "alice", "bob")
@@ -233,6 +236,7 @@ func TestDMRequestHandler_TransitionThenTransitionAgainIsConflict(t *testing.T) 
 // TestDMRequestHandler_TransitionByNonRecipientIsNotFound: neither the
 // sender nor an unrelated user can decide someone else's request.
 func TestDMRequestHandler_TransitionByNonRecipientIsNotFound(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router, svc := buildDMRequestRouter(database, &mockBroadcaster{})
 	senderID, _, channelID, senderTok, _ := seedOneToOneDM(t, database, "alice", "bob")
@@ -257,6 +261,7 @@ func TestDMRequestHandler_TransitionByNonRecipientIsNotFound(t *testing.T) {
 // BlockService.BlockUser (its existing side effects) and only then
 // transitions to blocked.
 func TestDMRequestHandler_Block_BlocksTheSenderAndTransitions(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router, svc := buildDMRequestRouter(database, &mockBroadcaster{})
 	senderID, recipientID, channelID, _, recipientTok := seedOneToOneDM(t, database, "alice", "bob")
@@ -289,6 +294,7 @@ func TestDMRequestHandler_Block_BlocksTheSenderAndTransitions(t *testing.T) {
 // PUT /api/v1/blocks/{id} does — the two endpoints share
 // evictBlockedUserFromVoice (dm_handler.go).
 func TestDMRequestHandler_Block_EvictsSenderFromSharedDMVoice(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	bc := &watermarkVoiceBroadcaster{mockBroadcaster: &mockBroadcaster{}}
 	router, svc := buildDMRequestRouter(database, bc)
@@ -336,6 +342,7 @@ func (s *raceAfterBlockStore) BlockUser(ctx context.Context, blockerID, blockedI
 // is blocked either way, and must not keep a live voice session because of
 // it.
 func TestDMRequestHandler_Block_EvictsEvenWhenTransitionLosesRace(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	senderID, _, channelID, _, recipientTok := seedOneToOneDM(t, database, "alice", "bob")
 	svc0 := service.New(database, auth.NewRateLimiter())
@@ -375,6 +382,7 @@ func TestDMRequestHandler_Block_EvictsEvenWhenTransitionLosesRace(t *testing.T) 
 // control) the pair was already trusted. Only volatile ids/timestamps are
 // normalised.
 func TestMessageRequest_SenderRESTViewIsByteIdentical(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	router, svc := buildDMRequestRouter(database, &mockBroadcaster{})
 	senderTok := dmCreateToken(t, database, "alice", 4)

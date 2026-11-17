@@ -9,6 +9,7 @@ import (
 // Only an unlifted, unexpired timeout is listed for re-arming, with its
 // target and expiry.
 func TestListActiveTimeoutExpiries_OnlyActive(t *testing.T) {
+	t.Parallel()
 	database, ownerID, activeID := newModerationActionsTestDB(t)
 	ctx := context.Background()
 	liftedID := mustCreateUser(t, database, "liftedmember", "hash", 4)

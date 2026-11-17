@@ -11,6 +11,7 @@ import (
 )
 
 func TestWSSeqFloorSidecar_RoundTripAndDamage(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "chat.db")
 	database, err := Open(path)
 	if err != nil {
@@ -38,6 +39,7 @@ func TestWSSeqFloorSidecar_RoundTripAndDamage(t *testing.T) {
 }
 
 func TestWSSeqFloorSidecar_MemoryDatabaseIsNoOp(t *testing.T) {
+	t.Parallel()
 	database, err := Open(":memory:")
 	if err != nil {
 		t.Fatal(err)
@@ -52,6 +54,7 @@ func TestWSSeqFloorSidecar_MemoryDatabaseIsNoOp(t *testing.T) {
 }
 
 func TestCarryWSSeqFloorForRestore_ErrorPaths(t *testing.T) {
+	t.Parallel()
 	const validSidecar = "3000000000\n"
 	seedLive := func(t *testing.T, path, value string) {
 		t.Helper()

@@ -69,12 +69,14 @@ func decodeAround(t *testing.T, rr *httptest.ResponseRecorder) aroundResponse {
 }
 
 func TestMessagesAround_Unauthenticated(t *testing.T) {
+	t.Parallel()
 	router := buildChannelRouter(newChannelTestDB(t))
 	rr := chGet(t, router, aroundPath(1, 1, ""), "")
 	expectStatus(t, rr, http.StatusUnauthorized)
 }
 
 func TestMessagesAround_InvalidMessageID(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "aroundbadid", 1)
 	chID, _ := seedAroundChannel(t, database, "aroundbadid", 1)
@@ -89,6 +91,7 @@ func TestMessagesAround_InvalidMessageID(t *testing.T) {
 }
 
 func TestMessagesAround_InvalidLimit(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "aroundbadlimit", 1)
 	chID, ids := seedAroundChannel(t, database, "aroundbadlimit", 3)
@@ -98,6 +101,7 @@ func TestMessagesAround_InvalidLimit(t *testing.T) {
 }
 
 func TestMessagesAround_ChannelNotFound(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "aroundnochan", 1)
 
@@ -106,6 +110,7 @@ func TestMessagesAround_ChannelNotFound(t *testing.T) {
 }
 
 func TestMessagesAround_MessageInAnotherChannel(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "aroundcross", 1)
 	_, idsA := seedAroundChannel(t, database, "aroundcross", 2)
@@ -116,6 +121,7 @@ func TestMessagesAround_MessageInAnotherChannel(t *testing.T) {
 }
 
 func TestMessagesAround_DeletedMessageIsNotFound(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "arounddeleted", 1)
 	user, _ := database.GetUserByUsername(context.Background(), "arounddeleted")
@@ -130,6 +136,7 @@ func TestMessagesAround_DeletedMessageIsNotFound(t *testing.T) {
 }
 
 func TestMessagesAround_CentersTheWindow(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "aroundcenter", 1)
 	chID, ids := seedAroundChannel(t, database, "aroundcenter", 40)
@@ -159,6 +166,7 @@ func TestMessagesAround_CentersTheWindow(t *testing.T) {
 }
 
 func TestMessagesAround_NearChannelStart(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "aroundstart", 1)
 	chID, ids := seedAroundChannel(t, database, "aroundstart", 30)
@@ -183,6 +191,7 @@ func TestMessagesAround_NearChannelStart(t *testing.T) {
 }
 
 func TestMessagesAround_NearChannelEnd(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "aroundend", 1)
 	chID, ids := seedAroundChannel(t, database, "aroundend", 30)
@@ -208,6 +217,7 @@ func TestMessagesAround_NearChannelEnd(t *testing.T) {
 }
 
 func TestMessagesAround_ShortChannelReturnsEverything(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "aroundshort", 1)
 	chID, ids := seedAroundChannel(t, database, "aroundshort", 3)
@@ -226,6 +236,7 @@ func TestMessagesAround_ShortChannelReturnsEverything(t *testing.T) {
 }
 
 func TestMessagesAround_SkipsDeletedNeighbours(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "aroundtomb", 1)
 	user, _ := database.GetUserByUsername(context.Background(), "aroundtomb")
@@ -252,6 +263,7 @@ func TestMessagesAround_SkipsDeletedNeighbours(t *testing.T) {
 }
 
 func TestMessagesAround_DMNonParticipantIsNotFound(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -272,6 +284,7 @@ func TestMessagesAround_DMNonParticipantIsNotFound(t *testing.T) {
 }
 
 func TestMessagesAround_DMParticipantAllowed(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -294,6 +307,7 @@ func TestMessagesAround_DMParticipantAllowed(t *testing.T) {
 }
 
 func TestMessagesAround_NoReadPermissionIsForbidden(t *testing.T) {
+	t.Parallel()
 	database := newPinTestDB(t)
 	router := buildChannelRouter(database)
 
@@ -317,6 +331,7 @@ func TestMessagesAround_NoReadPermissionIsForbidden(t *testing.T) {
 }
 
 func TestMessagesAround_EnrichesReactionsAndMentions(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "aroundrich", 1)
 	user, _ := database.GetUserByUsername(context.Background(), "aroundrich")

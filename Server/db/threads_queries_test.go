@@ -55,6 +55,7 @@ func (f threadCRUD) setActivity(t *testing.T, id int64, at string) {
 }
 
 func TestCreateThread_ReturnsTheRowAndIsIdempotentPerStarter(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	th := f.create(t, "plans")
@@ -84,6 +85,7 @@ func TestCreateThread_ReturnsTheRowAndIsIdempotentPerStarter(t *testing.T) {
 }
 
 func TestCreateThread_RefusesAnUnavailableStarter(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	other, err := f.d.CreateChannel(ctx, "other", "text", "", "", 1)
@@ -114,6 +116,7 @@ func TestCreateThread_RefusesAnUnavailableStarter(t *testing.T) {
 }
 
 func TestCreateThread_RefusedWhileOwnerIsErasing(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	starter := f.post(t, f.parent, "hello")
@@ -127,6 +130,7 @@ func TestCreateThread_RefusedWhileOwnerIsErasing(t *testing.T) {
 }
 
 func TestCreateThread_ClosedDatabaseSurfacesWrappedErrors(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -154,6 +158,7 @@ func TestCreateThread_ClosedDatabaseSurfacesWrappedErrors(t *testing.T) {
 }
 
 func TestGetThread_NilForOrdinaryChannelAndUnknownId(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	for _, id := range []int64{f.parent, 424242} {
@@ -167,6 +172,7 @@ func TestGetThread_NilForOrdinaryChannelAndUnknownId(t *testing.T) {
 }
 
 func TestThreadCountsOnlyLiveUserMessagesAndPostReopens(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	th := f.create(t, "busy")
@@ -200,6 +206,7 @@ func TestThreadCountsOnlyLiveUserMessagesAndPostReopens(t *testing.T) {
 }
 
 func TestUpdateThread_AppliesPatchAndHonoursLock(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	th := f.create(t, "old")
@@ -244,6 +251,7 @@ func TestUpdateThread_AppliesPatchAndHonoursLock(t *testing.T) {
 }
 
 func TestListThreads_KeysetPagesByActivityAndFiltersArchived(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	a, b, c, d := f.create(t, "a"), f.create(t, "b"), f.create(t, "c"), f.create(t, "d")
@@ -285,6 +293,7 @@ func TestListThreads_KeysetPagesByActivityAndFiltersArchived(t *testing.T) {
 }
 
 func TestDeleteThread_RemovesRowAndMessagesOnlyForThreads(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	th := f.create(t, "doomed")
@@ -308,6 +317,7 @@ func TestDeleteThread_RemovesRowAndMessagesOnlyForThreads(t *testing.T) {
 }
 
 func TestThreadArchiveSweep(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	if _, ok, err := f.d.NextThreadArchiveDue(ctx); err != nil || ok {
@@ -352,6 +362,7 @@ func TestThreadArchiveSweep(t *testing.T) {
 }
 
 func TestMessageHistoryCarriesTheThreadOnItsStarter(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	th := f.create(t, "attached")
@@ -374,6 +385,7 @@ func TestMessageHistoryCarriesTheThreadOnItsStarter(t *testing.T) {
 }
 
 func TestChannelThreadHelpers(t *testing.T) {
+	t.Parallel()
 	f := newThreadCRUD(t)
 	ctx := context.Background()
 	th := f.create(t, "helpers")

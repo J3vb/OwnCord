@@ -80,6 +80,7 @@ func uploadIDs(items []db.OwnUpload) string {
 }
 
 func TestListOwnUploads_SortsAndOwnership(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	f.file(t, "a1", f.alice, "one.txt", 30, "2026-01-01 10:00:00")
 	f.file(t, "a2", f.alice, "two.txt", 10, "2026-01-03 10:00:00")
@@ -99,6 +100,7 @@ func TestListOwnUploads_SortsAndOwnership(t *testing.T) {
 }
 
 func TestListOwnUploads_KeysetPaging(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	f.file(t, "a1", f.alice, "one.txt", 30, "2026-01-01 10:00:00")
 	f.file(t, "a2", f.alice, "two.txt", 10, "2026-01-03 10:00:00")
@@ -128,6 +130,7 @@ func TestListOwnUploads_KeysetPaging(t *testing.T) {
 }
 
 func TestListOwnUploads_NameFilterIsLiteralAndCaseInsensitive(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	f.file(t, "a1", f.alice, "Holiday_Photo.PNG", 1, "2026-01-01 10:00:00")
 	f.file(t, "a2", f.alice, "holidayXPhoto.png", 1, "2026-01-02 10:00:00")
@@ -148,6 +151,7 @@ func TestListOwnUploads_NameFilterIsLiteralAndCaseInsensitive(t *testing.T) {
 }
 
 func TestListOwnUploads_States(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	ctx := context.Background()
 	for i, id := range []string{"live", "gone", "pending", "avatar", "banner", "icon"} {
@@ -206,6 +210,7 @@ func deref(p *int64) any {
 }
 
 func TestDeleteOwnAttachment(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	ctx := context.Background()
 	f.file(t, "mine", f.alice, "mine.txt", 7, "2026-01-01 10:00:00")
@@ -228,6 +233,7 @@ func TestDeleteOwnAttachment(t *testing.T) {
 }
 
 func TestDeleteOwnAttachment_RefusesInUseRows(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	ctx := context.Background()
 	for _, id := range []string{"avatar", "banner", "icon"} {
@@ -257,6 +263,7 @@ func TestDeleteOwnAttachment_RefusesInUseRows(t *testing.T) {
 }
 
 func TestAttachmentStoredNameShared(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	ctx := context.Background()
 	f.file(t, "a1", f.alice, "a.txt", 1, "2026-01-01 10:00:00")
@@ -269,6 +276,7 @@ func TestAttachmentStoredNameShared(t *testing.T) {
 }
 
 func TestDeleteEmptyOwnMessage_OnlyWhileStillEmpty(t *testing.T) {
+	t.Parallel()
 	f := newUploadsFixture(t)
 	ctx := context.Background()
 	blank, _ := f.database.CreateMessage(ctx, f.ch, f.alice, "  ", nil)

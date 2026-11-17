@@ -15,6 +15,7 @@ import (
 // empty override map here would list every channel the role is explicitly
 // denied. The listing must error instead of leaking the denied channel.
 func TestListVisibleChannels_OverrideFetchErrorFailsClosed(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages|permissions.AddReactions)
 	seedUserRole(t, database, 1, permissions.MemberRoleID)
@@ -46,6 +47,7 @@ func TestListVisibleChannels_OverrideFetchErrorFailsClosed(t *testing.T) {
 // would then filter out. focus and mark_read share this one service call, so
 // gating it here closes both.
 func TestHandleChannelFocus_RefusedInArchivedChannel(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
@@ -76,10 +78,9 @@ func TestHandleChannelFocus_RefusedInArchivedChannel(t *testing.T) {
 // TestHandleChannelFocus_DMExemptFromArchiveGate makes sure the archive gate
 // above is scoped to non-DM channels only — DMs carry no archived concept.
 func TestHandleChannelFocus_DMExemptFromArchiveGate(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
-	database := newTestDB(t)
-	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
-	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
+	database := newAliceBobDB(t)
 	seedChannel(t, database, &db.Channel{ID: 50, Name: "dm-1-2", Type: "dm"})
 	seedDMParticipant(t, database, 50, 1)
 	seedDMParticipant(t, database, 50, 2)
@@ -96,6 +97,7 @@ func TestHandleChannelFocus_DMExemptFromArchiveGate(t *testing.T) {
 // because HandleTyping authorized on DM participation alone. Typing is
 // best-effort, so the refusal is a silent nil rather than an error.
 func TestHandleTyping_BlockedInDMEmitsNothing(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedAliceBobDM(t, database, permissions.SendMessages|permissions.ReadMessages)
 
@@ -142,6 +144,7 @@ func (c *countingLimiter) Allow(key string, limit int, window time.Duration) boo
 // once the caller is authorized to read it) so the key space is bounded to
 // real (user, channel) pairs.
 func TestHandleTyping_NoRateLimitKeyForNonexistentChannel(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedMemberRole(t, database, permissions.SendMessages|permissions.ReadMessages)
 	seedUser(t, database, &db.User{ID: 1, Username: "alice"})
@@ -167,6 +170,7 @@ func TestHandleTyping_NoRateLimitKeyForNonexistentChannel(t *testing.T) {
 // be built, so the key space stays bounded to channels the user is actually
 // authorized to see typing indicators in.
 func TestHandleTyping_NoRateLimitKeyWithoutReadPermission(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedRole(t, database, &db.Role{
 		ID:          permissions.MemberRoleID,

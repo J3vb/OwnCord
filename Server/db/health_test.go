@@ -9,6 +9,7 @@ import (
 )
 
 func TestHealthStats_FileBackedDatabase(t *testing.T) {
+	t.Parallel()
 	d, err := Open(filepath.Join(t.TempDir(), "health.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)
@@ -34,6 +35,7 @@ func TestHealthStats_FileBackedDatabase(t *testing.T) {
 
 // An expired deadline fails the read instead of waiting on the database.
 func TestHealthStats_HonoursDeadline(t *testing.T) {
+	t.Parallel()
 	d, err := Open(filepath.Join(t.TempDir(), "health.db"))
 	if err != nil {
 		t.Fatalf("Open: %v", err)

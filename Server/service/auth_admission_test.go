@@ -113,6 +113,7 @@ func (f *admissionFixture) sites() []admissionSite {
 }
 
 func TestExpensiveAuth_RefusedWhenBudgetExhausted(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newAdmissionFixture(t, 1)
 	f.hold(t)
@@ -135,6 +136,7 @@ func TestExpensiveAuth_RefusedWhenBudgetExhausted(t *testing.T) {
 }
 
 func TestExpensiveAuth_BusyRefusalsChargeNoAttempt(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newAdmissionFixture(t, 1)
 	release := f.hold(t)
@@ -185,6 +187,7 @@ func TestExpensiveAuth_BusyRefusalsChargeNoAttempt(t *testing.T) {
 }
 
 func TestExpensiveAuth_ConcurrentAttemptsAdmitAtMostTheBudget(t *testing.T) {
+	t.Parallel()
 	const budget, attempts = 2, 24
 	ctx := context.Background()
 	f := newAdmissionFixture(t, budget)
@@ -234,6 +237,7 @@ func TestExpensiveAuth_ConcurrentAttemptsAdmitAtMostTheBudget(t *testing.T) {
 // instead of being refused, so an attempt queued behind a held budget runs
 // once the slot comes back.
 func TestExpensiveAuth_QueuedSitesWaitForASlot(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newAdmissionFixture(t, 1)
 	f.svc.admissionWait = auth.AdmissionWait
@@ -254,6 +258,7 @@ func TestExpensiveAuth_QueuedSitesWaitForASlot(t *testing.T) {
 }
 
 func TestLogin_QueuedBehindTheBudgetSucceeds(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newAdmissionFixture(t, 1)
 	f.svc.admissionWait = auth.AdmissionWait
@@ -266,6 +271,7 @@ func TestLogin_QueuedBehindTheBudgetSucceeds(t *testing.T) {
 
 // A queued site's refusal carries the budget's retry hint for Retry-After.
 func TestExpensiveAuth_QueuedRefusalCarriesRetryHint(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	f := newAdmissionFixture(t, 1)
 	f.hold(t)
@@ -285,6 +291,7 @@ func TestExpensiveAuth_QueuedRefusalCarriesRetryHint(t *testing.T) {
 // A login reads the account only once admitted, so a password change or a
 // ban that lands while it waits in the queue is what decides it.
 func TestLogin_QueuedHonoursAccountChangesMadeDuringTheWait(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		change func(ctx context.Context, f *admissionFixture) error

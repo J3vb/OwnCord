@@ -10,6 +10,7 @@ import (
 // threadWonBy is the unique-index backstop of CreateThread: it names the thread
 // that took the starter, or fails when there is none to name.
 func TestThreadWonBy_NamesTheWinner(t *testing.T) {
+	t.Parallel()
 	d := openMigratedMemoryInternal(t)
 	ctx := context.Background()
 	u, err := d.CreateUser(ctx, "winner", "hash", 4)
@@ -42,6 +43,7 @@ func TestThreadWonBy_NamesTheWinner(t *testing.T) {
 // A committed message in a thread records activity and reopens it; any other
 // channel is untouched, and a failing lookup is reported.
 func TestTouchThreadOnPost(t *testing.T) {
+	t.Parallel()
 	d := openMigratedMemoryInternal(t)
 	ctx := context.Background()
 	u, err := d.CreateUser(ctx, "poster", "hash", 4)
@@ -90,6 +92,7 @@ func TestTouchThreadOnPost(t *testing.T) {
 // The delivery path (what chat_send uses) touches the thread in the message's
 // own transaction.
 func TestCreateMessageDelivery_TouchesThread(t *testing.T) {
+	t.Parallel()
 	d := openMigratedMemoryInternal(t)
 	ctx := context.Background()
 	u, err := d.CreateUser(ctx, "sender", "hash", 4)

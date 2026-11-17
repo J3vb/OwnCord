@@ -10,6 +10,7 @@ import (
 // one: a report about the viewer is left out, a missing id is absent, and the
 // per-row fallback for a store without the batch read gives the same answer.
 func TestVisibleReportPublicIDs_GuardsTheSubjectInOneRead(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestReportService(t)
 	ctx := context.Background()
 	if svc.links == nil {

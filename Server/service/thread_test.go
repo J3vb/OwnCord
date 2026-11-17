@@ -80,6 +80,7 @@ func (f *threadFixture) start(t *testing.T, userID int64, name string) *db.Threa
 }
 
 func TestThreadCreate_Valid(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	info := f.start(t, thrOwner, "  Plans  ")
 	if info.Name != "Plans" || info.ParentID != thrParent || info.Archived || info.Locked {
@@ -103,6 +104,7 @@ func TestThreadCreate_Valid(t *testing.T) {
 }
 
 func TestThreadCreate_Validation(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	starter := f.post(t, thrParent, thrOwner, "x")
 	cases := map[string]CreateThreadParams{
@@ -123,6 +125,7 @@ func TestThreadCreate_Validation(t *testing.T) {
 // A thread cannot start on a message of another channel, a deleted message or
 // a thread's own message.
 func TestThreadCreate_StarterRules(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	seedChannel(t, f.database, &db.Channel{ID: 11, Name: "other", Type: "text"})
 	foreign := f.post(t, 11, thrOwner, "elsewhere")
@@ -146,6 +149,7 @@ func TestThreadCreate_StarterRules(t *testing.T) {
 // Two creates race on one message: exactly one wins and the loser is told the
 // winner's id.
 func TestThreadCreate_Race(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	starter := f.post(t, thrParent, thrOwner, "contested")
 	const n = 8
@@ -201,6 +205,7 @@ func TestThreadCreate_Race(t *testing.T) {
 // The unique starter makes a create idempotent: the owner's retry gets the
 // thread back (and costs no rate token); anyone else is told it exists.
 func TestThreadCreate_RetryByOwnerIsIdempotent(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	starter := f.post(t, thrParent, thrOwner, "s")
 	p := CreateThreadParams{UserID: thrOwner, ChannelID: thrParent, MessageID: starter, Name: "once"}
@@ -223,6 +228,7 @@ func TestThreadCreate_RetryByOwnerIsIdempotent(t *testing.T) {
 }
 
 func TestThreadCreate_RateLimited(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	for i := range threadCreateLimit {
 		f.start(t, thrOwner, fmt.Sprintf("t%d", i))
@@ -235,6 +241,7 @@ func TestThreadCreate_RateLimited(t *testing.T) {
 }
 
 func TestThreadCreate_NeedsSendOnParent(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	starter := f.post(t, thrParent, thrOwner, "s")
 	seedChannelOverride(t, f.database, permissions.MemberRoleID, thrParent, 0, permissions.SendMessages)
@@ -247,6 +254,7 @@ func TestThreadCreate_NeedsSendOnParent(t *testing.T) {
 // The owner and moderator matrix for update and delete, including a locked
 // thread.
 func TestThreadUpdateDelete_Matrix(t *testing.T) {
+	t.Parallel()
 	rename := func(s string) *string { return &s }
 	yes, no := true, false
 
@@ -333,6 +341,7 @@ func TestThreadUpdateDelete_Matrix(t *testing.T) {
 // A post to an archived thread reopens it in the send transaction; a locked
 // thread refuses a member's post and admits a moderator's.
 func TestThread_PostUnarchivesAndLockRefuses(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	yes := true
 	th := f.start(t, thrOwner, "a")
@@ -358,6 +367,7 @@ func TestThread_PostUnarchivesAndLockRefuses(t *testing.T) {
 }
 
 func TestThreadList_PaginationAndGate(t *testing.T) {
+	t.Parallel()
 	f := newThreadFixture(t)
 	ids := make([]int64, 0, 3)
 	base := time.Now().UTC().Add(-time.Hour)
@@ -399,6 +409,7 @@ func TestThreadList_PaginationAndGate(t *testing.T) {
 }
 
 func TestThreadCursor_RoundTripAndRejects(t *testing.T) {
+	t.Parallel()
 	c := ThreadCursor{Activity: "2026-10-21T09:30:00Z", ID: 42}
 	got, err := ParseThreadCursor(FormatThreadCursor(c))
 	if err != nil || got != c {

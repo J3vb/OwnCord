@@ -6,6 +6,7 @@ import (
 )
 
 func TestGIFPageCache_ExpiresAndStaysBounded(t *testing.T) {
+	t.Parallel()
 	c := newGIFPageCache(time.Minute, 2)
 	now := time.Unix(0, 0)
 	c.now = func() time.Time { return now }

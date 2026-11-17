@@ -34,7 +34,9 @@ export const TARGETS = {
   server: {
     label: "Server Go tests",
     scan: "Server",
-    extraArgs: ["--pattern", "**/*_test.go"],
+    // A `t.Parallel()` line is a marker, not copied setup; counted, it pushes
+    // short repeated test openings over the token minimum.
+    extraArgs: ["--pattern", "**/*_test.go", "--ignore-pattern", "t\\.Parallel\\(\\)"],
     baselinePath: path.join(ROOT, "scripts/checks/server-test-duplication-baseline.json"),
     hint: "Share the repeated setup in a helper in the package's _test.go files instead of copying it.",
   },

@@ -20,6 +20,7 @@ import (
 // next query as a spliced fragment of two others. Keeping these files ASCII is
 // the cheapest way to make that class of corruption impossible.
 func TestQueryFilesAreASCIIOnly(t *testing.T) {
+	t.Parallel()
 	root := "queries"
 	// Not a Skipf: this test IS the guard, and a guard that excuses itself when
 	// its subject moves is worse than no guard. If the directory is renamed,

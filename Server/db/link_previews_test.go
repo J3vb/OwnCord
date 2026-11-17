@@ -12,6 +12,7 @@ func lpImage(hash string, size int64, stamp string) db.LinkPreviewImage {
 }
 
 func TestLinkPreviewCardAndImageRows(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	database := openMigratedMemory(t)
 
@@ -64,6 +65,7 @@ func TestLinkPreviewCardAndImageRows(t *testing.T) {
 }
 
 func TestLinkPreviewImageListsAndDelete(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	database := openMigratedMemory(t)
 
@@ -113,6 +115,7 @@ func TestLinkPreviewImageListsAndDelete(t *testing.T) {
 }
 
 func TestLinkPreviewMessageLinks(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	database := openMigratedMemory(t)
 	uid := seedUser(t, database, "lp-user")
@@ -165,6 +168,7 @@ func TestLinkPreviewMessageLinks(t *testing.T) {
 }
 
 func TestLinkPreviewQueriesFailOnClosedDB(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	database := openMigratedMemory(t)
 	mustDo(t, "close", database.Close())
@@ -192,6 +196,7 @@ func TestLinkPreviewQueriesFailOnClosedDB(t *testing.T) {
 }
 
 func TestLinkPreviewTouchAndPrune(t *testing.T) {
+	t.Parallel()
 	ctx := t.Context()
 	database := openMigratedMemory(t)
 	uid := seedUser(t, database, "lp-prune")

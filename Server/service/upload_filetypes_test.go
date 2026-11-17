@@ -13,6 +13,7 @@ import (
 // owner saved in the admin panel replaces the config one.
 
 func TestUploadFileTypePolicy_ConfigUntilSaved(t *testing.T) {
+	t.Parallel()
 	uploads, database := newUploadFixture(t)
 	ctx := context.Background()
 	uploads.SetStorageLimits(StorageLimits{FileTypes: storage.FileTypePolicy{Blocked: []string{"bat"}, Allowed: []string{}}})
@@ -38,6 +39,7 @@ func TestUploadFileTypePolicy_ConfigUntilSaved(t *testing.T) {
 }
 
 func TestSettings_UploadExtensionListsNormalized(t *testing.T) {
+	t.Parallel()
 	svc, _ := newSettingsService(t)
 	all, err := svc.Patch(context.Background(), 1, map[string]string{UploadBlockedExtensionsKey: " .BAT cmd,,bat "})
 	mustDo(t, "Patch", err)
@@ -51,6 +53,7 @@ func TestSettings_UploadExtensionListsNormalized(t *testing.T) {
 }
 
 func TestSettings_UploadExtensionListsAreOwnerOnly(t *testing.T) {
+	t.Parallel()
 	for _, key := range []string{UploadBlockedExtensionsKey, UploadAllowedExtensionsKey} {
 		if !IsOwnerOnlySettingKey(key) {
 			t.Errorf("IsOwnerOnlySettingKey(%q) = false, want true", key)

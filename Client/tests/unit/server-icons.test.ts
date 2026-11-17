@@ -10,7 +10,7 @@ import {
   pruneServerIcons,
   storeServerIcon,
   syncServerIcon,
-} from "@lib/prefs/serverIcons";
+} from "../../src/features/server-rail/serverIcons";
 import { readCapped } from "../../src/app/serverIconSync";
 import { createServerRail } from "../../src/features/server-rail/ServerRail";
 import { authStore } from "@stores/auth.store";

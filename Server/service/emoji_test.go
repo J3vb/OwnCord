@@ -45,6 +45,7 @@ func newEmojiService(t *testing.T) (*EmojiService, *db.DB) {
 // ─── Shortcode rules ─────────────────────────────────────────────────────────
 
 func TestValidateShortcode_Accepts(t *testing.T) {
+	t.Parallel()
 	cases := map[string]string{
 		"wave":                               "wave",
 		":wave:":                             "wave",
@@ -68,6 +69,7 @@ func TestValidateShortcode_Accepts(t *testing.T) {
 }
 
 func TestValidateShortcode_Rejects(t *testing.T) {
+	t.Parallel()
 	bad := []string{
 		"",                                     // empty
 		"::",                                   // colons only
@@ -91,6 +93,7 @@ func TestValidateShortcode_Rejects(t *testing.T) {
 }
 
 func TestEmojiImageURL(t *testing.T) {
+	t.Parallel()
 	if got, want := EmojiImageURL(42), "/api/v1/emoji/42/image"; got != want {
 		t.Errorf("EmojiImageURL(42) = %q, want %q", got, want)
 	}
@@ -99,6 +102,7 @@ func TestEmojiImageURL(t *testing.T) {
 // ─── Permission gate ─────────────────────────────────────────────────────────
 
 func TestEmojiCreate_RequiresManageServer(t *testing.T) {
+	t.Parallel()
 	svc, _ := newEmojiService(t)
 
 	// Moderator holds MANAGE_ROLES and KICK_MEMBERS but not MANAGE_SERVER.
@@ -119,6 +123,7 @@ func TestEmojiCreate_RequiresManageServer(t *testing.T) {
 }
 
 func TestEmojiDelete_RequiresManageServer(t *testing.T) {
+	t.Parallel()
 	svc, _ := newEmojiService(t)
 	created, err := svc.Create(context.Background(), 1, "wave", "stored-1", "image/png")
 	mustDo(t, "Create", err)
@@ -135,6 +140,7 @@ func TestEmojiDelete_RequiresManageServer(t *testing.T) {
 }
 
 func TestEmojiRequireManage_UnknownUserIsForbidden(t *testing.T) {
+	t.Parallel()
 	svc, _ := newEmojiService(t)
 	if err := svc.RequireManage(context.Background(), 9999); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("RequireManage(unknown) = %v, want ErrForbidden", err)
@@ -142,6 +148,7 @@ func TestEmojiRequireManage_UnknownUserIsForbidden(t *testing.T) {
 }
 
 func TestEmojiRequireManage_NilPermServiceIsForbidden(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svc := NewEmojiService(database, nil)
 	if err := svc.RequireManage(context.Background(), 1); !errors.Is(err, ErrForbidden) {
@@ -152,6 +159,7 @@ func TestEmojiRequireManage_NilPermServiceIsForbidden(t *testing.T) {
 // ─── Create / List / Delete ──────────────────────────────────────────────────
 
 func TestEmojiCreate_NormalizesAndPersists(t *testing.T) {
+	t.Parallel()
 	svc, database := newEmojiService(t)
 
 	created, err := svc.Create(context.Background(), 1, ":WAVE:", "stored-1", "image/png")
@@ -176,6 +184,7 @@ func TestEmojiCreate_NormalizesAndPersists(t *testing.T) {
 }
 
 func TestEmojiCreate_DuplicateShortcodeIsConflict(t *testing.T) {
+	t.Parallel()
 	svc, _ := newEmojiService(t)
 	if _, err := svc.Create(context.Background(), 1, "wave", "stored-1", "image/png"); err != nil {
 		t.Fatalf("first Create: %v", err)
@@ -206,6 +215,7 @@ func (f *raceEmojiStore) GetEmojiByShortcode(_ context.Context, _ string) (*db.E
 // still surface as ErrConflict (matching the sequential duplicate-shortcode
 // path), not ErrInternal.
 func TestEmojiCreate_RaceOnInsertIsConflict(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	seedRole(t, database, &db.Role{ID: permissions.OwnerRoleID, Name: "Owner",
 		Permissions: permissions.Administrator, Position: permissions.OwnerRolePosition})
@@ -231,6 +241,7 @@ func TestEmojiCreate_RaceOnInsertIsConflict(t *testing.T) {
 }
 
 func TestEmojiCreate_RejectsBadShortcodeBeforeInsert(t *testing.T) {
+	t.Parallel()
 	svc, _ := newEmojiService(t)
 	if _, err := svc.Create(context.Background(), 1, "no spaces", "stored-1", "image/png"); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("Create error = %v, want ErrBadRequest", err)
@@ -243,6 +254,7 @@ func TestEmojiCreate_RejectsBadShortcodeBeforeInsert(t *testing.T) {
 }
 
 func TestEmojiCreate_EnforcesCountCap(t *testing.T) {
+	t.Parallel()
 	svc, database := newEmojiService(t)
 	// Insert the cap directly — going through Create MaxEmojiCount times is a
 	// slower way of arriving at the same state.
@@ -259,6 +271,7 @@ func TestEmojiCreate_EnforcesCountCap(t *testing.T) {
 }
 
 func TestEmojiList_OrderedByShortcode(t *testing.T) {
+	t.Parallel()
 	svc, _ := newEmojiService(t)
 	for _, sc := range []string{"zebra", "apple", "mango"} {
 		if _, err := svc.Create(context.Background(), 1, sc, "stored-"+sc, "image/png"); err != nil {
@@ -278,6 +291,7 @@ func TestEmojiList_OrderedByShortcode(t *testing.T) {
 }
 
 func TestEmojiDelete_RemovesAndReturnsStorageID(t *testing.T) {
+	t.Parallel()
 	svc, _ := newEmojiService(t)
 	created, err := svc.Create(context.Background(), 1, "wave", "stored-1", "image/png")
 	mustDo(t, "Create", err)
@@ -300,6 +314,7 @@ func TestEmojiDelete_RemovesAndReturnsStorageID(t *testing.T) {
 }
 
 func TestEmojiDelete_UnknownIDIsNotFound(t *testing.T) {
+	t.Parallel()
 	svc, _ := newEmojiService(t)
 	if _, err := svc.Delete(context.Background(), 1, 4242); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Delete(unknown) = %v, want ErrNotFound", err)
@@ -307,6 +322,7 @@ func TestEmojiDelete_UnknownIDIsNotFound(t *testing.T) {
 }
 
 func TestEmojiGet_UnknownIDIsNotFound(t *testing.T) {
+	t.Parallel()
 	svc, _ := newEmojiService(t)
 	if _, err := svc.Get(context.Background(), 4242); !errors.Is(err, ErrNotFound) {
 		t.Fatalf("Get(unknown) = %v, want ErrNotFound", err)
@@ -314,6 +330,7 @@ func TestEmojiGet_UnknownIDIsNotFound(t *testing.T) {
 }
 
 func TestEmojiCreate_WritesAudit(t *testing.T) {
+	t.Parallel()
 	svc, database := newEmojiService(t)
 	created, err := svc.Create(context.Background(), 1, "wave", "stored-1", "image/png")
 	mustDo(t, "Create", err)
@@ -356,6 +373,7 @@ func (f *listOnlyEmojiStore) LogAudit(context.Context, int64, string, string, in
 }
 
 func TestEmojiService_RunsOnASixMethodFake(t *testing.T) {
+	t.Parallel()
 	if n := reflect.TypeFor[EmojiStore]().NumMethod(); n != 6 {
 		t.Fatalf("EmojiStore has %d methods, want 6", n)
 	}

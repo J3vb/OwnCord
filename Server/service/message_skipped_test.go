@@ -53,6 +53,7 @@ func attachmentIDsOf(in []db.AttachmentInfo) []string {
 }
 
 func TestSendMessage_KeyedSweptAttachmentReportedSkipped(t *testing.T) {
+	t.Parallel()
 	svc, database := newSkippedAttachmentService(t)
 	sweepAttachment(t, database, "att-b")
 
@@ -69,6 +70,7 @@ func TestSendMessage_KeyedSweptAttachmentReportedSkipped(t *testing.T) {
 }
 
 func TestSendMessage_UnkeyedSkippedReported(t *testing.T) {
+	t.Parallel()
 	svc, _ := newSkippedAttachmentService(t)
 	p := SendMessageParams{ChannelID: 10, UserID: 1, Username: "alice", Content: "hi",
 		AttachmentIDs: []string{"att-a", "att-missing"}}
@@ -83,6 +85,7 @@ func TestSendMessage_UnkeyedSkippedReported(t *testing.T) {
 }
 
 func TestSendMessage_NothingSkippedIsNil(t *testing.T) {
+	t.Parallel()
 	svc, _ := newSkippedAttachmentService(t)
 	p := deliveryTestParams()
 	p.AttachmentIDs = []string{"att-a", "att-b"}
@@ -93,6 +96,7 @@ func TestSendMessage_NothingSkippedIsNil(t *testing.T) {
 }
 
 func TestSendMessage_RetryReplaysSkipped(t *testing.T) {
+	t.Parallel()
 	svc, database := newSkippedAttachmentService(t)
 	ctx := context.Background()
 	sweepAttachment(t, database, "att-b")
@@ -121,6 +125,7 @@ func TestSendMessage_RetryReplaysSkipped(t *testing.T) {
 }
 
 func TestSendMessage_AllSkippedIsAttachmentsUnavailable(t *testing.T) {
+	t.Parallel()
 	for name, keyed := range map[string]bool{"keyed": true, "unkeyed": false} {
 		t.Run(name, func(t *testing.T) {
 			svc, database := newSkippedAttachmentService(t)
@@ -147,6 +152,7 @@ func TestSendMessage_AllSkippedIsAttachmentsUnavailable(t *testing.T) {
 }
 
 func TestSendMessage_TextWithAllSkippedSendsAndReportsEveryID(t *testing.T) {
+	t.Parallel()
 	svc, _ := newSkippedAttachmentService(t)
 	p := deliveryTestParams()
 	p.AttachmentIDs = []string{"att-missing", "att-missing", "att-other"}
@@ -158,6 +164,7 @@ func TestSendMessage_TextWithAllSkippedSendsAndReportsEveryID(t *testing.T) {
 }
 
 func TestSkippedAttachmentIDs_OrderAndDedup(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name              string
 		requested, linked []string
@@ -185,6 +192,7 @@ func (replayReadFailsStore) GetAttachmentsByMessageIDs(context.Context, []int64)
 }
 
 func TestSendMessage_ReplaySkippedReadFailureOmits(t *testing.T) {
+	t.Parallel()
 	svc, database := newSkippedAttachmentService(t)
 	ctx := context.Background()
 	p := deliveryTestParams()
@@ -211,6 +219,7 @@ func (missedReceiptStore) FindMessageDelivery(context.Context, db.MessageDeliver
 }
 
 func TestSendMessage_InTxDuplicateReplaysSkipped(t *testing.T) {
+	t.Parallel()
 	svc, database := newSkippedAttachmentService(t)
 	ctx := context.Background()
 	sweepAttachment(t, database, "att-b")

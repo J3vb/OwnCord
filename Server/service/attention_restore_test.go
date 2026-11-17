@@ -5,6 +5,7 @@ import "testing"
 // WP 5.5: a staged restore handled at boot shows on the panel. Without one
 // there is no signal at all.
 func TestAttention_RestoreOutcome(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	for _, s := range f.step().Signals {
 		if s.ID == "last_restore" {

@@ -77,7 +77,7 @@ var routeGroups = []routeGroup{
 	// Mounted unconditionally; with push.enabled false every route answers 503 PUSH_DISABLED after
 	// authentication.
 	{"push", func(r chi.Router, d *routeDeps) {
-		MountPushRoutes(r, d.svc.Sessions, d.svc.Push, d.cfg.Push.Enabled)
+		MountPushRoutes(r, d.svc.Sessions, d.svc.Push, d.limiter, d.cfg.Push.Enabled)
 	}},
 	{"uploads", func(r chi.Router, d *routeDeps) {
 		routerUploadRoutes(r, d.svc.Sessions, d.limiter, d.cfg, d.svc.Uploads, d.store)

@@ -45,6 +45,7 @@ func buildNicknameRouter(t *testing.T) (http.Handler, *db.DB, *recordingProfileB
 }
 
 func TestNicknameRoute_BroadcastsCommittedSnapshot(t *testing.T) {
+	t.Parallel()
 	h, database, rec := buildNicknameRouter(t)
 	modID := mintModerator(t, database, "nick-mod", 80, permissions.ManageNicknames)
 	modToken, _ := mintSession(t, database, modID)
@@ -87,6 +88,7 @@ func TestNicknameRoute_BroadcastsCommittedSnapshot(t *testing.T) {
 }
 
 func TestNicknameRoute_RefusalsDoNotBroadcastOrWrite(t *testing.T) {
+	t.Parallel()
 	h, database, rec := buildNicknameRouter(t)
 	modID := mintModerator(t, database, "nr-mod", 80, permissions.ManageNicknames)
 	modToken, _ := mintSession(t, database, modID)
@@ -146,6 +148,7 @@ func TestNicknameRoute_RefusalsDoNotBroadcastOrWrite(t *testing.T) {
 // the write. The transaction refuses, the route answers 403, the row is
 // unchanged and no user_update goes out.
 func TestNicknameRoute_PromotedBeforeWriteBroadcastsNothing(t *testing.T) {
+	t.Parallel()
 	h, database, rec := buildNicknameRouter(t)
 	ctx := context.Background()
 	modID := mintModerator(t, database, "pw-mod", 80, permissions.ManageNicknames)

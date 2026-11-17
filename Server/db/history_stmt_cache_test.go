@@ -14,6 +14,7 @@ import (
 // page size into its own SQL text would fill the cache, and the second sweep
 // would add entries.
 func TestHistoryPages_StatementCacheStaysSmall(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	userID := seedUser(t, database, "pager")
@@ -49,6 +50,7 @@ func TestHistoryPages_StatementCacheStaysSmall(t *testing.T) {
 // Readers on several pool connections share the cached statements while a
 // writer keeps adding rows; run with -race.
 func TestHistoryPages_ConcurrentReadersShareCache(t *testing.T) {
+	t.Parallel()
 	database, err := db.Open(filepath.Join(t.TempDir(), "cache.db"))
 	mustDo(t, "Open", err)
 	t.Cleanup(func() { _ = database.Close() })

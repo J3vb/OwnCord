@@ -65,6 +65,7 @@ func fileExists(t *testing.T, path string) bool {
 }
 
 func TestErasureService_EraseRemovesRowsAndFiles(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	dir := t.TempDir()
 	uid, files := seedErasureMember(context.Background(), t, database, dir)
@@ -91,6 +92,7 @@ func TestErasureService_EraseRemovesRowsAndFiles(t *testing.T) {
 
 // P4-08: a thumbnail of an erased user's image goes with the original.
 func TestErasureService_EraseRemovesThumbnails(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	dir := t.TempDir()
 	uid, files := seedErasureMember(context.Background(), t, database, dir)
@@ -119,6 +121,7 @@ func TestErasureService_EraseRemovesThumbnails(t *testing.T) {
 // badge. Without the flush the reversal consumes m0's badge and the later
 // increment is skipped (m is gone), leaving bob at 0.
 func TestErasureService_PreservesPriorBadgeForQueuedMention(t *testing.T) {
+	t.Parallel()
 	_, _, database := newMentionFixture(t)
 	ctx := context.Background()
 	mustCreateUser(t, database, "erasure-owner", "hash", 1)
@@ -148,6 +151,7 @@ func TestErasureService_PreservesPriorBadgeForQueuedMention(t *testing.T) {
 // on the same file, as the maintenance loop's startup resume sees it —
 // finishes the job.
 func TestErasureService_RestartResumesTheFileHalf(t *testing.T) {
+	t.Parallel()
 	dbPath := filepath.Join(t.TempDir(), "erasure.sqlite")
 	database, err := db.Open(dbPath)
 	mustDo(t, "db.Open", err)
@@ -202,6 +206,7 @@ func (f *failingRemover) Delete(name string) error {
 }
 
 func TestErasureService_FailedRemovalIsRetriedAndMissingFilesCount(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	dir := t.TempDir()
 	uid, files := seedErasureMember(context.Background(), t, database, dir)
@@ -246,6 +251,7 @@ func TestErasureService_FailedRemovalIsRetriedAndMissingFilesCount(t *testing.T)
 }
 
 func TestErasureService_NoStorageLeavesTheJobPending(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	dir := t.TempDir()
 	uid, _ := seedErasureMember(context.Background(), t, database, dir)
@@ -278,6 +284,7 @@ func TestErasureService_NoStorageLeavesTheJobPending(t *testing.T) {
 // (HP-4 drill D5's class), never a live attachment, an emoji's file, a file
 // younger than the cutoff, or anything when no storage is installed.
 func TestErasureService_ReconcileRemovesOnlyStrandedFiles(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -330,6 +337,7 @@ func TestErasureService_ReconcileRemovesOnlyStrandedFiles(t *testing.T) {
 // The B4-9 lineage checklist end to end on the alpha snapshot: every
 // inventory class zero and zero files for the subject on disk.
 func TestErasureService_LineageChecklistOnAlphaSnapshot(t *testing.T) {
+	t.Parallel()
 	path, err := alphasnap.Copy(t.TempDir())
 	mustDo(t, "alphasnap.Copy", err)
 	database, err := db.Open(path)
@@ -394,6 +402,7 @@ func (r *recordingBanBroadcaster) BroadcastMemberBan(userID int64) {
 }
 
 func TestAuthService_DeleteAccountErasesAndBroadcasts(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -438,6 +447,7 @@ func TestAuthService_DeleteAccountErasesAndBroadcasts(t *testing.T) {
 }
 
 func TestAuthService_DeleteAccountLastAdminIsRefused(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	hash, _ := auth.HashPassword("correct horse battery")
@@ -453,6 +463,7 @@ func TestAuthService_DeleteAccountLastAdminIsRefused(t *testing.T) {
 }
 
 func TestModerationService_EraseUser(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -530,6 +541,7 @@ func (h *recordingErasureHub) PurgeUserFromReplay(_ context.Context, userID int6
 // With the hub installed the runner broadcasts the member_ban itself and
 // purges replay right behind it, and the routes stop sending their own.
 func TestErasureService_HubBroadcastsThenPurges(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -583,6 +595,7 @@ func newTestMarkers(t *testing.T) *db.MarkerStore {
 // after the commit, and the audit rows carry its token; a refused erasure
 // leaves no marker behind.
 func TestErasureService_RecordsAndConfirmsTheMarker(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -630,6 +643,7 @@ func TestErasureService_RecordsAndConfirmsTheMarker(t *testing.T) {
 // ReplayMarkers is the start-up pass: an account a restore brought back is
 // erased again, files included, and the audit row names the replay by token.
 func TestErasureService_ReplayMarkersErasesAResurrectedAccount(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	restored, uid, files, dir, markers := restoreAfterErasure(ctx, t)
 	if u, _ := restored.GetUserByID(ctx, uid); u == nil {
@@ -668,6 +682,7 @@ func TestErasureService_ReplayMarkersErasesAResurrectedAccount(t *testing.T) {
 // propagate. The database half of the replay must go through, and the job
 // stays listed for Resume to finish once the store comes back (OC-0399).
 func TestErasureService_ReplayMarkersSurvivesFilesUnavailable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	restored, uid, _, _, markers := restoreAfterErasure(ctx, t)
 
@@ -707,6 +722,7 @@ func (h *failingHub) PurgeUserFromReplay(ctx context.Context, userID int64) erro
 }
 
 func TestErasureService_ReplayPurgeIsRetriedFromTheJournal(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -781,6 +797,7 @@ func (s *namingStore) ReferencedStoredFiles(ctx context.Context, names []string)
 // A file named by a row after the batch lookup is kept: Reconcile checks each
 // name again right before deleting it.
 func TestErasureService_ReconcileKeepsAFileNamedAfterTheBatchLookup(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	ctx := context.Background()
 	dir := t.TempDir()

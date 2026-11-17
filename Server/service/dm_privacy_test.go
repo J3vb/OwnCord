@@ -23,6 +23,7 @@ func setAllowDMs(t *testing.T, database *db.DB, userID int64, allow bool) {
 // sender's send is refused in the precheck, so no message, no request and no
 // trust row exists and the caller gets no result to fan out.
 func TestDMPrivacy_UntrustedSendRefused_NoRowsWritten(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	setAllowDMs(t, database, 2, false)
 
@@ -45,6 +46,7 @@ func TestDMPrivacy_UntrustedSendRefused_NoRowsWritten(t *testing.T) {
 // TestDMPrivacy_TrustedSourcesStillReach: every trust source keeps a pair
 // reachable when the recipient has DMs off.
 func TestDMPrivacy_TrustedSourcesStillReach(t *testing.T) {
+	t.Parallel()
 	for _, source := range []string{"accepted", "sent_first", "grandfathered"} {
 		t.Run(source, func(t *testing.T) {
 			database, svc := newMessageRequestFixture(t)
@@ -91,6 +93,7 @@ func dmSinkErrors(t *testing.T, database *db.DB, svc *Services) map[string]error
 // TestDMPrivacy_EditReactPinRingVoiceRefused: one table over every DMBlocked
 // sink this package owns (voice join and token refresh are covered in ws).
 func TestDMPrivacy_EditReactPinRingVoiceRefused(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	setAllowDMs(t, database, 2, false)
 
@@ -111,6 +114,7 @@ func TestDMPrivacy_EditReactPinRingVoiceRefused(t *testing.T) {
 // is the same kind and the same text as under "blocked by the recipient" and
 // "the sender blocked the recipient".
 func TestDMPrivacy_RefusalMatchesBlock(t *testing.T) {
+	t.Parallel()
 	scenarios := []struct {
 		name  string
 		setup func(t *testing.T, database *db.DB)
@@ -152,6 +156,7 @@ func TestDMPrivacy_RefusalMatchesBlock(t *testing.T) {
 // send's precheck passed. That send is staged as a pending request and is not
 // delivered; the next send is refused.
 func TestDMPrivacy_FlipDuringSendStagesRequest(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 	svc.Messages.afterFirstContactTrustCheck = func() { setAllowDMs(t, database, 2, false) }
@@ -191,6 +196,7 @@ func TestDMPrivacy_FlipDuringSendStagesRequest(t *testing.T) {
 // request opens the DM while the original sender has DMs off. The sender
 // initiated, so trusts the recipient (sent_first) and the open is allowed.
 func TestDMPrivacy_AcceptByOpenWhenSenderOff(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 
@@ -217,6 +223,7 @@ func TestDMPrivacy_AcceptByOpenWhenSenderOff(t *testing.T) {
 // TestDMPrivacy_GroupDMUnaffected: an existing group keeps working for a
 // member who has DMs off, in both directions.
 func TestDMPrivacy_GroupDMUnaffected(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 	seedUser(t, database, &db.User{ID: 3, Username: "carol"})
@@ -253,6 +260,7 @@ func (privacyReadErrStore) DMRefusesSender(context.Context, int64, int64) (bool,
 // ErrInternal, never ErrBlocked, so it cannot read as a refusal by the other
 // party.
 func TestDMPrivacy_ReadErrorFailsClosed(t *testing.T) {
+	t.Parallel()
 	database, permSvc := newDMFixture(t)
 	st := privacyReadErrStore{Store: database}
 	ctx := context.Background()

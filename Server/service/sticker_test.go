@@ -19,6 +19,7 @@ func newStickerService(t *testing.T) (*StickerService, *db.DB) {
 }
 
 func TestValidateStickerName(t *testing.T) {
+	t.Parallel()
 	ok := map[string]string{
 		"Wave":                  "Wave",
 		"  Party Blob  ":        "Party Blob",
@@ -42,6 +43,7 @@ func TestValidateStickerName(t *testing.T) {
 }
 
 func TestValidateStickerEmoji(t *testing.T) {
+	t.Parallel()
 	for _, in := range []string{"😀", "👍🏽", ":wave:", ":Wave:", "1️⃣", "🏳️‍🌈"} {
 		got, err := ValidateStickerEmoji(in)
 		if err != nil || got == nil {
@@ -63,6 +65,7 @@ func TestValidateStickerEmoji(t *testing.T) {
 }
 
 func TestStickerService_PermissionGate(t *testing.T) {
+	t.Parallel()
 	svc, _ := newStickerService(t)
 	ctx := context.Background()
 	for _, actor := range []int64{3, 4} {
@@ -85,6 +88,7 @@ func TestStickerService_PermissionGate(t *testing.T) {
 }
 
 func TestStickerService_NameIsUniqueIgnoringCase(t *testing.T) {
+	t.Parallel()
 	svc, _ := newStickerService(t)
 	ctx := context.Background()
 	if _, err := svc.Create(ctx, 1, "Wave", "", "file-a", "image/png"); err != nil {
@@ -107,6 +111,7 @@ func TestStickerService_NameIsUniqueIgnoringCase(t *testing.T) {
 }
 
 func TestStickerService_CapAtSixty(t *testing.T) {
+	t.Parallel()
 	svc, database := newStickerService(t)
 	ctx := context.Background()
 	for i := range MaxStickerCount {
@@ -121,6 +126,7 @@ func TestStickerService_CapAtSixty(t *testing.T) {
 }
 
 func TestStickerService_DeleteReturnsRowAndUnknownIs404(t *testing.T) {
+	t.Parallel()
 	svc, _ := newStickerService(t)
 	ctx := context.Background()
 	created, err := svc.Create(ctx, 1, "Wave", "", "file-a", "image/png")
@@ -141,6 +147,7 @@ func TestStickerService_DeleteReturnsRowAndUnknownIs404(t *testing.T) {
 }
 
 func TestStickerService_ConcurrentSameNameOneWins(t *testing.T) {
+	t.Parallel()
 	svc, database := newStickerService(t)
 	ctx := context.Background()
 	if _, err := svc.Create(ctx, 1, "Race", "", "file-a", "image/png"); err != nil {
@@ -155,6 +162,7 @@ func TestStickerService_ConcurrentSameNameOneWins(t *testing.T) {
 }
 
 func TestStickerWrites_WriteAudit(t *testing.T) {
+	t.Parallel()
 	svc, database := newStickerService(t)
 	ctx := context.Background()
 	created, err := svc.Create(ctx, 1, "Wave", "", "stored-1", "image/png")

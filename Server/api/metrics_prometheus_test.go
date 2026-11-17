@@ -333,6 +333,7 @@ var wantFamilies = map[string]string{
 // checks the grammar (see parseProm), that every family appears once with the
 // right type, and that the Content-Type is the 0.0.4 text type.
 func TestPromText_GrammarAndUniqueFamilies(t *testing.T) {
+	t.Parallel()
 	rr, fams := scrapeProm(t, fullPromSources())
 	if got, want := rr.Header().Get("Content-Type"), "text/plain; version=0.0.4; charset=utf-8"; got != want {
 		t.Errorf("Content-Type = %q, want %q", got, want)
@@ -367,6 +368,7 @@ func TestPromText_GrammarAndUniqueFamilies(t *testing.T) {
 // histogram counts and no windows, the families that depend on them are left
 // out cleanly and the rest is still valid.
 func TestPrometheusMetrics_AbsentSourcesOmitFamilies(t *testing.T) {
+	t.Parallel()
 	_, fams := scrapeProm(t, api.MetricsSources{
 		ConnectedUsers: func() int { return 1 },
 		PersisterStats: func() (uint64, uint64, uint64, uint64, bool) { return 0, 0, 0, 0, false },
@@ -394,6 +396,7 @@ func TestPrometheusMetrics_AbsentSourcesOmitFamilies(t *testing.T) {
 // TestPrometheusMetrics_WindowNotReadyIsAbsent: a window the sampler cannot
 // answer yet has no max series, so nothing reports a reassuring zero.
 func TestPrometheusMetrics_WindowNotReadyIsAbsent(t *testing.T) {
+	t.Parallel()
 	src := fullPromSources()
 	src.Windows = func(d time.Duration) (metrics.WindowSnapshot, bool) {
 		if d > time.Minute {
@@ -459,6 +462,7 @@ func jsonValue(t *testing.T, resp map[string]any, path, win string) (float64, bo
 // value converted to base units with its Prometheus series. A series reading
 // the wrong source, the wrong window or the wrong unit fails here.
 func TestPrometheusMetrics_MatchesJSON(t *testing.T) {
+	t.Parallel()
 	src := fullPromSources()
 	js := getMetrics(t, src)
 	_, fams := scrapeProm(t, src)
@@ -516,6 +520,7 @@ func TestPrometheusMetrics_MatchesJSON(t *testing.T) {
 // landing while scrapes run never break +Inf == _count (parseProm checks it on
 // every scrape).
 func TestPrometheusMetrics_ScrapeRacingObservations(t *testing.T) {
+	t.Parallel()
 	var h metrics.Histogram
 	src := api.MetricsSources{LatencyCounts: func() hubstats.LatencyCounts {
 		return hubstats.LatencyCounts{"ws_broadcast_ms": h.Counts()}
@@ -540,6 +545,7 @@ func TestPrometheusMetrics_ScrapeRacingObservations(t *testing.T) {
 }
 
 func TestPrometheusMetrics_AdminIPRestrict(t *testing.T) {
+	t.Parallel()
 	build := func(cidrs []string) http.Handler {
 		r := chi.NewRouter()
 		r.With(api.AdminIPRestrict("server.metrics_allowed_cidrs", cidrs, nil)).
@@ -570,6 +576,7 @@ func TestPrometheusMetrics_AdminIPRestrict(t *testing.T) {
 // router, in whichever build runs, with a real hub: the route is mounted, the
 // perimeter admits loopback, and every histogram family has its hub source.
 func TestPrometheusMetrics_LiveRouter(t *testing.T) {
+	t.Parallel()
 	handler := fullRouter(t)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/prometheus", nil)
 	rr := serveLocal(handler, req)
@@ -701,6 +708,7 @@ func jsonLeafPaths(t reflect.Type, prefix string) []string {
 // mapping or exclusion, and on a mapped series that a fully wired scrape does
 // not actually carry.
 func TestPrometheusMetrics_EveryJSONFieldClassified(t *testing.T) {
+	t.Parallel()
 	paths := jsonLeafPaths(reflect.TypeFor[api.ServerMetrics](), "")
 	if len(paths) < 100 {
 		t.Fatalf("walked only %d JSON leaves; the walk is not reaching the nested structs", len(paths))
@@ -769,6 +777,7 @@ func TestPrometheusMetrics_EveryJSONFieldClassified(t *testing.T) {
 // inside and outside it. A route mounted without the address limit would answer
 // 200 to the outside caller and fail here.
 func TestMetricsRoutes_LiveRouterPerimeter(t *testing.T) {
+	t.Parallel()
 	handler, _ := fullRouterWithConfig(t, func(cfg *config.Config) {
 		cfg.Server.AdminAllowedCIDRs = []string{"127.0.0.0/8"}
 		cfg.Server.MetricsAllowedCIDRs = nil // falls back to the list above

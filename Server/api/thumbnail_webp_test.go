@@ -107,6 +107,7 @@ func TestServeThumb_TransparentWebPIsAPNG(t *testing.T) {
 // The decoder here reads stills only: an animated WebP keeps its frames by
 // passing through, and nothing is kept for it.
 func TestServeThumb_AnimatedWebPPassesThrough(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	store := newUploadTestStorage(t)
 	router := buildUploadRouter(database, store, nil)
@@ -142,6 +143,7 @@ func webpBomb(t *testing.T) []byte {
 }
 
 func TestServeThumb_WebPBombIsNotDecoded(t *testing.T) {
+	t.Parallel()
 	bomb := webpBomb(t)
 	if cfg, format, err := image.DecodeConfig(bytes.NewReader(bomb)); err != nil || format != "webp" || cfg.Width != 16384 || cfg.Height != 16384 {
 		t.Fatalf("bomb header = %dx%d %s (%v), want a 16384x16384 webp", cfg.Width, cfg.Height, format, err)

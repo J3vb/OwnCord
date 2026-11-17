@@ -19,6 +19,7 @@ func seedTokenUser(t *testing.T, database *db.DB, name string, roleID int) int64
 }
 
 func TestAPIToken_CreateGetRevoke(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	uid := seedTokenUser(t, database, "owner", 1)
@@ -55,6 +56,7 @@ func TestAPIToken_CreateGetRevoke(t *testing.T) {
 }
 
 func TestAPIToken_Expiry(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	uid := seedTokenUser(t, database, "owner", 1)
@@ -93,6 +95,7 @@ func TestAPIToken_Expiry(t *testing.T) {
 }
 
 func TestAPIToken_TouchAndList(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	uid := seedTokenUser(t, database, "owner", 1)
@@ -117,6 +120,7 @@ func TestAPIToken_TouchAndList(t *testing.T) {
 }
 
 func TestAPIToken_RevokeByLabel(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	uid := seedTokenUser(t, database, "owner", 1)
@@ -136,6 +140,7 @@ func TestAPIToken_RevokeByLabel(t *testing.T) {
 }
 
 func TestGetOwnerUser(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 
@@ -162,6 +167,7 @@ func TestGetOwnerUser(t *testing.T) {
 // live admin forever and becomes the default identity for API-token creation,
 // minting tokens the auth layer then rejects on every use.
 func TestGetOwnerUser_SkipsBannedOwner(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 
@@ -189,6 +195,7 @@ func TestGetOwnerUser_SkipsBannedOwner(t *testing.T) {
 // because ' ' sorts below 'T' and a naive lexical compare reads a same-day
 // space-form expiry as lapsed (or, in the other direction, a live ban as lapsed).
 func TestGetOwnerUser_LapsedTempBanStaysEligible(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name    string
 		expires string

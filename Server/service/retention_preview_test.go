@@ -21,6 +21,7 @@ func previewChange(t *testing.T, svc *RetentionService, actor int64, c Retention
 }
 
 func TestRetentionProposedPreviewMath(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		scope      string
@@ -87,6 +88,7 @@ func TestRetentionProposedPreviewMath(t *testing.T) {
 }
 
 func TestRetentionPreviewBindingAndStaleRevision(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	uid, _ := database.CreateUser(ctx, "preview-owner", "hash", 1)
@@ -135,6 +137,7 @@ func TestRetentionPreviewBindingAndStaleRevision(t *testing.T) {
 }
 
 func TestRetentionConcurrentApplyHasOneWinner(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	uid, _ := database.CreateUser(ctx, "concurrent-owner", "hash", 1)
@@ -168,6 +171,7 @@ func TestRetentionConcurrentApplyHasOneWinner(t *testing.T) {
 }
 
 func TestRetentionPreviewInvalidationByEveryChannelWriter(t *testing.T) {
+	t.Parallel()
 	for _, change := range []string{"insert", "update", "delete", "cascade"} {
 		t.Run(change, func(t *testing.T) {
 			ctx := context.Background()
@@ -200,6 +204,7 @@ func TestRetentionPreviewInvalidationByEveryChannelWriter(t *testing.T) {
 }
 
 func TestRetentionPreviewValidation(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := newTestDB(t)
 	uid, _ := database.CreateUser(ctx, "validation-owner", "hash", 1)

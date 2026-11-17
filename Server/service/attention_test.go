@@ -93,6 +93,7 @@ func wantStatus(t *testing.T, rep AttentionReport, id, want string) {
 
 // An unmeasured source is unknown, never healthy, and raises nothing.
 func TestAttention_UnknownIsNotHealthy(t *testing.T) {
+	t.Parallel()
 	s := NewAttentionService(AttentionThresholds{WriterWaitMsPerMin: 1, ReconnectsPerMin: 1, DeliveryDropsPerMin: 1}, AttentionSources{})
 	s.Evaluate(context.Background(), time.Now())
 	rep := s.Report()
@@ -114,6 +115,7 @@ func TestAttention_UnknownIsNotHealthy(t *testing.T) {
 
 // A rate needs two samples; the first is unknown, the second is measured.
 func TestAttention_RateFirstSampleIsUnknown(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	wantStatus(t, f.step(), "reconnects", AttentionStatusUnknown)
 	wantStatus(t, f.step(), "reconnects", AttentionStatusOK)
@@ -122,6 +124,7 @@ func TestAttention_RateFirstSampleIsUnknown(t *testing.T) {
 // A disk warning commits only after two samples, holds inside the clear
 // margin, and recovers only after two samples clear of it.
 func TestAttention_DiskHysteresis(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	wantStatus(t, f.step(), "disk", AttentionStatusOK)
 
@@ -158,6 +161,7 @@ func TestAttention_DiskHysteresis(t *testing.T) {
 // only the critical level, and no floor at all is not checked rather than
 // healthy.
 func TestAttention_DiskFloors(t *testing.T) {
+	t.Parallel()
 	disk := func(warn, crit, free uint64) AttentionReport {
 		s := NewAttentionService(AttentionThresholds{DiskWarnFreeBytes: warn, DiskCriticalFreeBytes: crit},
 			AttentionSources{DiskFree: func() (uint64, error) { return free, nil }})
@@ -194,6 +198,7 @@ func TestAttention_DiskFloors(t *testing.T) {
 
 // A single noisy sample neither raises nor clears.
 func TestAttention_SingleSpikeDoesNotRaise(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.warmUp()
 	f.resumes += 100
@@ -208,6 +213,7 @@ func TestAttention_SingleSpikeDoesNotRaise(t *testing.T) {
 // The measured baseline raises the threshold above the configured floor, and
 // a raised rate clears only below half the threshold.
 func TestAttention_RateBaselineAndClearBand(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.step()
 	f.resumes += 3000 // every client's resume right after a restart: not learned
@@ -259,6 +265,7 @@ func (f *attentionFixture) warmUp() {
 
 // Reconnect warm-up learns and raises nothing, however high the rate.
 func TestAttention_ReconnectWarmUpDoesNotRaise(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.step()
 	for range attentionBaselineWarmup + 1 {
@@ -272,6 +279,7 @@ func TestAttention_ReconnectWarmUpDoesNotRaise(t *testing.T) {
 // Writer wait saturated at boot raises at the floor during warm-up and is
 // not learned, so it raises again once the baseline is established.
 func TestAttention_BootPressureIsRaisedNotLearned(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.step()
 	f.waitMs += 20_000 // 4x the 5000 ms/min floor
@@ -298,6 +306,7 @@ func TestAttention_BootPressureIsRaisedNotLearned(t *testing.T) {
 // One high first rate interval, such as the resume burst after a restart,
 // does not raise.
 func TestAttention_FirstRateIntervalNeedsSustain(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.step()
 	f.waitMs += 20_000
@@ -314,6 +323,7 @@ func TestAttention_FirstRateIntervalNeedsSustain(t *testing.T) {
 // The first disk level and a stopped dispatch loop commit at once rather
 // than reading as healthy.
 func TestAttention_FirstMeasuredLevelCommits(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.free = 100 << 20
 	f.alive = false
@@ -323,6 +333,7 @@ func TestAttention_FirstMeasuredLevelCommits(t *testing.T) {
 
 // Over a quiet baseline the configured floor is the threshold.
 func TestAttention_WriterWaitFloor(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.warmUp()
 	for range 2 {
@@ -338,6 +349,7 @@ func TestAttention_WriterWaitFloor(t *testing.T) {
 
 // A warning that keeps firing, recovers and fires again stays one entry.
 func TestAttention_WarningsAreDeduplicated(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.warmUp()
 	raise := func() {
@@ -383,6 +395,7 @@ func TestAttention_WarningsAreDeduplicated(t *testing.T) {
 
 // Losing a measurement never recovers an active warning.
 func TestAttention_UnknownDoesNotRecover(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.free = 100 << 20
 	f.step()
@@ -397,6 +410,7 @@ func TestAttention_UnknownDoesNotRecover(t *testing.T) {
 
 // Recovered warnings are listed for a day, then dropped.
 func TestAttention_RecoveredWarningsExpire(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.free = 100 << 20
 	f.step()
@@ -415,6 +429,7 @@ func TestAttention_RecoveredWarningsExpire(t *testing.T) {
 
 // A stopped dispatch loop is critical on its own.
 func TestAttention_DeadDispatchIsCritical(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.step()
 	wantStatus(t, f.step(), "delivery", AttentionStatusOK)
@@ -427,6 +442,7 @@ func TestAttention_DeadDispatchIsCritical(t *testing.T) {
 }
 
 func TestAttention_JobHealth(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.s.RegisterJob("Message retention", "retention sweep failed")
 	wantStatus(t, f.step(), "job:Message retention", AttentionStatusUnknown)
@@ -460,6 +476,7 @@ func TestAttention_JobHealth(t *testing.T) {
 }
 
 func TestAttention_Backup(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name     string
 		schedule string
@@ -495,6 +512,7 @@ func TestAttention_Backup(t *testing.T) {
 // A missing backup_schedule row is the default "off", not a read failure;
 // any other read failure is unknown.
 func TestAttention_BackupScheduleErrors(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		err  error
 		want string
@@ -513,6 +531,7 @@ func TestAttention_BackupScheduleErrors(t *testing.T) {
 
 // Run evaluates immediately and stops with its context.
 func TestAttention_RunStopsWithContext(t *testing.T) {
+	t.Parallel()
 	s := NewAttentionService(AttentionThresholds{}, AttentionSources{})
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
@@ -532,6 +551,7 @@ func TestAttention_RunStopsWithContext(t *testing.T) {
 }
 
 func TestBackupScheduleInterval(t *testing.T) {
+	t.Parallel()
 	for schedule, want := range map[string]time.Duration{
 		"daily": 24 * time.Hour, " Weekly ": 7 * 24 * time.Hour, "off": 0, "": 0, "hourly": 0, //nolint:gocritic // padded key proves trimming and case folding
 	} {
@@ -544,6 +564,7 @@ func TestBackupScheduleInterval(t *testing.T) {
 // SRE-04: a managed companion that is not running raises, and a stopped one
 // warns; an externally managed LiveKit is unknown, never healthy.
 func TestAttention_VoiceSignal(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 
 	// No source at all (bare service) is unknown, never healthy.
@@ -619,6 +640,7 @@ func TestAttention_VoiceSignal(t *testing.T) {
 // short-lived certificate never raises. Nothing to read (no source, TLS off
 // behind a proxy, ACME before its first handshake) is unknown, never healthy.
 func TestAttention_CertificateExpiry(t *testing.T) {
+	t.Parallel()
 	now := time.Date(2026, 9, 23, 12, 0, 0, 0, time.UTC)
 	days := func(n int) time.Time { return now.Add(time.Duration(n) * 24 * time.Hour) }
 	evalLife := func(mode string, lifetimeDays, leftDays int) AttentionReport {
@@ -706,6 +728,7 @@ func TestAttention_CertificateExpiry(t *testing.T) {
 // RefreshBackup re-evaluates only the backup signal, in place: a backup taken
 // between samples shows at once, and the rate signals keep their cadence.
 func TestAttention_RefreshBackupUpdatesOnlyTheBackupSignal(t *testing.T) {
+	t.Parallel()
 	f := newAttentionFixture(t)
 	f.schedule, f.last = "daily", time.Time{}
 

@@ -18,6 +18,7 @@ func turnDMsOff(t *testing.T, database *db.DB, userID int64) {
 // transaction: the transaction refuses and writes no participant row and no
 // group_add row.
 func TestAddGroupDMMembers_ReachabilityRecheckedInTx(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	dave := seedUser(t, f.database, "dave")
@@ -52,6 +53,7 @@ func TestAddGroupDMMembers_ReachabilityRecheckedInTx(t *testing.T) {
 }
 
 func TestAddGroupDMMembers_UnacceptedRequestRefusedInTx(t *testing.T) {
+	t.Parallel()
 	f := newGroupRowFixture(t)
 	ctx := context.Background()
 	dave := seedUser(t, f.database, "dave")
@@ -72,6 +74,7 @@ func TestAddGroupDMMembers_UnacceptedRequestRefusedInTx(t *testing.T) {
 }
 
 func TestCreateGroupDMChannel_RefusesUnreachableRecipientInTx(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	alice := seedUser(t, database, "alice")

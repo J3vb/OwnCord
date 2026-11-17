@@ -10,6 +10,7 @@ import (
 )
 
 func TestAuthorizeGroupIcon_GateOrder(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 
@@ -31,6 +32,7 @@ func TestAuthorizeGroupIcon_GateOrder(t *testing.T) {
 }
 
 func TestSetGroupIcon_RowFallbackTextAndAuthor(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	mustDo(t, "CreateAttachment", f.database.CreateAttachment(ctx, "icon-a", fixtureMember2, "a.png", "s-a", "image/png", 1, nil, nil))
@@ -61,6 +63,7 @@ func TestSetGroupIcon_RowFallbackTextAndAuthor(t *testing.T) {
 }
 
 func TestSetGroupIcon_TimedOutRefusedAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	f := newGroupMembershipFixture(t)
 	ctx := context.Background()
 	if _, err := f.mod.Timeout(ctx, fixtureMod, fixtureMember, "cool off", time.Hour, nil); err != nil {
@@ -77,6 +80,7 @@ func TestSetGroupIcon_TimedOutRefusedAndWritesNothing(t *testing.T) {
 // The service builds icon URLs with AvatarFileURL and the db layer with
 // GroupIconURL (db cannot import service): the two must agree.
 func TestGroupIconURL_MatchesAvatarFileURL(t *testing.T) {
+	t.Parallel()
 	for _, id := range []string{"a", "0f8e-4c", "icon.png"} {
 		if got, want := db.GroupIconURL(id), AvatarFileURL(id); got != want {
 			t.Errorf("GroupIconURL(%q) = %q, AvatarFileURL = %q", id, got, want)

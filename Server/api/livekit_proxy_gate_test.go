@@ -160,6 +160,7 @@ func getThroughProxy(t *testing.T, proxyAddr, pathAndQuery string, header http.H
 // reaches LiveKit: no credential or a malformed one is a 401, a refused join a
 // 403, and a check that could not be made a 503 the SDK retries.
 func TestLiveKitProxy_UnadmittedRequestNeverReachesBackend(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name      string
 		query     string
@@ -207,6 +208,7 @@ func TestLiveKitProxy_UnadmittedRequestNeverReachesBackend(t *testing.T) {
 
 // A proxy built without a gate admits nothing.
 func TestLiveKitProxy_NoGateFailsClosed(t *testing.T) {
+	t.Parallel()
 	backend, dials, _ := countingWSBackend(t)
 	proxy := httptest.NewServer(api.NewLiveKitProxy(backend, []string{"*"}, nil))
 	t.Cleanup(proxy.Close)
@@ -222,6 +224,7 @@ func TestLiveKitProxy_NoGateFailsClosed(t *testing.T) {
 // connected. When it refuses, or cannot decide, the client is never upgraded
 // and the backend connection is closed.
 func TestLiveKitProxy_WebSocket_ConfirmRefusalNeverUpgradesClient(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name       string
 		confirmErr error
@@ -255,6 +258,7 @@ func TestLiveKitProxy_WebSocket_ConfirmRefusalNeverUpgradesClient(t *testing.T) 
 // Confirm is not cut short by the client going away: it may have a session to
 // remove at LiveKit. The client here hangs up at the moment Confirm starts.
 func TestLiveKitProxy_WebSocket_ConfirmOutlivesClientHangup(t *testing.T) {
+	t.Parallel()
 	backend, _, _ := countingWSBackend(t)
 	clientCtx, clientHangsUp := context.WithCancel(t.Context())
 	defer clientHangsUp()
@@ -292,6 +296,7 @@ func TestLiveKitProxy_WebSocket_ConfirmOutlivesClientHangup(t *testing.T) {
 
 // An admitted request is confirmed once and then carries frames both ways.
 func TestLiveKitProxy_WebSocket_AdmittedSessionIsConfirmedOnce(t *testing.T) {
+	t.Parallel()
 	backend, dials, _ := countingWSBackend(t)
 	gate := &recordingGate{}
 	ctx, conn := dialGated(t, gatedProxy(t, backend, gate), "/rtc/v1?access_token=client")
@@ -330,6 +335,7 @@ func firstMessageBackend(t *testing.T, first *livekit.SignalResponse) string {
 // client to reconnect from scratch is passed on and nothing else is: the SDK
 // acts on that message, and would keep retrying the resume on an error status.
 func TestLiveKitProxy_WebSocket_AbsentSessionRelaysOnlyTheBackendLeave(t *testing.T) {
+	t.Parallel()
 	absent := fmt.Errorf("%w: test", ws.ErrVoiceSessionAbsent)
 	leave := &livekit.SignalResponse{Message: &livekit.SignalResponse_Leave{Leave: &livekit.LeaveRequest{
 		Reason: livekit.DisconnectReason_STATE_MISMATCH, Action: livekit.LeaveRequest_RECONNECT,
@@ -390,6 +396,7 @@ func rawUpgradeStatus(t *testing.T, addr, pathAndQuery, connection, upgrade stri
 // However a client spells its upgrade headers, a session either goes through
 // Confirm or is not opened; browsers differ here ("keep-alive, Upgrade").
 func TestLiveKitProxy_WebSocket_EveryUpgradeSpellingIsConfirmedOrRefused(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name, path, connection, upgrade string
 		want                            int
@@ -425,6 +432,7 @@ func TestLiveKitProxy_WebSocket_EveryUpgradeSpellingIsConfirmedOrRefused(t *test
 // A validate request is forwarded as a plain request whatever upgrade headers
 // it carries.
 func TestLiveKitProxy_ValidateNeverForwardsAnUpgrade(t *testing.T) {
+	t.Parallel()
 	var gotUpgrade string
 	addr := gatedProxy(t, plainBackend(t, func(w http.ResponseWriter, r *http.Request) {
 		gotUpgrade = r.Header.Get("Upgrade")
@@ -441,6 +449,7 @@ func TestLiveKitProxy_ValidateNeverForwardsAnUpgrade(t *testing.T) {
 // from an answer marked readable. LiveKit marks its own; an answer the proxy
 // gives in its place carries the mark once, and a forwarded one is not doubled.
 func TestLiveKitProxy_ValidateAnswersAreReadableCrossOrigin(t *testing.T) {
+	t.Parallel()
 	gate := &recordingGate{}
 	addr := gatedProxy(t, plainBackend(t, func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -470,6 +479,7 @@ func TestLiveKitProxy_ValidateAnswersAreReadableCrossOrigin(t *testing.T) {
 
 // The validate paths open no session, so they are admitted but not confirmed.
 func TestLiveKitProxy_ValidateIsAdmittedNotConfirmed(t *testing.T) {
+	t.Parallel()
 	var gotAuthz string
 	gate := &recordingGate{}
 	addr := gatedProxy(t, plainBackend(t, func(w http.ResponseWriter, r *http.Request) {

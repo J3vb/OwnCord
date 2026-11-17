@@ -17,6 +17,7 @@ import (
 // is silently skipped — nobody gets the dm_channel_open, and (because it is
 // unsequenced) nothing ever redelivers it.
 func TestBroadcastDMOpen_SurvivesCancelledRequestContext(t *testing.T) {
+	t.Parallel()
 	database := newDMTestDB(t)
 	svc := service.New(database, auth.NewRateLimiter())
 	broadcaster := &mockBroadcaster{}

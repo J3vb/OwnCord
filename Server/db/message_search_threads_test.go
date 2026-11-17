@@ -23,6 +23,7 @@ func seedThreadRow(t *testing.T, database *db.DB, parent int64, name string) int
 // The threads under the scope ride in SQL, so a parent with far more threads than SQLite's bound-parameter
 // limit still searches, and the hit names its parent.
 func TestSearchFiltered_ThreadsExpandedInSQL(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	u := seedUser(t, database, "tu")
@@ -56,6 +57,7 @@ func TestSearchFiltered_ThreadsExpandedInSQL(t *testing.T) {
 // With an imported channel in scope the date bound skips only that channel: the threads of a native parent
 // keep the id range and still match.
 func TestSearchFiltered_ThreadsWithDateBoundAndImportedScope(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	u := seedUser(t, database, "tu2")

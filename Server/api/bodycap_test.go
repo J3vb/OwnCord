@@ -14,6 +14,7 @@ import (
 // unreachable — the 16 MiB plugin upload 400s at ~1 MiB, and an at-limit
 // avatar can never fit its multipart framing.
 func TestBodyCapExemptions_RouteEnvelopesReachable(t *testing.T) {
+	t.Parallel()
 	drain := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if _, err := io.Copy(io.Discard, r.Body); err != nil {
 			w.WriteHeader(http.StatusRequestEntityTooLarge)

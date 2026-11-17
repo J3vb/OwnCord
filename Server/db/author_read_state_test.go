@@ -24,6 +24,7 @@ func assertReadState(t *testing.T, database *db.DB, userID, channelID, want int6
 }
 
 func TestCreateMessageWithMentions_AdvancesAuthorReadState(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
@@ -38,6 +39,7 @@ func TestCreateMessageWithMentions_AdvancesAuthorReadState(t *testing.T) {
 }
 
 func TestCreateMessageDelivery_AdvancesAuthorReadStateOnlyOnInsert(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	author := seedUser(t, database, "alice")

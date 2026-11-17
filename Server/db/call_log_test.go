@@ -57,6 +57,7 @@ func count(t *testing.T, database *db.DB, query string, args ...any) int {
 }
 
 func TestMigration064_ExistingMessagesKindZero(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	mustDo(t, "migrate to 063", db.MigrateFS(database, migrationsBefore(t, "064")))
 	ctx := context.Background()
@@ -80,6 +81,7 @@ func TestMigration064_ExistingMessagesKindZero(t *testing.T) {
 }
 
 func TestCreateCallLog_KindCallParticipantsAndAuthorReadState(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	row := f.startCall(t, f.alice, f.bob)
 
@@ -108,6 +110,7 @@ func TestCreateCallLog_KindCallParticipantsAndAuthorReadState(t *testing.T) {
 }
 
 func TestCreateCallLog_SecondOpenCallSameChannelConflicts(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	first := f.startCall(t, f.alice)
 	_, err := f.database.CreateCallLog(context.Background(), db.CallLogParams{
@@ -128,6 +131,7 @@ func TestCreateCallLog_SecondOpenCallSameChannelConflicts(t *testing.T) {
 }
 
 func TestEndCall_SecondEndIsNoop(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	row := f.startCall(t, f.alice)
 	ctx := context.Background()
@@ -152,6 +156,7 @@ func TestEndCall_SecondEndIsNoop(t *testing.T) {
 }
 
 func TestEditMessageContent_CallRowNotFound(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	row := f.startCall(t, f.alice)
 	_, err := f.database.EditMessage(context.Background(), row.Message.ID, f.alice, "rewritten")
@@ -165,6 +170,7 @@ func TestEditMessageContent_CallRowNotFound(t *testing.T) {
 }
 
 func TestSoftDeleteMessage_CallRowUntouched(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	row := f.startCall(t, f.alice)
 	ctx := context.Background()
@@ -188,6 +194,7 @@ func TestSoftDeleteMessage_CallRowUntouched(t *testing.T) {
 }
 
 func TestMessagesForAPI_CallRowCarriesKindAndCall(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	ctx := context.Background()
 	before, err := f.database.CreateMessage(ctx, f.dm, f.bob, "hi", nil)
@@ -233,6 +240,7 @@ func TestMessagesForAPI_CallRowCarriesKindAndCall(t *testing.T) {
 }
 
 func TestSearch_ExcludesCallRows(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	ctx := context.Background()
 	// The fallback text is indexed like any content; both rows contain "zebra".
@@ -271,6 +279,7 @@ func TestSearch_ExcludesCallRows(t *testing.T) {
 }
 
 func TestEraseAccount_RemovesCallParticipation(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	ctx := context.Background()
 	third := seedUser(t, f.database, "carol")
@@ -322,6 +331,7 @@ func TestEraseAccount_RemovesCallParticipation(t *testing.T) {
 }
 
 func TestDeleteChannel_CascadesCallTables(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	row := f.startCall(t, f.alice, f.bob)
 	mustDo(t, "DeleteChannel", f.database.DeleteChannel(context.Background(), f.dm))
@@ -342,6 +352,7 @@ func TestDeleteChannel_CascadesCallTables(t *testing.T) {
 // the pin-row insert and the window lookup, so a new insert or update cannot create or retype
 // one.
 func TestCallLog_OnlyWriterOfKind(t *testing.T) {
+	t.Parallel()
 	stmt := regexp.MustCompile(`(?is)(INSERT\s+(?:OR\s+\w+\s+)?INTO\s+messages\b[^;` + "`" + `]*|UPDATE\s+messages\s+SET\b[^;` + "`" + `]*)`)
 	kind := regexp.MustCompile(`(?i)\bkind\b\s*(=|,|\))`)
 	var files []string
@@ -382,6 +393,7 @@ func TestCallLog_OnlyWriterOfKind(t *testing.T) {
 }
 
 func TestPurgeChannelMessages_SkipsCallRows(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	ctx := context.Background()
 	row := f.startCall(t, f.alice)
@@ -398,6 +410,7 @@ func TestPurgeChannelMessages_SkipsCallRows(t *testing.T) {
 }
 
 func TestPurgeUserChannelMessagesSince_SkipsCallRows(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	ctx := context.Background()
 	row := f.startCall(t, f.alice) // authored by alice
@@ -414,6 +427,7 @@ func TestPurgeUserChannelMessagesSince_SkipsCallRows(t *testing.T) {
 }
 
 func TestSetMessagePinned_CallRowNotFound(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	row := f.startCall(t, f.alice)
 	if _, err := f.database.SetMessagePinned(context.Background(), db.SetPinnedParams{MessageID: row.Message.ID, Pinned: true, UserID: 1}); !errors.Is(err, db.ErrNotFound) {
@@ -425,6 +439,7 @@ func TestSetMessagePinned_CallRowNotFound(t *testing.T) {
 }
 
 func TestOpenCallReads_LiveVersusNone(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	ctx := context.Background()
 	if oc, err := f.database.GetOpenCall(ctx, f.dm); err != nil || oc != nil {
@@ -458,6 +473,7 @@ func TestOpenCallReads_LiveVersusNone(t *testing.T) {
 }
 
 func TestAddCallParticipants_IdempotentAndSkipsMissingUsers(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	ctx := context.Background()
 	row := f.startCall(t, f.alice)
@@ -475,6 +491,7 @@ func TestAddCallParticipants_IdempotentAndSkipsMissingUsers(t *testing.T) {
 }
 
 func TestTouchCall_OnlyMovesForwardAndOnlyWhileLive(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	ctx := context.Background()
 	row := f.startCall(t, f.alice)
@@ -503,6 +520,7 @@ func TestTouchCall_OnlyMovesForwardAndOnlyWhileLive(t *testing.T) {
 }
 
 func TestGetCallInfo_NilForNonCallMessage(t *testing.T) {
+	t.Parallel()
 	f := newCallFixture(t)
 	ctx := context.Background()
 	id, err := f.database.CreateMessage(ctx, f.dm, f.alice, "plain", nil)

@@ -19,6 +19,7 @@ func nsfwChannel(t *testing.T, database *db.DB, name string) int64 {
 }
 
 func TestAcknowledgeNSFW_RevokeAndHasNSFWAcknowledgement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	uid := seedUser(t, database, "acker")
@@ -50,6 +51,7 @@ func TestAcknowledgeNSFW_RevokeAndHasNSFWAcknowledgement(t *testing.T) {
 }
 
 func TestListNSFWAcknowledgedUserIDs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	chID := nsfwChannel(t, database, "labelled")
@@ -89,6 +91,7 @@ func TestListNSFWAcknowledgedUserIDs(t *testing.T) {
 }
 
 func TestDeleteNSFWAcknowledgementsForChannel(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	chID := nsfwChannel(t, database, "labelled")
@@ -117,6 +120,7 @@ func TestDeleteNSFWAcknowledgementsForChannel(t *testing.T) {
 // the acknowledgement with it, the same shape channel_retention (migration
 // 039) already uses.
 func TestNSFW_ChannelDeletionCascades(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	chID := nsfwChannel(t, database, "doomed")
@@ -145,6 +149,7 @@ func TestNSFW_ChannelDeletionCascades(t *testing.T) {
 // whole point of a server-side row over the old client-only sessionStorage
 // gate.
 func TestNSFW_NewSessionInheritsTheAcknowledgement(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	uid := seedUser(t, database, "multi-device")
@@ -175,6 +180,7 @@ func TestNSFW_NewSessionInheritsTheAcknowledgement(t *testing.T) {
 // label-lifecycle rule: unlabelling a channel deletes its acknowledgement
 // rows, and the flag write itself still lands.
 func TestAdminUpdateChannel_ClearsAcksInTheSameCommit(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	chID := nsfwChannel(t, database, "was-labelled")
@@ -202,6 +208,7 @@ func TestAdminUpdateChannel_ClearsAcksInTheSameCommit(t *testing.T) {
 }
 
 func TestChannelContentGateAndAcknowledgedChannelIDs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	uid := seedUser(t, database, "gater")

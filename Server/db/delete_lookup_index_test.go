@@ -10,6 +10,7 @@ import (
 // below, and each must seek an index: a scan of channels per deleted message
 // held the writer for seconds on a server with many channels.
 func TestDeleteLookups_PlansSeekIndexes(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	for _, tc := range []struct{ table, column, index string }{
 		{"channels", "thread_post_message_id", "idx_channels_thread_post_message"},

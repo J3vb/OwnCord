@@ -11,6 +11,7 @@ import (
 // account that redeemed it.
 
 func TestCreateUserWithInvite_RecordsRedemption(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -44,6 +45,7 @@ func TestCreateUserWithInvite_RecordsRedemption(t *testing.T) {
 // A failed redemption (bad/revoked/exhausted code) must not leave a
 // redemption row behind — the account transaction rolls back together.
 func TestCreateUserWithInvite_FailedRedemptionRecordsNothing(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 
@@ -60,6 +62,7 @@ func TestCreateUserWithInvite_FailedRedemptionRecordsNothing(t *testing.T) {
 // Erasing a redeemer unlinks the redemption (kept so the invite's history and
 // use count survive) and takes inventory class 15b to zero.
 func TestEraseAccount_ClearsInviteRedemptionLink(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 

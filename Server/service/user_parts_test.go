@@ -10,6 +10,7 @@ import (
 // an optional capability on the core's store at run time, and a part handed a
 // narrower wrapper would quietly lose it.
 func TestUserServicePartsShareStore(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	users := NewUserService(database)
 	for name, st := range map[string]any{
@@ -29,6 +30,7 @@ func TestUserServicePartsShareStore(t *testing.T) {
 // The welcome hook is installed on UserService after construction; it must land
 // on the registration part, which is the only code that greets.
 func TestServicesWelcomeReachesRegistrationPart(t *testing.T) {
+	t.Parallel()
 	database := newTestDB(t)
 	svcs := New(database, auth.NewRateLimiter())
 	if svcs.Welcome == nil {

@@ -45,6 +45,7 @@ func assertCallRowUnchanged(t *testing.T, f *moderationActionsFixture, msgID int
 }
 
 func TestEditMessage_CallRowForbidden(t *testing.T) {
+	t.Parallel()
 	f, _, msgID := callRowFixture(t)
 	// The author gets the same refusal as anyone else.
 	if _, err := f.messages.EditMessage(context.Background(), fixtureMember, msgID, "rewritten"); !errors.Is(err, ErrForbidden) {
@@ -54,6 +55,7 @@ func TestEditMessage_CallRowForbidden(t *testing.T) {
 }
 
 func TestDeleteMessage_CallRowForbiddenForAuthor(t *testing.T) {
+	t.Parallel()
 	f, _, msgID := callRowFixture(t)
 	ctx := context.Background()
 	if _, err := f.messages.DeleteMessage(ctx, fixtureMember, msgID); !errors.Is(err, ErrForbidden) {
@@ -72,6 +74,7 @@ func TestDeleteMessage_CallRowForbiddenForAuthor(t *testing.T) {
 }
 
 func TestReaction_CallRowRefused(t *testing.T) {
+	t.Parallel()
 	f, _, msgID := callRowFixture(t)
 	ctx := context.Background()
 	if _, err := f.messages.AddReaction(ctx, fixtureMember2, msgID, "👍"); !errors.Is(err, ErrBadRequest) {
@@ -84,6 +87,7 @@ func TestReaction_CallRowRefused(t *testing.T) {
 }
 
 func TestPin_CallRowRefused(t *testing.T) {
+	t.Parallel()
 	f, dmID, msgID := callRowFixture(t)
 	if _, err := f.messages.SetMessagePinned(context.Background(), fixtureMember, dmID, msgID, true); !errors.Is(err, ErrBadRequest) {
 		t.Fatalf("pin = %v, want ErrBadRequest", err)
@@ -92,6 +96,7 @@ func TestPin_CallRowRefused(t *testing.T) {
 }
 
 func TestSend_ReplyToCallRowRefused(t *testing.T) {
+	t.Parallel()
 	f, dmID, msgID := callRowFixture(t)
 	ctx := context.Background()
 	_, err := f.messages.SendMessage(ctx, SendMessageParams{
@@ -113,6 +118,7 @@ func TestSend_ReplyToCallRowRefused(t *testing.T) {
 
 // A non-member gets the same answer for a call row as for a missing id.
 func TestReaction_CallRowNonMemberSameAsMissing(t *testing.T) {
+	t.Parallel()
 	f, _, msgID := callRowFixture(t)
 	ctx := context.Background()
 	_, callErr := f.messages.AddReaction(ctx, fixtureOwner, msgID, "👍")

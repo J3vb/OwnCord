@@ -105,6 +105,7 @@ func parityWant(t *testing.T, database *db.DB, perms *PermissionService, pred fu
 // with CanSendMessage for every (user, channel) in the fixture, including the
 // kind of refusal.
 func TestSendPolicyParity(t *testing.T) {
+	t.Parallel()
 	database := newParityDB(t)
 	perms := NewPermissionService(database, permissions.NewChecker(database))
 	msgSvc := NewMessageService(database, perms, nil)
@@ -142,6 +143,7 @@ func TestSendPolicyParity(t *testing.T) {
 // TestViewPolicyParity: HandleChannelFocus (session admission: channel_focus
 // and mark_read) agrees with CanAdmitSession for every (user, channel).
 func TestViewPolicyParity(t *testing.T) {
+	t.Parallel()
 	database := newParityDB(t)
 	perms := NewPermissionService(database, permissions.NewChecker(database))
 	chSvc := NewChannelService(database, perms)

@@ -22,6 +22,7 @@ func deliveryTestParams() SendMessageParams {
 }
 
 func TestMessageDelivery_ConcurrentRetriesCommitOneMessageAndMention(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	svc.RunBackgroundInlineForTest()
 	seedUser(t, database, &db.User{ID: 2, Username: "bob", Status: "online"})
@@ -74,6 +75,7 @@ func TestMessageDelivery_ConcurrentRetriesCommitOneMessageAndMention(t *testing.
 }
 
 func TestMessageDelivery_PayloadMismatchAndSenderScope(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	svc.RunBackgroundInlineForTest()
 	p := deliveryTestParams()
@@ -101,6 +103,7 @@ func TestMessageDelivery_PayloadMismatchAndSenderScope(t *testing.T) {
 }
 
 func TestMessageDelivery_RetryAfterRevokeIsDuplicateAndSkipsSlowMode(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	svc.RunBackgroundInlineForTest()
 	svc.setLimiterForTest(auth.NewRateLimiter())
@@ -139,6 +142,7 @@ func TestMessageDelivery_RetryAfterRevokeIsDuplicateAndSkipsSlowMode(t *testing.
 }
 
 func TestMessageDelivery_RefusedSendRetryStaysRefused(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	svc.RunBackgroundInlineForTest()
 	ctx := context.Background()
@@ -160,6 +164,7 @@ func TestMessageDelivery_RefusedSendRetryStaysRefused(t *testing.T) {
 }
 
 func TestMessageDelivery_RejectsExpiredAndFutureIDs(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 	for _, id := range []string{
 		deliveryTestID(time.Now().Add(-MessageRetryWindow - time.Minute)),
@@ -175,6 +180,7 @@ func TestMessageDelivery_RejectsExpiredAndFutureIDs(t *testing.T) {
 }
 
 func TestMessageDelivery_DeletedOriginalCannotBeResent(t *testing.T) {
+	t.Parallel()
 	for _, hard := range []bool{false, true} {
 		t.Run(fmt.Sprint("hard=", hard), func(t *testing.T) {
 			svc, database := newTestMessageService(t)
@@ -202,6 +208,7 @@ func TestMessageDelivery_DeletedOriginalCannotBeResent(t *testing.T) {
 }
 
 func TestMessageDelivery_AttachmentOnlyFailureIsAtomicAndRetryable(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	svc.RunBackgroundInlineForTest()
 	ctx := context.Background()
@@ -230,6 +237,7 @@ func TestMessageDelivery_AttachmentOnlyFailureIsAtomicAndRetryable(t *testing.T)
 }
 
 func TestMessageDelivery_DuplicateStillUsesGeneralRateLimit(t *testing.T) {
+	t.Parallel()
 	svc, _ := newTestMessageService(t)
 	svc.RunBackgroundInlineForTest()
 	svc.setLimiterForTest(auth.NewRateLimiter())
@@ -248,6 +256,7 @@ func TestMessageDelivery_DuplicateStillUsesGeneralRateLimit(t *testing.T) {
 }
 
 func TestMessageDelivery_DuplicateAfterDMBlockIsAcknowledged(t *testing.T) {
+	t.Parallel()
 	svc, database := newTestMessageService(t)
 	svc.RunBackgroundInlineForTest()
 	seedUser(t, database, &db.User{ID: 2, Username: "bob"})
@@ -272,6 +281,7 @@ func TestMessageDelivery_DuplicateAfterDMBlockIsAcknowledged(t *testing.T) {
 }
 
 func TestMessageDelivery_NewIDsHonorAdvertisedRestoreFloor(t *testing.T) {
+	t.Parallel()
 	p := deliveryTestParams()
 	floor := time.Now().Add(6 * time.Minute).UnixMilli()
 	p.ClientMessageID = deliveryTestID(time.UnixMilli(floor))

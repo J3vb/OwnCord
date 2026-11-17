@@ -52,6 +52,7 @@ func (e *memberActionsEnv) addKicker(t *testing.T) string {
 }
 
 func TestChannelActions_Create_Edit_Delete_PermittedMemberSucceeds(t *testing.T) {
+	t.Parallel()
 	e := newMemberActionsEnv(t)
 
 	rr := e.do(t, http.MethodPost, channelsBase, "admin", `{"name":"planning","type":"text","category":"Team"}`)
@@ -80,6 +81,7 @@ func TestChannelActions_Create_Edit_Delete_PermittedMemberSucceeds(t *testing.T)
 }
 
 func TestChannelActions_WithoutManageChannels_Forbidden(t *testing.T) {
+	t.Parallel()
 	e := newMemberActionsEnv(t)
 	before := e.channelCount(t)
 	// "kicker" clears the admin perimeter but holds no MANAGE_CHANNELS; "member"
@@ -101,6 +103,7 @@ func TestChannelActions_WithoutManageChannels_Forbidden(t *testing.T) {
 }
 
 func TestChannelActions_ForeignOrMissingToken_Unauthorised(t *testing.T) {
+	t.Parallel()
 	e := newMemberActionsEnv(t)
 	e.tokens["foreign"] = "a-token-this-server-never-issued"
 	before := e.channelCount(t)
@@ -123,6 +126,7 @@ func TestChannelActions_ForeignOrMissingToken_Unauthorised(t *testing.T) {
 // WP 6.5a: the category routes ride the same mount, so the client reaches them
 // without the /admin prefix, behind the same MANAGE_CHANNELS check.
 func TestChannelActions_Categories_PermittedMemberRoundTrip(t *testing.T) {
+	t.Parallel()
 	e := newMemberActionsEnv(t)
 
 	rr := e.do(t, http.MethodPost, channelsBase+"/categories", "admin", `{"name":"Games"}`)
@@ -170,6 +174,7 @@ func TestChannelActions_Categories_PermittedMemberRoundTrip(t *testing.T) {
 }
 
 func TestChannelActions_Categories_WithoutManageChannels_Forbidden(t *testing.T) {
+	t.Parallel()
 	e := newMemberActionsEnv(t)
 	for _, actor := range []string{e.addKicker(t), "member"} {
 		for _, c := range []struct{ method, path, body string }{

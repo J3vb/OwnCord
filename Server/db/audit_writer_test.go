@@ -57,6 +57,7 @@ func waitForPersisted(t *testing.T, w *db.AuditWriter, want uint64) {
 }
 
 func TestAuditWriter_BatchFlush(t *testing.T) {
+	t.Parallel()
 	store := &fakeAuditStore{}
 	// flushEvery is huge so the only flush trigger is the batch filling up —
 	// this pins that a full batch goes to the store as one PersistAudits call.
@@ -127,6 +128,7 @@ func TestAuditWriter_DropOnFullQueueLogsError(t *testing.T) {
 }
 
 func TestAuditWriter_DrainOnStop(t *testing.T) {
+	t.Parallel()
 	store := &fakeAuditStore{}
 	// Neither flush trigger can fire (batch 50, ticker 1h): everything must
 	// be flushed by Stop's drain.
@@ -197,6 +199,7 @@ func (s *slowAuditStore) stats() (persisted, flushAfter, flushesAfter int) {
 // ~20ms with nothing persisted. The fix must return only after the flush
 // completes, with every entry persisted.
 func TestAuditWriter_StopWaitsForGoroutineExit(t *testing.T) {
+	t.Parallel()
 	store := &slowAuditStore{delay: 200 * time.Millisecond}
 	// Neither the batch (50) nor the ticker (1h) can flush; only Stop's drain
 	// flushes, so the in-flight flush is deterministic.
@@ -280,6 +283,7 @@ func TestAuditWriter_EnqueueAfterStopDropsLoudly(t *testing.T) {
 // after the store is closed — so a slow-disk shutdown never writes into a
 // closed pool (the D8 audit-loss race).
 func TestAuditWriter_StopDrainsBeforeStoreClose(t *testing.T) {
+	t.Parallel()
 	store := &slowAuditStore{delay: 200 * time.Millisecond}
 	w := db.NewAuditWriter(store, 64, 50, time.Hour)
 	w.Start(context.Background())
@@ -327,12 +331,14 @@ func TestAuditWriter_FlushFailureCountsAndLogs(t *testing.T) {
 }
 
 func TestAuditWriter_NilReceiverIsSafe(t *testing.T) {
+	t.Parallel()
 	var w *db.AuditWriter
 	w.Enqueue(1, "a", "user", 1, "") // must not panic
 	w.Stop(context.Background())     // must not panic
 }
 
 func TestNewAuditWriter_PanicsOnNilStore(t *testing.T) {
+	t.Parallel()
 	defer func() {
 		if recover() == nil {
 			t.Fatal("NewAuditWriter(nil, ...) did not panic")
@@ -342,6 +348,7 @@ func TestNewAuditWriter_PanicsOnNilStore(t *testing.T) {
 }
 
 func TestAuditWriter_ConcurrentEnqueue(t *testing.T) {
+	t.Parallel()
 	store := &fakeAuditStore{}
 	w := db.NewAuditWriter(store, 4096, 32, time.Millisecond)
 	w.Start(context.Background())
@@ -373,6 +380,7 @@ func TestAuditWriter_ConcurrentEnqueue(t *testing.T) {
 // ─── PersistAudits (batch insert + per-row fallback) ─────────────────────────
 
 func TestPersistAudits_SingleTransaction(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 	uid := seedUser(t, database, "batchactor")
 
@@ -402,6 +410,7 @@ func TestPersistAudits_SingleTransaction(t *testing.T) {
 }
 
 func TestPersistAudits_PoisonRowFallsBackPerRow(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 	uid := seedUser(t, database, "poisonactor")
 
@@ -433,6 +442,7 @@ func TestPersistAudits_PoisonRowFallsBackPerRow(t *testing.T) {
 }
 
 func TestPersistAudits_EmptyBatch(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 	persisted, err := database.PersistAudits(context.Background(), nil)
 	if err != nil || persisted != 0 {
@@ -446,6 +456,7 @@ func TestPersistAudits_EmptyBatch(t *testing.T) {
 // *DB with no writer installed writes audit entries synchronously, so the
 // entry is visible the moment WriteAudit returns.
 func TestWriteAudit_SynchronousWithoutWriter(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 	uid := seedUser(t, database, "syncactor")
 
@@ -462,6 +473,7 @@ func TestWriteAudit_SynchronousWithoutWriter(t *testing.T) {
 // installs a writer on the *DB, WriteAudit enqueues instead of inserting —
 // the row only lands when the writer flushes (here forced via Stop's drain).
 func TestWriteAudit_AsyncWithInstalledWriter(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 	uid := seedUser(t, database, "asyncactor")
 
@@ -543,6 +555,7 @@ func TestWriteAudit_FullQueueFallsBackToSyncWrite(t *testing.T) {
 // writer stopped (a teardown step that runs after the audit-writer step) lands
 // through the direct write while the database is still open.
 func TestWriteAudit_AfterStopFallsBackToSyncWrite(t *testing.T) {
+	t.Parallel()
 	database := newSchemaTestDB(t, adminTestSchema)
 	uid := seedUser(t, database, "lateactor")
 
@@ -567,6 +580,7 @@ func TestWriteAudit_AfterStopFallsBackToSyncWrite(t *testing.T) {
 // still applies an erasure's unlinking rule, because the stopped writer stays
 // installed and keeps its rule set.
 func TestWriteAudit_FallbackKeepsUnlinkRules(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	const uid = int64(42)
 
@@ -594,6 +608,7 @@ func TestWriteAudit_FallbackKeepsUnlinkRules(t *testing.T) {
 // accepts while Stop runs on another goroutine reaches the store, so an
 // accepted entry is never left in the queue after the final drain.
 func TestAuditWriter_TryEnqueueRacingStopNeverStrands(t *testing.T) {
+	t.Parallel()
 	for range 50 {
 		store := &fakeAuditStore{}
 		w := db.NewAuditWriter(store, 4096, 50, time.Hour)

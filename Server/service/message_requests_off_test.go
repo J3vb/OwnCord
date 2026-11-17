@@ -58,6 +58,7 @@ func (r *pushRecorder) all() []int64 {
 }
 
 func TestRequestsOff_FirstSendDeliveredLive(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	setPrivacy(t, database, 2, true, false)
 
@@ -91,6 +92,7 @@ func TestRequestsOff_FirstSendDeliveredLive(t *testing.T) {
 }
 
 func TestRequestsOn_FirstSendStillStaged(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	setPrivacy(t, database, 2, true, true)
 
@@ -105,6 +107,7 @@ func TestRequestsOn_FirstSendStillStaged(t *testing.T) {
 }
 
 func TestRequestsOff_MentionCountedAndPushQueued(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		requests bool
@@ -131,6 +134,7 @@ func TestRequestsOff_MentionCountedAndPushQueued(t *testing.T) {
 }
 
 func TestRequestsOff_ReEnableKeepsPairTrusted(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	setPrivacy(t, database, 2, true, false)
 	sendFirst(t, svc, 1, "first")
@@ -150,6 +154,7 @@ func TestRequestsOff_ReEnableKeepsPairTrusted(t *testing.T) {
 }
 
 func TestRequestsOff_WithDMsOffIsRefused(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	setPrivacy(t, database, 2, false, false)
 
@@ -170,6 +175,7 @@ func TestRequestsOff_WithDMsOffIsRefused(t *testing.T) {
 // transaction. The transaction's own read decides, so the message is staged
 // and never delivered.
 func TestRequestsOff_FlipDuringFirstSendIsDecidedInTransaction(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name            string
 		allowDMs, reqOn bool
@@ -203,6 +209,7 @@ func TestRequestsOff_FlipDuringFirstSendIsDecidedInTransaction(t *testing.T) {
 // Edge 2: two first sends race. The same sender twice: one row, one open,
 // both messages delivered. Both directions: one row each, both delivered.
 func TestRequestsOff_RacingFirstSends(t *testing.T) {
+	t.Parallel()
 	for _, tc := range []struct {
 		name     string
 		senders  [2]int64
@@ -269,6 +276,7 @@ func TestRequestsOff_RacingFirstSends(t *testing.T) {
 // A request already in the inbox when the setting goes off stays pending and
 // keeps holding the sender's messages until the recipient decides.
 func TestRequestsOff_PendingRequestsStayPending(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 	first := sendFirst(t, svc, 1, "first")
@@ -294,6 +302,7 @@ func TestRequestsOff_PendingRequestsStayPending(t *testing.T) {
 // A block that lands after the gate's reads and before the transaction stages
 // the request instead: the recipient never trusts a sender they blocked.
 func TestRequestsOff_BlockDuringFirstSendStages(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	ctx := context.Background()
 	setPrivacy(t, database, 2, true, false)
@@ -325,6 +334,7 @@ func TestRequestsOff_BlockDuringFirstSendStages(t *testing.T) {
 // loser's hook) accepts and opens, the recipient then closes the DM and turns
 // requests back on, and the loser is still delivered and reopens the DM.
 func TestRequestsOff_LoserDeliveredAfterSettingFlipsBack(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	setPrivacy(t, database, 2, true, false)
 
@@ -360,6 +370,7 @@ func TestRequestsOff_LoserDeliveredAfterSettingFlipsBack(t *testing.T) {
 // Trust persists: once accepted, turning direct messages off does not cut the
 // sender off. Only a block does.
 func TestRequestsOff_TrustPersistsWhenDMsTurnedOff(t *testing.T) {
+	t.Parallel()
 	database, svc := newMessageRequestFixture(t)
 	setPrivacy(t, database, 2, true, false)
 	sendFirst(t, svc, 1, "first")

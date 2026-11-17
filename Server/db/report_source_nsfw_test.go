@@ -77,6 +77,7 @@ var (
 // every source channel that still exists and leaves NULL (unknown, withheld
 // by the evidence gate) where the channel was already deleted.
 func TestReportSourceNSFW_Backfill(t *testing.T) {
+	t.Parallel()
 	database := openMemory(t)
 	mustDo(t, "MigrateFS(<052)", db.MigrateFS(database, migrationsBefore(t, "052_")))
 	reporter := mustCreateUser(t, database, "src-reporter", "x", 4)
@@ -95,6 +96,7 @@ func TestReportSourceNSFW_Backfill(t *testing.T) {
 // TestReportSourceNSFW_TriggersAreSticky: the flag is set from the label at
 // filing, set by any later labelling, and never cleared by unlabelling.
 func TestReportSourceNSFW_TriggersAreSticky(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	reporter := mustCreateUser(t, database, "src-reporter", "x", 4)
 	f := &sourceNSFWFixture{t: t, database: database, reporter: reporter}

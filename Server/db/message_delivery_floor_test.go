@@ -16,6 +16,7 @@ import (
 )
 
 func TestMessageDeliveryFloor_RestoreRejectsLostReceiptButAcknowledgesRetainedReceipt(t *testing.T) {
+	t.Parallel()
 	dir := t.TempDir()
 	path := filepath.Join(dir, "chat.db")
 	backup := filepath.Join(dir, "backup.db")
@@ -109,6 +110,7 @@ func TestMessageDeliveryFloor_RestoreRejectsLostReceiptButAcknowledgesRetainedRe
 }
 
 func TestMessageDeliveryFloor_PersistsAcrossReopenAndNeverMovesBack(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "chat.db")
 	assertFloor := func(want int64) {
 		t.Helper()
@@ -146,6 +148,7 @@ func TestMessageDeliveryFloor_PersistsAcrossReopenAndNeverMovesBack(t *testing.T
 }
 
 func TestMessageDeliveryFloor_RejectsMalformedFileAndReleasesStartupLock(t *testing.T) {
+	t.Parallel()
 	for _, data := range []string{"", "123\n", "-123456789012\n", "0123456789012\n", "not-a-cutoff!\n", strings.Repeat("1", 128)} {
 		t.Run(strconv.Itoa(len(data))+data[:min(len(data), 3)], func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "chat.db")
@@ -179,6 +182,7 @@ func TestMessageDeliveryFloor_RejectsMalformedFileAndReleasesStartupLock(t *test
 }
 
 func TestMessageDeliveryFloor_RejectsUnreadableAndUnwritablePaths(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "chat.db")
 	sidecar, err := messageDeliveryFloorPath(path)
 	if err != nil {
@@ -201,6 +205,7 @@ func TestMessageDeliveryFloor_RejectsUnreadableAndUnwritablePaths(t *testing.T) 
 }
 
 func TestMessageDeliveryFloor_FileURIMatchesPlainDatabasePath(t *testing.T) {
+	t.Parallel()
 	path := filepath.Join(t.TempDir(), "chat.db")
 	if err := AdvanceMessageDeliveryFloorForRestore(path); err != nil {
 		t.Fatal(err)

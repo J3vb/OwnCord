@@ -46,6 +46,7 @@ func (f *catPermFixture) seedTemplate(t *testing.T) {
 }
 
 func TestCreateInCategory_CopiesTheTemplateAndStartsSynced(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	f.seedTemplate(t)
@@ -100,6 +101,7 @@ func TestCreateInCategory_CopiesTheTemplateAndStartsSynced(t *testing.T) {
 }
 
 func TestDirectOverrideEditUnsyncs(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	steps := map[string]func(f *catPermFixture, ch *db.Channel) error{
 		"role put": func(f *catPermFixture, ch *db.Channel) error {
@@ -139,6 +141,7 @@ func TestDirectOverrideEditUnsyncs(t *testing.T) {
 }
 
 func TestMoveChannel_KeepsOverridesAndUnsyncsUnlessAskedToSync(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	f.seedTemplate(t)
@@ -223,6 +226,7 @@ func moveTo(ch *db.Channel, categoryID int64, sync bool, role *db.Role) AdminCha
 }
 
 func TestSyncChannelPermissions_ReplacesRowsWithTheTemplate(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	f.seedTemplate(t)
@@ -281,6 +285,7 @@ func TestSyncChannelPermissions_ReplacesRowsWithTheTemplate(t *testing.T) {
 }
 
 func TestSyncChannelPermissions_HierarchyCoversRemovedRows(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	// b carries a row for a role the mod does not outrank; syncing would
@@ -299,6 +304,7 @@ func TestSyncChannelPermissions_HierarchyCoversRemovedRows(t *testing.T) {
 }
 
 func TestSyncChannelPermissions_RowsChangedUnderTheCheckAreRefused(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	refused := error(nil)
@@ -319,6 +325,7 @@ func TestSyncChannelPermissions_RowsChangedUnderTheCheckAreRefused(t *testing.T)
 }
 
 func TestDeleteCategory_KeepsChannelOverridesAndUnsyncs(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	f.seedTemplate(t)
@@ -344,6 +351,7 @@ func TestDeleteCategory_KeepsChannelOverridesAndUnsyncs(t *testing.T) {
 }
 
 func TestAdminListChannelsSynced_ReportsTheFlag(t *testing.T) {
+	t.Parallel()
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	if _, err := f.svc.PutRoleOverride(ctx, 7, f.mod, f.b, f.low.ID, permissions.ReadMessages, 0); err != nil {

@@ -29,6 +29,7 @@ func resultIDs(rs []db.MessageSearchResult) []int64 {
 }
 
 func TestSearchFiltered_AuthorOrAndChannelAnd(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	a, b, c := seedUser(t, database, "fa"), seedUser(t, database, "fb"), seedUser(t, database, "fc")
@@ -50,6 +51,7 @@ func TestSearchFiltered_AuthorOrAndChannelAnd(t *testing.T) {
 }
 
 func TestSearchFiltered_NoWordsNewestFirstWithCursor(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	u, other := seedUser(t, database, "np"), seedUser(t, database, "npo")
@@ -80,6 +82,7 @@ func TestSearchFiltered_NoWordsNewestFirstWithCursor(t *testing.T) {
 }
 
 func TestSearchFiltered_DateBoundsExclusive(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	u := seedUser(t, database, "dt")
@@ -111,6 +114,7 @@ func TestSearchFiltered_DateBoundsExclusive(t *testing.T) {
 }
 
 func TestFirstIDAtOrAfter_GapsAndEmptyTable(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	if id, err := database.FirstIDAtOrAfterForTest(ctx, "2026-01-01 00:00:00"); err != nil || id != 0 {
@@ -147,6 +151,7 @@ func TestFirstIDAtOrAfter_GapsAndEmptyTable(t *testing.T) {
 }
 
 func TestSearchFiltered_RequiresScope(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	u := seedUser(t, database, "sc")
@@ -161,6 +166,7 @@ func TestSearchFiltered_RequiresScope(t *testing.T) {
 }
 
 func TestSearchFiltered_ValuesAreBound(t *testing.T) {
+	t.Parallel()
 	ctx := context.Background()
 	database := openMigratedMemory(t)
 	u := seedUser(t, database, "bd")

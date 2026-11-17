@@ -27,6 +27,7 @@ import (
 var reportAbsentPattern = regexp.MustCompile(`(?i)relay|central|upstream|forward|federat|remote`)
 
 func TestAbsenceContract_NoCentralOrCrossServerReportDelivery(t *testing.T) {
+	t.Parallel()
 	handler := fullRouter(t)
 	routes, ok := handler.(chi.Routes)
 	if !ok {

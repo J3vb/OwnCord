@@ -46,6 +46,7 @@ func voiceChatSend(svc *MessageService, userID int64, content string, attachment
 }
 
 func TestVoiceChannelChat_SendRequiresSendMessages(t *testing.T) {
+	t.Parallel()
 	svc, _, _ := newVoiceChatFixture(t)
 	mustDo(t, "member send into a voice channel", voiceChatSend(svc, 1, "hello"))
 	if err := voiceChatSend(svc, vcChatReadOnly, "hello"); !errors.Is(err, ErrForbidden) {
@@ -56,6 +57,7 @@ func TestVoiceChannelChat_SendRequiresSendMessages(t *testing.T) {
 // Q1 default: no "joined only" rule. The fixture has no voice state at all, so
 // every send above and here is from someone who is not in the call.
 func TestVoiceChannelChat_NotJoinedMayReadAndSend(t *testing.T) {
+	t.Parallel()
 	svc, chans, _ := newVoiceChatFixture(t)
 	mustDo(t, "send from outside the call", voiceChatSend(svc, 1, "from outside the call"))
 	if _, err := chans.AdmitChannelFocus(context.Background(), 1, vcChatChannel); err != nil {
@@ -67,6 +69,7 @@ func TestVoiceChannelChat_NotJoinedMayReadAndSend(t *testing.T) {
 }
 
 func TestVoiceChannelChat_ArchivedRefused(t *testing.T) {
+	t.Parallel()
 	svc, _, database := newVoiceChatFixture(t)
 	if _, err := database.ExecContext(context.Background(),
 		`UPDATE channels SET archived = 1 WHERE id = ?`, vcChatChannel); err != nil {
@@ -78,6 +81,7 @@ func TestVoiceChannelChat_ArchivedRefused(t *testing.T) {
 }
 
 func TestVoiceChannelChat_AttachRequiresAttachFiles(t *testing.T) {
+	t.Parallel()
 	svc, _, _ := newVoiceChatFixture(t)
 	if err := voiceChatSend(svc, 1, "with a file", "upload-1"); !errors.Is(err, ErrForbidden) {
 		t.Fatalf("attach without ATTACH_FILES = %v, want ErrForbidden", err)
@@ -86,6 +90,7 @@ func TestVoiceChannelChat_AttachRequiresAttachFiles(t *testing.T) {
 }
 
 func TestVoiceChannelChat_SlowModeApplies(t *testing.T) {
+	t.Parallel()
 	_, _, database := newVoiceChatFixture(t)
 	mustDo(t, "SetChannelSlowMode", database.SetChannelSlowMode(context.Background(), vcChatChannel, 3600))
 	permSvc := NewPermissionService(database, permissions.NewChecker(database))
@@ -101,6 +106,7 @@ func TestVoiceChannelChat_SlowModeApplies(t *testing.T) {
 // send is refused with the timeout error, while reading, focus and history
 // still work.
 func TestVoiceChannelChat_TimedOutCannotSend(t *testing.T) {
+	t.Parallel()
 	svc, chans, database := newVoiceChatFixture(t)
 	ctx := context.Background()
 	mustCreateMessage(t, database, vcChatChannel, vcChatTarget, "before the timeout", nil)

@@ -70,6 +70,7 @@ func runProgressingUpload(t *testing.T, readTimeout, sendFor time.Duration, star
 // once the absolute lifetime cap passes. Without the cap, progress would re-arm
 // the deadline forever and the body would read to EOF.
 func TestTransferDeadline_ProgressingTransferClosedAtLifetimeCap(t *testing.T) {
+	t.Parallel()
 	const (
 		progress = time.Second
 		lifetime = 200 * time.Millisecond
@@ -90,6 +91,7 @@ func TestTransferDeadline_ProgressingTransferClosedAtLifetimeCap(t *testing.T) {
 // still making progress, and far inside its lifetime cap, is cut once the
 // shutdown grace runs out, so a graceful drain is not held open by it.
 func TestTransferDeadline_TricklingTransferCutWithinShutdownGrace(t *testing.T) {
+	t.Parallel()
 	const (
 		progress   = time.Second
 		lifetime   = time.Minute
@@ -113,6 +115,7 @@ func TestTransferDeadline_TricklingTransferCutWithinShutdownGrace(t *testing.T) 
 // TestTransferDeadline_ShortTransferFinishesDuringShutdown: a transfer that
 // completes inside the shutdown grace is not cut by shutdown.
 func TestTransferDeadline_ShortTransferFinishesDuringShutdown(t *testing.T) {
+	t.Parallel()
 	const (
 		progress   = time.Second
 		lifetime   = time.Minute
@@ -135,6 +138,7 @@ func TestTransferDeadline_ShortTransferFinishesDuringShutdown(t *testing.T) {
 // hook has run; its transfer must still end by the shutdown grace, not be
 // given the full lifetime.
 func TestTransferDeadline_TransferStartingAfterShutdownIsCut(t *testing.T) {
+	t.Parallel()
 	const (
 		progress = time.Second
 		lifetime = time.Minute
@@ -156,6 +160,7 @@ func TestTransferDeadline_TransferStartingAfterShutdownIsCut(t *testing.T) {
 // TestTransferDeadline_ShutdownLeavesOtherServersAlone: one server's shutdown
 // hook must not cut a transfer another server in the same process starts.
 func TestTransferDeadline_ShutdownLeavesOtherServersAlone(t *testing.T) {
+	t.Parallel()
 	const (
 		progress = time.Second
 		lifetime = time.Minute
@@ -179,6 +184,7 @@ func serverOf(r *http.Request) *http.Server {
 // shutdown grace runs out is told the server is going away, not that the file
 // was too big for the link.
 func TestTransferDeadline_ShutdownCutAnswers503(t *testing.T) {
+	t.Parallel()
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		d := startTransfer(w, r, time.Second, time.Minute)
 		defer d.release()

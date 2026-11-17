@@ -91,6 +91,7 @@ func (f linkFixture) get(path string, hdr map[string]string) *httptest.ResponseR
 }
 
 func TestFileLink_IssueNeedsAccessToTheFile(t *testing.T) {
+	t.Parallel()
 	f := newLinkFixture(t)
 	if code, path := f.mint(t, f.fileID, f.viewer); code != http.StatusOK || !strings.HasPrefix(path, "/api/v1/files/"+f.fileID+"?link=") {
 		t.Fatalf("viewer mint = %d %q, want 200 and a file path", code, path)
@@ -111,6 +112,7 @@ func TestFileLink_IssueNeedsAccessToTheFile(t *testing.T) {
 }
 
 func TestFileLink_RedeemServesFileAndRange(t *testing.T) {
+	t.Parallel()
 	f := newLinkFixture(t)
 	_, path := f.mint(t, f.fileID, f.viewer)
 
@@ -134,6 +136,7 @@ func TestFileLink_RedeemServesFileAndRange(t *testing.T) {
 }
 
 func TestFileLink_SameCredentialSameFileReusesToken(t *testing.T) {
+	t.Parallel()
 	f := newLinkFixture(t)
 	_, a := f.mint(t, f.fileID, f.viewer)
 	_, b := f.mint(t, f.fileID, f.viewer)
@@ -147,6 +150,7 @@ func TestFileLink_SameCredentialSameFileReusesToken(t *testing.T) {
 }
 
 func TestFileLink_WrongFileIDIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newLinkFixture(t)
 	rr := doUpload(t, f.router, f.viewer, "file", "other.txt", []byte("other file"))
 	resp := decodeBody[map[string]any](t, rr)
@@ -180,6 +184,7 @@ func TestFileLink_ExpiredLinkIsRefused(t *testing.T) {
 // Edge case 1: the session is gone while the clip streams. The very next
 // Range request is a 403, and so is a re-mint with the dead credential.
 func TestFileLink_SignedOutOrExpiredSessionVoidsLink(t *testing.T) {
+	t.Parallel()
 	for name, kill := range map[string]string{
 		"signed out":      `DELETE FROM sessions WHERE user_id = (SELECT id FROM users WHERE username = 'linkviewer')`,
 		"session expired": `UPDATE sessions SET expires_at = '2000-01-01T00:00:00Z' WHERE user_id = (SELECT id FROM users WHERE username = 'linkviewer')`,
@@ -208,6 +213,7 @@ func TestFileLink_SignedOutOrExpiredSessionVoidsLink(t *testing.T) {
 
 // Edge case 2: the user loses channel access after the link was minted.
 func TestFileLink_LostChannelAccessIsRefused(t *testing.T) {
+	t.Parallel()
 	f := newLinkFixture(t)
 	_, path := f.mint(t, f.fileID, f.viewer)
 	if _, err := f.database.ExecContext(context.Background(), `INSERT INTO channel_overrides (channel_id, role_id, allow, deny) VALUES (1, 4, 0, 2)`); err != nil {
@@ -220,6 +226,7 @@ func TestFileLink_LostChannelAccessIsRefused(t *testing.T) {
 }
 
 func TestFileLink_UnknownTokenAndAbsentCredentialAreTheSame403(t *testing.T) {
+	t.Parallel()
 	f := newLinkFixture(t)
 	bogus := f.get("/api/v1/files/"+f.fileID+"?link="+strings.Repeat("a", 64), nil)
 	_, path := f.mint(t, f.fileID, f.viewer)
@@ -240,6 +247,7 @@ func TestFileLink_UnknownTokenAndAbsentCredentialAreTheSame403(t *testing.T) {
 }
 
 func TestFileLink_AuthorizationHeaderTakesPrecedence(t *testing.T) {
+	t.Parallel()
 	f := newLinkFixture(t)
 	_, path := f.mint(t, f.fileID, f.viewer)
 	// A valid link plus a bad bearer: the header wins, so this is a 401.
@@ -252,6 +260,7 @@ func TestFileLink_AuthorizationHeaderTakesPrecedence(t *testing.T) {
 }
 
 func TestFileLink_ThumbRouteDoesNotAcceptLinks(t *testing.T) {
+	t.Parallel()
 	f := newLinkFixture(t)
 	_, path := f.mint(t, f.fileID, f.viewer)
 	_, query, _ := strings.Cut(path, "?")
@@ -298,6 +307,7 @@ func TestFileLink_TokenIsNeverLogged(t *testing.T) {
 }
 
 func TestFileLinks_CapAndSweep(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(1_700_000_000, 0)
 	l := api.NewFileLinksForTest(func() time.Time { return now })
 
@@ -339,6 +349,7 @@ func TestFileLinks_CapAndSweep(t *testing.T) {
 
 // A replaced link is left to expire: a player holding the old one keeps working.
 func TestFileLinks_ReissueKeepsTheOldTokenRedeemable(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(1_700_000_000, 0)
 	l := api.NewFileLinksForTest(func() time.Time { return now })
 	old, _, err := l.Issue("f", "h")
@@ -366,6 +377,7 @@ func TestFileLinks_ReissueKeepsTheOldTokenRedeemable(t *testing.T) {
 }
 
 func TestFileLinks_PerCredentialCapEvictsItsOwnSoonest(t *testing.T) {
+	t.Parallel()
 	now := time.Unix(1_700_000_000, 0)
 	l := api.NewFileLinksForTest(func() time.Time { return now })
 	other, _, _ := l.Issue("o", "other")
@@ -388,6 +400,7 @@ func TestFileLinks_PerCredentialCapEvictsItsOwnSoonest(t *testing.T) {
 }
 
 func TestFileLink_IssueIsRateLimitedPerUser(t *testing.T) {
+	t.Parallel()
 	database := newUploadTestDB(t)
 	limiter := auth.NewRateLimiter()
 	perms := service.NewPermissionService(database, permissions.NewChecker(database))

@@ -39,6 +39,7 @@ func mentionCount(t *testing.T, database *db.DB, userID int64) int {
 // An edit that adds @bob never raises his badge, so deleting the edited
 // message must not take away the badge an earlier message raised.
 func TestDecrementMentionCounts_EditAddedMentionKeepsOtherBadge(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
@@ -64,6 +65,7 @@ func TestDecrementMentionCounts_EditAddedMentionKeepsOtherBadge(t *testing.T) {
 // An edit that removes @bob leaves the badge it raised in place, so deleting
 // the message must still take that badge back.
 func TestDecrementMentionCounts_EditRemovedMentionStillReversed(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
@@ -85,6 +87,7 @@ func TestDecrementMentionCounts_EditRemovedMentionStillReversed(t *testing.T) {
 // @everyone stores no message_mentions row per reader; the receipt is what
 // lets the delete take the badge back.
 func TestDecrementMentionCounts_ReversesEveryoneBadge(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
@@ -106,6 +109,7 @@ func TestDecrementMentionCounts_ReversesEveryoneBadge(t *testing.T) {
 // The reversal consumes the message's receipts, so a second reversal of the
 // same message (a retried purge batch, two removal paths) lowers nothing.
 func TestDecrementMentionCounts_RepeatLowersNothing(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()
@@ -132,6 +136,7 @@ func TestDecrementMentionCounts_RepeatLowersNothing(t *testing.T) {
 // a real mention raised. The backfill's receipts are the ones on messages
 // older than the migration.
 func TestDecrementMentionCounts_BackfilledReceiptNeedsDirectMention(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	seedMentionFixture(t, database)
 	ctx := context.Background()

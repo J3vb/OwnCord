@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/J3vb/OwnCord/Server/api"
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/service"
 	"github.com/go-chi/chi/v5"
@@ -45,7 +46,7 @@ func buildPushRouter(t *testing.T, database *db.DB, enabled bool) (http.Handler,
 		return []netip.Addr{netip.MustParseAddr("8.8.8.8")}, nil
 	})
 	r := chi.NewRouter()
-	api.MountPushRoutes(r, service.NewSessionService(database), push, enabled)
+	api.MountPushRoutes(r, service.NewSessionService(database), push, auth.NewRateLimiter(), enabled)
 	return r, push
 }
 
@@ -89,6 +90,7 @@ func pushDo(t *testing.T, router http.Handler, method, path, token string, body 
 // ─── Lifecycle ───────────────────────────────────────────────────────────────
 
 func TestPushSubscriptions_LifecycleCreateListRevoke(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-lifecycle")
@@ -160,6 +162,7 @@ func TestPushSubscriptions_NonStandardPortIsRefusedWithItsOwnCode(t *testing.T) 
 }
 
 func TestPushSubscriptions_VisibleOnlyToOwner(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 
@@ -199,6 +202,7 @@ func TestPushSubscriptions_VisibleOnlyToOwner(t *testing.T) {
 }
 
 func TestPushSubscriptions_DisabledIs503AfterAuthAndWritesNothing(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, false)
 	userID := mintUser(t, database, "push-disabled")
@@ -224,6 +228,7 @@ func TestPushSubscriptions_DisabledIs503AfterAuthAndWritesNothing(t *testing.T) 
 // ─── Validation ──────────────────────────────────────────────────────────────
 
 func TestPushSubscriptions_RejectsMalformed(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-malformed")
@@ -287,6 +292,7 @@ func TestPushSubscriptions_RejectsMalformed(t *testing.T) {
 // ─── Refresh and cap ─────────────────────────────────────────────────────────
 
 func TestPushSubscriptions_RefreshIsAnUpsert(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-refresh")
@@ -340,6 +346,7 @@ func TestPushSubscriptions_RefreshIsAnUpsert(t *testing.T) {
 }
 
 func TestPushSubscriptions_DeviceCapEvictsOldest(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-cap")
@@ -383,9 +390,37 @@ func TestPushSubscriptions_DeviceCapEvictsOldest(t *testing.T) {
 	}
 }
 
+func TestPushSubscriptions_RegistrationIsRateLimitedPerUser(t *testing.T) {
+	t.Parallel()
+	database := openMigratedDB(t)
+	router, _ := buildPushRouter(t, database, true)
+	userID := mintUser(t, database, "push-limit")
+	token, _ := mintSession(t, database, userID)
+	other := mintUser(t, database, "push-limit-other")
+	otherToken, _ := mintSession(t, database, other)
+
+	body := validSubscribeBody("https://push.example.com/sub/limit")
+	for i := range 30 {
+		rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, body)
+		if rr.Code != http.StatusCreated {
+			t.Fatalf("subscribe #%d = %d %s", i, rr.Code, rr.Body.String())
+		}
+	}
+	rr := pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", token, body)
+	requireStatus(t, rr, http.StatusTooManyRequests)
+	if rr.Header().Get("Retry-After") == "" {
+		t.Error("a refused registration has no Retry-After header")
+	}
+
+	// The budget is per user: another member still registers.
+	rr = pushDo(t, router, http.MethodPost, "/api/v1/push/subscriptions", otherToken, validSubscribeBody("https://push.example.com/sub/limit-other"))
+	requireStatus(t, rr, http.StatusCreated)
+}
+
 // ─── VAPID ───────────────────────────────────────────────────────────────────
 
 func TestPushVAPID_ReturnsTheRunningKey(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, push := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-vapid")
@@ -413,6 +448,7 @@ func TestPushVAPID_ReturnsTheRunningKey(t *testing.T) {
 // TestPushSubscriptions_TiedToTheSubscribingSession: the row names the
 // session that made it, so signing that session out ends the pushes to it.
 func TestPushSubscriptions_TiedToTheSubscribingSession(t *testing.T) {
+	t.Parallel()
 	database := openMigratedDB(t)
 	router, _ := buildPushRouter(t, database, true)
 	userID := mintUser(t, database, "push-session")

@@ -32,6 +32,7 @@ func rolePerms(t *testing.T, database *db.DB, id int64) int64 {
 }
 
 func TestMigration078_GrantsUntouchedAdminAndModerator(t *testing.T) {
+	t.Parallel()
 	database := migratedAt077(t)
 	if got := rolePerms(t, database, 3); got != untouchedModerator {
 		t.Fatalf("Moderator before 078 = %d, want %d (the mask the migration compares against)", got, untouchedModerator)
@@ -59,6 +60,7 @@ func TestMigration078_GrantsUntouchedAdminAndModerator(t *testing.T) {
 }
 
 func TestMigration078_CustomisedRolesUnchangedOrCleared(t *testing.T) {
+	t.Parallel()
 	database := migratedAt077(t)
 	ctx := context.Background()
 	exec := func(q string, args ...any) {

@@ -22,6 +22,9 @@ const (
 	// Per user: invites are credentials into the server, so minting them is bounded.
 	inviteCreatePerHour = 20
 
+	// Per user: a device registers again on start-up and on a key change, so this is far above normal use.
+	pushSubscribePerHour = 30
+
 	loginRateLimitPerMinute = 5
 
 	verifyTOTPRateLimitPerMinute = 10

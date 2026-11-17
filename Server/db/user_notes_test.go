@@ -19,6 +19,7 @@ func scalarInt(t *testing.T, database *db.DB, q string, args ...any) int {
 }
 
 func TestMigration069_ColumnsTableTrigger(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	for _, col := range []string{"banner_id", "banner_color"} {
@@ -54,6 +55,7 @@ func TestMigration069_ColumnsTableTrigger(t *testing.T) {
 }
 
 func TestUserNoteQueries_UpsertGetDeleteScoped(t *testing.T) {
+	t.Parallel()
 	database := openMigratedMemory(t)
 	ctx := context.Background()
 	a, b, c := seedUser(t, database, "na"), seedUser(t, database, "nb"), seedUser(t, database, "nc")

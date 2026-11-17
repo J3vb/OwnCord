@@ -49,6 +49,7 @@ func replyParams(replyTo int64) SendMessageParams {
 }
 
 func TestSendMessage_ReplyInSameChannelIsAccepted(t *testing.T) {
+	t.Parallel()
 	svc, _, inserts, parent, _ := newReplyTargetFixture(t, nil)
 
 	result, err := svc.SendMessage(context.Background(), replyParams(parent))
@@ -62,6 +63,7 @@ func TestSendMessage_ReplyInSameChannelIsAccepted(t *testing.T) {
 }
 
 func TestSendMessage_ReplyTargetMustBeAMessageInTheChannel(t *testing.T) {
+	t.Parallel()
 	cases := []struct {
 		name   string
 		target func(database *db.DB, inCh10, inCh11 int64) int64
@@ -94,6 +96,7 @@ func TestSendMessage_ReplyTargetMustBeAMessageInTheChannel(t *testing.T) {
 // A retry of a send that already committed still gets its original message
 // after the reply target is deleted.
 func TestSendMessage_RetryAfterReplyTargetDeletedReturnsOriginal(t *testing.T) {
+	t.Parallel()
 	svc, database, _, parent, _ := newReplyTargetFixture(t, nil)
 	p := replyParams(parent)
 	p.ClientMessageID = deliveryTestID(time.Now())
@@ -112,6 +115,7 @@ func TestSendMessage_RetryAfterReplyTargetDeletedReturnsOriginal(t *testing.T) {
 
 // A failed reply target lookup refuses the send.
 func TestSendMessage_ReplyTargetLookupFailureRefusesSend(t *testing.T) {
+	t.Parallel()
 	lookupErr := errors.New("database is locked")
 	svc, _, inserts, parent, _ := newReplyTargetFixture(t, lookupErr)
 

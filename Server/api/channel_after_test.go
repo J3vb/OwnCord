@@ -41,6 +41,7 @@ func decodeAfter(t *testing.T, rr *httptest.ResponseRecorder) (ids []int64, hasM
 }
 
 func TestChannelMessages_AfterReturnsAscendingNewerPage(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "afterasc", 1)
 	chID, ids := seedAroundChannel(t, database, "afterasc", 8)
@@ -64,6 +65,7 @@ func TestChannelMessages_AfterReturnsAscendingNewerPage(t *testing.T) {
 }
 
 func TestChannelMessages_AfterNewestIsEmpty(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "afternewest", 1)
 	chID, ids := seedAroundChannel(t, database, "afternewest", 3)
@@ -80,6 +82,7 @@ func TestChannelMessages_AfterNewestIsEmpty(t *testing.T) {
 }
 
 func TestChannelMessages_AfterRejectsBadQuery(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "afterbad", 1)
 	chID, ids := seedAroundChannel(t, database, "afterbad", 3)
@@ -100,6 +103,7 @@ func TestChannelMessages_AfterRejectsBadQuery(t *testing.T) {
 }
 
 func TestChannelMessages_AfterDeniedByPermission(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router := buildChannelRouter(database)
 	ownerToken := chTestCreateToken(t, database, "afterowner", 1)
@@ -121,6 +125,7 @@ func TestChannelMessages_AfterDeniedByPermission(t *testing.T) {
 }
 
 func TestChannelMessages_AfterUnknownChannelIsNotFound(t *testing.T) {
+	t.Parallel()
 	database := newChannelTestDB(t)
 	router, token := newChannelRouterAs(t, database, "afternochan", 1)
 	if rr := chGet(t, router, afterPath(9999, "after=1"), token); rr.Code != http.StatusNotFound {
