@@ -229,7 +229,7 @@ video[hidden] + .video-surface {
    the tile's, not the browser's. A swipe at 1x still opens the drawer
    (lib/ui/swipe.ts). A person's card has no picture to zoom, and the
    participant strip and the cards view scroll under the finger. */
-.video-touch-zoom:not(.video-cell--avatar) {
+.video-cell:not(.video-cell--avatar) {
   touch-action: none;
 }
 

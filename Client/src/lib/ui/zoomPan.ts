@@ -363,7 +363,7 @@ function bindDoubleTapReset(host: HTMLElement, view: ZoomPan, signal: AbortSigna
  * on `host` (video.css), so a video moved out of it shows unzoomed. A drag that pans is
  * no click: the host's click handlers never see it. On a touch screen two
  * fingers pinch, one pans once zoomed in, and a double tap goes back to 1x;
- * the host's `video-touch-zoom` class gives it `touch-action: none`.
+ * a grid tile has `touch-action: none` for that (video.css).
  */
 export function bindVideoZoom(host: HTMLElement, signal: AbortSignal): ZoomPan {
   let updateNavigator: (() => void) | undefined;
@@ -424,16 +424,8 @@ export function bindVideoZoom(host: HTMLElement, signal: AbortSignal): ZoomPan {
     },
     { signal, capture: true },
   );
-  host.classList.add("video-touch-zoom");
   bindTouchZoom(host, view, signal, undefined, { ignore: NO_PAN, capture: false });
   bindDoubleTapReset(host, view, signal);
-  signal.addEventListener(
-    "abort",
-    () => {
-      view.cancelDrag();
-      host.classList.remove("video-touch-zoom");
-    },
-    { once: true },
-  );
+  signal.addEventListener("abort", () => view.cancelDrag(), { once: true });
   return view;
 }

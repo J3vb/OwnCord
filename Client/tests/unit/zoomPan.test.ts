@@ -243,7 +243,6 @@ describe("bindVideoZoom", () => {
 
   it("two fingers on the picture pinch it; fingers on its controls do not", () => {
     const { el, select, other, zp } = host();
-    expect(el.classList.contains("video-touch-zoom")).toBe(true);
     other.dispatchEvent(touch("pointerdown", 1, 190, 100));
     other.dispatchEvent(touch("pointerdown", 2, 210, 100));
     other.dispatchEvent(touch("pointermove", 2, 230, 100));
@@ -348,7 +347,6 @@ describe("bindVideoZoom", () => {
     expect(el.classList.contains("video-panning")).toBe(false);
     el.dispatchEvent(wheel(-1, 0, 0, { ctrlKey: true }));
     expect(zp.scale).toBe(2);
-    expect(el.classList.contains("video-touch-zoom")).toBe(false);
   });
 });
 
