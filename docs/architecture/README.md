@@ -64,9 +64,9 @@ behaviour.
 
 [platform-contracts.md](platform-contracts.md) is a third kind of page: a map
 of the desktop/browser seam. B7 built the desktop side
-(`Client/src/platform/contracts/` and `Client/src/platform/desktop/`). The
-browser side is deferred to B8, so that half of the page is still a decision
-record, not a description of code.
+(`Client/src/platform/contracts/` and `Client/src/platform/desktop/`), and the
+browser side (`Client/src/platform/browser/`) shipped with the browser client
+in v2.6.0.
 
 ## Maintenance rule
 
