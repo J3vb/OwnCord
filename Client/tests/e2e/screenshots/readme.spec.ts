@@ -9,6 +9,7 @@ const IMAGES = fromClientRoot("../.github/images");
 const OWNER = "mira";
 const SERVER_NAME = "Game Night Crew";
 const MEMBERS = ["jonas", "noor", "sam", "lena", "kai"] as const;
+const MODERATOR_ROLE_ID = 3;
 
 type Socket = Awaited<ReturnType<typeof rawSocket>>;
 type Channel = { id: number; name: string; type: string };
@@ -85,6 +86,21 @@ async function seed(server: TestServer): Promise<{ token: string; sockets: Socke
   }
   await say("sam", gameNight.id, "Game ideas go here, one per message, react to vote");
 
+  // A second person who can work reports keeps the admin Attention card clear.
+  const users: { id: number; username: string }[] = await server.api(
+    "/admin/api/users",
+    undefined,
+    owner.token,
+  );
+  const moderator = users.find((user) => user.username === "jonas");
+  if (!moderator) throw new Error(`seed: missing jonas in ${JSON.stringify(users)}`);
+  await server.api(
+    `/admin/api/users/${moderator.id}/roles/${MODERATOR_ROLE_ID}`,
+    undefined,
+    owner.token,
+    "PUT",
+  );
+
   as("noor").send("presence_update", { status: "dnd", custom_status: "Working until 17:00" });
   as("lena").send("presence_update", { status: "idle" });
   await server.api("/admin/api/backup", {}, owner.token);
@@ -99,6 +115,32 @@ async function fakeLiveKit(port: number): Promise<Server> {
     response.end();
   });
   await new Promise<void>((resolve) => fake.listen(port, "127.0.0.1", resolve));
+  return fake;
+}
+
+/** A small LiveKit stats page, so the admin Dashboard's LiveKit card shows
+ *  numbers instead of "Not reachable". */
+async function fakeLiveKitMetrics(): Promise<Server> {
+  const started = Date.now();
+  const fake = createServer((_request, response) => {
+    const seconds = (Date.now() - started) / 1000;
+    response.writeHead(200, { "Content-Type": "text/plain; version=0.0.4" });
+    response.end(
+      [
+        `process_cpu_seconds_total ${(1.5 + seconds * 0.02).toFixed(3)}`,
+        "process_resident_memory_bytes 48234496",
+        "go_sched_gomaxprocs_threads 4",
+        "livekit_room_total 1",
+        "livekit_participant_total 3",
+        "livekit_track_published_total 4",
+        "livekit_track_subscribed_total 8",
+        `livekit_packet_bytes{direction="incoming"} ${Math.round(2e6 + seconds * 40_000)}`,
+        `livekit_packet_bytes{direction="outgoing"} ${Math.round(5e6 + seconds * 110_000)}`,
+        "",
+      ].join("\n"),
+    );
+  });
+  await new Promise<void>((resolve) => fake.listen(0, "127.0.0.1", resolve));
   return fake;
 }
 
@@ -130,7 +172,17 @@ async function settle(page: Page): Promise<void> {
 }
 
 test("README screenshots", async ({ page, browser, baseURL }) => {
-  const server = await startTestServer({ seed: false, authRateLimitMultiplier: 10 });
+  const metrics = await fakeLiveKitMetrics();
+  const address = metrics.address();
+  const metricsPort = typeof address === "object" && address ? address.port : 0;
+  const server = await startTestServer({
+    seed: false,
+    authRateLimitMultiplier: 10,
+    env: {
+      ...process.env,
+      OWNCORD_VOICE_LIVEKIT_METRICS_URL: `http://127.0.0.1:${metricsPort}/metrics`,
+    },
+  });
   let sockets: Socket[] = [];
   const liveKit = await fakeLiveKit(server.livekitPort);
   try {
@@ -193,5 +245,6 @@ test("README screenshots", async ({ page, browser, baseURL }) => {
     for (const socket of sockets) socket.close();
     await server.close();
     await new Promise((resolve) => liveKit.close(resolve));
+    await new Promise((resolve) => metrics.close(resolve));
   }
 });
