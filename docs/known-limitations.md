@@ -81,6 +81,21 @@ the [trust model](trust-model.md).
   [Updating](linux-install.md#updating) and
   [Uninstall](linux-install.md#uninstall).
 
+## Android app
+
+- **It is not in the Play Store.** Install the APK from the release page. It
+  needs Android 9 or newer on a 64-bit ARM phone. See
+  [The Android app](android.md).
+- **Notifications while the app is closed need two things:** the server owner
+  turns push on, and you install a UnifiedPush app such as ntfy. There is no
+  Google push. See
+  [Notifications when the app is closed](android.md#notifications-when-the-app-is-closed).
+- **Push only goes to public push servers.** A ntfy server on your own home
+  network or VPN gets nothing.
+- **Music sharing is not on the phone.** It works on Windows and Linux only.
+- **Your phone may stop the app in the background.** Then you show as offline
+  until you open it again.
+
 ## Voice and video
 
 - **Voice needs open ports.** UDP for the media and TCP 7881 as a fallback. A

@@ -45,6 +45,7 @@ You start the server, give your friends an invite code, and that is it.
 | Let friends connect without router work | [docs/tailscale.md](docs/tailscale.md)                       |
 | Open ports on my router myself          | [docs/port-forwarding.md](docs/port-forwarding.md)           |
 | Install the desktop app on Linux        | [docs/linux-install.md](docs/linux-install.md)               |
+| Use OwnCord on my Android phone         | [docs/android.md](docs/android.md)                           |
 | Change a server setting                 | [docs/server-configuration.md](docs/server-configuration.md) |
 | Keep my server and members safe         | [docs/security.md](docs/security.md)                         |
 | Know how many people one server holds   | [docs/capacity.md](docs/capacity.md)                         |
@@ -69,22 +70,29 @@ Security is reviewed in regular passes. Each review is a dated audit, listed in
 ## Features
 
 - **Chat.** Channels, direct messages, forums with threads, polls, stickers,
-  custom emoji and voice messages. History is saved, with retention per
-  channel.
+  custom emoji and voice messages. Search covers threads and forum posts too.
+  History is saved, with retention per channel.
 - **Voice and video.** Runs on [LiveKit](https://livekit.io), which the server
   can download and run for you. Calls are end-to-end encrypted. Screen
-  sharing, and optional passwords on voice channels.
+  sharing, music sharing from one app, a call layout you can pin and resize,
+  noise suppression, and optional passwords on voice channels.
 - **Several servers.** A server rail like Discord's, with Home for your direct
-  messages.
+  messages, and an icon for each server.
 - **Bring your Discord history.** The admin panel imports a Discord channel
   export, with the original authors on each message.
-- **Files.** Uploads with inline images and video, a Media panel per channel
-  and a My uploads page.
-- **Your look.** Themes, animated avatars and your own CSS.
+- **Files and links.** Uploads with inline images and video, a Media panel per
+  channel and a My uploads page. Link previews are built by your server, so
+  your members' computers never contact the linked site.
+- **Your look.** Themes with background pictures, your own CSS, animated
+  avatars and a choice of app sounds.
+- **On your phone.** The Android app gets messages and calls while it is
+  closed, through UnifiedPush (no Google services), and you can share photos
+  and files to OwnCord from other apps.
 - **Who can join.** Closed, invite, approval or open registration, with
   invite codes and role permissions.
 - **Moderation and admin.** Reports, appeals, warnings and timeouts, and a web
-  admin panel for logs, backups, retention, the audit log and updates.
+  admin panel for system health, logs, storage, backups, retention, the audit
+  log and updates.
 - **Accounts.** Two-factor sign-in, a recovery kit, several devices, and
   saved credentials in the system keyring.
 - **Updates.** The desktop and Android apps update themselves and check each
@@ -101,8 +109,9 @@ Optional extras (GIF picker, experimental WASM plugins) are in
 | Desktop app   | Yes (installer) | Yes (installer) | Yes (AppImage, .deb) | Yes (AppImage, .deb) |
 | Docker server | No              | No              | Yes                  | Yes                  |
 
-- **Android (experimental):** each release has an arm64 APK. Android asks once
-  to allow installs from OwnCord; after that the app offers updates itself.
+- **Android (experimental):** each release has an arm64 APK for Android 9 and
+  newer. Android asks once to allow installs from OwnCord; after that the app
+  offers updates itself. See [docs/android.md](docs/android.md).
 - **Browser client:** the server can host the client itself. Turn on **Host a
   browser client** in the admin panel (Server configuration). It is off by
   default.

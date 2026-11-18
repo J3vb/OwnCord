@@ -8,7 +8,7 @@ live in the [changelog](../CHANGELOG.md) and the linked pages.
 builds (`scripts/release/verify-release-status.mjs`), so add the row in the release PR,
 together with the changelog section.
 
-_Last updated 2026-11-17._
+_Last updated 2026-11-18._
 
 ## Current release
 
@@ -54,16 +54,16 @@ Newest first, one line each. The full notes are the matching section of
 
 Work follows a phased roadmap set on 2026-10-10. In plain words:
 
-| Phase | Goal                                                            | State                                             |
-| ----- | --------------------------------------------------------------- | ------------------------------------------------- |
-| 0     | Releases gated on real signals; small defects cleared           | Done (v2.4.0-beta.1)                              |
-| 1     | Voice that feels like Discord, without state bugs               | Done (v2.3.0-beta.1)                              |
-| 2     | Nothing disappears without an error; notifications that work    | Done (v2.4.0-beta.1)                              |
-| 3     | Chat, DMs, members, navigation and settings on par with Discord | Done (v2.4.0-beta.1)                              |
-| 4     | Larger servers and sturdier self-hosting                        | Done (v2.4.0-beta.1)                              |
-| 5     | One owner for each piece of shared state                        | Done (v2.4.0-beta.1)                              |
-| 6     | New features                                                    | Mostly done (v2.4.0-beta.1); browser client later |
-| 7     | Docs that cannot drift; safe protocol changes                   | Ongoing                                           |
+| Phase | Goal                                                            | State                                            |
+| ----- | --------------------------------------------------------------- | ------------------------------------------------ |
+| 0     | Releases gated on real signals; small defects cleared           | Done (v2.4.0-beta.1)                             |
+| 1     | Voice that feels like Discord, without state bugs               | Done (v2.3.0-beta.1)                             |
+| 2     | Nothing disappears without an error; notifications that work    | Done (v2.4.0-beta.1)                             |
+| 3     | Chat, DMs, members, navigation and settings on par with Discord | Done (v2.4.0-beta.1)                             |
+| 4     | Larger servers and sturdier self-hosting                        | Done (v2.4.0-beta.1)                             |
+| 5     | One owner for each piece of shared state                        | Done (v2.4.0-beta.1)                             |
+| 6     | New features                                                    | Done (browser client v2.6.0, Android app v2.7.0) |
+| 7     | Docs that cannot drift; safe protocol changes                   | Ongoing                                          |
 
 The older B0–B10 phase plans in [plans/](plans/README.md) are history: B9 was
 the last of them, and the betas above shipped after it.
