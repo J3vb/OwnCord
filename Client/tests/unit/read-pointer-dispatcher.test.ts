@@ -27,7 +27,7 @@ import {
   markMessageUnread,
   setMarkUnreadSender,
 } from "../../src/features/messaging/message-list/markUnread";
-import { viewChannel } from "../../src/lib/prefs/lastChannel";
+import { viewChannel } from "../../src/features/channels/viewChannel";
 import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
 import type { WsErrorCodeValue } from "../../src/lib/protocolTypes";

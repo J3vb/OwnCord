@@ -27,7 +27,7 @@ import {
   settleThreadNavigation,
 } from "../../features/threads/threadNavigation";
 import { channelsStore, setActiveChannel, setNsfwAcknowledged } from "@stores/channels.store";
-import { viewChannel } from "@lib/prefs/lastChannel";
+import { viewChannel } from "../../features/channels/viewChannel";
 import { leaveChannel, markChannelRead } from "@lib/readState";
 import { readPointerEnabled } from "@lib/net/serverCapabilities";
 import { WsErrorCode } from "@lib/protocolTypes";

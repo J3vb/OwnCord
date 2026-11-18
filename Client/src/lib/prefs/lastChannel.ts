@@ -11,11 +11,8 @@
  * guessed at.
  */
 
-import { clearUnread } from "@stores/channels.store";
 import { loadPref, savePref } from "./preferences";
 import { readPointerEnabled } from "../net/serverCapabilities";
-import type { ChannelType } from "../types";
-import type { WsClient } from "../ws";
 
 /** localStorage key (under the shared settings prefix). */
 const LAST_CHANNEL_KEY = "lastChannel";
@@ -40,27 +37,6 @@ export function rememberLastChannel(channelId: number): void {
 /** The `channel_focus` payload: with a read pointer, focus without marking read. */
 export function focusPayload(channelId: number): { channel_id: number; read?: false } {
   return readPointerEnabled() ? { channel_id: channelId, read: false } : { channel_id: channelId };
-}
-
-/**
- * The channel is on screen now (mounted, not merely selected): focus it on the
- * server, which advances its read state (unless the server keeps a read pointer:
- * `read: false` then focuses without marking, and only what is seen is marked
- * read), clear its local badge, and record it
- * as the last channel. A DM is not recorded: `ready` restores only from its
- * server channel list, and DMs arrive separately in `dm_channels`. Neither is
- * a voice channel (its chat is reached from a call; a restart must not land on
- * an unjoined call chat). An
- * undefined type is a server channel.
- */
-export function viewChannel(
-  channelId: number,
-  channelType: ChannelType | undefined,
-  ws: WsClient,
-): void {
-  ws.send({ type: "channel_focus", payload: focusPayload(channelId) });
-  clearUnread(channelId);
-  if (channelType !== "dm" && channelType !== "voice") rememberLastChannel(channelId);
 }
 
 /** The stored last channel for the current server, or null when none/unset.
