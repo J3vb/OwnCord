@@ -79,7 +79,9 @@ would not work otherwise.
 
 What the server does **not** keep in the clear:
 
-- **Passwords** — bcrypt, cost 12: `Server/auth/password.go:38`, `:17`.
+- **Passwords** — argon2id (64 MiB, 4 passes); an account made before
+  v2.10.0 keeps its bcrypt hash (cost 12) until its next sign-in replaces it:
+  `Server/auth/password.go`.
   Test: `Server/auth/password_test.go`.
 - **Session tokens and API tokens** — SHA-256 of the token, never the token:
   `Server/auth/session.go:21-22`; stored hashed at `Server/api/auth_handler.go:201`

@@ -105,7 +105,7 @@ erDiagram
         int id PK
         int role_id FK
         string username
-        string password "bcrypt hash"
+        string password "argon2id hash"
         bool banned
     }
     roles {
@@ -162,8 +162,8 @@ erDiagram
 `recovery_kits` (035), `recovery_assists` (036). Each table stores its secrets
 in its own way. Partial-auth tokens and used TOTP codes are SHA-256 digests.
 Pending enrolment secrets are AES-GCM ciphertext. Emergency TOTP recovery codes
-are bcrypt hashes. Only `recovery_kits` and `recovery_assists` use argon2id
-verifiers. See [trust-model.md](../trust-model.md), "Account
+are bcrypt hashes. `recovery_kits` and `recovery_assists` use argon2id
+verifiers, as do account passwords in `users` since v2.10.0. See [trust-model.md](../trust-model.md), "Account
 recovery".
 
 **Messaging.** Tables: `channels`, `messages`, `attachments`, `reactions`,

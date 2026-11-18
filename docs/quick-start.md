@@ -55,7 +55,8 @@ closed, invite, approval (an admin says yes to each person) or open.
 ## 5. Connect with the desktop app
 
 Get the app from the same [Releases](https://github.com/J3vb/OwnCord/releases)
-page. On Linux, see [Linux install](linux-install.md).
+page. On Linux, see [Linux install](linux-install.md). For a phone, see
+[The Android app](android.md).
 
 The first time you connect, the app shows the server's fingerprint and asks if
 you trust it. **Compare it with the one the server owner sent you.** After
