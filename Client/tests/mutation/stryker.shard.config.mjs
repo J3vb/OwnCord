@@ -613,6 +613,7 @@ export const shards = {
     "src/lib/net/restReplies.ts",
     "src/lib/pollState.ts",
     "src/lib/prefs/lastChannel.ts",
+    "src/features/channels/viewChannel.ts",
     "src/lib/protocolTypes.ts",
     "src/lib/ui/imageHeader.ts",
   ],

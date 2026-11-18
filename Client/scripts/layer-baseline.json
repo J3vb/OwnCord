@@ -61,9 +61,6 @@
     "lib/net/identity.ts": {
       "stores/auth.store.ts": 1
     },
-    "lib/prefs/lastChannel.ts": {
-      "stores/channels.store.ts": 1
-    },
     "lib/voice/livekitDiagnostics.ts": {
       "features/voice/releaseRoom.ts": 1,
       "features/voice/sessionState.ts": 1
