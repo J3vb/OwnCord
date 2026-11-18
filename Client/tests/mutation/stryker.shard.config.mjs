@@ -404,6 +404,7 @@ export const shards = {
     "src/lib/prefs/keybinds.ts",
   ],
   "lib-rest-6": [
+    "src/features/custom-themes/themeBackgroundEditor.ts",
     "src/features/forums/newPostParts.ts",
     "src/features/messaging/attachSheet.ts",
     "src/features/messaging/pickerImages.ts",
@@ -423,7 +424,6 @@ export const shards = {
   ],
   "lib-rest-8": [
     "src/features/custom-themes/customThemeSection.ts",
-    "src/features/custom-themes/themeBackgroundEditor.ts",
     "src/lib/linkPreviewState.ts",
     "src/lib/presence/roleLookup.ts",
     "src/lib/presence/serverStatus.ts",
