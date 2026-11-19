@@ -253,6 +253,8 @@ type MetricsSources struct {
 	// Raw counts of every latency histogram for the Prometheus exposition; nil leaves the histogram families
 	// out.
 	LatencyCounts func() hubstats.LatencyCounts
+	// Fills the runtime memory figures; nil reads runtime.ReadMemStats. Tests pin it so two reads agree.
+	MemStats func(*runtime.MemStats)
 }
 
 func handleMetrics(src MetricsSources) http.HandlerFunc {
@@ -265,7 +267,11 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 // disagree.
 func collectMetrics(ctx context.Context, src MetricsSources) ServerMetrics {
 	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	if src.MemStats != nil {
+		src.MemStats(&m)
+	} else {
+		runtime.ReadMemStats(&m)
+	}
 
 	uptime := time.Since(serverStartTime)
 	metrics := ServerMetrics{
