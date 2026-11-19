@@ -263,15 +263,21 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 	}
 }
 
-// collectMetrics reads every source once; it backs both the JSON and Prometheus encoders so the two cannot
-// disagree.
-func collectMetrics(ctx context.Context, src MetricsSources) ServerMetrics {
+// readMemStats reads the runtime memory figures, through src.MemStats when a test pins it.
+func readMemStats(src MetricsSources) runtime.MemStats {
 	var m runtime.MemStats
 	if src.MemStats != nil {
 		src.MemStats(&m)
-	} else {
-		runtime.ReadMemStats(&m)
+		return m
 	}
+	runtime.ReadMemStats(&m)
+	return m
+}
+
+// collectMetrics reads every source once; it backs both the JSON and Prometheus encoders so the two cannot
+// disagree.
+func collectMetrics(ctx context.Context, src MetricsSources) ServerMetrics {
+	m := readMemStats(src)
 
 	uptime := time.Since(serverStartTime)
 	metrics := ServerMetrics{
