@@ -14,6 +14,7 @@ vi.mock("@stores/voice.store", () => ({
 const { attachGlobalKeybinds } = await import("../../src/features/settings/GlobalKeybinds");
 const { saveGlobalShortcutVk } = await import("../../src/lib/voice/voiceShortcuts");
 const { parseKeybinds, saveKeybind } = await import("../../src/lib/prefs/keybinds");
+const { runPopoutDocumentHooks } = await import("../../src/features/voice/popoutDocuments");
 
 function makeHandlers(): {
   onSearch: Mock<() => void>;
@@ -277,6 +278,56 @@ describe("global keybinds", () => {
     expect(h.onToggleMute).toHaveBeenCalledOnce();
     expect(h.onToggleDeafen).toHaveBeenCalledOnce();
     expect(h.onToggleCamera).toHaveBeenCalledOnce();
+  });
+
+  it("fires only the voice shortcuts in a pop-out window, until it closes", () => {
+    mockVoiceGetState.mockReturnValue({ currentChannelId: 7 });
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+    const popout = document.implementation.createHTMLDocument("popout");
+    const life = new AbortController();
+    runPopoutDocumentHooks(popout, life.signal);
+    const pressIn = (key: string, opts: Partial<KeyboardEventInit> = {}): void =>
+      void popout.dispatchEvent(
+        new KeyboardEvent("keydown", { key, code: codeFor(key), ctrlKey: true, ...opts }),
+      );
+
+    pressIn("V", { shiftKey: true });
+    pressIn("M", { shiftKey: true });
+    pressIn("D", { shiftKey: true });
+    pressIn("f");
+    pressIn(",");
+    expect(h.onToggleCamera).toHaveBeenCalledOnce();
+    expect(h.onToggleMute).toHaveBeenCalledOnce();
+    expect(h.onToggleDeafen).toHaveBeenCalledOnce();
+    expect(h.onSearch).not.toHaveBeenCalled();
+    expect(h.onOpenSettings).not.toHaveBeenCalled();
+
+    life.abort();
+    pressIn("V", { shiftKey: true });
+    expect(h.onToggleCamera).toHaveBeenCalledOnce();
+  });
+
+  it("leaves a character typed with AltGr in a pop-out window alone", () => {
+    mockVoiceGetState.mockReturnValue({ currentChannelId: 7 });
+    const h = makeHandlers();
+    detach = attachGlobalKeybinds(h);
+    const popout = document.implementation.createHTMLDocument("popout");
+    const life = new AbortController();
+    runPopoutDocumentHooks(popout, life.signal);
+    const altGr = { ctrlKey: true, altKey: true, shiftKey: true, modifierAltGraph: true };
+
+    for (const [key, code] of [
+      ["V", "KeyV"],
+      ["M", "KeyM"],
+      ["D", "KeyD"],
+    ] as const) {
+      popout.dispatchEvent(new KeyboardEvent("keydown", { key, code, ...altGr }));
+    }
+    expect(h.onToggleCamera).not.toHaveBeenCalled();
+    expect(h.onToggleMute).not.toHaveBeenCalled();
+    expect(h.onToggleDeafen).not.toHaveBeenCalled();
+    life.abort();
   });
 
   describe("rebindable actions", () => {

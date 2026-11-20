@@ -351,6 +351,29 @@ describe("VideoGrid", () => {
       expect((container.querySelector(".tile-volume-slider") as HTMLInputElement).value).toBe("0");
     });
 
+    it("a level set from the sidebar menu redraws the tile, and unmuting keeps it", () => {
+      addAudioTile(grid, 58, "gale", false);
+      const slider = container.querySelector(".tile-volume-slider") as HTMLInputElement;
+      const muteBtn = container.querySelector(".tile-mute-btn") as HTMLButtonElement;
+      expect(slider.value).toBe("100");
+
+      mockGetUserVolume.mockImplementation((id) => (id === 58 ? 40 : 100));
+      try {
+        window.dispatchEvent(
+          new CustomEvent("owncord:user-volume-changed", { detail: { userId: 58 } }),
+        );
+        expect(slider.value).toBe("40");
+        expect(container.querySelector(".tile-volume-value")!.textContent).toBe("40%");
+
+        muteBtn.click();
+        muteBtn.click();
+        expect(slider.value).toBe("40");
+        expect(mockSetUserVolume).not.toHaveBeenCalledWith(58, 100);
+      } finally {
+        mockGetUserVolume.mockImplementation(() => 100);
+      }
+    });
+
     it("mute button icon swaps between volume and volume-x SVGs on click", () => {
       const config = makeTileConfig({ isSelf: false });
       grid.addStream(42, "alice", fakeStream(), config);

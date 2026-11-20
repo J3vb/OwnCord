@@ -4,6 +4,7 @@ import { cascadedDeclaration, keyword } from "../../helpers/app-css";
 import { expectConsole } from "../../helpers/console";
 import { clearHost, hostAndroidApp } from "../../helpers/androidHost";
 import { registerVideoSurface } from "../../../src/lib/voice/videoSurface";
+import { voiceStore } from "../../../src/stores/voice.store";
 import {
   createVideoGrid,
   type VideoGridComponent,
@@ -23,6 +24,12 @@ import {
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+const mockToggleMusicShare = vi.fn(() => Promise.resolve());
+vi.mock("../../../src/features/voice/musicControl", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/features/voice/musicControl")>()),
+  toggleMusicShare: () => mockToggleMusicShare(),
+  cachedMusicSupport: () => ({ ok: true }),
+}));
 
 const { mockMuteScreenshareAudio, mockSetScreenshareAudioVolume, mockShowToast } = mocks;
 
@@ -105,6 +112,25 @@ describe("VideoGrid", () => {
       expect(root.classList.contains("video-panning")).toBe(true);
       popup.doc.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
       expect(root.classList.contains("video-panning")).toBe(false);
+    });
+
+    it("offers no tile Pop out in the Android app, nor on your own screen share", () => {
+      hostAndroidApp();
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+        expect(cell(SCREEN).querySelector("[data-tile-control='pip']")).toBeNull();
+        expect(cell(SCREEN).querySelector("[data-tile-control='fullscreen']")).not.toBeNull();
+      } finally {
+        clearHost();
+      }
+      const OWN = SCREEN + 1;
+      grid.addStream(
+        OWN,
+        "Me (Screen)",
+        fakeStream(),
+        makeTileConfig({ isSelf: true, isScreenshare: true }),
+      );
+      expect(cell(OWN).querySelector("[data-tile-control='pip']")).toBeNull();
     });
 
     it("offers Pop out where picture-in-picture is missing too (WebKitGTK)", () => {
@@ -228,7 +254,7 @@ describe("VideoGrid", () => {
       control(SCREEN, "pip").click();
       control(SCREEN, "pop-in").click();
       popup = fakePopup();
-      open.mockReturnValue(popup.win as unknown as Window);
+      open.mockReturnValue(popup.win);
       control(SCREEN, "pip").click();
 
       expect(open).toHaveBeenCalledTimes(2);
@@ -665,6 +691,34 @@ describe("VideoGrid", () => {
       expect(container.contains(grid0)).toBe(true);
       expect(onCallPopout).toHaveBeenLastCalledWith(false, true);
       expect(cc.onScreenshareToggle).toHaveBeenCalledTimes(1);
+    });
+
+    it("brings the call back to the app window before the music picker opens there", () => {
+      const { onCallPopout } = startCall();
+      popRow().click();
+      const grid0 = root();
+      mockToggleMusicShare.mockClear();
+
+      barButton("music").click();
+
+      expect(container.contains(grid0)).toBe(true);
+      expect(onCallPopout).toHaveBeenLastCalledWith(false, true);
+      expect(mockToggleMusicShare).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops music from the pop-out without leaving it", () => {
+      startCall();
+      popRow().click();
+      voiceStore.setState((prev) => ({ ...prev, localMusic: true }));
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false, music: true });
+      mockToggleMusicShare.mockClear();
+      try {
+        barButton("music").click();
+        expect(popup.doc.body.contains(root())).toBe(true);
+        expect(mockToggleMusicShare).toHaveBeenCalledTimes(1);
+      } finally {
+        voiceStore.setState((prev) => ({ ...prev, localMusic: false }));
+      }
     });
 
     it("stops a share from the pop-out without leaving it", () => {

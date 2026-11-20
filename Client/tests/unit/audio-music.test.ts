@@ -77,6 +77,18 @@ describe("music volume and mute", () => {
     expect(elements.getMusicGain(42)).toBe(1);
   });
 
+  it("announces a Music volume moving to or from 0, which reads as muted", () => {
+    const seen: unknown[] = [];
+    const onChange = (e: Event): void => void seen.push((e as CustomEvent).detail);
+    window.addEventListener("owncord:user-local-mute-changed", onChange);
+    elements.setMusicVolume(42, 50);
+    elements.setMusicVolume(42, 0);
+    elements.setMusicVolume(42, 0);
+    elements.setMusicVolume(42, 30);
+    window.removeEventListener("owncord:user-local-mute-changed", onChange);
+    expect(seen).toEqual([{ userId: 42 }, { userId: 42 }]);
+  });
+
   it("tells a native room when a music setting changes", () => {
     const listener = vi.fn();
     elements.setMusicGainListener(listener);

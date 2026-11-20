@@ -50,6 +50,14 @@ import {
 import { inputMode } from "@lib/ui/inputMode";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
 import { canPublishScreen } from "../voice/native/platform";
+import { onPopoutDocument } from "../voice/popoutDocuments";
+import {
+  inPicker,
+  inThreadPanel,
+  isComposer,
+  isIdleTarget,
+  isTypingTarget,
+} from "./keybindTargets";
 
 const log = createLogger("global-keybinds");
 
@@ -272,6 +280,25 @@ function dispatchRebindable(
   return true;
 }
 
+/** A key in a pop-out window: mute, deafen, camera, screen share and
+ *  disconnect only. The other shortcuts act on the app window's page. */
+function onPopoutKeydown(
+  e: KeyboardEvent,
+  handlers: GlobalKeybindHandlers,
+  table: RebindableTable,
+): void {
+  if (handlers.isSuspended?.() === true || e.defaultPrevented || e.isComposing) return;
+  // A character typed with AltGr (Ctrl+Alt on Windows) is typing, not a shortcut.
+  if (dialogOpen() || (e.key.length === 1 && e.getModifierState("AltGraph"))) return;
+  const combo = comboFromEvent(e, "inApp");
+  const id = combo === null ? undefined : table().get(comboKey(combo));
+  if (id !== undefined && isVoiceOnlyAction(id)) {
+    dispatchRebindable(e, handlers, table);
+    return;
+  }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && !e.altKey) handleCtrlShiftKey(e, handlers);
+}
+
 /** PageUp/PageDown from the message box scroll the messages. */
 function scrollOnPageKey(e: KeyboardEvent, handlers: GlobalKeybindHandlers): void {
   // A focused scroller pages itself; only these two would page nothing.
@@ -406,6 +433,13 @@ export function attachGlobalKeybinds(handlers: GlobalKeybindHandlers): () => voi
   };
 
   document.addEventListener("keydown", handler, { signal: owner.signal });
+  // A focused pop-out window gets the voice shortcuts too.
+  const onPopoutKey = (e: KeyboardEvent): void => {
+    if (!owner.signal.aborted) onPopoutKeydown(e, handlers, currentTable);
+  };
+  onPopoutDocument((doc, signal) => {
+    doc.addEventListener("keydown", onPopoutKey, { signal });
+  }, owner.signal);
   window.addEventListener("keydown", onEscapeCapture, { capture: true, signal: owner.signal });
   window.addEventListener("keydown", onAcceptRingCapture, { capture: true, signal: owner.signal });
   window.addEventListener("keydown", onEscape, { signal: owner.signal });
@@ -429,23 +463,6 @@ function buildTable(eff: EffectiveKeybinds): ReadonlyMap<string, ActionId> {
   return table;
 }
 
-/** Controls that take keys of their own; typing on one of them stays there. */
-const INTERACTIVE =
-  'button, a[href], input, textarea, select, [contenteditable="true"], [role="button"], ' +
-  '[role="menu"], [role="menuitem"], [role="listbox"], [role="option"], [role="tab"], ' +
-  '[role="slider"], [role="radio"], [role="checkbox"], [role="switch"], [role="textbox"]';
-
-/** Nothing that takes typed keys has focus. */
-function isIdleTarget(target: EventTarget | null): boolean {
-  if (target === document.body || target === document.documentElement) return true;
-  return target instanceof Element && target.closest(INTERACTIVE) === null;
-}
-
-/** Inside an open emoji or GIF picker, which focuses its own search field. */
-function inPicker(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest(".emoji-picker, .gif-picker") !== null;
-}
-
 /** The bound push-to-talk key, in a call with Push to Talk as the input mode. `keyCode`
  *  is the Windows VK the native poller uses, on every platform for these keys. */
 function isPttKey(e: KeyboardEvent): boolean {
@@ -461,29 +478,10 @@ function findComposer(): HTMLTextAreaElement | null {
   return isDisplayed(composer) ? composer : null;
 }
 
-/** A text-entry control, where a bare Alt+Arrow belongs to the field. */
-function isTypingTarget(target: EventTarget | null): boolean {
-  return (
-    (target instanceof HTMLInputElement && target.type !== "range") ||
-    target instanceof HTMLTextAreaElement ||
-    (target instanceof HTMLElement && target.isContentEditable)
-  );
-}
-
 function focusNewComposer(): void {
   const active = document.activeElement;
   if (active !== null && active !== document.body) return;
   document.querySelector<HTMLTextAreaElement>("textarea.msg-textarea")?.focus();
-}
-
-/** The message composer's textarea, where Alt+↑/↓ still steps channels. */
-/** Whether the key was pressed inside the thread side panel. */
-function inThreadPanel(target: EventTarget | null): boolean {
-  return target instanceof Element && target.closest(".thread-panel") !== null;
-}
-
-function isComposer(target: EventTarget | null): boolean {
-  return target instanceof HTMLTextAreaElement && target.classList.contains("msg-textarea");
 }
 
 /** Prevent the default and report any handler error rather than let it escape. */

@@ -6,7 +6,7 @@
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
-import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
+import { USER_LOCAL_MUTE_CHANGED, USER_VOLUME_CHANGED } from "@lib/constants";
 import { syncVideoSurface } from "@lib/voice/videoSurface";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { StreamInfo } from "./streamInfo";
@@ -298,6 +298,10 @@ export function createVideoGrid(): VideoGridComponent {
       signal: st.gridListeners.signal,
     });
     window.addEventListener(USER_LOCAL_MUTE_CHANGED, api.onUserLocalMute, {
+      signal: st.gridListeners.signal,
+    });
+    // A level set from another surface (the voice roster's menu) too.
+    window.addEventListener(USER_VOLUME_CHANGED, api.onUserLocalMute, {
       signal: st.gridListeners.signal,
     });
 

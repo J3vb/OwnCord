@@ -105,9 +105,13 @@ export abstract class MusicAudioState extends ScreenshareAudioState {
   }
 
   setMusicVolume(userId: number, percent: number): void {
-    savePref(userMusicVolumeKey(userId), clampMusicPercent(percent));
+    const level = clampMusicPercent(percent);
+    const wasSilent = this.getMusicVolume(userId) === 0;
+    savePref(userMusicVolumeKey(userId), level);
     this.applyMusicElements(userId);
     this.musicGainListener?.();
+    // A level of 0 shows as muted too, so moving to or from it is announced.
+    if (wasSilent !== (level === 0)) announceLocalMute(userId);
   }
 
   setMusicMuted(userId: number, muted: boolean): void {

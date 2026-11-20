@@ -131,9 +131,14 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     }
     // Music goes where a share does: a phone, or a call without a share control, has no button.
     if (canPublishScreen() && cc.onScreenshareToggle !== undefined) {
-      bar.appendChild(
-        callButton(voiceText("music.share"), "music", "music", () => void toggleMusicShare()),
-      );
+      // Its app picker opens in the app window too: the call comes back first.
+      const onMusic = (): void => {
+        if (st.callPop !== null && voiceStore.getState().localMusic !== true) {
+          closeCallPopout(true);
+        }
+        void toggleMusicShare();
+      };
+      bar.appendChild(callButton(voiceText("music.share"), "music", "music", onMusic));
     }
     if (inCallView) {
       // A phone's view options: one round control instead of square toggles.

@@ -32,6 +32,7 @@ export function createGridStats(st: GridState, deps: GridStatsDeps) {
       clearInterval(st.statsTimer);
       st.statsTimer = null;
     }
+    if (st.statsTile !== null) closeStats(st.statsTile);
     st.statsTile = wanted;
     if (wanted === null) return;
     const poll = (): void => void pollStats(wanted);
@@ -71,6 +72,19 @@ export function createGridStats(st: GridState, deps: GridStatsDeps) {
     const pop = entry.el.querySelector<HTMLElement>(".video-stats");
     if (pop !== null) renderStats(pop, entry.name, info);
     st.lastInfo.set(tileId, info);
+  }
+
+  /** The Stream info box goes with its polling: its numbers would freeze,
+   *  and the chip that closes it is hidden outside focus. */
+  function closeStats(tileId: number): void {
+    const el = st.cells.get(tileId)?.el;
+    const pop = el?.querySelector<HTMLElement>(".video-stats");
+    if (el === undefined || pop == null) return;
+    // Focus in the box stays on the tile, not the page body.
+    const hadFocus = pop.contains(pop.ownerDocument.activeElement);
+    pop.remove();
+    el.querySelector(".video-quality")?.setAttribute("aria-expanded", "false");
+    if (hadFocus) el.querySelector<HTMLElement>(".video-cell-select")?.focus();
   }
 
   function toggleStats(tileId: number, chip: HTMLButtonElement): void {

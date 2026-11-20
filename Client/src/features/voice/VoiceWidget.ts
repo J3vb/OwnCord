@@ -272,6 +272,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       stopStatsPoller();
       stopElapsedTimer();
       statsPane?.el.classList.remove("visible");
+      signalBtn?.el.setAttribute("aria-expanded", "false");
       return;
     }
 
