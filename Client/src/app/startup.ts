@@ -44,7 +44,11 @@ export const beforeRenderSteps: readonly StartupStep[] = [
       applyStoredAppearance();
       applyStoredCustomTheme();
       // Native webview zoom: the stored level now, and the zoom keys everywhere.
-      startZoom(() => import("../features/zoom").then((m) => m.appZoom), new Disposable().signal);
+      startZoom(
+        () => import("../features/zoom").then((m) => m.appZoom),
+        new Disposable().signal,
+        desktop.window.available,
+      );
       // Ctrl+Shift+Backspace turns a custom CSS theme off, even one that hides the settings.
       installCustomThemeEscape(new Disposable().signal);
     },

@@ -3,6 +3,7 @@ import * as mocks from "../../helpers/settingsOverlayMocks";
 import { createSettingsOverlay } from "../../../src/features/settings/SettingsOverlay";
 import { makeOverlayOptions } from "../../helpers/settingsOverlayOptions";
 import type { SessionInfo } from "../../../src/lib/api";
+import { saveUserStatus } from "../../../src/lib/presence/userStatus";
 import {
   APP_LIFETIME_MODULES,
   clickEl,
@@ -142,6 +143,19 @@ describe("SettingsOverlay", () => {
     expect(defaultOptions.onStatusChange).toHaveBeenCalledWith("idle");
 
     overlay.destroy?.();
+  });
+
+  it("status select follows a status set elsewhere while open, and stops once closed", () => {
+    const overlay = openOverlay(container);
+    const select = container.querySelector<HTMLSelectElement>("[data-testid='status-select']")!;
+    expect(select.value).toBe("online");
+
+    saveUserStatus("dnd");
+    expect(select.value).toBe("dnd");
+
+    overlay.destroy?.();
+    saveUserStatus("idle");
+    expect(select.value).toBe("dnd");
   });
 
   // --- Connect page: Account tab gating ---

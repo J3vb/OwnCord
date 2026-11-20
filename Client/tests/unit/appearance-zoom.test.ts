@@ -1,7 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
-const setZoom = vi.hoisted(() => vi.fn<(scale: number) => Promise<boolean>>());
-vi.mock("../../src/platform/desktop", () => ({ desktop: { window: { setZoom } } }));
+const { setZoom, hostWindow } = vi.hoisted(() => {
+  const setZoom = vi.fn<(scale: number) => Promise<boolean>>();
+  return { setZoom, hostWindow: { available: true, setZoom } };
+});
+vi.mock("../../src/platform/desktop", () => ({ desktop: { window: hostWindow } }));
 
 import { expectConsole } from "../helpers/console";
 import { buildAppearanceTab } from "../../src/features/settings/AppearanceTab";
@@ -18,6 +21,7 @@ describe("AppearanceTab zoom", () => {
   beforeEach(async () => {
     localStorage.clear();
     document.body.replaceChildren();
+    hostWindow.available = true;
     setZoom.mockReset().mockResolvedValue(true);
     await appZoom.reset();
     setZoom.mockClear();
@@ -34,6 +38,14 @@ describe("AppearanceTab zoom", () => {
     await vi.waitFor(() => expect(setZoom).toHaveBeenCalledWith(1.5));
     expect(label.textContent).toBe("150%");
     await vi.waitFor(() => expect(localStorage.getItem("owncord:settings:zoomLevel")).toBe("150"));
+    ac.abort();
+  });
+
+  it("has no zoom row where the host cannot zoom (the web build)", () => {
+    hostWindow.available = false;
+    const { tab, ac } = build();
+    expect(tab.querySelector('input[aria-label="Zoom level"]')).toBeNull();
+    expect(tab.textContent).not.toContain("Zoom level");
     ac.abort();
   });
 

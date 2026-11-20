@@ -418,6 +418,28 @@ describe("AppearanceTab — Accessibility", () => {
     expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#ff00ff");
   });
 
+  it("saves a typed upper-case accent in lower case and selects its swatch on reopen", () => {
+    const first = buildAppearanceTab(ac.signal);
+    container.appendChild(first);
+    const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
+    hexInput.value = "5865F2";
+    hexInput.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(localStorage.getItem("owncord:settings:accentColor")).toBe('"#5865f2"');
+    first.remove();
+
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const active = container.querySelector(".accent-swatch.active") as HTMLElement;
+    expect(active.getAttribute("aria-label")).toBe("#5865f2");
+  });
+
+  it("selects the swatch of an accent stored in upper case", () => {
+    localStorage.setItem("owncord:settings:accentColor", '"#5865F2"');
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const active = container.querySelector(".accent-swatch.active") as HTMLElement;
+    expect(active.getAttribute("aria-checked")).toBe("true");
+    expect(active.getAttribute("aria-label")).toBe("#5865f2");
+  });
+
   it("strips invalid hex characters from input", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);

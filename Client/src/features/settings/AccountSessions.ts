@@ -3,7 +3,7 @@
 import { createElement, appendChildren, setText, focusIsOurs } from "@lib/dom";
 import type { UserStatus } from "@lib/types";
 import { errorText } from "@lib/api";
-import { loadUserStatus, saveUserStatus } from "@lib/presence/userStatus";
+import { loadUserStatus, onUserStatusChange, saveUserStatus } from "@lib/presence/userStatus";
 import type { SettingsOverlayOptions } from "./SettingsOverlay";
 import { platformText, outcomeEl } from "./helpers";
 import { createStatusRow, createRevealToggle, setStatusIcon, createDisclosure } from "./status";
@@ -53,6 +53,13 @@ export function buildStatusSelector(
     select.appendChild(createElement("option", { value: opt.value }, opt.label));
   }
   select.value = loadUserStatus();
+  // The tray, a timed status and auto-idle change it while Settings is open.
+  onUserStatusChange(
+    (status) => {
+      select.value = status;
+    },
+    { signal },
+  );
   select.addEventListener(
     "change",
     () => {

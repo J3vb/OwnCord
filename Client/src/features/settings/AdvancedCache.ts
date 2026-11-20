@@ -89,6 +89,7 @@ export function clearLocalStoragePreservingUserData(): void {
     "owncord:theme:active",
     "owncord:theme:custom:",
     "owncord:settings:notificationLevel",
+    "owncord:settings:channelNotificationLevels",
     "owncord:settings:inputMode",
     "owncord:settings:pttVk",
     "owncord:settings:mutedChannels",

@@ -10,6 +10,7 @@ const load = (): Promise<Notifier> =>
 export const androidNotifier: Notifier = {
   readsOsPermission: true,
   ringsCalls: true,
+  canFlash: false,
   permissionGranted: async () => (await load()).permissionGranted(),
   requestPermission: async () => (await load()).requestPermission(),
   show: async (title, body, options) => (await load()).show(title, body, options),

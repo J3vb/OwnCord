@@ -4,4 +4,6 @@ import { desktop } from "../../platform/desktop";
 import { createZoomController } from "./zoom";
 
 export const appZoom = createZoomController(desktop.window);
+/** False where the host has no webview zoom to set (the web build). */
+export const hostCanZoom = (): boolean => desktop.window.available;
 export { ZOOM_LEVELS, zoomIndex } from "./zoom";

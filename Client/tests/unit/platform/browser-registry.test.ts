@@ -232,6 +232,7 @@ describe("browser platform registry", () => {
 
     // Notifications.
     expect(b.notifier.readsOsPermission).toBe(false);
+    expect(b.notifier.canFlash).toBe(false);
     expect(await b.notifier.permissionGranted()).toBe(false);
     expect(await b.notifier.requestPermission()).toBe(false);
     const target = { host: "h", channelId: 1 };

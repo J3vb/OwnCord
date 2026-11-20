@@ -48,6 +48,7 @@ describe("lazy Android notifier", () => {
     expect(real.showMessage).toHaveBeenCalledWith("t", "b", target);
     expect(real.clearMessages).toHaveBeenCalledWith(7);
     expect(lazy.readsOsPermission).toBe(true);
+    expect(lazy.canFlash).toBe(false);
   });
 
   it("subscribes once loaded and unsubscribes through the real notifier", async () => {

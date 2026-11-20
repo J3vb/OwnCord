@@ -5,9 +5,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-const { mockGetVersion, mockLoad } = vi.hoisted(() => ({
+const { mockGetVersion, mockLoad, hostNotifier } = vi.hoisted(() => ({
   mockGetVersion: vi.fn<() => Promise<string | null>>(),
   mockLoad: vi.fn<() => Promise<{ version: string; body: string }[]>>(),
+  hostNotifier: { canFlash: true },
 }));
 vi.mock("../../src/platform/desktop", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../src/platform/desktop")>();
@@ -17,6 +18,7 @@ vi.mock("../../src/platform/desktop", async (importOriginal) => {
       appMetadata: { getVersion: mockGetVersion },
       autostart: { ...real.desktop.autostart, available: true },
       window: { ...real.desktop.window, available: true },
+      notifier: Object.assign(hostNotifier, { ...real.desktop.notifier, canFlash: true }),
     },
   };
 });
@@ -65,6 +67,7 @@ beforeEach(() => {
   invokeMock.mockReset().mockResolvedValue(undefined);
   mockGetVersion.mockResolvedValue("1.0.0");
   mockLoad.mockResolvedValue([]);
+  hostNotifier.canFlash = true;
   ac = new AbortController();
 });
 
@@ -90,6 +93,14 @@ describe("Notifications", () => {
     expect(hasText(el, "Unread message badge")).toBe(true);
     expect(hasText(el, "Desktop notifications")).toBe(true);
     expect(hasText(el, "Show desktop notifications for messages")).toBe(true);
+  });
+
+  it("leaves out the taskbar flash, and keeps the unread badge, where nothing can flash (a browser tab)", async () => {
+    hostDesktopApp();
+    hostNotifier.canFlash = false;
+    const el = await mounted(() => buildNotificationsTab(ac.signal));
+    expect(hasText(el, "Flash taskbar")).toBe(false);
+    expect(hasText(el, "Unread message badge")).toBe(true);
   });
 
   it("leaves out the taskbar flash and unread badge, and drops 'desktop', on Android", async () => {
