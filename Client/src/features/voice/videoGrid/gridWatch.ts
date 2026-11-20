@@ -114,6 +114,7 @@ export function createGridWatch(st: GridState, api: GridApi) {
       video: entry.video,
       // The stream's volume and mute, where it is being watched.
       controls: entry.volumeOverlay,
+      rewireControls: entry.rewireVolume,
       onClosed: (byUser) => bringBack(entry, byUser),
       setWindowFullscreen: (on, label) =>
         st.callbacks.setWindowFullscreen?.(on, label) ?? Promise.resolve(),
@@ -167,7 +168,10 @@ export function createGridWatch(st: GridState, api: GridApi) {
       entry.video.srcObject = stream;
     }
     syncVideoSurface(entry.video);
-    if (entry.volumeOverlay !== undefined) entry.el.appendChild(entry.volumeOverlay);
+    if (entry.volumeOverlay !== undefined) {
+      entry.el.appendChild(entry.volumeOverlay);
+      entry.rewireVolume?.();
+    }
     entry.video.play()?.catch(() => {});
     syncViews();
   }

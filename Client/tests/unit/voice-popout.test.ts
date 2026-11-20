@@ -352,7 +352,7 @@ describe("openPopout", () => {
     expect(setWindowFullscreen).not.toHaveBeenCalled();
   });
 
-  it("releases the zoom bindings when no window could open", () => {
+  it("leaves no zoom bindings when no window could open", () => {
     const wheelSignals: AbortSignal[] = [];
     const add = EventTarget.prototype.addEventListener;
     const spy = vi.spyOn(EventTarget.prototype, "addEventListener").mockImplementation(function (
@@ -372,8 +372,7 @@ describe("openPopout", () => {
     } finally {
       spy.mockRestore();
     }
-    expect(wheelSignals).toHaveLength(1);
-    expect(wheelSignals[0]!.aborted).toBe(true);
+    expect(wheelSignals.filter((signal) => !signal.aborted)).toEqual([]);
   });
 
   it("ignores F with a modifier and other keys", () => {
@@ -500,6 +499,27 @@ describe("openPopout", () => {
     const second = setupPopout();
     second.popout.close();
     expect(second.onClosed).toHaveBeenCalledWith(false);
+  });
+
+  it("wires the page again each time the window draws it, once each time", () => {
+    const rewireControls = vi.fn();
+    const v = video();
+    const setWindowFullscreen = vi.fn(() => Promise.resolve());
+    track(
+      openPopout({ title: "x", video: v, rewireControls, onClosed: vi.fn(), setWindowFullscreen }),
+    );
+    expect(rewireControls).toHaveBeenCalledTimes(1);
+    wins[0]!.reload();
+    expect(rewireControls).toHaveBeenCalledTimes(2);
+
+    const root = wins[0]!.document.querySelector<HTMLElement>(".video-popout")!;
+    const button = root.querySelector<HTMLButtonElement>("[data-popout-control='fullscreen']")!;
+    button.click();
+    expect(setWindowFullscreen).toHaveBeenLastCalledWith(true, expect.any(String));
+    const wheel = new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, cancelable: true });
+    root.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(root.classList.contains("video-zoomed")).toBe(true);
   });
 
   it("stops zooming the picture once the window is closed", () => {
