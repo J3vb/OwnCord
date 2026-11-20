@@ -14,23 +14,23 @@ function makeComposer(usable = true): MentionTarget & { insertMention: ReturnTyp
 describe("activeComposer", () => {
   it("has no composer until one claims the slot", () => {
     expect(canMention()).toBe(false);
-    expect(mentionInComposer("Dave")).toBe(false);
+    expect(mentionInComposer("Dave", 7)).toBe(false);
   });
 
   it("routes a mention to the claimed composer", () => {
     const c = makeComposer();
     const release = claimComposer(c);
     expect(canMention()).toBe(true);
-    expect(mentionInComposer("Dave")).toBe(true);
-    expect(c.insertMention).toHaveBeenCalledWith("Dave");
+    expect(mentionInComposer("Dave", 7)).toBe(true);
+    expect(c.insertMention).toHaveBeenCalledWith("Dave", 7);
     release();
-    expect(mentionInComposer("Dave")).toBe(false);
+    expect(mentionInComposer("Dave", 7)).toBe(false);
   });
 
   it("reports a composer that cannot take text as unavailable", () => {
     const release = claimComposer(makeComposer(false));
     expect(canMention()).toBe(false);
-    expect(mentionInComposer("Dave")).toBe(false);
+    expect(mentionInComposer("Dave", 7)).toBe(false);
     release();
   });
 
@@ -42,12 +42,12 @@ describe("activeComposer", () => {
     const releaseSecond = claimComposer(second);
 
     releaseFirst();
-    expect(mentionInComposer("Dave")).toBe(true);
+    expect(mentionInComposer("Dave", 7)).toBe(true);
     expect(second.insertMention).toHaveBeenCalledTimes(1);
     expect(first.insertMention).not.toHaveBeenCalled();
 
     releaseSecond();
-    expect(mentionInComposer("Dave")).toBe(false);
+    expect(mentionInComposer("Dave", 7)).toBe(false);
   });
 
   it("sends a mention to the composer the user last focused, and hands the slot back on release", () => {
@@ -56,21 +56,21 @@ describe("activeComposer", () => {
     const releaseChannel = claimComposer(channel);
     const releaseThread = claimComposer(thread);
 
-    mentionInComposer("Dave");
+    mentionInComposer("Dave", 7);
     expect(thread.insertMention).toHaveBeenCalledTimes(1);
 
     focusComposer(channel);
-    mentionInComposer("Eve");
-    expect(channel.insertMention).toHaveBeenCalledWith("Eve");
+    mentionInComposer("Eve", 7);
+    expect(channel.insertMention).toHaveBeenCalledWith("Eve", 7);
 
     focusComposer(thread);
     releaseThread();
-    mentionInComposer("Fay");
-    expect(channel.insertMention).toHaveBeenCalledWith("Fay");
+    mentionInComposer("Fay", 7);
+    expect(channel.insertMention).toHaveBeenCalledWith("Fay", 7);
     expect(thread.insertMention).toHaveBeenCalledTimes(1);
 
     releaseChannel();
-    expect(mentionInComposer("Gus")).toBe(false);
+    expect(mentionInComposer("Gus", 7)).toBe(false);
   });
 
   it("ignores a focus on a composer that was already released", () => {
@@ -79,7 +79,7 @@ describe("activeComposer", () => {
     const releaseLive = claimComposer(live);
     claimComposer(gone)();
     focusComposer(gone);
-    expect(mentionInComposer("Dave")).toBe(true);
+    expect(mentionInComposer("Dave", 7)).toBe(true);
     expect(live.insertMention).toHaveBeenCalledTimes(1);
     releaseLive();
   });
@@ -95,8 +95,8 @@ describe("activeComposer", () => {
     // b is still claimed: when a later composer leaves, b takes the slot back.
     const c = makeComposer();
     claimComposer(c)();
-    expect(mentionInComposer("Dave")).toBe(true);
-    expect(b.insertMention).toHaveBeenCalledWith("Dave");
+    expect(mentionInComposer("Dave", 7)).toBe(true);
+    expect(b.insertMention).toHaveBeenCalledWith("Dave", 7);
     expect(c.insertMention).not.toHaveBeenCalled();
     releaseB();
   });
@@ -111,8 +111,8 @@ describe("activeComposer", () => {
     focusComposer(b);
 
     releaseA();
-    mentionInComposer("Dave");
-    expect(b.insertMention).toHaveBeenCalledWith("Dave");
+    mentionInComposer("Dave", 7);
+    expect(b.insertMention).toHaveBeenCalledWith("Dave", 7);
     expect(c.insertMention).not.toHaveBeenCalled();
 
     releaseC();

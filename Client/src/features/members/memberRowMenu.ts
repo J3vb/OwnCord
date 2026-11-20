@@ -245,7 +245,7 @@ export function createMemberItem(
         timeoutState: timeoutStateOf(member.id),
         onProfile: () => openProfile(clientX, clientY),
         onMention: () => {
-          mentionInComposer(member.username);
+          mentionInComposer(member.username, member.id);
         },
         ...optional,
         onToggleBlock: () => opts.onToggleBlock(member.id, memberDisplayName(member), !isBlocked),
