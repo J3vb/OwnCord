@@ -4,10 +4,8 @@
  */
 import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { replaceEmojiShortcodes } from "../shortcodes";
-import { applyPickedMentions } from "@lib/text/pickedMentions";
 import { idMentionsEnabled } from "@lib/net/serverCapabilities";
-import { applySlashCommand } from "../slashCommands";
+import { composeOutgoing } from "./outgoingText";
 import { MAX_MESSAGE_LEN } from "../messageLimits";
 import { authStore } from "@stores/auth.store";
 import { messagingText } from "../../../i18n/messaging";
@@ -184,13 +182,15 @@ export function createInputSend(st: InputState, api: InputApi) {
     // Built-in slash commands rewrite the text here, so the attachment and
     // send-while-uploading paths below carry the rewritten message too. A bare
     // /spoiler or /me has nothing to send and leaves the draft as typed.
-    const slash = applySlashCommand(st.textarea.value);
-    if (slash !== null && "empty" in slash) {
-      showUploadError(messagingText("slash.needsText", { name: slash.name }));
+    const outgoing = composeOutgoing(
+      st.textarea.value,
+      idMentionsEnabled() ? st.pickedMentions : [],
+    );
+    if ("empty" in outgoing) {
+      showUploadError(messagingText("slash.needsText", { name: outgoing.name }));
       return;
     }
-    const typed = replaceEmojiShortcodes(slash === null ? st.textarea.value.trim() : slash.text);
-    const content = applyPickedMentions(typed, idMentionsEnabled() ? st.pickedMentions : []);
+    const content = outgoing.content;
     const hasAttachments = st.pendingAttachments.length > 0;
     if (content.length === 0 && !hasAttachments) return;
     if (refuseTooLong(content, st.textarea)) return;

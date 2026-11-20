@@ -12,7 +12,12 @@ import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { totalDmUnread } from "@lib/dmUnread";
 import type { DmChannel } from "@stores/dm.store";
-import { setSidebarMode } from "@stores/ui.store";
+import {
+  DM_SECTION_COLLAPSED_KEY,
+  isCategoryCollapsed,
+  setSidebarMode,
+  toggleCategory,
+} from "@stores/ui.store";
 import { CHANNEL_MUTE_CHANGED, getChannelMute, isChannelMuted } from "@lib/prefs/channelMutes";
 import { trackCurrentView } from "../navigation/contentView";
 import type { CountSource } from "../navigation/destinations";
@@ -171,7 +176,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   dmSection.appendChild(dmHeader);
 
   // --- DM list ---
-  let dmCollapsed = false;
+  let dmCollapsed = isCategoryCollapsed(DM_SECTION_COLLAPSED_KEY);
 
   // "Message Requests (N)" above the conversations, while any are pending.
   let renderRequestsRow: (() => void) | undefined;
@@ -423,8 +428,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   unsubs.push(unsubDmSection);
 
   // --- Collapse toggle ---
-  dmHeader.addEventListener("click", () => {
-    dmCollapsed = !dmCollapsed;
+  function paintCollapsed(): void {
     dmHeader.classList.toggle("collapsed", dmCollapsed);
     dmArrow.textContent = dmCollapsed ? "\u25B6" : "\u25BC";
     dmArrow.setAttribute("aria-expanded", String(!dmCollapsed));
@@ -435,6 +439,13 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
       : dmStore.getState().channels.length > 3
         ? ""
         : "none";
+  }
+  if (dmCollapsed) paintCollapsed();
+  dmHeader.addEventListener("click", () => {
+    // Saved per server with the categories, so it survives a remount or reload.
+    toggleCategory(DM_SECTION_COLLAPSED_KEY);
+    dmCollapsed = isCategoryCollapsed(DM_SECTION_COLLAPSED_KEY);
+    paintCollapsed();
   });
 
   // --- Add DM button ---

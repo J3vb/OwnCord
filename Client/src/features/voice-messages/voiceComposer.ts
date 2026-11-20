@@ -14,6 +14,7 @@ import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { dialogOpen, isDisplayed } from "@lib/ui/dialogOpen";
 import type { VoiceUploadMeta } from "@lib/types";
 import { authStore } from "@stores/auth.store";
 import { attachmentTtlMs } from "../messaging/attachmentTtl";
@@ -26,6 +27,28 @@ import {
   VoiceRecordError,
 } from "./recorder";
 import { bucketMax, formatClock } from "./waveform";
+
+/**
+ * Whether Escape is meant for something other than the recording bar: an open
+ * dialog, the settings overlay, the image viewer, a menu or a message edit, or
+ * a key pressed inside some other control than the composer.
+ */
+function escapeBelongsElsewhere(e: KeyboardEvent, root: HTMLElement): boolean {
+  if (dialogOpen()) return true;
+  if (document.querySelector(".image-lightbox, .msg-inline-edit, [role='menu']") !== null) {
+    return true;
+  }
+  const settings = document.querySelector<HTMLElement>(".settings-overlay");
+  if (settings !== null && isDisplayed(settings)) return true;
+  const target = e.target;
+  if (!(target instanceof Node)) return false;
+  return !(
+    root.contains(target) ||
+    target === document ||
+    target === document.body ||
+    target === document.documentElement
+  );
+}
 
 /** Bars drawn in the recording bar. */
 const BAR_COUNT = 48;
@@ -236,11 +259,13 @@ export function createVoiceComposer(options: VoiceComposerOptions): VoiceCompose
     options.root.classList.add("voice-active");
     built.cancel.addEventListener("click", () => cancel(), { signal: session.signal });
     built.primary.addEventListener("click", () => void submit(), { signal: session.signal });
-    // Escape cancels, ahead of the app-wide Escape (mark the channel read).
+    // Escape cancels, ahead of the app-wide Escape (mark the channel read), unless
+    // it is meant for something else that is open: it closes that first.
     document.addEventListener(
       "keydown",
       (e: KeyboardEvent) => {
         if (e.key !== "Escape" || isImeCommit(e) || e.defaultPrevented) return;
+        if (escapeBelongsElsewhere(e, options.root)) return;
         e.preventDefault();
         e.stopPropagation();
         cancel();

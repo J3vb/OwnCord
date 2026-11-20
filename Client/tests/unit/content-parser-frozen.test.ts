@@ -142,9 +142,16 @@ function buildSpoiler(
     // spoiler must not open on the same click that uncovers it.
     e.preventDefault();
     e.stopPropagation();
+    const hadFocus = document.activeElement === span;
     span.classList.add("revealed");
-    span.setAttribute("aria-pressed", "true");
-    span.setAttribute("aria-label", messagingText("spoiler.revealed"));
+    // A revealed spoiler is plain text again, keeping a keyboard reader's
+    // place (changed deliberately: it no longer reads as a pressed button).
+    for (const attr of ["role", "aria-pressed", "aria-label", "tabindex"])
+      span.removeAttribute(attr);
+    if (hadFocus) {
+      span.tabIndex = -1;
+      span.focus();
+    }
   };
   span.addEventListener("click", reveal);
   span.addEventListener("keydown", (e: KeyboardEvent) => {

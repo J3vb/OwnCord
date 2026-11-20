@@ -122,6 +122,16 @@ release changes the database, and anything an operator must do first.)
 - After choosing another graphics card, Restart to apply stays visible until you restart, also after reopening Settings.
 - An accent colour typed in capitals shows its swatch as selected.
 
+**Messages and sidebar**
+
+- Pressing Escape while a voice message is recording or waiting to be sent closes the dialog, menu, image or edit you meant instead of throwing the recording away.
+- Voice messages recorded on Windows or Android can be skipped ahead before the first play without Play hanging, and seeking while one plays keeps it playing.
+- The Direct Messages section in the channel sidebar stays collapsed after you open a DM, switch server or reload.
+- The reply bar clears when the message you reply to is deleted, the character counter counts what will actually be sent (`/me`, `/spoiler`, `:shortcodes:`), and ArrowUp edits your last message in threads and forum posts too.
+- On Android, Enter in the message edit box adds a new line; Save saves.
+- A mention badge on a voice channel can be cleared with Mark as Read, and the DM header no longer shows a Media button left over from the last channel.
+- Screen readers read a revealed spoiler's text and the member list's collapse arrow.
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

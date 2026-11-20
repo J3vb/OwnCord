@@ -2,7 +2,6 @@
  * Channel mount steps for the composer: the typing indicator, the message input
  * and its draft, then slow mode and the rules that disable or gate it.
  */
-import { isServerRowKind } from "@lib/text/messageKind";
 import { ApiClientError } from "@lib/api";
 import {
   createMessageInput,
@@ -12,6 +11,8 @@ import {
 import { onSendAcknowledged } from "../../../features/messaging/sendAcknowledged";
 import { createTypingIndicator } from "../../../features/messaging/TypingIndicator";
 import { getChannelMessages } from "@stores/messages.store";
+import { lastOwnEditable } from "../../../features/messaging/lastOwnEditable";
+import { watchReplyTarget } from "../../../features/messaging/composer/replyTargetWatch";
 import { canManageMessages } from "@lib/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
@@ -345,32 +346,17 @@ export function mountComposerGating(st: ChannelState, cc: ChannelApi, ms: MountS
     );
   }
 
+  // The reply bar follows its target: a deleted message cannot be replied to.
+  if (st.messageInput !== null) {
+    st.composerGatingUnsubs.push(watchReplyTarget(st.messageInput, ms.channelId));
+  }
+
   // Arrow-up edit: listen for edit-last-message bubbling from MessageInput
   st.slots.inputSlot.addEventListener(
     "edit-last-message",
     () => {
-      const msgs = getChannelMessages(ms.channelId);
-      const myId = st.getCurrentUserId();
-      // Find the last message sent by the current user (array is chronological)
-      for (let i = msgs.length - 1; i >= 0; i--) {
-        const m = msgs[i]!;
-        // Mirrors renderers.ts's gate on the visual Edit affordance: an
-        // optimistic row (pending/failed) carries id 0 until the server
-        // acks it, so editing it would send chat_edit for a message that
-        // does not exist yet.
-        // A server-written row (a DM call log) is never editable, nor is a
-        // sticker message: it has no text and the server refuses it.
-        if (
-          m.user.id === myId &&
-          !m.deleted &&
-          m.status === "sent" &&
-          !isServerRowKind(m.kind) &&
-          m.sticker === undefined
-        ) {
-          st.messageList?.startEdit(m.id);
-          break;
-        }
-      }
+      const own = lastOwnEditable(getChannelMessages(ms.channelId), st.getCurrentUserId());
+      if (own !== undefined) st.messageList?.startEdit(own.id);
     },
     { signal: ms.signal },
   );

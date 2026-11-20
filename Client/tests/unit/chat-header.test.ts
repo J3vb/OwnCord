@@ -6,6 +6,7 @@ import {
   setChatHeaderCallChat,
   setChatHeaderTopic,
   setChatHeaderLock,
+  setChatHeaderMedia,
 } from "../../src/pages/main-page/ChatHeader";
 import { useMountContainer } from "../helpers/mountContainer";
 import { cascadedDeclaration } from "../helpers/app-css";
@@ -239,6 +240,14 @@ describe("setChatHeaderLock", () => {
 });
 
 describe("updateChatHeaderForDm", () => {
+  it("hides the Media button a channel showed, whatever channel was viewed last", () => {
+    const { refs } = buildChatHeader({ onTogglePins: vi.fn() });
+    setChatHeaderMedia(refs, true);
+    expect(refs.mediaBtn!.hidden).toBe(false);
+    updateChatHeaderForDm(refs, { username: "alice", status: "Online" });
+    expect(refs.mediaBtn!.hidden).toBe(true);
+  });
+
   let container: HTMLDivElement;
   useMountContainer((mounted) => {
     container = mounted;

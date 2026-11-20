@@ -219,6 +219,9 @@ export function migrateCollapsedCategoryNames(keysByName: ReadonlyMap<string, st
   uiStore.setState((prev) => ({ ...prev, collapsedCategories: next }));
 }
 
+/** The Direct Messages section's key in the collapsed set (no category id looks like it). */
+export const DM_SECTION_COLLAPSED_KEY = "section:dms";
+
 /** Selector: check if a category is collapsed. */
 export function isCategoryCollapsed(category: string): boolean {
   return uiStore.select((s) => s.collapsedCategories.has(category));

@@ -40,6 +40,8 @@ import { formatUntil, safetyText } from "../../i18n/safety";
 import { threadComposerReason } from "./threadCommands";
 import { createMessageList, type MessageListComponent } from "../messaging/MessageList";
 import { createMessageInput, type MessageInputComponent } from "../messaging/MessageInput";
+import { lastOwnEditable } from "../messaging/lastOwnEditable";
+import { watchReplyTarget } from "../messaging/composer/replyTargetWatch";
 import { createThreadJump } from "./threadJump";
 import {
   bindTrackedFailures,
@@ -325,6 +327,16 @@ export function createThreadPanel(options: ThreadPanelOptions): ThreadPanelCompo
       tracked.trackTimers.clear();
     });
     messageInput.mount(inputSlot);
+    disposable.addCleanup(watchReplyTarget(messageInput, threadId));
+    // ArrowUp in the empty composer edits the newest own message, as in a channel.
+    inputSlot.addEventListener(
+      "edit-last-message",
+      () => {
+        const own = lastOwnEditable(getChannelMessages(threadId), currentUserId());
+        if (own !== undefined) void messageList?.startEdit(own.id);
+      },
+      { signal },
+    );
 
     header.paint();
     starter.paint();

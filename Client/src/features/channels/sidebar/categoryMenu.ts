@@ -15,7 +15,7 @@ import { createElement } from "@lib/dom";
 import { getChannelsByCategory, type CategoryRef } from "@stores/channels.store";
 import { canManageChannels, visibleCategories } from "@lib/permissions";
 import { collapseCategories, isCategoryCollapsed, toggleCategory } from "@stores/ui.store";
-import { hasUnread, markChannelsRead } from "@lib/readState";
+import { markChannelsRead, showsUnreadBadge } from "@lib/readState";
 import { openMenuOnKeyboard, openMenuShell } from "@lib/ui/contextMenu";
 import { shellText } from "../../../i18n/shell";
 import { canMoveCategory } from "../categoryActions";
@@ -134,7 +134,7 @@ export function attachCategoryContextMenu(
     const category = target.key;
     const groups = getChannelsByCategory(visibleCategories());
     const unreadIds = (groups.get(category) ?? [])
-      .filter((ch) => ch.type !== "voice" && hasUnread(ch.id))
+      .filter((ch) => showsUnreadBadge(ch.id))
       .map((ch) => ch.id);
     addItem(
       shellText("category.markRead"),

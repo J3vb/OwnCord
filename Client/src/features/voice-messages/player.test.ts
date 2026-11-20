@@ -289,6 +289,122 @@ describe("voice player on a file with no duration header", () => {
   });
 });
 
+/** Like Chromium with preload none: nothing loads until the preload hint is raised or play() runs. */
+function lazyWebmAudio() {
+  const audio = document.createElement("audio");
+  const state = { duration: Infinity, time: 0, paused: true, sets: [] as number[] };
+  audio.preload = "none";
+  Object.defineProperty(audio, "duration", { get: () => state.duration, configurable: true });
+  Object.defineProperty(audio, "readyState", {
+    get: () => (audio.getAttribute("src") !== null && audio.preload !== "none" ? 4 : 0),
+    configurable: true,
+  });
+  Object.defineProperty(audio, "currentTime", {
+    get: () => state.time,
+    set: (v: number) => {
+      state.sets.push(v);
+      state.time = v;
+      if (v > 1e100 && audio.preload !== "none") {
+        state.duration = 20;
+        if (!state.paused) {
+          // Seeking to the end of a playing element pauses it.
+          state.paused = true;
+          queueMicrotask(() => audio.dispatchEvent(new Event("pause")));
+        }
+        queueMicrotask(() => audio.dispatchEvent(new Event("durationchange")));
+      }
+    },
+  });
+  audio.play = vi.fn(async () => {
+    state.paused = false;
+    audio.dispatchEvent(new Event("play"));
+  });
+  audio.pause = vi.fn(() => {
+    state.paused = true;
+    audio.dispatchEvent(new Event("pause"));
+  });
+  return { audio, state };
+}
+
+describe("voice player seeking on a webm clip", () => {
+  it("does not stall on the first seek before play when nothing is loaded yet", async () => {
+    const { audio, state } = lazyWebmAudio();
+    const node = mount(audio);
+    key(q<HTMLElement>(node, "voice-slider"), "ArrowRight");
+    q<HTMLButtonElement>(node, "voice-play").click();
+    // The workaround's own waits are 3 s each; it must not need them.
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalled(), { timeout: 1500 });
+    expect(state.sets).toEqual([1e101, 0, 5]);
+  });
+
+  it("keeps playing when the first seek lands during playback", async () => {
+    const { audio, state } = lazyWebmAudio();
+    const node = mount(audio);
+    q<HTMLButtonElement>(node, "voice-play").click();
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1));
+    expect(node.classList.contains("playing")).toBe(true);
+
+    key(q<HTMLElement>(node, "voice-slider"), "ArrowRight");
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(2), { timeout: 1500 });
+    expect(state.time).toBe(5);
+    expect(state.paused).toBe(false);
+    expect(node.classList.contains("playing")).toBe(true);
+  });
+
+  it("stays paused when the viewer pauses while the length is being learned", async () => {
+    const { audio } = lazyWebmAudio();
+    const node = mount(audio);
+    const play = q<HTMLButtonElement>(node, "voice-play");
+    play.click();
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1));
+    key(q<HTMLElement>(node, "voice-slider"), "ArrowRight");
+    play.click();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(audio.play).toHaveBeenCalledTimes(1);
+    expect(node.classList.contains("playing")).toBe(false);
+  });
+
+  it("does not resume over another clip that started during the length probe", async () => {
+    const first = lazyWebmAudio();
+    const node = mount(first.audio);
+    q<HTMLButtonElement>(node, "voice-play").click();
+    await vi.waitFor(() => expect(first.audio.play).toHaveBeenCalledTimes(1));
+    key(q<HTMLElement>(node, "voice-slider"), "ArrowRight");
+    // Another message starts before the probe settles.
+    const other = lazyWebmAudio();
+    mount(other.audio);
+    other.audio.dispatchEvent(new Event("play"));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(first.audio.play).toHaveBeenCalledTimes(1);
+    expect(node.classList.contains("playing")).toBe(false);
+  });
+
+  it("does not resume a clip that failed during the length probe", async () => {
+    const { audio } = lazyWebmAudio();
+    const node = mount(audio);
+    q<HTMLButtonElement>(node, "voice-play").click();
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1));
+    key(q<HTMLElement>(node, "voice-slider"), "ArrowRight");
+    audio.dispatchEvent(new Event("error"));
+    await new Promise((r) => setTimeout(r, 30));
+    expect(audio.play).toHaveBeenCalledTimes(1);
+    expect(node.classList.contains("playing")).toBe(false);
+  });
+
+  it("leaves a finite clip alone: a seek while playing is a plain currentTime write", async () => {
+    const { audio } = lazyWebmAudio();
+    Object.defineProperty(audio, "duration", { get: () => 20, configurable: true });
+    const node = mount(audio);
+    q<HTMLButtonElement>(node, "voice-play").click();
+    await vi.waitFor(() => expect(audio.play).toHaveBeenCalledTimes(1));
+    key(q<HTMLElement>(node, "voice-slider"), "ArrowRight");
+    await new Promise((r) => setTimeout(r, 20));
+    expect(audio.currentTime).toBe(5);
+    expect(audio.play).toHaveBeenCalledTimes(1);
+    expect(audio.pause).not.toHaveBeenCalled();
+  });
+});
+
 function playable() {
   const audio = document.createElement("audio");
   Object.defineProperty(audio, "duration", { get: () => 20, configurable: true });

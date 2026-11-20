@@ -461,6 +461,8 @@ export function updateChatHeaderForDm(refs: ChatHeaderRefs, recipient: ChatHeade
     refs.callBtn.style.display = "";
     refs.videoCallBtn.style.display = "";
     if (refs.threadsBtn !== undefined) refs.threadsBtn.hidden = true;
+    // Channel media is a server-channel feature: a DM never inherits the last channel's button.
+    setChatHeaderMedia(refs, false);
     refs.profileBtn.style.display = recipient.isGroup === true ? "none" : "";
     refs.membersBtn.style.display = recipient.isGroup === true ? "" : "none";
   } else {

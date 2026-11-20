@@ -22,6 +22,7 @@ import {
 } from "../helpers/message-actions-fixtures";
 import { resetMembersState, resetMessagesState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
+import { clearHost, hostAndroidApp } from "../helpers/androidHost";
 import { mountMessageInput } from "../helpers/messageInputHarness";
 import { hoverRows } from "../helpers/hoverRows";
 
@@ -333,6 +334,30 @@ describe("inline message editor", () => {
       expect(row(2)!.classList.contains("editing")).toBe(false);
       // Focus went back to the host (the composer).
       expect(options.onEditEnd).toHaveBeenCalledTimes(1);
+    });
+
+    it("on the Android app Enter is a newline and the Save link saves", async () => {
+      hostAndroidApp();
+      try {
+        mount([mine(1)]);
+        const textarea = await openEditor(1);
+        textarea.value = "line one";
+        expect(textarea.getAttribute("enterkeyhint")).toBe("enter");
+
+        const e = key(textarea, "Enter");
+
+        expect(e.defaultPrevented).toBe(false);
+        expect(options.onEditSave).not.toHaveBeenCalled();
+        expect(editor(1)).not.toBeNull();
+        expect(row(1)!.querySelector(".msg-inline-edit-hint")!.textContent).not.toContain(
+          "enter to",
+        );
+
+        byId("msg-edit-save-1")!.click();
+        expect(options.onEditSave).toHaveBeenCalledExactlyOnceWith(1, "line one");
+      } finally {
+        clearHost();
+      }
     });
 
     it("Shift+Enter is a newline: it saves nothing and is left to the browser", async () => {
