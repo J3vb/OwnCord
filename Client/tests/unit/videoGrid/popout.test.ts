@@ -287,6 +287,52 @@ describe("VideoGrid", () => {
       expect(popup.doc.querySelector(".video-tile-overlay")).toBeNull();
     });
 
+    it("keeps the stream's volume and mute working when the window drops their listeners on load", () => {
+      // WebView2 drops the listeners of nodes drawn into the window before
+      // its page loaded: record them, and strip them as it does.
+      const added: Array<[EventTarget, string, EventListenerOrEventListenerObject, boolean]> = [];
+      const add = EventTarget.prototype.addEventListener;
+      const spy = vi.spyOn(EventTarget.prototype, "addEventListener").mockImplementation(function (
+        this: EventTarget,
+        type,
+        listener,
+        options,
+      ) {
+        const capture = typeof options === "boolean" ? options : options?.capture === true;
+        if (listener !== null) added.push([this, type, listener, capture]);
+        return add.call(this, type, listener, options);
+      });
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+        control(SCREEN, "pip").click();
+        const drawnInto = popup.doc;
+        for (const [target, type, listener, capture] of added) {
+          if (target instanceof Node && drawnInto.contains(target)) {
+            target.removeEventListener(type, listener, capture);
+          }
+        }
+        popup.reload();
+      } finally {
+        spy.mockRestore();
+      }
+
+      const overlay = popup.doc.querySelector<HTMLElement>(".video-tile-overlay")!;
+      const slider = overlay.querySelector<HTMLInputElement>(".tile-volume-slider")!;
+      const mute = overlay.querySelector<HTMLButtonElement>(".tile-mute-btn")!;
+      slider.value = "0";
+      slider.dispatchEvent(new Event("input"));
+      expect(mockMuteScreenshareAudio).toHaveBeenLastCalledWith(2, true);
+      expect(overlay.querySelector(".tile-volume-value")!.textContent).toBe("0%");
+      expect(mute.getAttribute("aria-label")).toBe("Unmute");
+      expect(overlay.classList.contains("muted")).toBe(true);
+
+      // Wired once: a click toggles the mute once, not back and forth.
+      mute.click();
+      expect(mute.getAttribute("aria-label")).toBe("Mute");
+      expect(overlay.querySelector(".tile-volume-value")!.textContent).toBe("100%");
+      expect(mockMuteScreenshareAudio).toHaveBeenLastCalledWith(2, false);
+    });
+
     it("hides a muted track's stalled frame in the window too", () => {
       const { stream, track } = fakeStreamWithTrack();
       grid.addStream(SCREEN, "Otto (Screen)", stream, screenCfg);

@@ -202,6 +202,7 @@ export function createGridTileBuild(st: GridState, api: GridApi, menus: GridMenu
   ): void {
     const volume = buildVolumeControls(config);
     entry.applyVolume = volume.apply;
+    entry.rewireVolume = volume.rewire;
     entry.volumeOverlay = volume.overlay;
     entry.el.appendChild(volume.overlay);
     nav.insertBefore(

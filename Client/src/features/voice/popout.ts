@@ -34,6 +34,10 @@ export interface PopoutOptions {
   /** Controls shown over the video in the window (the stream's volume): the
    *  caller's to put back, with the video. */
   readonly controls?: HTMLElement;
+  /** `controls` landed in a new document: wire its listeners again. WebView2
+   *  drops the listeners of nodes drawn into the window before its page
+   *  finished loading. */
+  readonly rewireControls?: () => void;
   /** The window is gone, closed by the user (`byUser`) or by close(): the
    *  video is the caller's to put back. Called once. */
   readonly onClosed: (byUser: boolean) => void;
@@ -203,21 +207,28 @@ export function openPopout(opts: PopoutOptions): Popout | null {
   }
 
   setFullscreen(false);
-  // Ctrl + wheel and drag zoom the stream here as on its tile; the window
-  // opens unzoomed.
-  const zoom = new Disposable();
-  bindVideoZoom(root, zoom.signal);
+  let drawn = new Disposable();
   const popout = openPopoutWindow({
     title: opts.title,
     content: root,
     onDraw: (doc, signal) => {
-      const navigator = root.querySelector(".video-zoom-nav");
+      // Each draw wires the page again (WebView2 drops the listeners of a
+      // page drawn before the window loaded), starting unzoomed.
+      drawn.destroy();
+      drawn = new Disposable();
+      root.style.removeProperty("--video-pan");
+      root.style.removeProperty("--video-scale");
+      root.classList.remove("video-zoomed", "video-panning");
       root.replaceChildren(
         opts.video,
         ...(opts.controls === undefined ? [] : [opts.controls]),
         button,
-        ...(navigator === null ? [] : [navigator]),
       );
+      // Ctrl + wheel and drag zoom the stream here as on its tile.
+      bindVideoZoom(root, drawn.signal);
+      button.addEventListener("click", toggleFullscreen, { signal: drawn.signal });
+      root.addEventListener("dblclick", toggleFullscreen, { signal: drawn.signal });
+      opts.rewireControls?.();
       syncVideoSurface(opts.video);
       doc.addEventListener("fullscreenchange", () => setFullscreen(doc.fullscreenElement != null), {
         signal,
@@ -226,16 +237,14 @@ export function openPopout(opts: PopoutOptions): Popout | null {
       void opts.video.play()?.catch(() => {});
     },
     onClosed: (byUser) => {
-      zoom.destroy();
+      drawn.destroy();
       opts.onClosed(byUser);
     },
   });
   if (popout === null) {
-    zoom.destroy();
+    drawn.destroy();
     return null;
   }
   label = popout.label;
-  button.addEventListener("click", toggleFullscreen);
-  root.addEventListener("dblclick", toggleFullscreen);
   return popout;
 }
