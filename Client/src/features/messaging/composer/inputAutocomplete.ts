@@ -2,7 +2,7 @@
  * Autocomplete in the message input: the @mention, :emoji:, #channel and
  * /command popups and what each inserts.
  */
-import { createMentionAutocomplete } from "./MentionAutocomplete";
+import { createMentionAutocomplete, filterMentionSuggestions } from "./MentionAutocomplete";
 import { createEmojiAutocomplete, MIN_EMOJI_QUERY } from "./EmojiAutocomplete";
 import { createChannelAutocomplete } from "./ChannelAutocomplete";
 import { emojiCatalog, loadEmojiCatalog } from "../emojiCatalog";
@@ -10,17 +10,32 @@ import { createSlashAutocomplete } from "./SlashAutocomplete";
 import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import type { InputState, InputApi } from "./inputState";
 
+/** "@" plus a query in the mention grammar, at a boundary the server's mention rule allows. */
+const MENTION_QUERY = /(?:^|[^\p{L}\p{N}_@])@([\p{L}\p{N}_.-]{0,64})$/u;
+/** The same "@", followed by a name that may hold spaces ("@John Do"). */
+const SPACED_MENTION_QUERY = /(?:^|[^\p{L}\p{N}_@])@([^\s@][^\n@]{0,63})$/u;
+
 export function createInputAutocomplete(st: InputState, api: InputApi) {
   /**
    * The @token immediately before the caret, or null. The leading boundary
    * mirrors the server's mention rule, so the popup never offers a completion
-   * for text ("mail@dom") that a send would not resolve as a mention.
+   * for text ("mail@dom") that a send would not resolve as a mention. A query
+   * with a space counts only while it still matches someone, so "@John D"
+   * keeps finding "John Doe" but "@bob how are you" is plain text.
    */
   function activeMentionToken(): { query: string; start: number } | null {
     if (st.textarea === null) return null;
     const caret = st.textarea.selectionStart;
     const before = st.textarea.value.slice(0, caret);
-    const match = /(?:^|[^\p{L}\p{N}_@])@([\p{L}\p{N}_.-]{0,64})$/u.exec(before);
+    const spaced = SPACED_MENTION_QUERY.exec(before)?.[1];
+    if (
+      spaced !== undefined &&
+      /\s/u.test(spaced) &&
+      filterMentionSuggestions(spaced, st.options.channelId).length > 0
+    ) {
+      return { query: spaced, start: caret - spaced.length - 1 };
+    }
+    const match = MENTION_QUERY.exec(before);
     if (match === null) return null;
     const query = match[1] ?? "";
     return { query, start: caret - query.length - 1 };
@@ -34,17 +49,23 @@ export function createInputAutocomplete(st: InputState, api: InputApi) {
     st.pendingPick = null;
   }
 
+  /** Remember that the text `@token` stands for the id token `idToken`. */
+  function rememberPick(token: string, idToken: string): void {
+    if (!idMentionsEnabled()) return;
+    const picked = { text: `@${token}`, token: idToken };
+    if (!st.pickedMentions.some((p) => p.text === picked.text && p.token === picked.token)) {
+      st.pickedMentions.push(picked);
+    }
+  }
+
   /** Remember that the text `@token` stands for the picked user or role. */
   function recordPick(token: string): void {
     const pick = st.pendingPick;
     st.pendingPick = null;
-    if (pick === null || pick.token !== token || !idMentionsEnabled()) return;
+    if (pick === null || pick.token !== token) return;
     const id = pick.kind === "role" ? pick.roleId : pick.userId;
     if (id === null) return;
-    const picked = { text: `@${token}`, token: pick.kind === "role" ? `<@&${id}>` : `<@${id}>` };
-    if (!st.pickedMentions.some((p) => p.text === picked.text && p.token === picked.token)) {
-      st.pickedMentions.push(picked);
-    }
+    rememberPick(token, pick.kind === "role" ? `<@&${id}>` : `<@${id}>`);
   }
 
   /** Replace the token under the caret with "@token ". */
@@ -337,8 +358,11 @@ export function createInputAutocomplete(st: InputState, api: InputApi) {
     syncEmojiPopup();
   }
 
-  /** Insert `@username ` at the caret, spaced from a preceding word. */
-  function insertMentionAtCaret(username: string): boolean {
+  /**
+   * Insert `@username ` at the caret, spaced from a preceding word. With the
+   * user's id the text is sent as their id token, like a pick from the popup.
+   */
+  function insertMentionAtCaret(username: string, userId?: number): boolean {
     if (st.textarea === null || !api.canTakeText()) return false;
     const start = st.textarea.selectionStart;
     const end = st.textarea.selectionEnd;
@@ -347,6 +371,7 @@ export function createInputAutocomplete(st: InputState, api: InputApi) {
     const lead = before.length > 0 && !/\s$/.test(before) ? " " : "";
     const inserted = `${lead}@${username} `;
     st.textarea.value = before + inserted + after;
+    if (userId !== undefined) rememberPick(username, `<@${userId}>`);
     const pos = before.length + inserted.length;
     st.textarea.selectionStart = pos;
     st.textarea.selectionEnd = pos;

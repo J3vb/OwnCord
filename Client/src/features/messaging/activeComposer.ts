@@ -10,8 +10,11 @@
 
 /** What the menu needs from a composer. */
 export interface MentionTarget {
-  /** Insert `@username ` at the caret; false when the composer cannot take text. */
-  insertMention(username: string): boolean;
+  /**
+   * Insert `@username ` at the caret; false when the composer cannot take text.
+   * With `userId` the mention is sent as that user's id token.
+   */
+  insertMention(username: string, userId?: number): boolean;
   /** Whether a mention could be inserted right now. */
   canMention(): boolean;
 }
@@ -44,6 +47,6 @@ export function canMention(): boolean {
 }
 
 /** Insert a mention into the focused composer; false when there is none. */
-export function mentionInComposer(username: string): boolean {
-  return current !== null && current.insertMention(username);
+export function mentionInComposer(username: string, userId?: number): boolean {
+  return current !== null && current.insertMention(username, userId);
 }
