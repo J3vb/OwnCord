@@ -34,6 +34,7 @@ import { renderReplyRef } from "../../src/features/messaging/message-list/render
 import { messagingText } from "../../src/i18n/messaging";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import {
+  deleteMessage,
   messagesStore,
   type Message,
   resetMessagesStore,
@@ -313,6 +314,56 @@ describe("edit and delete in a thread", () => {
     expect(frame).toBeDefined();
     ws.simulateSendFailure(frame!.id, "NETWORK");
     expect(toast).toHaveBeenCalledWith(messagingText("toast.deleteFailed"), "error");
+    panel.destroy?.();
+  });
+});
+
+describe("composer in a thread", () => {
+  const bar = (): Element => container.querySelector(".reply-bar")!;
+
+  it("ArrowUp in the empty composer edits the newest own message", async () => {
+    seedMessages(THREAD, [
+      makeMessage({ id: 100, channelId: THREAD, user: { id: ME, username: "me", avatar: null } }),
+      makeMessage({ id: 101, channelId: THREAD }),
+    ]);
+    const panel = mountPanel();
+    await flush();
+    const textarea = container.querySelector<HTMLTextAreaElement>(".msg-textarea")!;
+    const e = new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true });
+    textarea.dispatchEvent(e);
+    expect(fakeList.startEdit).toHaveBeenCalledWith(100);
+    panel.destroy?.();
+  });
+
+  it("ArrowUp edits nothing when the thread holds no editable own message", async () => {
+    const panel = mountPanel();
+    await flush();
+    container
+      .querySelector<HTMLTextAreaElement>(".msg-textarea")!
+      .dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true }));
+    expect(fakeList.startEdit).not.toHaveBeenCalled();
+    panel.destroy?.();
+  });
+
+  it("drops the reply bar when the message being replied to is deleted", async () => {
+    const panel = mountPanel();
+    await flush();
+    listOpts().onReplyClick?.(100);
+    expect(bar().classList.contains("visible")).toBe(true);
+    deleteMessage({ message_id: 100, channel_id: THREAD });
+    messagesStore.flush();
+    expect(bar().classList.contains("visible")).toBe(false);
+    expect(fakeList.setReplyTarget).toHaveBeenLastCalledWith(null);
+    panel.destroy?.();
+  });
+
+  it("keeps the reply bar when a different message is deleted", async () => {
+    const panel = mountPanel();
+    await flush();
+    listOpts().onReplyClick?.(100);
+    deleteMessage({ message_id: 101, channel_id: THREAD });
+    messagesStore.flush();
+    expect(bar().classList.contains("visible")).toBe(true);
     panel.destroy?.();
   });
 });

@@ -202,6 +202,49 @@ describe("recording and sending", () => {
     expect(onUploadFile).not.toHaveBeenCalled();
   });
 
+  it("leaves the recording alone when Escape is meant for an open viewer, dialog or edit", async () => {
+    mountComposer();
+    await record();
+    const escape = (): KeyboardEvent => {
+      const e = new KeyboardEvent("keydown", { key: "Escape", cancelable: true, bubbles: true });
+      document.dispatchEvent(e);
+      return e;
+    };
+    for (const cls of ["image-lightbox", "modal-overlay", "msg-inline-edit", "settings-overlay"]) {
+      const other = document.createElement("div");
+      other.className = cls;
+      document.body.appendChild(other);
+      const e = escape();
+      expect(q('[data-testid="voice-bar"]')).not.toBeNull();
+      expect(e.defaultPrevented).toBe(false);
+      expect(stream.allStopped).toBe(false);
+      other.remove();
+    }
+    escape();
+    expect(q('[data-testid="voice-bar"]')).toBeNull();
+    expect(stream.allStopped).toBe(true);
+  });
+
+  it("leaves the recording alone for a context menu and for a key pressed in another control", async () => {
+    mountComposer();
+    await record();
+    const menu = document.createElement("div");
+    menu.setAttribute("role", "menu");
+    document.body.appendChild(menu);
+    menu.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(q('[data-testid="voice-bar"]')).not.toBeNull();
+    menu.remove();
+
+    const panel = document.createElement("input");
+    document.body.appendChild(panel);
+    panel.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(q('[data-testid="voice-bar"]')).not.toBeNull();
+    panel.remove();
+
+    document.body.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(q('[data-testid="voice-bar"]')).toBeNull();
+  });
+
   it("shows an error line and no bar when the microphone is denied", async () => {
     mediaDevices.getUserMedia.mockRejectedValue(
       Object.assign(new Error("no"), { name: "NotAllowedError" }),

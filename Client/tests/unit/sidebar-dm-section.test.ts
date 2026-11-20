@@ -10,7 +10,7 @@ import {
   updateDmParticipant,
   updateDmLastMessagePreview,
 } from "../../src/stores/dm.store";
-import { uiStore } from "../../src/stores/ui.store";
+import { loadCollapsedCategories, uiStore } from "../../src/stores/ui.store";
 import {
   dmRecipient,
   makeDm,
@@ -647,6 +647,44 @@ describe("SidebarDmSection", () => {
       expect(dmList.style.display).not.toBe("none");
 
       section.destroy();
+    });
+
+    it("stays collapsed after the section is rebuilt and after a reload of the saved state", () => {
+      addDmChannel(makeDm({ channelId: 100 }));
+      loadCollapsedCategories("srv.example");
+      const first = mount();
+      (container.querySelector(".category") as HTMLElement).click();
+      first.destroy();
+      first.element.remove();
+
+      // Opening a DM and coming back to the channel list builds a new section.
+      const second = mount();
+      const arrow = container.querySelector<HTMLButtonElement>("button.category-arrow")!;
+      expect(arrow.getAttribute("aria-expanded")).toBe("false");
+      expect(arrow.textContent).toBe("\u25B6");
+      expect((container.querySelector(".sidebar-dm-list") as HTMLElement).style.display).toBe(
+        "none",
+      );
+      second.destroy();
+      second.element.remove();
+
+      // A reload reads it back from storage for the same server only.
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
+      loadCollapsedCategories("srv.example");
+      const third = mount();
+      expect(container.querySelector("button.category-arrow")!.getAttribute("aria-expanded")).toBe(
+        "false",
+      );
+      third.destroy();
+      third.element.remove();
+
+      uiStore.setState((prev) => ({ ...prev, collapsedCategories: new Set() }));
+      loadCollapsedCategories("other.example");
+      const other = mount();
+      expect(container.querySelector("button.category-arrow")!.getAttribute("aria-expanded")).toBe(
+        "true",
+      );
+      other.destroy();
     });
 
     it("hides View All button when collapsed even if more than 3 DMs", () => {

@@ -84,6 +84,20 @@ describe("channel context menu - Copy Link / Invite People / Copy Channel ID", (
     expect(item("ctx-copy-channel-link")).toBeNull();
   });
 
+  it("offers Mark as Read on a voice row only while its chat shows a mention, and clears it", () => {
+    signInAs("member");
+    const voice: Channel = { ...channel, id: 7, name: "lounge", type: "voice", mentionCount: 2 };
+    channelsStore.setState((s) => ({ ...s, channels: new Map([[7, voice]]) }));
+    const el = document.createElement("div");
+    container.appendChild(el);
+    attachChannelContextMenu(el, voice, ac.signal, ac.signal);
+    el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, clientX: 4, clientY: 4 }));
+    const mark = item("ctx-mark-read")!;
+    expect(mark.classList.contains("disabled")).toBe(false);
+    mark.click();
+    expect(channelsStore.getState().channels.get(7)?.mentionCount).toBe(0);
+  });
+
   it("Open chat navigates without voice_join", () => {
     signInAs("member");
     const voice: Channel = { ...channel, id: 7, name: "lounge", type: "voice" };

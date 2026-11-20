@@ -92,9 +92,9 @@ function kindGates(
     // still joins.
     openChat: channel.type === "voice",
     // Mark as Read touches only the caller's own read state, so it needs no
-    // permission — but a voice channel holds no messages to read.
-    // A forum holds no messages either, so it has no unread state to clear.
-    markRead: channel.type !== "voice" && channel.type !== "forum",
+    // permission. A voice row offers it only while its chat shows a mention badge.
+    // A forum holds no messages, so it has no unread state to clear.
+    markRead: channel.type === "voice" ? showsUnreadBadge(channel.id) : channel.type !== "forum",
     // Muting silences notifications, which a voice channel does not produce.
     mute: channel.type !== "voice",
     // The link opens the channel's message view, so a voice channel has none to

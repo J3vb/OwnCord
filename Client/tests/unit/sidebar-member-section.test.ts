@@ -330,6 +330,22 @@ describe("SidebarMemberSection", () => {
       section.destroy();
     });
 
+    it("names the collapse control after the heading and reports its expanded state", () => {
+      const section = mountSection();
+      const arrow = container.querySelector<HTMLButtonElement>(
+        ".sidebar-members-header .category-arrow",
+      )!;
+      const heading = container.querySelector(".sidebar-members-header .category-name")!;
+      expect(arrow.getAttribute("aria-labelledby")).toBe(heading.id);
+      expect(heading.id).not.toBe("");
+      expect(arrow.getAttribute("aria-expanded")).toBe("true");
+      arrow.click();
+      expect(arrow.getAttribute("aria-expanded")).toBe("false");
+      arrow.click();
+      expect(arrow.getAttribute("aria-expanded")).toBe("true");
+      section.destroy();
+    });
+
     // The header was a click-only div with a bare arrow span, so a keyboard
     // user could never collapse the member list — unlike the channel
     // categories and DM section, which use a real <button>.

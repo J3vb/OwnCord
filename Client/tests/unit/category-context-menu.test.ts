@@ -97,6 +97,17 @@ describe("category context menu", () => {
     expect(sent).toHaveLength(6);
   });
 
+  it("clears a voice channel's mention badge, leaving its plain unread alone", () => {
+    remount([
+      { id: 20, name: "talk", type: "voice", category: "Mix", position: 0, mention_count: 1 },
+      { id: 21, name: "chat", type: "voice", category: "Mix", position: 1, unread_count: 3 },
+    ]);
+    const mark = item(openMenu("Mix"), "ctx-category-mark-read");
+    expect(mark.classList.contains("disabled")).toBe(false);
+    mark.click();
+    expect(sent).toEqual([20]);
+  });
+
   it("disables Mark Category as Read when nothing in it is unread", () => {
     remount([{ id: 9, name: "z", type: "text", category: "Quiet", position: 0 }]);
     const mark = item(openMenu("Quiet"), "ctx-category-mark-read");
