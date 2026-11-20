@@ -391,6 +391,19 @@ describe("DmCallPanel — connected", () => {
     expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic");
   });
 
+  it("shows the mic as off while a moderator's deafen holds it closed, still yours to mute", () => {
+    setVoice(DM, [vu(SELF), vu(OTTO)]);
+    const { root, opts } = mount();
+    patchVoice({ localDeafened: true, localServerDeafened: true, localMuted: false });
+
+    const mute = q(root, "dcp-mute")!;
+    expect(mute.querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+    expect(mute.getAttribute("aria-pressed")).toBe("false");
+    expect(mute.title).toBe("Your mic is off while you're deafened");
+    mute.click();
+    expect(opts.onMuteToggle).toHaveBeenCalledOnce();
+  });
+
   it("does not read a push-to-talk user as muted between presses", () => {
     setVoice(DM, [vu(SELF), vu(OTTO)]);
     const { root } = mount();

@@ -61,6 +61,7 @@ export function syncGridCallState(
     ...(socket === "connected" ? {} : { offline: socket }),
     ...(shareBlock === null ? {} : { shareBlock }),
     ...(isPhoneCallHold(state) ? { phoneHold: true } : {}),
+    ...(state.currentChannelId !== null && state.inAfkChannel === true ? { afkLocked: true } : {}),
   };
   const callKey = JSON.stringify(callState);
   if (callKey === memo.prevCallState) return;

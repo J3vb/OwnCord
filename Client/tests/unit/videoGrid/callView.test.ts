@@ -281,6 +281,20 @@ describe("VideoGrid", () => {
       expect(barButton("deafen").title).toBe("You were deafened by a moderator");
       expect(camera.disabled).toBe(false);
 
+      // The AFK channel is listen-only: the mic reads muted and is locked.
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false, afkLocked: true });
+      expect(barButton("mute").disabled).toBe(true);
+      expect(barButton("mute").getAttribute("aria-pressed")).toBe("true");
+      expect(barButton("mute").querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+      expect(barButton("mute").title).toBe("You can't speak in the AFK channel");
+
+      // A moderator's deafen without a mute closes the mic, which stays yours to mute.
+      grid.setCallState({ muted: false, deafened: true, listenOnly: false, serverDeafened: true });
+      expect(barButton("mute").disabled).toBe(false);
+      expect(barButton("mute").getAttribute("aria-pressed")).toBe("false");
+      expect(barButton("mute").querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+      expect(barButton("mute").title).toBe("Your mic is off while you're deafened");
+
       // No share permission or the video limit: share is inert with the reason.
       grid.setCallState({
         muted: false,

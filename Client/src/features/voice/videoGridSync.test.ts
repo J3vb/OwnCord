@@ -140,6 +140,14 @@ describe("syncGridCallState", () => {
     expect(setCallState.mock.calls[1]![0]).not.toHaveProperty("music");
   });
 
+  it("tells the grid the AFK channel locks the mic, and only inside a call", () => {
+    const { setCallState, grid, seen } = callStateSetup();
+    syncGridCallState(voiceState(1, [], { inAfkChannel: true }), seen, grid);
+    expect(setCallState).toHaveBeenLastCalledWith(expect.objectContaining({ afkLocked: true }));
+    syncGridCallState(voiceState(null, [], { inAfkChannel: true }), seen, grid);
+    expect(setCallState.mock.calls[1]![0]).not.toHaveProperty("afkLocked");
+  });
+
   it("holds nothing where there is no call", () => {
     const { setCallState, grid, seen } = callStateSetup();
     syncGridCallState(voiceState(null, [], { phoneCallHold: true }), seen, grid);

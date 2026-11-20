@@ -24,6 +24,7 @@ import { saveSelfVoicePrefs, loadSelfVoicePrefs } from "./voiceSelfPrefs";
 import {
   rosterFromReady,
   ownReadyRow,
+  withReadyVoice,
   withVoiceState,
   withVoiceUsername,
   withoutVoiceUser,
@@ -125,25 +126,9 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
     (userId) => membersStore.getState().members.get(userId)?.username ?? "",
   );
 
-  // Capture the user's own row so the moderator-imposed flags below can be
-  // derived from it — a full-ready reconnect (mustFullResync / replay-buffer
-  // miss) that preserves a live voice session must not leave localServerMuted/
-  // localServerDeafened stuck at their pre-reconnect values.
   const currentUserId = authStore.getState().user?.id ?? 0;
   const selfState = ownReadyRow(states, currentUserId, voiceStore.getState().voiceStatus);
-  const autoJoinChannel = selfState?.channel_id ?? null;
-
-  voiceStore.setState((prev) => ({
-    ...prev,
-    voiceUsers: channelMap,
-    // If user is in a voice channel per ready payload, use that channel.
-    // Otherwise preserve prev — user may be mid-join and server hasn't
-    // registered them yet. Stale IDs are cleared by leaveVoiceChannel()
-    // or resetVoiceStore() on logout.
-    currentChannelId: autoJoinChannel ?? prev.currentChannelId,
-    localServerMuted: selfState?.server_muted ?? false,
-    localServerDeafened: selfState?.server_deafened ?? false,
-  }));
+  voiceStore.setState((prev) => withReadyVoice(prev, channelMap, selfState));
 }
 
 /** Update or add a user's voice state from a voice_state event. When the event
@@ -201,6 +186,7 @@ export function setSwitchingTo(channelId: number | null): void {
 /** Clear the current voice channel and remove current user from voice users. */
 export function leaveVoiceChannel(): void {
   voiceStore.setState((prev) => withLeftChannel(prev, ownUserId()));
+  setVoiceDeafened(voiceStore.getState().localDeafened);
 }
 
 /** Set the voice-session lifecycle status. Single-writer from livekitSession.ts

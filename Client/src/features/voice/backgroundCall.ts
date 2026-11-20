@@ -31,9 +31,19 @@ function inCall(state: VoiceState): boolean {
   return state.currentChannelId !== null || state.voiceStatus !== "idle";
 }
 
-/** A moderator's mute is not the member's to lift, whatever their own was. */
+/** A moderator's mute, the AFK channel and a call joined without a mic are
+ *  not the member's to lift, whatever their own mute was. Neither is a deafen
+ *  that closes the mic without a mute (a moderator's deafen). */
 function micOf(voice: VoiceState): CallMic {
-  if (voice.localServerMuted === true) return "locked";
+  const deafenedOpen = voice.localDeafened && !voice.localMuted;
+  if (
+    voice.localServerMuted === true ||
+    voice.inAfkChannel === true ||
+    voice.listenOnly ||
+    deafenedOpen
+  ) {
+    return "locked";
+  }
   return voice.localMuted ? "muted" : "live";
 }
 

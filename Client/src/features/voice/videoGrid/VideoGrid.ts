@@ -136,6 +136,9 @@ export interface CallState {
   /** A phone call holds the call (the Android app): the mic control is inert
    *  and the bar says the call is paused. */
   readonly phoneHold?: boolean;
+  /** In the AFK channel, which is listen-only: the mic control reads muted
+   *  and is inert. */
+  readonly afkLocked?: boolean;
 }
 
 export interface VideoGridComponent extends MountableComponent {

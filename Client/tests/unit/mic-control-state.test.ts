@@ -1,5 +1,5 @@
 /**
- * micControlState over every combination of the seven inputs it reads, checked
+ * micControlState over every combination of the eight inputs it reads, checked
  * against explicit expectations for each precedence rule.
  */
 import { afterEach, describe, expect, it } from "vitest";
@@ -21,6 +21,7 @@ interface Inputs {
   pttGated: boolean;
   afk: boolean;
   phoneHold: boolean;
+  deafened?: boolean;
 }
 
 function stateFor(i: Inputs): VoiceState {
@@ -33,6 +34,7 @@ function stateFor(i: Inputs): VoiceState {
     pttGated: i.pttGated,
     inAfkChannel: i.afk,
     phoneCallHold: i.phoneHold,
+    localDeafened: i.deafened === true,
   };
 }
 
@@ -41,6 +43,7 @@ const TITLE = {
   server: voiceText("widget.mutedByModerator"),
   afk: voiceText("widget.control.afkLocked"),
   listen: voiceText("widget.control.listenOnly"),
+  deafened: voiceText("widget.control.deafenedMic"),
   ptt: voiceText("widget.control.pttGated"),
   pttAndroid: voiceText("widget.control.pttGated.android"),
   unmute: voiceText("widget.control.unmute"),
@@ -49,7 +52,7 @@ const TITLE = {
 
 function allInputs(): Inputs[] {
   const out: Inputs[] = [];
-  for (let n = 0; n < 128; n++) {
+  for (let n = 0; n < 256; n++) {
     out.push({
       inCall: (n & 1) !== 0,
       muted: (n & 2) !== 0,
@@ -58,6 +61,7 @@ function allInputs(): Inputs[] {
       pttGated: (n & 16) !== 0,
       afk: (n & 32) !== 0,
       phoneHold: (n & 64) !== 0,
+      deafened: (n & 128) !== 0,
     });
   }
   return out;
@@ -71,7 +75,10 @@ describe("micControlState", () => {
     const phoneHold = i.inCall && i.phoneHold;
     const afkLocked = i.inCall && i.afk;
     const listenOnly = i.inCall && i.listenOnly && !i.serverMuted && !afkLocked;
-    const pttGated = i.inCall && i.pttGated && !i.muted && !listenOnly && !afkLocked && !phoneHold;
+    const locked = listenOnly || afkLocked || phoneHold;
+    // A deafen closes the mic without the member's mute (a moderator's deafen).
+    const deafened = i.inCall && i.deafened === true && !i.muted && !locked;
+    const pttGated = i.inCall && i.pttGated && !i.muted && !locked && !deafened;
     const expectedTitle = phoneHold
       ? TITLE.hold
       : i.serverMuted
@@ -80,17 +87,19 @@ describe("micControlState", () => {
           ? TITLE.afk
           : listenOnly
             ? TITLE.listen
-            : pttGated
-              ? TITLE.ptt
-              : i.muted
-                ? TITLE.unmute
-                : TITLE.mute;
+            : deafened
+              ? TITLE.deafened
+              : pttGated
+                ? TITLE.ptt
+                : i.muted
+                  ? TITLE.unmute
+                  : TITLE.mute;
     expect(micControlState(stateFor(i))).toEqual({
       userMuted: i.muted,
       listenOnly,
       pttGated,
       phoneHold,
-      micOff: i.muted || listenOnly || afkLocked || phoneHold,
+      micOff: i.muted || locked || deafened,
       pressed: i.muted || afkLocked || phoneHold,
       disabled: i.serverMuted || listenOnly || afkLocked || phoneHold,
       title: expectedTitle,
