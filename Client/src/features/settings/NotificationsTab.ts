@@ -300,10 +300,13 @@ export function buildNotificationsTab(signal: AbortSignal): HTMLDivElement {
     },
   ];
 
-  // The taskbar flash and the unread badge are desktop features.
-  const shownToggles = toggles.filter(
-    ({ key }) => !isAndroidApp() || (key !== "flashTaskbar" && key !== "unreadBadge"),
-  );
+  // The taskbar flash and the unread badge are desktop features; a browser
+  // tab shows the badge but has no taskbar to flash.
+  const android = isAndroidApp();
+  const shownToggles = toggles.filter(({ key }) => {
+    if (key === "flashTaskbar") return !android && desktop.notifier.canFlash;
+    return !android || key !== "unreadBadge";
+  });
   const [desktopRow] = appendToggleRows(alerts.card, shownToggles, signal) as [HTMLDivElement];
 
   sounds.card.appendChild(buildSoundsVolumeRow(signal));

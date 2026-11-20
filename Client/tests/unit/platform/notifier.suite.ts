@@ -84,6 +84,10 @@ export function describeNotifierSuite(
       expect(ctx.native.shown()).toEqual([{ title: "Alice in #general", body: "hello" }]);
     });
 
+    check("says it can flash exactly where it has a window to flash", () => {
+      expect(ctx.subject.canFlash).toBe(options?.windowAttention !== false);
+    });
+
     checkAttention("asks for the user's attention once per flash", async () => {
       await ctx.subject.flashTaskbar();
       expect(ctx.native.attentionRequests()).toBe(1);

@@ -36,6 +36,12 @@ export interface Notifier {
    * all for one it rejected.
    */
   readonly ringsCalls?: boolean;
+  /**
+   * Whether `flashTaskbar` can do anything here: false where there is no app
+   * window to flash (a browser tab, the Android app), so a settings surface
+   * leaves its switch out.
+   */
+  readonly canFlash: boolean;
   permissionGranted(): Promise<boolean>;
   requestPermission(): Promise<boolean>;
   show(title: string, body: string, options?: NotifierShowOptions): Promise<void>;

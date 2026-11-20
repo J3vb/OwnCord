@@ -197,6 +197,7 @@ const inertNativeProxies: NativeProxies = {
 
 const inertNotifier: Notifier = {
   readsOsPermission: false,
+  canFlash: false,
   permissionGranted: async () => false,
   requestPermission: async () => false,
   show: async () => undefined,

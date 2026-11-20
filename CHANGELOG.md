@@ -106,6 +106,15 @@ release changes the database, and anything an operator must do first.)
 
 - Other people's speaking ring could light late, blink off in the middle of a sentence or stay dark for a quiet voice, while the speaker's own ring was fine. Each app now reports its own ring to the server, which passes it on to the call, so everyone sees the ring the speaker sees, also while deafened. It needs this version of the server and of the app on both sides (Windows, Android and Linux): someone on an older app, and everyone on an older server, is shown as before.
 
+**Settings**
+
+- In the web client the zoom keys (Ctrl+=, Ctrl+- and Ctrl+0) work as the browser's own zoom again, and the Zoom slider that could not work there is hidden. The Flash taskbar switch, which a browser cannot do, is hidden too.
+- Clear all cache & restart keeps each channel's notification level, as it says.
+- The Account status picker follows a status changed from the tray, a timed status or going idle while Settings is open.
+- Choosing a new push-to-talk key and another shortcut at the same time no longer saves one key press for both.
+- After choosing another graphics card, Restart to apply stays visible until you restart, also after reopening Settings.
+- An accent colour typed in capitals shows its swatch as selected.
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

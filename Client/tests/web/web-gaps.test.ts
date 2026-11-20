@@ -1,6 +1,7 @@
 /**
  * Gaps the web build used to have against the desktop app: the app version,
- * an invite for another server, and the log folder button. Runs in the `web`
+ * an invite for another server, the log folder button, and settings rows for
+ * a zoom or taskbar a browser tab does not have. Runs in the `web`
  * project, where `__OWNCORD_WEB__` is true and the browser platform is wired.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -19,6 +20,8 @@ const { renderMessageContent } = await import("../../src/features/messaging/cont
 const { setChannelMutesHost } = await import("../../src/lib/prefs/channelMutes");
 const { setInviteJoinHandler } = await import("../../src/lib/nav/inviteNavigation");
 const { createLogsTab } = await import("../../src/features/settings/LogsTab");
+const { buildAppearanceTab } = await import("../../src/features/settings/AppearanceTab");
+const { buildNotificationsTab } = await import("../../src/features/settings/NotificationsTab");
 
 describe("app version (web build)", () => {
   afterEach(() => {
@@ -88,5 +91,30 @@ describe("Logs tab (web build)", () => {
     expect(el.querySelector("[data-testid='open-log-folder']")).toBeNull();
     expect(el.querySelector("[data-testid='get-help']")).not.toBeNull();
     controller.abort();
+  });
+});
+
+describe("settings rows a browser tab cannot drive (web build)", () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+  });
+
+  it("leaves out the zoom row, so the browser's own zoom is the only one", () => {
+    const ac = new AbortController();
+    const tab = buildAppearanceTab(ac.signal);
+    document.body.appendChild(tab);
+    expect(tab.querySelector("input[aria-label='Zoom level']")).toBeNull();
+    expect(tab.textContent).not.toContain("Zoom level");
+    ac.abort();
+  });
+
+  it("leaves out Flash taskbar and keeps the unread badge", () => {
+    const ac = new AbortController();
+    const tab = buildNotificationsTab(ac.signal);
+    document.body.appendChild(tab);
+    const labels = [...tab.querySelectorAll(".setting-label")].map((n) => n.textContent);
+    expect(labels).not.toContain("Flash taskbar");
+    expect(labels).toContain("Unread message badge");
+    ac.abort();
   });
 });

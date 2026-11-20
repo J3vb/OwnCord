@@ -26,9 +26,16 @@ export function zoomKeyAction(e: KeyboardEvent): ZoomKeyAction | null {
  * plus to zoom in, `-` or numpad minus to zoom out and `0` to reset. They work
  * everywhere, like Discord, including while a text field has focus. The native
  * webview hotkeys stay off, so this is the only handler. `load` resolves the
- * controller; a load that fails is dropped, leaving the app unzoomed.
+ * controller; a load that fails is dropped, leaving the app unzoomed. Where
+ * the host has no zoom to set (`hostCanZoom` false: the web build), nothing
+ * is wired and the browser keeps its own zoom keys.
  */
-export function startZoom(load: () => Promise<ZoomController>, signal: AbortSignal): void {
+export function startZoom(
+  load: () => Promise<ZoomController>,
+  signal: AbortSignal,
+  hostCanZoom: boolean,
+): void {
+  if (!hostCanZoom) return;
   const run = (act: (zoom: ZoomController) => Promise<void>): void => {
     load()
       .then(act)

@@ -39,6 +39,7 @@ export const notifier: Notifier = {
   // tauri-plugin-notification's desktop backend hard-codes both the
   // permission state and the request answer to "granted".
   readsOsPermission: false,
+  canFlash: true,
   async permissionGranted(): Promise<boolean> {
     const { isPermissionGranted } = await import("@tauri-apps/plugin-notification");
     return isPermissionGranted();

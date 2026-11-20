@@ -37,7 +37,7 @@ import {
   type TimeFormat,
 } from "@lib/text/timeFormat";
 import { loadMemberLayout, MEMBER_LAYOUT_PREF, type MemberLayout } from "../members/memberLayout";
-import { appZoom, ZOOM_LEVELS, zoomIndex } from "../zoom";
+import { appZoom, hostCanZoom, ZOOM_LEVELS, zoomIndex } from "../zoom";
 import { buildCustomThemeSection } from "../custom-themes/customThemeSection";
 import { buildChoiceRow, buildSettingRow } from "./settingRow";
 import { settingsText as t } from "../../i18n/settings";
@@ -98,8 +98,10 @@ function buildFontSizeRow(signal: AbortSignal, currentFontSize: number): HTMLEle
   return buildSettingRow({ label: t("appearance.fontSize"), control: fontRow });
 }
 
-/** The zoom slider row. Null on Android, which has no webview zoom to set. */
+/** The zoom slider row. Null on Android and the web build, which have no webview zoom to set. */
 function buildZoomRow(signal: AbortSignal): HTMLElement | null {
+  // The Android app and a browser tab have no webview zoom to set.
+  if (isAndroidApp() || !hostCanZoom()) return null;
   const zoomRow = createElement("div", { class: "slider-row" });
   const zoomSlider = createElement("input", {
     class: "settings-slider",
@@ -140,8 +142,6 @@ function buildZoomRow(signal: AbortSignal): HTMLElement | null {
   );
   zoomReset.addEventListener("click", () => void appZoom.reset(), { signal });
   appendChildren(zoomRow, zoomSlider, zoomLabel, zoomReset);
-  // The Android app has no webview zoom to set.
-  if (isAndroidApp()) return null;
   return buildSettingRow({ label: t("appearance.zoom"), control: zoomRow });
 }
 
@@ -290,7 +290,8 @@ export function buildAppearanceTab(
     "#b9bbbe", // grey
   ];
 
-  const currentAccent = loadPref<string>("accentColor", defaultAccent);
+  // Presets are lower case; an accent stored in upper case still selects its swatch.
+  const currentAccent = loadPref<string>("accentColor", defaultAccent).toLowerCase();
 
   function saveAccent(color: string): void {
     hasStoredAccent = true;
@@ -382,7 +383,7 @@ export function buildAppearanceTab(
       const raw = hexInput.value.replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
       hexInput.value = raw;
       if (raw.length === 6) {
-        const color = `#${raw}`;
+        const color = `#${raw.toLowerCase()}`;
         saveAccent(color);
         syncDisplayedAccent(color);
       }

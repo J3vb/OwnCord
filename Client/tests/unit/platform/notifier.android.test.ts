@@ -216,6 +216,7 @@ describe("Android notifier", () => {
 
   test("reads the system's permission state", () => {
     expect(notifier.readsOsPermission).toBe(true);
+    expect(notifier.canFlash).toBe(false);
   });
 
   test("reads the permission without asking, and asks only when told to", async () => {

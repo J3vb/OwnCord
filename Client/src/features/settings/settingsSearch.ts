@@ -28,6 +28,7 @@ import { settingsText } from "../../i18n/settings";
 import { voiceText } from "../../i18n/voice";
 import { whatsNewText } from "../../i18n/whatsNew";
 import { isAndroidApp, isLinuxDesktop, isWindowsDesktop } from "../voice/native/platform";
+import { desktop } from "../../platform/desktop";
 import { platformText } from "./helpers";
 
 const s = settingsText;
@@ -102,7 +103,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("appearance.section.textSize"),
     s("appearance.section.layout"),
     s("appearance.fontSize"),
-    ...desktopOnly(s("appearance.zoom")),
+    ...(desktop.window.available ? desktopOnly(s("appearance.zoom")) : []),
     s("appearance.compactMode"),
     s("appearance.timeFormat"),
     s("appearance.timeFormat.desc"),
@@ -224,7 +225,9 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     platformText(s("notifications.desktop.desc"), s("notifications.desktop.desc.android")),
     s("notifications.permission.label"),
     ...androidOnly(s("notifications.push.label")),
-    ...desktopOnly(s("notifications.flash.label"), s("notifications.flash.desc")),
+    ...(desktop.notifier.canFlash
+      ? desktopOnly(s("notifications.flash.label"), s("notifications.flash.desc"))
+      : []),
     s("notifications.suppress.label"),
     s("notifications.suppress.desc"),
     ...desktopOnly(s("notifications.unreadBadge.label"), s("notifications.unreadBadge.desc")),
