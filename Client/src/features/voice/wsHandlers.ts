@@ -340,6 +340,17 @@ export function handleVoiceWatching(payload: Payload<"voice_watching">): void {
   setPeerWatching(payload.user_id, ids);
 }
 
+/** The speaking ring a member of our channel reports for itself. The wire is
+ *  untrusted: anything but a boolean counts as "no verdict", and the session
+ *  ignores a user who is not in our room. */
+export function handleVoiceSpeaking(payload: Payload<"voice_speaking">): void {
+  const raw: unknown = payload.speaking;
+  const speaking = typeof raw === "boolean" ? raw : null;
+  void livekitSession()
+    .then(({ handleRingAnnounced }) => handleRingAnnounced(payload.user_id, speaking))
+    .catch((err: unknown) => log.debug("voice_speaking not applied", err));
+}
+
 /** An error answering our voice_watch is swallowed (an old server does not
  *  know the type); a rate-limited one re-sends the set once after a second.
  *  True when the frame was ours. */
@@ -393,4 +404,5 @@ export const wsRoutes: readonly WsRoute[] = [
   route(S.VOICE_E2EE_ANNOUNCE, () => handleVoiceE2eeAnnounce),
   route(S.VOICE_E2EE_OFFER, () => handleVoiceE2eeOffer),
   route(S.VOICE_WATCHING, () => handleVoiceWatching),
+  route(S.VOICE_SPEAKING, () => handleVoiceSpeaking),
 ];

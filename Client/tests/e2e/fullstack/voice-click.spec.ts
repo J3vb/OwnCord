@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
-import { joinVoice } from "../support/media";
+import { fakeMicArgs, joinVoice, setPrefs } from "../support/media";
 import { openSettings, switchSettingsTab } from "../helpers";
 
 const LOOP_SECONDS = 3;
@@ -49,23 +49,9 @@ function writeClickLoop(): string {
 
 test.use({
   media: true,
-  launchOptions: {
-    args: [
-      "--use-fake-device-for-media-stream",
-      "--use-fake-ui-for-media-stream",
-      "--autoplay-policy=no-user-gesture-required",
-      `--use-file-for-fake-audio-capture=${writeClickLoop()}`,
-    ],
-  },
+  launchOptions: { args: fakeMicArgs(writeClickLoop()) },
 });
 test.setTimeout(180_000);
-
-async function setPrefs(page: Page, prefs: Record<string, unknown>): Promise<void> {
-  await page.evaluate((entries) => {
-    for (const [key, value] of Object.entries(entries))
-      localStorage.setItem(`owncord:settings:${key}`, JSON.stringify(value));
-  }, prefs);
-}
 
 /**
  * The loudest ~200 ms of decoded inbound audio over two loops of the fixture,

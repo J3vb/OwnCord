@@ -183,6 +183,12 @@ export interface ReadyPayload {
      */
     readonly voice_messages?: boolean;
     /**
+     * The server understands `voice_speak` and relays it as `voice_speaking`.
+     * Absent means an older server: nothing is sent, and every ring follows
+     * the media server's speaker detection.
+     */
+    readonly voice_speaking?: boolean;
+    /**
      * The server understands `activity_update` and carries a member's game as
      * `activity` on `presence` and `presence_batch` and as `ready.activities`.
      * Absent means an older server: nothing is sent, no game shown.

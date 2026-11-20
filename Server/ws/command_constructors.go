@@ -307,6 +307,16 @@ var commandConstructors = map[string]func(userID int64, reqID string, raw json.R
 		return VoiceWatchCmd{userID: userID, UserIDs: p.UserIDs}, nil
 	},
 
+	MsgTypeVoiceSpeak: func(userID int64, _ string, raw json.RawMessage) (Command, error) {
+		var p struct {
+			Speaking *bool `json:"speaking"`
+		}
+		if err := json.Unmarshal(raw, &p); err != nil {
+			return nil, fmt.Errorf("invalid voice_speak payload: %w", err)
+		}
+		return VoiceSpeakCmd{userID: userID, Speaking: p.Speaking}, nil
+	},
+
 	MsgTypeChatCommand: func(userID int64, reqID string, raw json.RawMessage) (Command, error) {
 		var p struct {
 			ChannelID int64    `json:"channel_id"`

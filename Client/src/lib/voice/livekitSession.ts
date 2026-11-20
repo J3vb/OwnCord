@@ -45,6 +45,7 @@ owncordNs.setVoiceStatus = setVoiceStatus;
 export const setWsClient = session.setWsClient.bind(session);
 export const resendWatching = session.resendWatching.bind(session);
 export const retryWatching = session.retryWatching.bind(session);
+export const handleRingAnnounced = session.handleRingAnnounced.bind(session);
 export const setServerHost = session.setServerHost.bind(session);
 export const setOnError = session.setOnError.bind(session);
 export const setOnRemoteVideo = session.setOnRemoteVideo.bind(session);

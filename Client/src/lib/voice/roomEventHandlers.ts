@@ -120,8 +120,9 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     keyInstalls++;
   }
 
+  const speakerTracker = createSpeakerTracker({ ...deps, setSpeakers, parseUserId });
   const { handleActiveSpeakersChanged, clearSpeakerHold, resetSpeakers, dropSpeaker } =
-    createSpeakerTracker({ ...deps, setSpeakers, parseUserId });
+    speakerTracker;
 
   function resetEncryptionRecovery(): void {
     clearDecryptQuietTimer();
@@ -485,6 +486,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     handleConnected,
     handleActiveSpeakersChanged,
     handleParticipantDisconnected,
+    handleRingAnnounced: speakerTracker.handleRingAnnounced,
     handleTrackMuted,
     handleAudioPlaybackChanged,
     handleDisconnected,

@@ -3,15 +3,17 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/roomEventHandlersMocks";
 import { DisconnectReason, Track } from "livekit-client";
-import type { Participant, RemoteParticipant, RemoteTrackPublication, Room } from "livekit-client";
+import type { Participant, RemoteParticipant, Room } from "livekit-client";
 import { voiceStore, setSpeakers, joinVoiceChannel } from "@stores/voice.store";
-import type { VoiceUser } from "@stores/voice.store";
 import { expectConsole } from "../../helpers/console";
 import {
-  Harness,
+  type Harness,
   build,
+  join,
+  muteMic,
   pub,
   participant,
+  seedVoiceUsers,
   useRoomEventHandlersHarness,
 } from "../../helpers/roomEventHandlersHarness";
 
@@ -21,40 +23,7 @@ useRoomEventHandlersHarness();
 
 // ── handleActiveSpeakersChanged ────────────────────────────────────────────
 
-function seedVoiceUsers(channelId: number, userIds: number[]): void {
-  voiceStore.setState((prev) => {
-    const users = new Map<number, VoiceUser>(
-      userIds.map((id) => [
-        id,
-        {
-          userId: id,
-          username: `u${id}`,
-          muted: false,
-          deafened: false,
-          speaking: false,
-          camera: false,
-          screenshare: false,
-        },
-      ]),
-    );
-    return { ...prev, currentChannelId: channelId, voiceUsers: new Map([[channelId, users]]) };
-  });
-}
-
 describe("handleActiveSpeakersChanged", () => {
-  /** A remote participant in the room, microphone published and unmuted. */
-  function join(h: Harness, identity: string, sid = `PA_${identity}`): RemoteParticipant {
-    const mic = { source: Track.Source.Microphone, isMuted: false };
-    const p = {
-      identity,
-      sid,
-      getTrackPublication: (source: Track.Source) =>
-        source === Track.Source.Microphone ? mic : undefined,
-    } as unknown as RemoteParticipant;
-    h.room.remoteParticipants.set(identity, p);
-    return p;
-  }
-
   const speaking = () => voiceStore.getState().voiceUsers.get(12)?.get(7)?.speaking;
 
   it("marks the reported users as speaking", () => {
@@ -176,10 +145,8 @@ describe("handleActiveSpeakersChanged", () => {
       const h = build();
       const u7 = join(h, "user-7:tok");
       h.handlers.handleActiveSpeakersChanged([u7]);
-      const mic = u7.getTrackPublication(Track.Source.Microphone) as { isMuted: boolean };
-      mic.isMuted = true;
 
-      h.handlers.handleTrackMuted(mic as unknown as RemoteTrackPublication, u7);
+      muteMic(h, u7);
 
       expect(speaking()).toBe(false);
       // The SFU's own "stopped" update trails the mute by a detection window.

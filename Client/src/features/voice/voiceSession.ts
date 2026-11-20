@@ -12,8 +12,15 @@
 // the session.
 import { Track } from "livekit-client";
 import type { WsClient } from "@lib/ws";
-import { restateSelfVoiceState, isPttPollingLive, setLocalGateSpeaking } from "@stores/voice.store";
+import {
+  restateSelfVoiceState,
+  isPttPollingLive,
+  setLocalGateSpeaking,
+  getLocalRing,
+  onLocalRingChange,
+} from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
+import { voiceSpeakingEnabled } from "@lib/net/serverCapabilities";
 import { AudioPipeline } from "@lib/voice/audioPipeline";
 import { AudioElements } from "@lib/voice/audioElements";
 import { E2EEManager } from "@lib/voice/livekitE2EE";
@@ -31,6 +38,7 @@ import { noteVoiceLeave } from "./leaveOwed";
 import { isLinuxDesktop } from "./native/platform";
 import { nativeCounters } from "./native/counters";
 import { speechDetectionOf } from "./sileroDetection";
+import { createRingAnnouncer } from "./ringAnnouncer";
 import { desktop } from "../../platform/desktop";
 import { SessionReconnect } from "./sessionReconnect";
 import type { MusicShare, MusicStartOptions, MusicStartOutcome } from "./musicShare";
@@ -134,6 +142,12 @@ export class LiveKitSession extends SessionReconnect {
   protected _audioElements = new AudioElements();
   protected _deviceManager = new DeviceManager();
   protected _eventHandlers: RoomEventHandlers;
+  /** Reports the own speaking ring to the call, through the OwnCord server. */
+  protected _ringAnnouncer = createRingAnnouncer({
+    getCall: () => this._room,
+    getRing: getLocalRing,
+    send: (speaking) => this.sendRing(speaking),
+  });
 
   /** Manually published local tracks (camera/screenshare) for explicit cleanup. */
   /** Built on the first Share music, so the share code loads with the first use. */
@@ -144,6 +158,7 @@ export class LiveKitSession extends SessionReconnect {
   constructor() {
     super();
     this._audioPipeline.onGateSpeaking = setLocalGateSpeaking;
+    onLocalRingChange(this._ringAnnouncer.update);
     this._eventHandlers = this.createEventHandlers();
   }
 
@@ -157,6 +172,8 @@ export class LiveKitSession extends SessionReconnect {
   /** Update all extracted modules with a room reference. See RoomLifecycle. */
   protected syncModuleRooms(room: VoiceRoom | null = this._room): void {
     this._lifecycle.syncModuleRooms(room);
+    // A ring that was lit before this call existed has not been reported to it.
+    this._ringAnnouncer.update();
   }
 
   // --- Volume helpers ---
@@ -173,6 +190,26 @@ export class LiveKitSession extends SessionReconnect {
   }
 
   // --- Public API ---
+
+  /** Report the own ring (voice_speak) while the server relays it and the
+   *  socket is up. The server drops a report from outside a voice channel. */
+  protected sendRing(speaking: boolean | null): boolean {
+    if (!voiceSpeakingEnabled() || this.ws?.getState() !== "connected") return false;
+    this.ws.send({ type: "voice_speak", payload: { speaking } });
+    return true;
+  }
+
+  /** The socket resumed while in voice: a ring change made while it was down
+   *  was never sent either. */
+  override resendWatching(): void {
+    super.resendWatching();
+    this._ringAnnouncer.update();
+  }
+
+  /** The ring a member of our channel reports for itself (voice_speaking). */
+  handleRingAnnounced(userId: number, speaking: boolean | null): void {
+    this._eventHandlers.handleRingAnnounced(userId, speaking);
+  }
 
   setWsClient(client: WsClient): void {
     this.ws = client;

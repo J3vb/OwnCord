@@ -48,6 +48,13 @@ export interface VoiceWatchingPayload {
   readonly user_ids: readonly number[];
 }
 
+/** Server→Client: the speaking ring a member of the voice channel reports for
+ *  itself. `null` means it has no verdict of its own. */
+export interface VoiceSpeakingPayload {
+  readonly user_id: number;
+  readonly speaking: boolean | null;
+}
+
 /** One user's presence in a presence_batch. */
 export interface PresenceBatchEntry {
   readonly user_id: number;

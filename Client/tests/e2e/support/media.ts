@@ -192,6 +192,24 @@ export async function expectDecodedMedia(page: Page, video = false) {
     .toBe(true);
 }
 
+/** Write client preferences before the voice join that reads them. */
+export async function setPrefs(page: Page, prefs: Record<string, unknown>): Promise<void> {
+  await page.evaluate((entries) => {
+    for (const [key, value] of Object.entries(entries))
+      localStorage.setItem(`owncord:settings:${key}`, JSON.stringify(value));
+  }, prefs);
+}
+
+/** Chromium arguments for a fake microphone that loops the WAV at `path`. */
+export function fakeMicArgs(path: string): string[] {
+  return [
+    "--use-fake-device-for-media-stream",
+    "--use-fake-ui-for-media-stream",
+    "--autoplay-policy=no-user-gesture-required",
+    `--use-file-for-fake-audio-capture=${path}`,
+  ];
+}
+
 export async function joinVoice(page: Page, name = "voice-one") {
   await page.locator(".channel-item.voice", { hasText: name }).click();
   await expect(page.locator(".voice-widget.visible .vw-channel")).toHaveText(name);

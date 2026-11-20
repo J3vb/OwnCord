@@ -89,6 +89,8 @@ export interface RoomEventHandlers {
   readonly handleConnected: (room: VoiceRoom) => void;
   readonly handleActiveSpeakersChanged: (speakers: Participant[]) => void;
   readonly handleParticipantDisconnected: (participant: RemoteParticipant) => void;
+  /** The speaking ring a member reports for itself, relayed by the server. */
+  readonly handleRingAnnounced: (userId: number, speaking: boolean | null) => void;
   readonly handleTrackMuted: (publication: TrackPublication, participant: Participant) => void;
   readonly handleAudioPlaybackChanged: () => void;
   readonly handleDisconnected: (reason?: DisconnectReason) => void;

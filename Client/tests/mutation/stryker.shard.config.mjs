@@ -328,11 +328,13 @@ export const shards = {
   "transport-auth-7": [
     "src/features/direct-messages/wsHandlers.ts",
     "src/features/messaging/channelWarmup.ts",
+    "src/features/voice/ringAnnouncer.ts",
     "src/lib/apiChannels.ts",
     "src/lib/apiShared.ts",
     "src/lib/nav/deepLink.ts",
     "src/lib/nav/pressWarm.ts",
     "src/lib/net/ws/wsGapResume.ts",
+    "src/lib/voice/ringAnnounce.ts",
     "src/lib/voice/roomSpeakers.ts",
   ],
   "transport-auth-8": [

@@ -169,6 +169,8 @@ export function voiceStoreActionStubs() {
     setListenOnly: vi.fn(),
     setShareDenied: vi.fn(),
     setLocalGateSpeaking: vi.fn(),
+    getLocalRing: vi.fn(() => null),
+    onLocalRingChange: vi.fn(() => () => {}),
     restateSelfVoiceState: vi.fn(),
     setVoiceStatus: vi.fn(),
     setPeerVerification: vi.fn(),

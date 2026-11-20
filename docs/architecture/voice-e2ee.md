@@ -78,16 +78,33 @@ security badge shows "Unsecured" for the rest of the session
 encryption is subscribed again.
 
 **The speaking ring has two sources.** A client's own ring follows its input
-gate (`setLocalGateSpeaking` in `src/stores/voice.store.ts`). The ring the
-others see comes from LiveKit's speaker detection on the audio that reaches
-the SFU (`ActiveSpeakersChanged`, `src/lib/voice/roomSpeakers.ts`), tuned by
+gate (`setLocalGateSpeaking` in `src/stores/voice.store.ts`). While a gate
+decides it, the client also reports that ring to the OwnCord server as
+`voice_speak`, on every change and again every second while the ring is lit
+(`src/features/voice/ringAnnouncer.ts`), and the server relays it to the other
+members of the voice channel as `voice_speaking` (`Server/ws/voice_speak.go`;
+see `docs/protocol.md`). A listener shows a member's reported ring in place of
+the media server's detection for 3 seconds after the last report
+(`src/lib/voice/roomSpeakers.ts`), so the others see the ring the speaker sees,
+a deafened listener sees it too, and a speaker whose connection drops goes
+dark without a word. The server stamps the sender's user id, so a member can
+report only its own ring, and a listener never lights a ring for a member who
+is not in its room or whose microphone is muted. The report travels over the
+OwnCord connection, not the media server, so it works with
+`voice.restrict_data_publishing` on, and on the Linux desktop app.
+
+Everyone else's ring comes from LiveKit's speaker detection on the audio that
+reaches the SFU (`ActiveSpeakersChanged`, same file): a member on an app that
+does not report, every member on a server without the `voice_speaking`
+capability, and a microphone with no gate (sensitivity 100, or push-to-talk),
+which takes its own ring from that detection too. The detection is tuned by
 the `audio:` block of the generated `livekit.yaml`
 (`Server/livekitproc/process.go`; `Server/livekit.yaml.example` carries the
 same values). `active_level: 60` (0 is the loudest, 127 the softest) lights it
 for the soft speech a gate lets through, and `update_interval: 100` with one
-smoothing interval lights it within about a tenth of a second. A microphone
-with no gate (sensitivity 100, or push-to-talk) takes its own ring from the
-same detection.
+smoothing interval lights it within about a tenth of a second. It judges
+loudness alone, so for a quiet voice it can light late or blink off in the
+middle of a sentence.
 
 **With Enhanced Noise Suppression on, speech models decide what opens the
 input gate** on the web path (`public/silero-vad-worker.js`, started by

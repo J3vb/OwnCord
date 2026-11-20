@@ -30,6 +30,7 @@ type readyCapabilitiesPayload struct {
 	Threads                   bool  `json:"threads"`        // thread_* commands and frames
 	UserNotes                 bool  `json:"user_notes"`
 	VoiceMessages             bool  `json:"voice_messages"` // duration_ms and waveform on an upload and its attachment
+	VoiceSpeaking             bool  `json:"voice_speaking"` // voice_speak and its voice_speaking relay
 }
 
 func readyCapabilities(retryFloorMS int64, threads, forums, gameActivity, linkPreviews bool) readyCapabilitiesPayload {
@@ -54,5 +55,6 @@ func readyCapabilities(retryFloorMS int64, threads, forums, gameActivity, linkPr
 		Threads:                   threads,
 		UserNotes:                 true,
 		VoiceMessages:             true,
+		VoiceSpeaking:             true,
 	}
 }

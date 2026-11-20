@@ -32,6 +32,7 @@ import {
   withSwitchingTo,
   withLocalRing,
   withSpeakers,
+  localRing,
 } from "./voiceRoster";
 import {
   withPeerVideoDecode,
@@ -357,6 +358,13 @@ export function setLocalGateSpeaking(speaking: boolean | null): void {
       : withLocalRing({ ...prev, localGateSpeaking: speaking }, ownUserId()),
   );
 }
+
+/** The gate-decided local ring (null when no gate runs): what this client announces to the call. */
+export const getLocalRing = (): boolean | null => localRing(voiceStore.getState());
+
+/** Run `listener` whenever that ring changes. Returns the unsubscribe. */
+export const onLocalRingChange = (listener: () => void): (() => void) =>
+  voiceStore.subscribeSelector(localRing, listener);
 
 /** Update speaking state for users from LiveKit's ActiveSpeakersChanged.
  *  Updates every remote user. The local user too, unless the input-sensitivity

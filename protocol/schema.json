@@ -90,6 +90,7 @@
     },
     { "wire": "voice_e2ee_offer", "go": "MsgTypeVoiceE2EEOffer", "ts": "VOICE_E2EE_OFFER" },
     { "wire": "voice_watch", "go": "MsgTypeVoiceWatch", "ts": "VOICE_WATCH" },
+    { "wire": "voice_speak", "go": "MsgTypeVoiceSpeak", "ts": "VOICE_SPEAK" },
     { "wire": "call_ring", "go": "MsgTypeCallRing", "ts": "CALL_RING" },
     { "wire": "call_decline", "go": "MsgTypeCallDecline", "ts": "CALL_DECLINE" },
     {
@@ -268,6 +269,7 @@
     { "wire": "call_incoming", "go": "MsgTypeCallIncoming", "ts": "CALL_INCOMING" },
     { "wire": "call_declined", "go": "MsgTypeCallDeclined", "ts": "CALL_DECLINED" },
     { "wire": "voice_watching", "go": "MsgTypeVoiceWatching", "ts": "VOICE_WATCHING" },
+    { "wire": "voice_speaking", "go": "MsgTypeVoiceSpeaking", "ts": "VOICE_SPEAKING" },
     {
       "wire": "voice_e2ee_announce",
       "go": "MsgTypeVoiceE2EEAnnounceBC",
