@@ -3,7 +3,7 @@
 
 import { loadPref, STORAGE_PREFIX } from "@lib/prefs/preferences";
 import { migrateLegacyValue } from "@lib/net/legacyKeyMigration";
-import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
+import { USER_LOCAL_MUTE_CHANGED, USER_VOLUME_CHANGED } from "@lib/constants";
 
 /**
  * Server host the per-user volume prefs below belong to. Mirrors
@@ -52,6 +52,11 @@ export function userMusicMuteKey(userId: number): string {
 export function announceLocalMute(userId: number): void {
   if (typeof window === "undefined") return;
   window.dispatchEvent(new CustomEvent(USER_LOCAL_MUTE_CHANGED, { detail: { userId } }));
+}
+
+export function announceVolume(userId: number): void {
+  if (typeof window === "undefined") return;
+  window.dispatchEvent(new CustomEvent(USER_VOLUME_CHANGED, { detail: { userId } }));
 }
 
 // setUserVolume always clamps to 0-200, so -1 is safe as a "nothing saved" sentinel.

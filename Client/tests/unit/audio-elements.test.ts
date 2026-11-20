@@ -1396,6 +1396,16 @@ describe("AudioElements", () => {
       expect(seen).toEqual([{ userId: 7 }]);
     });
 
+    it("announces every level change, not only those to or from 0", () => {
+      const seen: unknown[] = [];
+      const onChange = (e: Event): void => void seen.push((e as CustomEvent).detail);
+      window.addEventListener("owncord:user-volume-changed", onChange);
+      elements.setUserVolume(7, 40);
+      elements.setUserVolume(7, 120);
+      window.removeEventListener("owncord:user-volume-changed", onChange);
+      expect(seen).toEqual([{ userId: 7 }, { userId: 7 }]);
+    });
+
     it("scopes the Mute pref to the current host", () => {
       setAudioVolumeHost("a.example:8443");
       try {

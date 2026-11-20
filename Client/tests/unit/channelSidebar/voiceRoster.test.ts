@@ -18,6 +18,7 @@ import {
   joinVoiceChannel,
   setSwitchingTo,
   setVoiceStatus,
+  setMusicSharer,
 } from "../../../src/stores/voice.store";
 import { membersStore } from "../../../src/stores/members.store";
 import { noteJoinFailed, noteJoinSucceeded } from "../../../src/features/voice/joinBackoff";
@@ -914,6 +915,26 @@ describe("ChannelSidebar voice rows on models", () => {
     expect(userRow(82)!.querySelector(".vu-local-muted")).not.toBeNull();
     expect(userRow(83)).toBe(quiet);
     expect(userRow(83)!.querySelector(".vu-local-muted")).toBeNull();
+  });
+
+  it("dims a sharer's music note at a Music volume of 0", () => {
+    setChannels(testChannels);
+    addVoiceUser(VOICE_CH, 84, "dj");
+    setMusicSharer(84, true);
+    voiceStore.flush();
+    sidebar.mount(container);
+    const note = (): Element | null => userRow(84)!.querySelector(".vu-music");
+    expect(note()!.classList.contains("vu-music--muted")).toBe(false);
+
+    localStorage.setItem("owncord:settings:userMusicVolume_84", "0");
+    try {
+      window.dispatchEvent(
+        new CustomEvent("owncord:user-local-mute-changed", { detail: { userId: 84 } }),
+      );
+      expect(note()!.classList.contains("vu-music--muted")).toBe(true);
+    } finally {
+      localStorage.removeItem("owncord:settings:userMusicVolume_84");
+    }
   });
 
   it("connection drop disables the channel without rebuilding user rows", () => {

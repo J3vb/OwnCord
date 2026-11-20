@@ -361,7 +361,9 @@ describe("video tile menu icons", () => {
       config: { isSelf: false, audioUserId: 5, isScreenshare: true },
       signal: ac.signal,
       onVolumeChange: vi.fn(),
+      watching: true,
       onStopWatching: vi.fn(),
+      onWatch: vi.fn(),
       view: {
         focused: false,
         fullscreen: false,

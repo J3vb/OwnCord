@@ -23,6 +23,7 @@ import { createIcon } from "../../lib/icons";
 import { syncVideoSurface } from "../../lib/voice/videoSurface";
 import { bindVideoZoom } from "../../lib/ui/zoomPan";
 import { voiceText } from "../../i18n/voice";
+import { runPopoutDocumentHooks } from "./popoutDocuments";
 
 /** How often to check whether the window was closed (the system's close
  *  button sends the opener no event). */
@@ -53,6 +54,23 @@ export interface Popout {
 /** Numbers each window: a label is never reused, since a closing window can
  *  stay registered with the desktop for a moment after close(). */
 let openings = 0;
+
+const SHEETS = "link[rel='stylesheet'], style";
+
+function isSheet(node: Node | null): boolean {
+  return node instanceof Element && node.matches(SHEETS);
+}
+
+/** Whether the app's head changed a stylesheet (a custom theme painted,
+ *  edited or removed), not just its title. */
+function touchesSheets(records: readonly MutationRecord[]): boolean {
+  return records.some(
+    (r) =>
+      isSheet(r.target) ||
+      isSheet(r.target.parentNode) ||
+      [...r.addedNodes, ...r.removedNodes].some(isSheet),
+  );
+}
 
 /** F without a modifier: the tiles' full-screen key. */
 function isFullscreenKey(e: KeyboardEvent): boolean {
@@ -99,13 +117,40 @@ export function openPopoutWindow(opts: PopoutWindowOptions): PopoutWindow | null
     doc.title = opts.title;
     // The app's theme and styles, so the window looks like the app.
     copyRootAttributes();
-    for (const sheet of document.head.querySelectorAll("link[rel='stylesheet'], style")) {
-      const copy = doc.importNode(sheet, true);
-      if (sheet instanceof HTMLLinkElement) copy.setAttribute("href", sheet.href);
-      doc.head.appendChild(copy);
-    }
+    copyBodyTheme();
+    copySheets();
     doc.body.appendChild(content);
     opts.onDraw?.(doc, signal);
+    runPopoutDocumentHooks(doc, signal);
+  }
+
+  /** Each app stylesheet's copy in the window, kept across head changes so
+   *  an unchanged sheet is not loaded again. */
+  const sheetCopies = new Map<Element, Element>();
+  function copySheets(): void {
+    const doc = win!.document;
+    const sheets = [...document.head.querySelectorAll(SHEETS)];
+    for (const [sheet, copy] of sheetCopies) {
+      if (sheets.includes(sheet) && copy.ownerDocument === doc) continue;
+      copy.remove();
+      sheetCopies.delete(sheet);
+    }
+    let prev: Element | null = null;
+    for (const sheet of sheets) {
+      let copy = sheetCopies.get(sheet);
+      if (copy === undefined) {
+        copy = doc.importNode(sheet, true);
+        if (sheet instanceof HTMLLinkElement) copy.setAttribute("href", sheet.href);
+        sheetCopies.set(sheet, copy);
+      } else if (sheet instanceof HTMLStyleElement && copy.textContent !== sheet.textContent) {
+        copy.textContent = sheet.textContent;
+      }
+      if (!copy.isConnected) {
+        if (prev === null) doc.head.prepend(copy);
+        else prev.after(copy);
+      }
+      prev = copy;
+    }
   }
 
   const poll = setInterval(() => {
@@ -131,12 +176,52 @@ export function openPopoutWindow(opts: PopoutWindowOptions): PopoutWindow | null
     }
   }
 
-  // A setting changed while the window is open reaches it at once.
+  /** The built-in theme's body class and the body's inline tokens (an
+   *  accent), which the theme stylesheets key on. */
+  function copyBodyTheme(): void {
+    const body = win!.document.body;
+    const stale = Array.from(body.classList).filter(
+      (cls) => cls.startsWith("theme-") && !document.body.classList.contains(cls),
+    );
+    body.classList.remove(...stale);
+    for (const cls of document.body.classList) {
+      if (cls.startsWith("theme-")) body.classList.add(cls);
+    }
+    for (let i = body.style.length - 1; i >= 0; i--) {
+      const prop = body.style.item(i);
+      if (prop.startsWith("--") && document.body.style.getPropertyValue(prop) === "") {
+        body.style.removeProperty(prop);
+      }
+    }
+    const app = document.body.style;
+    for (let i = 0; i < app.length; i++) {
+      const prop = app.item(i);
+      if (prop.startsWith("--")) body.style.setProperty(prop, app.getPropertyValue(prop));
+    }
+  }
+
+  // A setting or theme changed while the window is open reaches it at once.
   const rootWatch = new MutationObserver(() => {
     if (!win.closed) copyRootAttributes();
   });
   rootWatch.observe(document.documentElement, { attributes: true });
-  signal.addEventListener("abort", () => rootWatch.disconnect(), { once: true });
+  const bodyWatch = new MutationObserver(() => {
+    if (!win.closed) copyBodyTheme();
+  });
+  bodyWatch.observe(document.body, { attributes: true, attributeFilter: ["class", "style"] });
+  const headWatch = new MutationObserver((records) => {
+    if (!win.closed && touchesSheets(records)) copySheets();
+  });
+  headWatch.observe(document.head, { childList: true, subtree: true, characterData: true });
+  signal.addEventListener(
+    "abort",
+    () => {
+      rootWatch.disconnect();
+      bodyWatch.disconnect();
+      headWatch.disconnect();
+    },
+    { once: true },
+  );
 
   win.addEventListener("load", draw, { signal });
   // No orphan windows: the app page going away takes them along.
@@ -227,7 +312,17 @@ export function openPopout(opts: PopoutOptions): Popout | null {
       // Ctrl + wheel and drag zoom the stream here as on its tile.
       bindVideoZoom(root, drawn.signal);
       button.addEventListener("click", toggleFullscreen, { signal: drawn.signal });
-      root.addEventListener("dblclick", toggleFullscreen, { signal: drawn.signal });
+      // A double click on a control (mute twice, the slider's track) is the
+      // control's, as on the tile.
+      root.addEventListener(
+        "dblclick",
+        (e) => {
+          if ((e.target as Element).closest("button, input, .video-zoom-nav") === null) {
+            toggleFullscreen();
+          }
+        },
+        { signal: drawn.signal },
+      );
       opts.rewireControls?.();
       syncVideoSurface(opts.video);
       doc.addEventListener("fullscreenchange", () => setFullscreen(doc.fullscreenElement != null), {

@@ -362,6 +362,12 @@
       "reason": "Listeners removed by the disposer each subscriber holds"
     },
     {
+      "file": "features/voice/popoutDocuments.ts",
+      "binding": "documentHooks",
+      "category": "app-lifetime",
+      "reason": "Hooks the app's shortcuts register for pop-out window documents, each removed when its owner's signal aborts; nothing in it is per-server"
+    },
+    {
       "file": "features/custom-themes/customTheme.ts",
       "binding": "changeListeners",
       "category": "dom-owned",

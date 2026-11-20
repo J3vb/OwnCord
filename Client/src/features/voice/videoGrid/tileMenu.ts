@@ -45,7 +45,10 @@ export interface TileMenuOptions {
   readonly signal: AbortSignal;
   /** The tiles' own sliders show the same settings; keep them in step. */
   readonly onVolumeChange: (isScreenshare: boolean, volume: number, muted: boolean) => void;
+  /** Whether the stream plays here, or shows its Watch cover. */
+  readonly watching: boolean;
   readonly onStopWatching: () => void;
+  readonly onWatch: () => void;
   /** Focus (pin the tile, the others Small), full screen and pop out for this
    *  tile, in their state now. */
   readonly view: TileMenuView;
@@ -343,7 +346,15 @@ function buildTileMenu(menu: HTMLElement, opts: TileMenuOptions, closeMenu: () =
   appendViewRows(menu, view, closeMenu);
   if (opts.arrange !== undefined) appendArrangeRows(menu, opts.arrange, closeMenu);
   menu.append(
-    actionItem(t("tile.stopWatching"), "stop-watching", "eye-off", closeMenu, opts.onStopWatching),
+    opts.watching
+      ? actionItem(
+          t("tile.stopWatching"),
+          "stop-watching",
+          "eye-off",
+          closeMenu,
+          opts.onStopWatching,
+        )
+      : actionItem(t("tile.watchStream"), "watch", "eye", closeMenu, opts.onWatch),
   );
 
   if (person?.moderation !== undefined) {

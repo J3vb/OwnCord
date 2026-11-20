@@ -108,6 +108,10 @@ release changes the database, and anything an operator must do first.)
 - If a moderator muted or deafened you and you left the call, you no longer start your next call muted or deafened; your own mute and deafen are kept.
 - In the AFK channel the call view's mic button shows the mic as locked like the user bar, and the mute shortcut or the Android call notification no longer sets a hidden mute.
 - While a moderator has you deafened, every mic button shows the mic as off.
+- A person's volume slider on their camera tile (and in its pop-out) follows a change made in the voice list menu, and unmuting from the tile no longer puts back the old level. Music at 0% shows as muted.
+- In a popped-out call the Music button brings the call back first so its app picker is in view, like Share. Double-clicking a control in a stream pop-out no longer switches full screen, and the voice shortcuts (mute, deafen, camera, share, disconnect) work while a pop-out has focus.
+- Pop-out windows use the theme's colours, also after a custom theme changes.
+- The tile Pop out button is gone on Android and on your own screen share, a tile you are not watching offers Watch stream instead of Stop watching, and the Stream info box closes when you leave focus.
 
 **Settings**
 

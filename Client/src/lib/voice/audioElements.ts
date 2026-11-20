@@ -18,6 +18,7 @@ import { onRoom } from "../../features/voice/releaseRoom";
 import { voiceStore } from "@stores/voice.store";
 import {
   announceLocalMute,
+  announceVolume,
   clampPercent,
   getSavedUserVolume,
   MAX_GAIN,
@@ -420,6 +421,7 @@ export class AudioElements extends MusicAudioState {
     this.applyGainOf(userId, this.gainOf(clamped, this.getUserLocalMute(userId)));
     // A level of 0 shows as muted too, so moving to or from it is announced.
     if (wasSilent !== (clamped === 0)) announceLocalMute(userId);
+    announceVolume(userId);
   }
 
   getUserVolume(userId: number): number {

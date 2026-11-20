@@ -816,6 +816,16 @@ describe("VideoGrid", () => {
       expect(cell(OTTO).classList.contains("video-cell--stopped")).toBe(true);
     });
 
+    it("offers Watch stream, not Stop watching, on a tile not being watched", async () => {
+      grid.addStream(OTTO, "Otto", fakeStream(), remote());
+      await openMenu(OTTO);
+      item("stop-watching").click();
+      await openMenu(OTTO);
+      expect(menu()!.querySelector("[data-action='stop-watching']")).toBeNull();
+      item("watch").click();
+      expect(cell(OTTO).classList.contains("video-cell--stopped")).toBe(false);
+    });
+
     it("Mute silences the person for you only, and stays open", async () => {
       grid.addStream(OTTO, "Otto", fakeStream(), remote());
       await openMenu(OTTO);

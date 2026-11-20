@@ -235,6 +235,22 @@ describe("VoiceWidget connection panel (Option C)", () => {
     widget.destroy?.();
   });
 
+  it("reads the signal button as collapsed again after the call ends", () => {
+    const { widget, container } = mount();
+    try {
+      const signal = container.querySelector<HTMLButtonElement>(".vw-signal")!;
+      signal.click();
+      expect(signal.getAttribute("aria-expanded")).toBe("true");
+
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+      voiceStore.flush();
+      expect(container.querySelector(".vw-stats")!.classList.contains("visible")).toBe(false);
+      expect(signal.getAttribute("aria-expanded")).toBe("false");
+    } finally {
+      widget.destroy?.();
+    }
+  });
+
   it("keeps four equal controls with the screen-share state on the button, no text label", () => {
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: true }));
     const { widget, container } = mount();

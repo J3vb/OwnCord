@@ -198,6 +198,7 @@ function appendMusicSection(menu: HTMLElement, userId: number): void {
     setMenuItemLabel(label, t("music.volume", { percent: val }));
     slider.setAttribute("aria-label", t("music.volume", { percent: val }));
     setMusicVolume(userId, val);
+    sync();
   });
   appendChildren(row, slider, valLabel);
   menu.appendChild(row);
@@ -213,14 +214,28 @@ function appendMusicSection(menu: HTMLElement, userId: number): void {
   });
   check.appendChild(createIcon("check", 14));
   mute.appendChild(check);
-  const sync = (): void => {
-    const muted = getMusicMuted(userId);
+  // A level of 0 reads as muted, as the voice rows do; unchecking it
+  // brings the music back at 100%.
+  const isSilenced = (): boolean => getMusicMuted(userId) || getMusicVolume(userId) === 0;
+  function sync(): void {
+    const muted = isSilenced();
     mute.setAttribute("aria-checked", String(muted));
     check.style.visibility = muted ? "visible" : "hidden";
-  };
+  }
   sync();
   mute.addEventListener("click", () => {
-    setMusicMuted(userId, !getMusicMuted(userId));
+    if (!isSilenced()) {
+      setMusicMuted(userId, true);
+    } else {
+      setMusicMuted(userId, false);
+      if (getMusicVolume(userId) === 0) {
+        setMusicVolume(userId, 100);
+        slider.value = "100";
+        setText(valLabel, "100%");
+        setMenuItemLabel(label, t("music.volume", { percent: 100 }));
+        slider.setAttribute("aria-label", t("music.volume", { percent: 100 }));
+      }
+    }
     sync();
   });
   menu.appendChild(mute);
