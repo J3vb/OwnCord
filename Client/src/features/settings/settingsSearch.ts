@@ -39,11 +39,6 @@ function desktopOnly(...texts: string[]): string[] {
   return isAndroidApp() ? [] : texts;
 }
 
-/** Text that is on screen only where the host has what it controls (not a browser tab). */
-function hostOnly(has: boolean, ...texts: string[]): string[] {
-  return has ? desktopOnly(...texts) : [];
-}
-
 /** Text that is on screen only in the Android app. */
 function androidOnly(...texts: string[]): string[] {
   return isAndroidApp() ? texts : [];
@@ -108,7 +103,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("appearance.section.textSize"),
     s("appearance.section.layout"),
     s("appearance.fontSize"),
-    ...hostOnly(desktop.window.available, s("appearance.zoom")),
+    ...(desktop.window.available ? desktopOnly(s("appearance.zoom")) : []),
     s("appearance.compactMode"),
     s("appearance.timeFormat"),
     s("appearance.timeFormat.desc"),
@@ -230,11 +225,9 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     platformText(s("notifications.desktop.desc"), s("notifications.desktop.desc.android")),
     s("notifications.permission.label"),
     ...androidOnly(s("notifications.push.label")),
-    ...hostOnly(
-      desktop.notifier.canFlash,
-      s("notifications.flash.label"),
-      s("notifications.flash.desc"),
-    ),
+    ...(desktop.notifier.canFlash
+      ? desktopOnly(s("notifications.flash.label"), s("notifications.flash.desc"))
+      : []),
     s("notifications.suppress.label"),
     s("notifications.suppress.desc"),
     ...desktopOnly(s("notifications.unreadBadge.label"), s("notifications.unreadBadge.desc")),
