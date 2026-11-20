@@ -10,6 +10,7 @@ import type {
 import { createRoomEventHandlers } from "@lib/voice/roomEventHandlers";
 import type { RoomEventDeps } from "@lib/voice/roomEventHandlers";
 import { voiceStore } from "@stores/voice.store";
+import type { VoiceUser } from "@stores/voice.store";
 import type { AudioElements } from "@lib/voice/audioElements";
 
 // ── fakes ──────────────────────────────────────────────────────────────────
@@ -140,6 +141,51 @@ export function pub(source: Track.Source): RemoteTrackPublication {
 
 export function participant(identity: string): RemoteParticipant {
   return { identity } as unknown as RemoteParticipant;
+}
+
+// ── speaking rings ─────────────────────────────────────────────────────────
+
+/** Put the client in a channel whose roster holds these users, none speaking. */
+export function seedVoiceUsers(channelId: number, userIds: number[]): void {
+  voiceStore.setState((prev) => {
+    const users = new Map<number, VoiceUser>(
+      userIds.map((id) => [
+        id,
+        {
+          userId: id,
+          username: `u${id}`,
+          muted: false,
+          deafened: false,
+          speaking: false,
+          camera: false,
+          screenshare: false,
+        },
+      ]),
+    );
+    return { ...prev, currentChannelId: channelId, voiceUsers: new Map([[channelId, users]]) };
+  });
+}
+
+/** A remote participant in the room, microphone published and unmuted. */
+export function join(h: Harness, identity: string, sid = `PA_${identity}`): RemoteParticipant {
+  const mic = { source: Track.Source.Microphone, isMuted: false };
+  const p = {
+    identity,
+    sid,
+    getTrackPublication: (source: Track.Source) =>
+      source === Track.Source.Microphone ? mic : undefined,
+  } as unknown as RemoteParticipant;
+  h.room.remoteParticipants.set(identity, p);
+  return p;
+}
+
+/** Mute a joined participant's microphone and report it, as the SFU does. */
+export function muteMic(h: Harness, remote: RemoteParticipant, report = true): void {
+  const mic = remote.getTrackPublication(Track.Source.Microphone) as unknown as {
+    isMuted: boolean;
+  };
+  mic.isMuted = true;
+  if (report) h.handlers.handleTrackMuted(mic as unknown as RemoteTrackPublication, remote);
 }
 
 // ── opt-in watching: what is subscribed ────────────────────────────────────

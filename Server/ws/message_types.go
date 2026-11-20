@@ -50,6 +50,7 @@ const (
 	MsgTypeVoiceE2EEAnnounce = "voice_e2ee_announce"
 	MsgTypeVoiceE2EEOffer    = "voice_e2ee_offer"
 	MsgTypeVoiceWatch        = "voice_watch"
+	MsgTypeVoiceSpeak        = "voice_speak"
 	MsgTypeCallRing          = "call_ring"
 	MsgTypeCallDecline       = "call_decline"
 	MsgTypeChatCommand       = "chat_command" // plugin slash-command dispatch (Phase C)
@@ -120,6 +121,7 @@ const (
 	MsgTypeCallIncoming        = "call_incoming"
 	MsgTypeCallDeclined        = "call_declined"
 	MsgTypeVoiceWatching       = "voice_watching"
+	MsgTypeVoiceSpeaking       = "voice_speaking"
 	MsgTypeVoiceE2EEAnnounceBC = "voice_e2ee_announce" // broadcast (same string as client msg)
 	MsgTypeVoiceE2EEOfferRelay = "voice_e2ee_offer"    // relay (same string as client msg)
 	MsgTypeCommandReply        = "command_reply"       // ephemeral plugin reply, sent only to the invoking client

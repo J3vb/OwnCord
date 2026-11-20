@@ -270,6 +270,10 @@ func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envel
 			h.sendToVoiceChannelExcept(sw.chID, c.userID, buildVoiceWatching(c.userID, sw.ids))
 		}
 	}
+	if vs := result.RelayVoiceSpeaking; vs != nil && c.voice.channel() == vs.chID {
+		// A frame that lost a channel switch reaches nobody, as above.
+		h.sendToVoiceChannelExcept(vs.chID, c.userID, buildVoiceSpeaking(c.userID, vs.speaking))
+	}
 	if result.SetVoiceJoinToken != nil {
 		txn := h.begin(c.userID)
 		txn.setJoinToken(c, *result.SetVoiceJoinToken)

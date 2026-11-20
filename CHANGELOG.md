@@ -100,6 +100,12 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Fixed
+
+**Voice**
+
+- Other people's speaking ring could light late, blink off in the middle of a sentence or stay dark for a quiet voice, while the speaker's own ring was fine. Each app now reports its own ring to the server, which passes it on to the call, so everyone sees the ring the speaker sees, also while deafened. It needs this version of the server and of the app on both sides (Windows, Android and Linux): someone on an older app, and everyone on an older server, is shown as before.
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

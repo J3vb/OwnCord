@@ -223,17 +223,24 @@ export function withLeftChannel(prev: VoiceState, currentUserId: number): VoiceS
   return { ...prev, ...cleared, voiceUsers: nextChannels };
 }
 
-/** Apply the input-sensitivity gate to the local user's ring. A no-op when no
- *  gate runs (LiveKit then decides). The ring lights only while the gate is
- *  open and nothing silences the mic (self-mute, push-to-talk). */
-export function withLocalRing(state: VoiceState, userId: number): VoiceState {
+/** The local user's ring as the input-sensitivity gate decides it, or null
+ *  when no gate runs (LiveKit then decides). The ring lights only while the
+ *  gate is open and nothing silences the mic (self-mute, push-to-talk). */
+export function localRing(state: VoiceState): boolean | null {
   const gate = state.localGateSpeaking;
+  if (gate === null || gate === undefined) return null;
+  return gate && !state.localMuted && state.pttGated !== true;
+}
+
+/** Apply the input-sensitivity gate to the local user's ring. A no-op when no
+ *  gate runs. */
+export function withLocalRing(state: VoiceState, userId: number): VoiceState {
+  const speaking = localRing(state);
   const channelId = state.currentChannelId;
-  if (gate === null || gate === undefined || channelId === null) return state;
+  if (speaking === null || channelId === null) return state;
   const channel = state.voiceUsers.get(channelId);
   const user = channel?.get(userId);
   if (channel === undefined || user === undefined) return state;
-  const speaking = gate && !state.localMuted && state.pttGated !== true;
   if (user.speaking === speaking) return state;
   const voiceUsers = new Map(state.voiceUsers);
   voiceUsers.set(channelId, new Map(channel).set(userId, { ...user, speaking }));
