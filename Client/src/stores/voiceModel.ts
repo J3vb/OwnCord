@@ -80,9 +80,15 @@ export interface VoiceState {
   readonly inAfkChannel?: boolean;
   /** The local deafen in effect is the one a moderator's deafen applied, not
    *  the member's own: the moderator's lift releases it, while a deafen the
-   *  member chose survives the lift. Follows localDeafened, so it outlives a
-   *  leave (a moderator move) and clears on any undeafen. */
+   *  member chose survives the lift. Follows localDeafened and clears on any
+   *  undeafen. A leave drops that deafen with it: the server re-sends a
+   *  moderator's deafen that follows the member (a moderator move). */
   readonly moderatorDeafened?: boolean;
+  /** The local mute in effect is the one a moderator's mute applied over an
+   *  open mic, not the member's own. Set from the member's own voice row while
+   *  the moderator's mute holds; a leave drops that mute, as for the deafen
+   *  above. Optional for the fixture reason above. */
+  readonly moderatorMuted?: boolean;
   /** The member was already muted when they deafened, so undeafening restores
    *  that mute instead of lifting it. Written by the widget's deafen toggle and
    *  cleared by the widget's undeafen. Like localDeafened it outlives a leave, so a
@@ -198,6 +204,7 @@ export function createVoiceState(): VoiceState {
     localServerMuted: false,
     localServerDeafened: false,
     moderatorDeafened: false,
+    moderatorMuted: false,
     mutedBeforeDeafen: false,
     pttGated: false,
     phoneCallHold: false,

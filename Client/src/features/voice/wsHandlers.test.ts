@@ -262,11 +262,16 @@ describe("handleVoiceState moderator enforcement", () => {
     handleVoiceState(socket, voiceState({ deafened: true, server_deafened: true }));
     await vi.waitFor(() => expect(setDeafened).toHaveBeenCalledWith(true));
     setLocalDeafened(true);
-    // The move: the server's voice_leave for the old channel clears the
-    // session's moderator flags, and the re-join restates them.
+    // The move: the server's voice_leave for the old channel ends the
+    // moderator's deafen with the session, and the re-join applies it again.
     leaveVoiceChannel();
+    expect(voiceStore.getState().localDeafened).toBe(false);
     joinVoiceChannel(5);
+    vi.mocked(setDeafened).mockClear();
     handleVoiceState(socket, voiceState({ channel_id: 5, deafened: true, server_deafened: true }));
+    await vi.waitFor(() => expect(setDeafened).toHaveBeenCalledWith(true));
+    expect(voiceStore.getState().moderatorDeafened).toBe(true);
+    setLocalDeafened(true);
     vi.mocked(setDeafened).mockClear();
 
     handleVoiceState(

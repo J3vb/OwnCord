@@ -43,6 +43,39 @@ export function rosterFromReady(
   return channelMap;
 }
 
+/** Whether the local mute is a moderator's (see VoiceState.moderatorMuted),
+ *  read from the member's own row: a mute laid over an open mic is the
+ *  moderator's, one laid over the member's own mute is not. A mute that only
+ *  came with the member's own deafen ends with that deafen, so the mute laid
+ *  over it is the moderator's too. */
+function moderatorMutedMark(prev: VoiceState, serverMuted: boolean): boolean {
+  if (!serverMuted) return false;
+  if (prev.localServerMuted === true) return prev.moderatorMuted === true;
+  return !prev.localMuted || (prev.localDeafened && prev.mutedBeforeDeafen !== true);
+}
+
+/** Replace the roster with a ready payload's. `selfState` is this device's
+ *  own row (see ownReadyRow): it names the call's channel and carries the
+ *  moderator's flags. Without one the channel stands, since the user may be
+ *  mid-join and not registered yet (a leave or logout clears a stale one),
+ *  and the moderator's flags read false, so a full resync that keeps a live
+ *  call cannot leave them stuck at their pre-reconnect values. */
+export function withReadyVoice(
+  prev: VoiceState,
+  voiceUsers: VoiceState["voiceUsers"],
+  selfState: ReadyVoiceState | undefined,
+): VoiceState {
+  const serverMuted = selfState?.server_muted ?? false;
+  return {
+    ...prev,
+    voiceUsers,
+    currentChannelId: selfState?.channel_id ?? prev.currentChannelId,
+    localServerMuted: serverMuted,
+    localServerDeafened: selfState?.server_deafened ?? false,
+    moderatorMuted: moderatorMutedMark(prev, serverMuted),
+  };
+}
+
 /** The signed-in user's own row in a ready payload, when this device holds the
  *  call. While idle that row is another device's call and stays a roster entry
  *  (the sidebar still shows the user in the channel) without becoming this
@@ -99,6 +132,7 @@ export function withVoiceState(
     voiceUsers: nextChannels,
     localServerMuted: serverMuted,
     localServerDeafened: serverDeafened,
+    moderatorMuted: moderatorMutedMark(prev, serverMuted),
   };
 }
 
@@ -184,9 +218,24 @@ export function withJoinedChannel(prev: VoiceState, channelId: number, now: numb
   };
 }
 
+/** The mute and deafen a moderator applied end with the session; the
+ *  member's own stay. A deafen of their own still mutes. */
+function withoutModeratorAudio(
+  prev: VoiceState,
+): Pick<VoiceState, "localMuted" | "localDeafened" | "moderatorMuted" | "moderatorDeafened"> {
+  const localDeafened = prev.localDeafened && prev.moderatorDeafened !== true;
+  return {
+    localMuted: prev.moderatorMuted === true ? localDeafened : prev.localMuted,
+    localDeafened,
+    moderatorMuted: false,
+    moderatorDeafened: false,
+  };
+}
+
 /** Leave the current channel and take the signed-in user off its roster. */
 export function withLeftChannel(prev: VoiceState, currentUserId: number): VoiceState {
   const cleared = {
+    ...withoutModeratorAudio(prev),
     currentChannelId: null,
     joinedAt: null,
     switchingTo: null,

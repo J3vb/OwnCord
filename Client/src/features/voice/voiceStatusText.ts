@@ -39,8 +39,8 @@ export interface MicControlState {
   readonly pttGated: boolean;
   /** A phone call holds the call: the mic is closed until it ends. */
   readonly phoneHold: boolean;
-  /** The mic reads as off: muted, listen-only, locked in the AFK channel or
-   *  held by a phone call. */
+  /** The mic reads as off: muted, deafened, listen-only, locked in the AFK
+   *  channel or held by a phone call. */
   readonly micOff: boolean;
   /** aria-pressed: the mute the user asked for, the AFK lock or the hold. */
   readonly pressed: boolean;
@@ -51,13 +51,14 @@ export interface MicControlState {
 }
 
 /** The mic button's label: the first state that applies, a phone call's hold
- *  before a moderator's mute before the AFK lock before listen-only before an
- *  idle push-to-talk key. */
+ *  before a moderator's mute before the AFK lock before listen-only before a
+ *  deafen before an idle push-to-talk key. */
 function micTitle(
   phoneHold: boolean,
   serverMuted: boolean,
   afkLocked: boolean,
   listenOnly: boolean,
+  deafened: boolean,
   pttGated: boolean,
   userMuted: boolean,
 ): string {
@@ -65,10 +66,23 @@ function micTitle(
   if (serverMuted) return t("widget.mutedByModerator");
   if (afkLocked) return t("widget.control.afkLocked");
   if (listenOnly) return t("widget.control.listenOnly");
+  if (deafened) return t("widget.control.deafenedMic");
   if (pttGated) {
     return t(isAndroidApp() ? "widget.control.pttGated.android" : "widget.control.pttGated");
   }
   return t(userMuted ? "widget.control.unmute" : "widget.control.mute");
+}
+
+/** What holds the mic apart from the user's own mute. */
+function micLocks(
+  voice: VoiceState,
+  inCall: boolean,
+): { serverMuted: boolean; phoneHold: boolean; afkLocked: boolean; listenOnly: boolean } {
+  const serverMuted = voice.localServerMuted === true;
+  // The AFK channel is listen-only for everyone: the mic reads muted and is locked.
+  const afkLocked = inCall && voice.inAfkChannel === true;
+  const listenOnly = inCall && voice.listenOnly && !serverMuted && !afkLocked;
+  return { serverMuted, phoneHold: isPhoneCallHold(voice), afkLocked, listenOnly };
 }
 
 /** A moderator's mute is not ours to lift (the server refuses it), so the
@@ -77,28 +91,27 @@ function micTitle(
 export function micControlState(voice: VoiceState): MicControlState {
   const inCall = voice.currentChannelId !== null;
   const userMuted = isSelfMuted(voice);
-  const serverMuted = voice.localServerMuted === true;
-  const phoneHold = isPhoneCallHold(voice);
-  // The AFK channel is listen-only for everyone: the mic reads muted and is locked.
-  const afkLocked = inCall && voice.inAfkChannel === true;
-  const listenOnly = inCall && voice.listenOnly && !serverMuted && !afkLocked;
+  const { serverMuted, phoneHold, afkLocked, listenOnly } = micLocks(voice, inCall);
   // Closed whatever the user's own mute says, and not theirs to open.
   const locked = listenOnly || afkLocked || phoneHold;
-  const pttGated = inCall && voice.pttGated === true && !userMuted && !locked;
+  // A deafen closes the mic as well; a moderator's deafen leaves the mute as it was.
+  const deafened = inCall && voice.localDeafened && !userMuted && !locked;
+  const pttGated = inCall && voice.pttGated === true && !userMuted && !locked && !deafened;
   return {
     userMuted,
     listenOnly,
     pttGated,
     phoneHold,
-    micOff: userMuted || locked,
+    micOff: userMuted || locked || deafened,
     pressed: userMuted || afkLocked || phoneHold,
     disabled: serverMuted || locked,
-    title: micTitle(phoneHold, serverMuted, afkLocked, listenOnly, pttGated, userMuted),
+    title: micTitle(phoneHold, serverMuted, afkLocked, listenOnly, deafened, pttGated, userMuted),
   };
 }
 
 /** Whether the mic is the user's to open: not muted by them or a moderator,
- *  not listen-only, not in the AFK channel, not held by a phone call. */
+ *  not deafened, not listen-only, not in the AFK channel, not held by a phone
+ *  call. */
 export function micIsUsersToOpen(voice: VoiceState): boolean {
   const mic = micControlState(voice);
   return !mic.micOff && !mic.disabled;
@@ -109,6 +122,7 @@ export function micControlKey(s: VoiceState): string {
   return [
     s.currentChannelId !== null,
     s.localMuted,
+    s.localDeafened,
     s.localServerMuted === true,
     s.listenOnly,
     s.pttGated === true,

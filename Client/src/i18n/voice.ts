@@ -46,6 +46,7 @@ export const voiceText = defineCatalog("voice", {
   "widget.control.listenOnly": "Listening only — no microphone access",
   "widget.control.afkLocked": "You can't speak in the AFK channel",
   "widget.control.phoneCallHold": "Muted while paused",
+  "widget.control.deafenedMic": "Your mic is off while you're deafened",
   "widget.control.deafen": "Deafen",
   "widget.control.undeafen": "Undeafen",
   "widget.control.camera": "Camera",

@@ -114,6 +114,8 @@ interface VoiceStateStub {
   voiceStatus?: string;
   switchingTo?: number | null;
   mutedBeforeDeafen?: boolean;
+  inAfkChannel?: boolean;
+  moderatorMuted?: boolean;
 }
 
 function makeVoiceState(overrides: Partial<VoiceStateStub> = {}): VoiceStateStub {
@@ -221,6 +223,18 @@ describe("createVoiceWidgetCallbacks", () => {
 
       cbs.onMuteToggle();
 
+      expect(mockSetMuted).not.toHaveBeenCalled();
+      expect(mockSaveSelfVoiceState).not.toHaveBeenCalled();
+    });
+
+    it("does nothing in the AFK channel, where the mic is locked muted", () => {
+      for (const localMuted of [false, true]) {
+        const { ws, cbs } = widgetWith(makeVoiceState({ localMuted, inAfkChannel: true }));
+
+        cbs.onMuteToggle();
+
+        expect(ws.send).not.toHaveBeenCalled();
+      }
       expect(mockSetMuted).not.toHaveBeenCalled();
       expect(mockSaveSelfVoiceState).not.toHaveBeenCalled();
     });
@@ -373,6 +387,16 @@ describe("createVoiceWidgetCallbacks", () => {
 
     it("records that the user was not muted when deafening", () => {
       const { cbs } = widgetWith();
+
+      cbs.onDeafenToggle();
+
+      expect(mockSetMutedBeforeDeafen).toHaveBeenLastCalledWith(false);
+    });
+
+    it("does not record a moderator's mute as the user's own when deafening", () => {
+      const { cbs } = widgetWith(
+        makeVoiceState({ localMuted: true, localServerMuted: true, moderatorMuted: true }),
+      );
 
       cbs.onDeafenToggle();
 
