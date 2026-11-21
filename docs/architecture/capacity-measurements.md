@@ -112,10 +112,10 @@ target is larger. What is measured, on the 2 vCPU / 4 GB reference cgroup:
 
 The figures are in [Scale profile > Measured](#measured).
 
-| Tier  | Hardware            | Carries                                                                                                                                    | Why this one                                                                                                   |
-| ----- | ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------- |
-| Base  | 2 vCPU / 4 GB / SSD | measured: the published profile, and steady chat and a 4x burst at 1,000 online; login burst and herd miss, see [Scale profile](#measured) | Steady state at realistic chat rates fits on 2 vCPU with room; login throughput (bcrypt) is the measured limit |
-| 2,000 | 4 vCPU / 8 GB / SSD | estimate, not measured: about 2,000 online                                                                                                 | Roughly doubles bcrypt login throughput and fan-out CPU headroom, which are the two 2-vCPU ceilings            |
+| Tier  | Hardware            | Carries                                                                                                                                                                                   | Why this one                                                                                                   |
+| ----- | ------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------- |
+| Base  | 2 vCPU / 4 GB / SSD | measured: the published profile, and steady chat, a 4x burst and the 500-login burst (in about a minute) at 1,000 online; the herd's per-dial wait misses, see [Scale profile](#measured) | Steady state at realistic chat rates fits on 2 vCPU with room; login throughput (bcrypt) is the measured limit |
+| 2,000 | 4 vCPU / 8 GB / SSD | estimate, not measured: about 2,000 online                                                                                                                                                | Roughly doubles bcrypt login throughput and fan-out CPU headroom, which are the two 2-vCPU ceilings            |
 
 Memory is not expected to be the constraint at either tier: the estimate is
 about 266 MB resident for 2,000 idle connections, 324 MB at 100 messages/s and
@@ -803,7 +803,7 @@ The non-defaults this profile adds to the configuration table above:
 | `ramp`            | WebSocket open → `auth_ok` received, p95 / p99 (the connects happen here) | 200 / 500 ms   |
 | `ramp`, `herd`    | WebSocket connect (`ws_connect_time`), p95                                | < 2 s          |
 | `burst`           | Acknowledgement p95; delivery p95                                         | 150 ms; 200 ms |
-| `login`           | REST login (`auth_time`, the successful attempt), p95 / p99               | 600 / 1,000 ms |
+| `login`           | REST login (`auth_time`, the successful attempt), p95 / p99               | reported only  |
 
 **New budgets for the herd and the login burst (owner decision D3,
 2026-09-30).** They apply to this profile, and no existing row changes:
@@ -816,9 +816,21 @@ The non-defaults this profile adds to the configuration table above:
 | login burst | Give-ups                                                         | 0                                                        |
 | login burst | First attempt → token, retries included (`login_burst_time` max) | ≤ 70 s, for all K (`login_burst_ok` ≥ K)                 |
 
-A login-burst VU retries a refusal at most 12 times, which spans about 45 s,
-and then counts one give-up and stops. It never retries in an unbounded loop
-(the B6-10 defect).
+A login-burst VU retries a busy refusal the way the app does
+(`Client/src/features/connection/login-form/loginFormSubmit.ts`): it waits the
+larger of `Retry-After` and 15 s, plus up to 1 s of jitter, and gives up when
+that wait would overrun 70 s from its first attempt. A give-up is then a
+sign-in the app would have shown as failed. Until 2026-11-21 it stopped after
+12 attempts, about 45 s, so a VU could give up before the 70 s a user waits.
+It never retries in an unbounded loop (the B6-10 defect).
+
+**The `login` window's REST login time is reported, not gated (owner decision,
+2026-11-21).** In a 500-login rush the successful attempt's time is mostly
+queue wait in the admission budget (`auth/admission.go`). Each password check
+costs about what bcrypt at cost 12 does, about 250 ms of one core, so 2 vCPU
+check about 8 a second and 500 logins need about a minute however they are
+queued. The 600 / 1,000 ms budget still holds for every other window; in a rush
+the user-facing budget is the login burst's: 0 give-ups and a token within 70 s.
 
 **Validity gates.** A run that fails one of these did not measure what it
 claims:
@@ -1063,6 +1075,41 @@ budget; in that window k6 peaked at 2.02 of 2 cores, so the per-dial figures
 may include generator time that this run cannot separate out. The misses are in the
 findings ledger (OC-0490, OC-0491). No budget was changed and nothing was
 re-run on a bigger box.
+
+#### Scale profile at 1,000 connections, login burst on the app's retry (2026-11-21)
+
+```
+commit:          41503898c72a7863ce4fc72faff79c8d8a2c639a  (dev 430627ff plus the k6 change above)
+date (UTC):      2026-11-21
+workflow run:    44902649604  (.github/workflows/load-baseline.yml, profile=scale, scale_connections=1000)
+job:             136841607001  (scale, constrained)
+runner:          ubuntu-latest, 4 CPU / 16 GB host; the same recipe
+livekit-server:  1.13.11
+population:      1,501 users seeded; 500 logins
+```
+
+The same run as above with the login burst retrying the way the app does. It
+measures the login burst; the other windows are recorded for the history.
+
+| Scenario    | Measure                                | Achieved                    | Budget     | Met? |
+| ----------- | -------------------------------------- | --------------------------- | ---------- | ---- |
+| login burst | Give-ups                               | 0 of 500                    | 0          | Yes  |
+| login burst | `login_burst_ok`                       | 500 of 500                  | ≥ 500      | Yes  |
+| login burst | First attempt → token, p50 / p95 / max | 25,933 / 53,062 / 59,055 ms | max ≤ 70 s | Yes  |
+| herd        | Every VU `ready` again                 | 1,000 of 1,000 in 25,769 ms | ≤ 30 s     | Yes  |
+| herd        | Dial → `ready` p95 / p99               | 9,761 / 10,986 ms           | ≤ 5 s      | No   |
+
+Server CPU in `login` was 1.45 of 2 on average and 2.04 at the peak, k6 0.36 /
+0.53: the window is bound by the password checks, as expected. In `herd` k6
+again peaked at 2.03 of its 2 CPUs while the server averaged 0.25, so the herd's
+per-dial figures still include generator time. The only thresholds crossed
+were `ws_connect_time{phase:herd}` and `ws_ready_time{phase:herd}`.
+
+**Owner decision (2026-11-21).** The login burst is met: nobody gives up and
+everyone has a token within 70 s. The herd's per-dial budgets (OC-0491) and a
+valid 2,000 run (OC-0492) need a load generator larger than the 2 CPUs this
+runner leaves it; that rig is not planned, so both findings are declined, and
+the herd budgets and the 2,000 estimate stay as they are.
 
 #### Scale profile at 2,000 connections (NOT a valid measurement)
 

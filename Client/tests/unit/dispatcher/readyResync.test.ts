@@ -445,8 +445,8 @@ describe("WS Dispatcher", () => {
 
       // The active channel is refetched from the server.
       expect(getMessages).toHaveBeenCalledWith(1, { limit: 50 });
-      await Promise.resolve();
-      await Promise.resolve();
+      // The refetch pages back to the loaded rows before it installs.
+      for (let i = 0; i < 4; i++) await Promise.resolve();
       expect(getChannelMessages(1).map((m) => m.id)).toEqual([900]);
       expect(isChannelLoaded(1)).toBe(true);
     });
@@ -521,8 +521,8 @@ describe("WS Dispatcher", () => {
       // The stale channel-1 refetch now resolves with its pre-resync-era
       // snapshot.
       resolveGetMessages!({ messages: [storedMessage(900)], has_more: false });
-      await Promise.resolve();
-      await Promise.resolve();
+      // The refetch pages back to the loaded rows before it installs.
+      for (let i = 0; i < 4; i++) await Promise.resolve();
 
       // Channel 1 must stay invalidated — writing the stale snapshot here
       // would re-add it to loadedChannels, permanently hiding every message
@@ -646,8 +646,8 @@ describe("WS Dispatcher", () => {
       mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
       mock.dispatch("ready", readyEvent({ channels: readyChannels, dm_channels: [] }));
 
-      await Promise.resolve();
-      await Promise.resolve();
+      // The refetch pages back to the loaded rows before it installs.
+      for (let i = 0; i < 4; i++) await Promise.resolve();
 
       expect(isChannelLoaded(1)).toBe(false);
       expect(getHistoryLoadState(1)).toBe("error");
@@ -687,8 +687,8 @@ describe("WS Dispatcher", () => {
 
       setActiveChannel(2);
       rejectGetMessages!(new Error("network down"));
-      await Promise.resolve();
-      await Promise.resolve();
+      // The refetch pages back to the loaded rows before it installs.
+      for (let i = 0; i < 4; i++) await Promise.resolve();
 
       expect(getHistoryLoadState(1)).not.toBe("error");
       expectConsole("warn", /\[dispatcher\] Failed to reload message history after resync/);
@@ -719,7 +719,16 @@ describe("WS Dispatcher", () => {
         prependMessages(1, page(1, 50), false);
       }
       async function settle(): Promise<void> {
-        for (let i = 0; i < 4; i++) await Promise.resolve();
+        for (let i = 0; i < 30; i++) await Promise.resolve();
+      }
+      /** GET /messages over the server's history `from..to`, newest-first. */
+      function serverHistory(from: number, to: number) {
+        return vi.fn(async (_channelId: number, opts?: { before?: number; limit?: number }) => {
+          const below = opts?.before ?? to + 1;
+          const top = Math.min(below - 1, to);
+          const bottom = Math.max(from, top - (opts?.limit ?? 50) + 1);
+          return { messages: top < bottom ? [] : page(bottom, top), has_more: bottom > from };
+        });
       }
       async function resyncAndSettle(): Promise<void> {
         mock.dispatch("ready", readyPayload);
@@ -753,19 +762,124 @@ describe("WS Dispatcher", () => {
         expect(getHistoryLoadState(1)).toBeNull();
       });
 
-      it("replaces the window when the tail is disjoint from it", async () => {
-        const getMessages = vi.fn().mockResolvedValue({ messages: page(301, 350), has_more: true });
+      it("pages back to the loaded rows when more than a page arrived meanwhile", async () => {
+        const getMessages = serverHistory(1, 350);
         rewire({ getMessages });
         setActiveChannel(1);
         load200();
 
         await resyncAndSettle();
 
-        expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(301, 350));
+        expect(getMessages).toHaveBeenCalledWith(1, { before: 301, limit: 100 }, undefined);
+        expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(1, 350));
+        expect(isWindowDetached(1)).toBe(false);
+      });
+
+      it("revalidates the kept older rows, so an edit or delete made while down shows", async () => {
+        const history = serverHistory(1, 200);
+        const getMessages = vi.fn(
+          async (channelId: number, opts?: { before?: number; limit?: number }) => {
+            const resp = await history(channelId, opts);
+            const messages = resp.messages
+              .filter((m) => m.id !== 30)
+              .map((m) => (m.id === 20 ? { ...m, content: "edited while down" } : m));
+            return { ...resp, messages };
+          },
+        );
+        rewire({ getMessages });
+        setActiveChannel(1);
+        load200();
+        const untouched = getChannelMessages(1).find((m) => m.id === 40);
+
+        await resyncAndSettle();
+
+        expect(getMessages).toHaveBeenCalledWith(1, { before: 151, limit: 100 }, undefined);
+        const msgs = getChannelMessages(1);
+        expect(msgs.map((m) => m.id)).toEqual(ids(1, 200).filter((id) => id !== 30));
+        expect(msgs.find((m) => m.id === 20)!.content).toBe("edited while down");
+        expect(msgs.find((m) => m.id === 40)).toBe(untouched);
+      });
+
+      it("drops a kept row deleted while down when the splice sits at the row cap", async () => {
+        const history = serverHistory(1, 530);
+        const getMessages = vi.fn(
+          async (channelId: number, opts?: { before?: number; limit?: number }) => {
+            const resp = await history(channelId, opts);
+            return { ...resp, messages: resp.messages.filter((m) => m.id !== 20) };
+          },
+        );
+        rewire({ getMessages });
+        const unregister = registerReadingAnchor((channelId) => (channelId === 1 ? 10 : null));
+        try {
+          setActiveChannel(1);
+          setMessages(1, page(451, 500), true);
+          for (let top = 450; top > 0; top -= 50) prependMessages(1, page(top - 49, top), top > 50);
+
+          await resyncAndSettle();
+
+          expect(getChannelMessages(1).map((m) => m.id)).toEqual(
+            ids(1, 500).filter((id) => id !== 20),
+          );
+          expect(isWindowDetached(1)).toBe(true);
+        } finally {
+          unregister();
+        }
+      });
+
+      describe("a live message during the refetch is no proof the page reaches the window", () => {
+        /** Dispatch the resync, then a live message while its refetch is in flight. */
+        async function resyncWithLiveRow(id: number): Promise<void> {
+          mock.dispatch("ready", readyPayload);
+          mock.dispatch("ready", readyPayload);
+          mock.dispatch("chat_message", {
+            ...storedMessage(id),
+            user: { id: 2, username: "bob", avatar: null },
+          });
+          await settle();
+        }
+
+        it("replaces the window when the tail is beyond the paging bound", async () => {
+          rewire({ getMessages: serverHistory(1, 701) });
+          setActiveChannel(1);
+          load200();
+
+          await resyncWithLiveRow(701);
+
+          expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(252, 701));
+        });
+
+        it("replaces the window when a page back fails", async () => {
+          const history = serverHistory(1, 401);
+          const getMessages = vi.fn(
+            async (channelId: number, opts?: { before?: number; limit?: number }) => {
+              if (opts?.before !== undefined && opts.before > 300) throw new Error("503");
+              return history(channelId, opts);
+            },
+          );
+          rewire({ getMessages });
+          setActiveChannel(1);
+          load200();
+
+          await resyncWithLiveRow(401);
+
+          expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(352, 401));
+        });
+      });
+
+      it("replaces the window when the tail is beyond the paging bound", async () => {
+        const getMessages = serverHistory(1, 700);
+        rewire({ getMessages });
+        setActiveChannel(1);
+        load200();
+
+        await resyncAndSettle();
+
+        // 50 + 4 x 100 rows reach back to 251, short of the newest loaded row.
+        expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(251, 700));
       });
 
       it("refetches a detached window around the reader's top visible message", async () => {
-        const getMessages = vi.fn();
+        const getMessages = serverHistory(1, 300);
         const getMessagesAround = vi.fn().mockResolvedValue({
           messages: page(110, 150)
             .reverse()
@@ -781,7 +895,8 @@ describe("WS Dispatcher", () => {
 
           await resyncAndSettle();
 
-          expect(getMessages).not.toHaveBeenCalled();
+          // Only the kept rows above the window are asked for again, not the tail.
+          expect(getMessages.mock.calls).toEqual([[1, { before: 110, limit: 100 }, undefined]]);
           expect(getMessagesAround).toHaveBeenCalledWith(1, 130, { limit: 50 });
           const msgs = getChannelMessages(1);
           expect(msgs.map((m) => m.id)).toEqual(ids(100, 160));
@@ -850,7 +965,7 @@ describe("WS Dispatcher", () => {
       });
 
       it("falls back to the tail for a detached window no list is showing", async () => {
-        const getMessages = vi.fn().mockResolvedValue({ messages: page(451, 500), has_more: true });
+        const getMessages = serverHistory(1, 1000);
         const getMessagesAround = vi.fn();
         rewire({ getMessages, getMessagesAround });
         setActiveChannel(1);
@@ -859,7 +974,8 @@ describe("WS Dispatcher", () => {
         await resyncAndSettle();
 
         expect(getMessagesAround).not.toHaveBeenCalled();
-        expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(451, 500));
+        expect(getMessages).toHaveBeenCalledWith(1, { limit: 50 });
+        expect(getChannelMessages(1).map((m) => m.id)).toEqual(ids(551, 1000));
         expect(isWindowDetached(1)).toBe(false);
       });
     });

@@ -98,11 +98,17 @@ function frozenSetMessages(
   // reaches back to what was loaded at fetch start, so nothing is missing
   // between them. A gap, or a page that is the whole channel, replaces.
   const minSnapshotId = trimmed[0]?.id ?? 0;
+  // Changed deliberately: a page also reaches the loaded, attached tail an
+  // install left after the fetch began (a resync racing a revisit refetch).
+  const installedTail =
+    prev.loadedChannels.has(channelId) &&
+    !prev.detachedChannels.has(channelId) &&
+    previous.some((m) => m.status === "sent" && m.id >= minSnapshotId);
   const older =
     splice &&
     hasMore &&
     trimmed.length > 0 &&
-    minSnapshotId <= (prev.loadWatermark?.get(channelId) ?? 0)
+    (minSnapshotId <= (prev.loadWatermark?.get(channelId) ?? 0) || installedTail)
       ? previous.filter((m) => m.status === "sent" && m.id < minSnapshotId)
       : [];
   let merged: readonly Message[] = [...older, ...snapshot, ...carried];

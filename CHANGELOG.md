@@ -129,6 +129,8 @@ release changes the database, and anything an operator must do first.)
 - The Direct Messages section in the channel sidebar stays collapsed after you open a DM, switch server or reload.
 - The reply bar clears when the message you reply to is deleted, the character counter counts what will actually be sent (`/me`, `/spoiler`, `:shortcodes:`), and ArrowUp edits your last message in threads and forum posts too.
 - On Android, Enter in the message edit box adds a new line; Save saves.
+- Older messages you scrolled up to no longer disappear when a busy channel reloads, or when the app reconnects after an outage while it reloads.
+- Older messages kept on screen through a reload now show edits, deletes and reactions made while you were away.
 - A mention badge on a voice channel can be cleared with Mark as Read, and the DM header no longer shows a Media button left over from the last channel.
 - Screen readers read a revealed spoiler's text and the member list's collapse arrow.
 

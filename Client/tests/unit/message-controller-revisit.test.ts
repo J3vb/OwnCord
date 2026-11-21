@@ -29,6 +29,9 @@ import {
   setMessages,
 } from "@stores/messages.store";
 import { setActiveChannel, setChannels } from "@stores/channels.store";
+import { applyReadyMessageResync } from "../../src/features/messaging/readyResync";
+import type { DispatchApi, ReconnectClock } from "../../src/features/connection/dispatchContext";
+import { registerReadingAnchor } from "../../src/features/messaging/readingAnchor";
 import type { MessageResponse } from "../../src/lib/types";
 import "../helpers/resizeObserverStub";
 
@@ -357,7 +360,10 @@ describe("revisit keeps and revalidates older loaded history", () => {
     // the kept window must not either.
     expect(ids()).not.toContain(151);
     expect(ids()).toEqual([...rows(101, 250)].map((m) => m.id).filter((id) => id !== 151));
-    expect(getMessages).toHaveBeenCalledTimes(2);
+    // The tail refetch, the older page, then one revalidation of the rows the
+    // splice kept above the refetched range.
+    expect(getMessages).toHaveBeenCalledTimes(3);
+    expect(getMessages.mock.calls[2]?.[1]).toEqual({ before: 150, limit: 100 });
   });
 
   it("drops that older page when the refetch does not reach the cached head", async () => {
@@ -370,6 +376,106 @@ describe("revisit keeps and revalidates older loaded history", () => {
     // stay: a kept older page would sit across a gap.
     expect(ids()).toEqual([...rows(201, 300)].map((m) => m.id));
     expect(hasMoreMessages(CH)).toBe(true);
+  });
+
+  it("keeps the rows the reader is on when the kept older page passes the row cap", async () => {
+    server = rows(1, 820);
+    cacheWindow(351, 800);
+    const unregister = registerReadingAnchor((channelId) => (channelId === CH ? 305 : null));
+    try {
+      await olderPageDuringRefetch();
+    } finally {
+      unregister();
+    }
+
+    // 321..820 plus the kept 301..320 is 520 rows: the newest end goes, not
+    // the rows the reader scrolled up to, and the window detaches.
+    expect(ids()).toEqual([...rows(301, 800)].map((m) => m.id));
+    expect(isWindowDetached(CH)).toBe(true);
+  });
+
+  it("leaves the kept rows alone when the revisit is aborted during their revalidation", async () => {
+    server = rows(1, 250);
+    cacheWindow(151, 250);
+    const real = getMessages.getMockImplementation()!;
+    const tailGate = createDeferred();
+    const recheckGate = createDeferred();
+    getMessages.mockImplementation(async (channelId, opts) => {
+      if (opts?.before === undefined) await tailGate.promise;
+      if (opts?.before === 151 && opts.limit === 100) await recheckGate.promise;
+      return real(channelId, opts);
+    });
+    try {
+      openWithUnread(0);
+      const ctrl = controller();
+      const abort = new AbortController();
+      const refetch = ctrl.loadMessages(CH, abort.signal);
+      await ctrl.loadOlderMessages(CH, abort.signal);
+      tailGate.resolve();
+      await refetch;
+      // The reader leaves while the kept rows are being checked; the server
+      // has since lost one of them.
+      server = server.filter((m) => m.id !== 120);
+      abort.abort();
+      recheckGate.resolve();
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+
+      expect(ids()).toContain(120);
+      expect(ids()[0]).toBe(101);
+    } finally {
+      getMessages.mockImplementation(real);
+    }
+  });
+
+  describe("a full-ready resync during the revisit's refetch", () => {
+    const clock = (): ReconnectClock => ({ hasReceivedReadyBefore: true }) as ReconnectClock;
+    const settle = async (): Promise<void> => {
+      for (let i = 0; i < 30; i++) await Promise.resolve();
+    };
+
+    for (const first of ["revisit", "resync"] as const) {
+      it(`keeps the older page the reader loaded when the ${first} lands first`, async () => {
+        server = rows(1, 260);
+        cacheWindow(151, 200);
+        const real = getMessages.getMockImplementation()!;
+        const revisitGate = createDeferred();
+        const resyncGate = createDeferred();
+        let tails = 0;
+        getMessages.mockImplementation(async (channelId, opts) => {
+          if (opts?.before === undefined) {
+            tails++;
+            await (tails === 1 ? revisitGate.promise : resyncGate.promise);
+          }
+          return real(channelId, opts);
+        });
+        try {
+          openWithUnread(0);
+          const ctrl = controller();
+          const signal = new AbortController().signal;
+          const revisit = ctrl.loadMessages(CH, signal);
+          await ctrl.loadOlderMessages(CH, signal);
+          expect(ids()[0]).toBe(101);
+          // 60 messages arrived during the outage, more than the resync's page.
+          applyReadyMessageResync({ getMessages } as unknown as DispatchApi, clock());
+          const gates = first === "revisit" ? [revisitGate, resyncGate] : [resyncGate, revisitGate];
+          for (const gate of gates) {
+            gate.resolve();
+            await settle();
+          }
+          await revisit;
+          await settle();
+
+          // One unbroken window from at least the reader's page to the newest
+          // row (the revisit may have paged further back than the older page).
+          const top = ids()[0]!;
+          expect(top).toBeLessThanOrEqual(101);
+          expect(ids()).toEqual([...rows(top, 260)].map((m) => m.id));
+          expect(isWindowDetached(CH)).toBe(false);
+        } finally {
+          getMessages.mockImplementation(real);
+        }
+      });
+    }
   });
 
   describe("with the list mounted", () => {
