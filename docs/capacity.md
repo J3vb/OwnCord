@@ -67,11 +67,14 @@ stolen password files are hard to crack.
 - Normal chat is fast: a message reaches everyone in about 14 ms, and the
   server uses less than a tenth of its CPU.
 - A burst of four times the normal chat rate is still well inside every limit.
-- **A rush of 500 sign-ins in 10 seconds is too much.** About one in five gave
-  up. Checking passwords is what fills the CPU.
+- **A rush of 500 sign-ins in 10 seconds is slow, but everyone gets in.**
+  Checking a password is expensive on purpose, and 2 vCPU check about 8 a
+  second, so the last of the 500 is in after about a minute. The app keeps
+  retrying while the server is busy, so nobody has to try again by hand.
 - **When all 1,000 reconnect at once** (for example after a restart), everyone
   is back within 30 seconds, but each person waits longer than the 5-second
-  goal.
+  goal. How much of that is the test machine itself is not known: it ran out
+  of CPU during the reconnect.
 
 **2,000 online is an estimate.** The one run at 2,000 did not count: the test
 machine itself ran out of CPU before the server did. Until a valid run exists,

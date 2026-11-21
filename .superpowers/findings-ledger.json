@@ -11350,12 +11350,19 @@
       "evidence": "Run 39069195764, job 117503072275 (scale_connections=1000, dev 59197a25, 2026-10-17): login window auth_time 10,125 / 10,556 / 10,656 ms (p50 / p95 / p99, 395 samples), login_burst_ok 395, login_burst_giveups 105, login_burst_time max 53,727 ms, server CPU 1.35 avg / 2.03 peak of 2. Run 39069193852, job 117503067669 (scale_connections=2000): 394 ok, 106 give-ups, auth_time p95 / p99 11,949 / 12,787 ms, login_burst_time max 77,270 ms, server CPU 1.80 / 2.09. Published in docs/capacity.md, Scale profile > Measured.",
       "suggestedFix": "Do not loosen the budget. Options for the owner and the next work package to evaluate: the 4 vCPU tier (which doubles the admission budget and the hash throughput), a longer admission wait or a larger admission queue for a burst the server can finish inside the budget, or a login-burst budget derived from the measured bcrypt rate with the client retry schedule aligned to it.",
       "confidence": "high",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-10-17",
       "hunt": "roadmap-wp-4.2-2026-10-17",
       "lens": "perf",
       "finder": "wp-4.2-scale-run",
-      "note": "Roadmap Phase 4, WP 4.2."
+      "note": "Roadmap Phase 4, WP 4.2.",
+      "fixedDate": "2026-11-21",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/scripts/k6/ws-load.test.mjs (login burst retries a busy refusal on the app's schedule, within 70 s); load-baseline run 44902649604 (scale, 1,000): 500 of 500 logins, 0 give-ups, max 59,055 ms",
+        "revertProof": "the 2026-10-17 run with the 12-attempt retry: 105 of 500 gave up"
+      },
+      "rationale": "Owner decision 2026-11-21: the give-ups came from the load test stopping after about 45 s while the app retries for 70 s; the test now retries like the app and every login gets a token within 70 s. The per-attempt REST login budget (600 / 1,000 ms) is reported, not gated, in the login window: in a rush it is queue wait bound by the password-check rate of 2 vCPU (about 8 a second)."
     },
     {
       "id": "OC-0491",
@@ -11368,12 +11375,13 @@
       "evidence": "Run 39069195764, job 117503072275 (dev 59197a25, 2026-10-17): herd drops 1,000, readies 1,000, all ready 29,523 ms; ws_ready_time p50 / p95 / p99 9,049 / 13,918 / 15,071 ms; auth_ok 1,544 / 3,091 / 4,091 ms; ws_connect_time p95 7,535 ms; server CPU 0.22 avg / 0.47 peak, k6 0.91 / 2.02 of 2. Published in docs/capacity.md, Scale profile > Measured.",
       "suggestedFix": "Do not loosen the budget. Establish first where the time goes (connect, auth_ok or ready build) with the generator off the critical path, then decide whether the work is in the server (ready payload cost, upgrade admission) or in a lighter driver; both are the owner's and the next work package's call.",
       "confidence": "high",
-      "status": "open",
+      "status": "declined",
       "found": "2026-10-17",
       "hunt": "roadmap-wp-4.2-2026-10-17",
       "lens": "perf",
       "finder": "wp-4.2-scale-run",
-      "note": "Roadmap Phase 4, WP 4.2."
+      "note": "Roadmap Phase 4, WP 4.2.",
+      "rationale": "Owner decision 2026-11-21: the per-dial herd budgets cannot be measured on the current rig, where k6 saturates its 2 CPUs in the herd window (re-run 44902649604: all 1,000 ready in 25,769 ms, dial to ready p95 9,761 ms, k6 peak 2.03 of 2, server 0.25). A larger load generator is not planned; the budgets stay as they are."
     },
     {
       "id": "OC-0492",
@@ -11386,12 +11394,13 @@
       "evidence": "Run 39069193852, job 117503067669 (scale_connections=2000, dev 59197a25, 2026-10-17): 18 of 220 threshold expressions failed including the population gate; steady population min 1,917, ack p50 / p95 / p99 55.5 / 11,153 / 25,921 ms, delivery 62 / 8,756 / 21,285 ms; CPU server / k6 avg and peak: steady 0.50 / 0.67 and 1.42 / 2.03, burst 0.82 / 0.87 and 1.99 / 2.05 (generator-limited), herd 0.50 / 0.90 and 1.98 / 2.05 (generator-limited). topic_sheds_total 0, obs_ws_conn_rejects 0, queue disconnects 0. Published in docs/capacity.md, Scale profile > Measured.",
       "suggestedFix": "Do not make a 2,000 claim and do not change a budget. Establish whether the generator or the server is the limit before any 2,000 result is published: per the generator notes in docs/capacity.md (decision D6) a larger runner or a lighter driver is the owner's call, and the same constrained-server recipe must be kept.",
       "confidence": "medium",
-      "status": "open",
+      "status": "declined",
       "found": "2026-10-17",
       "hunt": "roadmap-wp-4.2-2026-10-17",
       "lens": "perf",
       "finder": "wp-4.2-scale-run",
-      "note": "Roadmap Phase 4, WP 4.2."
+      "note": "Roadmap Phase 4, WP 4.2.",
+      "rationale": "Owner decision 2026-11-21: a valid 2,000 run needs a load generator larger than the 2 CPUs the runner leaves k6; that rig is not planned. No 2,000 result is claimed and the 2,000 tier stays an estimate (4 vCPU / 8 GB) in docs/capacity.md."
     },
     {
       "id": "OC-0493",
