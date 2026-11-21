@@ -439,6 +439,7 @@ export const shards = {
     "src/features/direct-messages/groupIcon.ts",
     "src/features/messaging/emojiSheetsData.ts",
     "src/features/messaging/historyWindows.ts",
+    "src/features/messaging/historyRevalidate.ts",
     "src/features/server-rail/joinInvite.ts",
     "src/features/server-rail/switchConfirmDialog.ts",
     "src/features/updates/updateChecker.ts",

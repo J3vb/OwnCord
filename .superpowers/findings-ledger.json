@@ -11025,12 +11025,18 @@
       "evidence": "Server/db/message_delivery.go:57 and :102: CreatedAtMS below the floor with no receipt returns ErrMessageDeliveryBeforeRestore. Server/service/message_delivery.go:74-75 maps it to ErrBadRequest with \"review the pending message before sending it again\". Client/src/lib/pendingMessages.ts:41-52: an id counts as expired only when older than 24h or createdAt > max(now+5min, floor), so ids below the floor stay valid. Client/src/pages/main-page/ChannelController.ts:468-493: retrySend reuses draft.clientMessageId. ChannelController.ts:356-360: performSend keeps existingClientMessageId. Client/src/features/messaging/wsHandlers.ts:362-380: markSendFailed(id, payload.code) drops the message text. No client test covers the floor.",
       "suggestedFix": "Do not refuse a pre-floor id on the client: Retry resends the same client_message_id with its unchanged timestamp and lets the server decide. If the restored database holds the receipt, the server deduplicates (chat_send_ok with deduplicated) and the row reconciles. Otherwise it returns the before-restore BAD_REQUEST: handleMessagingError, using pendingMessageBeforeRestore in lib/pendingMessages.ts, labels the row BEFORE_RESTORE (\"The server was restored \u2014 check the conversation before sending this again.\"), keeping its text for copy or discard, and ChannelController shows the same text as a toast. Never mint a replacement id (docs/protocol.md). Vitest cases cover both the deduplicated and the refused retry.",
       "confidence": "high",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25",
       "hunt": "b9-exit-audit-2026-09-25",
       "lens": "reliability-upgrade",
       "finder": "b9-exit-audit",
-      "note": "Cross-exam: keeping the id is by design (docs/protocol.md:472-483). Fix direction accepted (owner decision 2026-09-27, option a, revised): resend the same id and label the server's refusal with the restore reason; the text is retained for copy/discard. No silent new id."
+      "note": "Cross-exam: keeping the id is by design (docs/protocol.md:472-483). Fix direction accepted (owner decision 2026-09-27, option a, revised): resend the same id and label the server's refusal with the restore reason; the text is retained for copy/discard. No silent new id.",
+      "fixedDate": "2026-09-27",
+      "fix": {
+        "commit": "c27115f6",
+        "test": "Client/src/features/messaging/wsHandlers.test.ts (labels a refused pre-restore retry and keeps its text); Client/tests/unit/pending-messages.test.ts (detects a keyed id that predates the restore floor)",
+        "revertProof": "not re-run: the fix shipped in #1882 and the entry was closed on 2026-11-21"
+      }
     },
     {
       "id": "OC-0477",
@@ -13752,12 +13758,18 @@
       "evidence": "MessageController.ts installTail: setMessages(channelId, messages, hasMore, splice) with no anchor; historyWindows.ts capMerged keeps the head only when anchorId is in the overflow; readyResync.ts passes readingAnchor(activeAfterReady).",
       "suggestedFix": "Pass readingAnchor(channelId) from installTail when splice is true, as readyResync does, and add a unit test at the cap.",
       "confidence": "high",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-11-12",
       "hunt": "release-review-2.9.0",
       "lens": "client-state",
       "finder": "claude",
-      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
+      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release.",
+      "fixedDate": "2026-11-21",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/message-controller-revisit.test.ts (keeps the rows the reader is on when the kept older page passes the row cap)",
+        "revertProof": "fail (the kept rows 301..320 are trimmed)"
+      }
     },
     {
       "id": "OC-0596",
@@ -13770,12 +13782,18 @@
       "evidence": "historyWindows.ts olderThanPage returns previous.filter(sent && id < minSnapshotId); messages.store.ts setMessages doc: 'They may still show an edit, delete or reaction missed while offline until the next visit refetches them.'",
       "suggestedFix": "After the splice installs, revalidate the kept rows off the paint path (one around/before fetch over their id range), or drop kept rows older than what the refetch can reach.",
       "confidence": "high",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-11-12",
       "hunt": "release-review-2.9.0",
       "lens": "client-state",
       "finder": "claude",
-      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
+      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release.",
+      "fixedDate": "2026-11-21",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/dispatcher/readyResync.test.ts (revalidates the kept older rows, so an edit or delete made while down shows; drops a kept row deleted while down when the splice sits at the row cap); Client/tests/unit/message-controller-revisit.test.ts (leaves the kept rows alone when the revisit is aborted during their revalidation)",
+        "revertProof": "fail (the cached text and the deleted row stay)"
+      }
     },
     {
       "id": "OC-0597",
@@ -13788,12 +13806,18 @@
       "evidence": "Review note on #3353 (2.9.0 release prep, 2026-11-12). readyResync.ts calls setChannelLoading and invalidateLoadedMessageWindows before its own refetch; MessageController.installTail is skipped once that refetch marks the channel loaded.",
       "suggestedFix": "Write a unit test that interleaves the resync refetch with a pending revisit tail and an older page; if it drops rows, carry the older page through the resync splice the same way installTail does.",
       "confidence": "medium",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-11-12",
       "hunt": "release-review-2.9.0",
       "lens": "client-state",
       "finder": "claude",
-      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
+      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release.",
+      "fixedDate": "2026-11-21",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/message-controller-revisit.test.ts (a full-ready resync during the revisit's refetch keeps the older page the reader loaded, whichever lands first)",
+        "revertProof": "fail (both orders drop the older page; reproduced before the fix)"
+      }
     },
     {
       "id": "OC-0601",

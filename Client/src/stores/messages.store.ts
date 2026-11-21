@@ -49,6 +49,7 @@ import {
   reducePrependMessages,
   reduceAppendNewerMessages,
   reduceMergeTailMessages,
+  reduceRevalidateRows,
   reduceHoldLoadJournal,
   reduceReleaseLoadJournal,
 } from "../features/messaging/historyWindows";
@@ -131,13 +132,9 @@ export function removeOptimistic(correlationId: string): void {
   messagesStore.setState((prev) => reduceRemoveOptimistic(prev, correlationId));
 }
 
-/**
- * Mark a channel's first-page history fetch as in flight. Also records a
- * watermark of the highest message id present right now, consumed by the
- * matching setMessages call to tell "nothing arrived after this snapshot" (an
- * empty result really means empty) apart from "no snapshot was taken" — see
- * MessagesState.loadWatermark.
- */
+/** Mark a channel's first-page history fetch as in flight, recording the highest
+ *  message id present now as the watermark the matching setMessages reads to
+ *  tell an empty page from no snapshot (MessagesState.loadWatermark). */
 export function setChannelLoading(channelId: number): void {
   messagesStore.setState((prev) => reduceSetChannelLoading(prev, channelId));
 }
@@ -175,21 +172,18 @@ export function setChannelLoadError(channelId: number): void {
  *  message until the fetched range reaches the oldest cached row, so the rows
  *  it keeps are revalidated by that range; when the cached window plus the
  *  unseen gap outruns the paging bound, the fetched range is kept and the
- *  stale cached rows below it are dropped, as before.
- *  The list patches
- *  only the rows that changed: the dropped head, the new tail and, for a
- *  revisit that opened with unread messages, the NEW divider.
+ *  stale cached rows below it are dropped, as before. The list patches only
+ *  the rows that changed: the dropped head, the new tail and, for a revisit
+ *  that opened with unread messages, the NEW divider.
  *
  *  `splice` is a full-ready resync's refetch (P2-T4), or a tail refetch
  *  (MessageController.loadMessages) that an older page landed above while it
  *  was in flight; the controller passes it only when its fetched range reaches
  *  the cached head, so nothing is missing between that page and the window.
- *  When the page reaches
- *  back to the newest row loaded at setChannelLoading, the loaded rows older
- *  than the page stay above it instead of being dropped. They may still show
- *  an edit, delete or reaction missed while offline until the next visit
- *  refetches them. A gap, or a page that is the whole channel, replaces the
- *  window as usual. A splice past the row cap trims the oldest rows, unless
+ *  When the page reaches back to the newest row loaded at setChannelLoading,
+ *  the loaded rows older than the page stay above it, and the caller
+ *  revalidates them (revalidateOlderRows). A gap, or a page that is the whole
+ *  channel, replaces the window as usual. A splice past the row cap trims the oldest rows, unless
  *  that would drop `anchorId`, the row the reader is looking at: then it
  *  trims the newest end and detaches the window, as prependMessages does. */
 export function setMessages(
@@ -211,25 +205,19 @@ export function setMessages(
 
 /**
  * Replace a channel's loaded window with an around-window centred on a jump
- * target. Unlike setMessages the payload is already oldest-first, so it is not
- * reversed.
+ * target. The payload is already oldest-first, so it is not reversed.
+ * `hasMoreAfter` detaches the window from the live tail: the list offers "Jump
+ * to Present" and live broadcasts stop being appended until reattachToPresent
+ * (or a fresh setMessages) lands.
  *
- * `hasMoreAfter` marks the window as detached from the live tail: the list
- * offers "Jump to Present" and live broadcasts stop being appended until
- * reattachToPresent (or a fresh setMessages) lands.
- *
- * Carries unreconciled (pending/failed) rows across the replacement exactly
- * like setMessages does — they are the only copy of the user's composed
- * text, and a jump elsewhere must not silently destroy an in-flight send or
- * orphan its Retry draft. When the window reattaches to the live tail it also
- * carries any "sent" row newer than the window, for the same reason
- * setMessages protects a live broadcast that landed mid-fetch: a reattached
- * window claims to BE the live tail, and dropping such a row here would
- * delete it with no badge, no "Jump to Present" pill, and no recovery path.
+ * Pending/failed rows are carried across, as setMessages does: they are the
+ * only copy of the user's composed text. A window that reattaches also carries
+ * any "sent" row newer than it, since it claims to BE the live tail and that
+ * row would otherwise vanish with no way back.
  *
  * `splice` is a full-ready resync's refetch around a loaded row (P2-T4): the
- * loaded rows above the window stay, and so do the rows below it while it
- * stays detached, with the same missed-change caveat as setMessages'.
+ * loaded rows above the window stay, and the caller revalidates them; the
+ * rows below it stay while it is detached.
  */
 export function setAroundMessages(
   channelId: number,
@@ -354,6 +342,17 @@ export function appendNewerMessages(
 ): void {
   adoptStarterThreads(messages);
   messagesStore.setState((prev) => reduceAppendNewerMessages(prev, channelId, messages, hasMore));
+}
+
+/** Swap loaded sent rows in [from, below) for the server's copies; drop the rest. */
+export function revalidateRows(
+  channelId: number,
+  messages: readonly MessageResponse[],
+  from: number,
+  below: number,
+): void {
+  adoptStarterThreads(messages);
+  messagesStore.setState((prev) => reduceRevalidateRows(prev, channelId, messages, from, below));
 }
 
 /** Union an oldest-first page into an attached window (the follow-up after a
