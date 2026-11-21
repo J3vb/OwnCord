@@ -1252,7 +1252,10 @@ function scaleThresholds() {
     login_burst_giveups: ["count==0"],
     login_burst_ok: [`count>=${SCALE_LOGINS}`],
     login_burst_time: ["max<=70000"],
-    "auth_time{phase:login}": ["p(95)<600", "p(99)<1000", "med>=0"],
+    // Reported, not gated: in a rush the successful attempt's time is queue
+    // wait, bounded by the password-hash rate of 2 vCPU (about 8 a second), so
+    // the user-facing budget is login_burst_time above (owner decision, 2026-11-21).
+    "auth_time{phase:login}": ["med>=0", "p(95)>=0", "p(99)>=0"],
   };
 }
 
@@ -1400,6 +1403,25 @@ function sentBy(content) {
 // ~45 s.
 const LOGIN_ATTEMPTS = 12;
 
+// The app's own busy retry (Client loginShared.ts, loginFormSubmit.ts): an
+// AUTH_BUSY refusal waits the larger of Retry-After and 15 s, plus up to 1 s of
+// jitter clipped to the budget, until that wait (before jitter) would overrun
+// 70 s from the first attempt. The login burst uses it, because its give-up
+// count stands for people who saw the sign-in fail, and the app does not stop
+// after 12 attempts.
+const APP_RETRY_BUDGET_MS = 70000;
+const APP_MIN_RETRY_MS = 15000;
+const APP_RETRY_JITTER_MS = 1000;
+
+// The app's wait before its next attempt, or null when the app would give up.
+function appRetryWaitMs(res, deadline) {
+  const hinted = parseInt(res.headers["Retry-After"] || "0", 10);
+  const minWait = Math.max(Number.isFinite(hinted) ? hinted * 1000 : 0, APP_MIN_RETRY_MS);
+  const left = deadline - Date.now();
+  if (minWait > left) return null;
+  return Math.min(minWait + Math.random() * APP_RETRY_JITTER_MS, left);
+}
+
 // Login and get session token.
 //
 // The retry lives here rather than in the callers, because there are two of
@@ -1418,8 +1440,11 @@ const LOGIN_ATTEMPTS = 12;
 // minority of the 100 uploads VUs. In the ceiling run they came from the
 // majority: 173 sockets opened against a vus_max of 501, and the run passed
 // anyway, because nothing asserted that the VUs had got on the wire.
-function authenticate(username, extraHeaders) {
-  for (let attempt = 0; attempt < LOGIN_ATTEMPTS; attempt++) {
+//
+// appRetry follows the app's schedule above instead of the bounded one.
+function authenticate(username, extraHeaders, appRetry = false) {
+  const deadline = Date.now() + APP_RETRY_BUDGET_MS;
+  for (let attempt = 0; appRetry || attempt < LOGIN_ATTEMPTS; attempt++) {
     const start = Date.now();
     const res = http.post(
       `${HTTP_URL}/api/v1/auth/login`,
@@ -1455,6 +1480,13 @@ function authenticate(username, extraHeaders) {
       }
       if (code === "AUTH_BUSY") authAdmissionRefused.add(1, scaleTags());
       else authRateLimited.add(1, scaleTags());
+      if (appRetry) {
+        // The app retries only the admission refusal; anything else is shown.
+        const wait = code === "AUTH_BUSY" ? appRetryWaitMs(res, deadline) : null;
+        if (wait === null) return null;
+        sleep(wait / 1000);
+        continue;
+      }
       // Backoff, so the retries of many stuck VUs de-synchronise instead of
       // arriving in lockstep and re-colliding on the same slots.
       if (attempt < LOGIN_ATTEMPTS - 1) sleep(1 + attempt * 0.5);
@@ -2348,14 +2380,14 @@ export function uploadsScenario() {
 
 // The login burst (scale): each VU is one person logging in with a password
 // from its own address, the K of them spread evenly over the login spread.
-// authenticate() retries a refusal a bounded number of times, as a client
-// that retries would; login_burst_time is first attempt to token, retries
-// included, which is what the user waits.
+// authenticate() retries a busy refusal on the app's schedule, so a give-up is
+// a sign-in the app would have shown as failed; login_burst_time is first
+// attempt to token, retries included, which is what the user waits.
 export function loginBurstScenario() {
   vuScaleOffsetS = SCALE_LOGIN_AT_S;
   sleep((exec.scenario.iterationInTest * SCALE_LOGIN_SPREAD_S) / SCALE_LOGINS);
   const start = Date.now();
-  const token = authenticate(`${USERNAME_PREFIX}${__VU}`, scaleHeaders(__VU));
+  const token = authenticate(`${USERNAME_PREFIX}${__VU}`, scaleHeaders(__VU), true);
   if (!token) {
     loginBurstGiveUps.add(1);
     return;

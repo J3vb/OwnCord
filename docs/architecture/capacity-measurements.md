@@ -803,7 +803,7 @@ The non-defaults this profile adds to the configuration table above:
 | `ramp`            | WebSocket open → `auth_ok` received, p95 / p99 (the connects happen here) | 200 / 500 ms   |
 | `ramp`, `herd`    | WebSocket connect (`ws_connect_time`), p95                                | < 2 s          |
 | `burst`           | Acknowledgement p95; delivery p95                                         | 150 ms; 200 ms |
-| `login`           | REST login (`auth_time`, the successful attempt), p95 / p99               | 600 / 1,000 ms |
+| `login`           | REST login (`auth_time`, the successful attempt), p95 / p99               | reported only  |
 
 **New budgets for the herd and the login burst (owner decision D3,
 2026-09-30).** They apply to this profile, and no existing row changes:
@@ -816,9 +816,21 @@ The non-defaults this profile adds to the configuration table above:
 | login burst | Give-ups                                                         | 0                                                        |
 | login burst | First attempt → token, retries included (`login_burst_time` max) | ≤ 70 s, for all K (`login_burst_ok` ≥ K)                 |
 
-A login-burst VU retries a refusal at most 12 times, which spans about 45 s,
-and then counts one give-up and stops. It never retries in an unbounded loop
-(the B6-10 defect).
+A login-burst VU retries a busy refusal the way the app does
+(`Client/src/features/connection/login-form/loginFormSubmit.ts`): it waits the
+larger of `Retry-After` and 15 s, plus up to 1 s of jitter, and gives up when
+that wait would overrun 70 s from its first attempt. A give-up is then a
+sign-in the app would have shown as failed. Until 2026-11-21 it stopped after
+12 attempts, about 45 s, so a VU could give up before the 70 s a user waits.
+It never retries in an unbounded loop (the B6-10 defect).
+
+**The `login` window's REST login time is reported, not gated (owner decision,
+2026-11-21).** In a 500-login rush the successful attempt's time is mostly
+queue wait in the admission budget (`auth/admission.go`). Each password check
+costs about what bcrypt at cost 12 does, about 250 ms of one core, so 2 vCPU
+check about 8 a second and 500 logins need about a minute however they are
+queued. The 600 / 1,000 ms budget still holds for every other window; in a rush
+the user-facing budget is the login burst's: 0 give-ups and a token within 70 s.
 
 **Validity gates.** A run that fails one of these did not measure what it
 claims:
