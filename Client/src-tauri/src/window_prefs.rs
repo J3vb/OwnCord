@@ -564,7 +564,7 @@ mod tests {
         for args in [
             &["owncord.exe"][..],
             &["owncord.exe", "--minimized"],
-            &["owncord.exe", "https://chat.example/invite/ABC"],
+            &["owncord.exe", "https://chat.example.com/invite/ABC"],
             &["owncord.exe", "owncord://invite/ABC", "--minimized"],
             &["owncord.exe", "--minimized", "owncord://invite/ABC"],
         ] {
