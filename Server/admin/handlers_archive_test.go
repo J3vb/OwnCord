@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"os"
@@ -357,6 +358,32 @@ func TestHandleArchive_UploadDuringBuildIsArchived(t *testing.T) {
 	entries := archiveEntries(t, f)
 	if got := string(entries["data/uploads/late.bin"]); got != "late upload" {
 		t.Errorf("upload landed before the snapshot is missing from the archive; got %v", archiveNames(entries))
+	}
+}
+
+// TestHandleArchive_LeavesOutTheDatabaseLock: the running server holds its
+// database's process lock file open for its whole life (with no sharing on
+// Windows), and a restore needs nothing from it, so the archive is built
+// without it while the lock is held.
+func TestHandleArchive_LeavesOutTheDatabaseLock(t *testing.T) {
+	f := newArchiveFixture(t)
+	release, err := db.AcquireProcessLock(filepath.Join(f.dataDir, "chatserver.db"))
+	if errors.Is(err, errors.ErrUnsupported) {
+		t.Skip("no process lock on this platform")
+	}
+	if err != nil {
+		t.Fatalf("taking the database lock: %v", err)
+	}
+	t.Cleanup(release)
+
+	entries := archiveEntries(t, f)
+	for name := range entries {
+		if strings.HasSuffix(name, ".lock") {
+			t.Errorf("archive carries the database lock file %q; got %v", name, archiveNames(entries))
+		}
+	}
+	if _, ok := entries["data/chatserver.db"]; !ok {
+		t.Errorf("archive is missing the database; got %v", archiveNames(entries))
 	}
 }
 

@@ -13982,6 +13982,75 @@
       "fixedDate": "2026-11-22"
     },
     {
+      "id": "OC-0615",
+      "title": "The full archive download leaves out the database's process lock file, so it builds while the server runs on Windows",
+      "file": "Server/admin/handlers_archive.go",
+      "line": 350,
+      "severity": "medium",
+      "why": "The archive walk now skips the database's lock file (db.LockFilePath) next to its WAL sidecars. The running server holds that file open for its whole life, on Windows with no sharing, and it holds no data a restore needs.",
+      "repro": "Windows host with the default database path: Admin panel > Server > Download full archive.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Export the lock-path helper from db and skip that path in the archive walk.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/handlers_archive_test.go (TestHandleArchive_LeavesOutTheDatabaseLock)",
+        "revertProof": "fail (archive carried data/chatserver.db.lock)"
+      },
+      "lens": "win-server-host",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0616",
+      "title": "Saved-log history returns the newest lines of a log file that is still being written",
+      "file": "Server/admin/handlers_log_history.go",
+      "line": 322,
+      "severity": "low",
+      "why": "Each file's scan now ends at the open file's own size (File.Stat), capped by the page cursor, instead of the size from the folder listing, which Windows updates late for a file still being written.",
+      "repro": "Windows host with file logging on: open the saved-log history while today's log file is open in the writer.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "In readLogFile, take the end from f.Stat() on the opened file and cap it by the cursor offset.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/handlers_log_history_internal_test.go (TestLogHistory_ReturnsLinesWrittenAfterTheListing)",
+        "revertProof": "fail (1 of 2 entries returned)"
+      },
+      "lens": "win-server-host",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0617",
+      "title": "A server in the Windows services session keeps running when a user signs out of the machine",
+      "file": "Server/internal/app/lifecycle.go",
+      "line": 391,
+      "severity": "medium",
+      "why": "In session 0 (NSSM, or a scheduled task that runs whether a user is logged on or not) the server now registers a console control handler, after the Go runtime's, that consumes CTRL_LOGOFF_EVENT, so a sign-out no longer becomes SIGTERM. Ctrl+C, Ctrl+Break, closing the console and shutdown still stop it, and an interactive session's sign-out still drains it.",
+      "repro": "Run the server under NSSM, sign in to the host as another user (or over RDP) and sign out.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "On Windows, when the process session is 0, register a SetConsoleCtrlHandler that returns TRUE for CTRL_LOGOFF_EVENT only; keep the decision in a cross-platform function.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/internal/app/console_ctrl_test.go (TestConsumeConsoleCtrl); Server/internal/app/console_ctrl_windows_test.go (TestConsoleCtrlConstantsMatchWindows, TestInstallLogoffFilter)",
+        "revertProof": "fail (1 of 10 cases)"
+      },
+      "lens": "win-server-host",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
       "id": "OC-0621",
       "title": "On Linux, a mic that never sends sound no longer hangs mute, input switch and Leave",
       "file": "Client/src-tauri/src/native_voice/capture.rs",
