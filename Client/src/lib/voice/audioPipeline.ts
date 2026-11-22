@@ -256,6 +256,8 @@ export class AudioPipeline {
       return;
     }
     this.processor = processor;
+    // A press or release while the SDK took the processor found none to set.
+    processor.setGate("ptt", this.pttGated);
     processor.setSileroBufferMs(sileroBufferMs());
     this.watchedTrack = track;
     track.on(TrackEvent.Restarted, this.onMicRestarted);

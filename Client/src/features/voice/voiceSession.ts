@@ -18,6 +18,7 @@ import {
   setLocalGateSpeaking,
   getLocalRing,
   onLocalRingChange,
+  cancelPttClose,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { voiceSpeakingEnabled } from "@lib/net/serverCapabilities";
@@ -279,6 +280,7 @@ export class LiveKitSession extends SessionReconnect {
     this._lostOnReconnect = null;
     this._lostMusicApp = null;
     this._music?.stop();
+    cancelPttClose();
     if (this._watchRetry !== null) clearTimeout(this._watchRetry);
     this._watchRetry = null;
     dismissMediaLostNotice();

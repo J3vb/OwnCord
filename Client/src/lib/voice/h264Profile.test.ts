@@ -280,6 +280,21 @@ describe("fitGpuH264Share", () => {
     },
   );
 
+  it.each([
+    ["the capture reports none", {}],
+    ["the capture reports another", { frameRate: 30 }],
+  ])("keeps the rate a 60 fps Source share was opened with when %s", async (_, settings) => {
+    const { share, applyConstraints } = capture({ width: 1920, height: 1080 }, settings);
+
+    await fitGpuH264Share(share, { width: 0, height: 0, frameRate: 60 });
+
+    expect(applyConstraints).toHaveBeenCalledExactlyOnceWith({
+      width: { max: 3840 },
+      height: { max: 2160 },
+      frameRate: 60,
+    });
+  });
+
   it("leaves a share held to a quality's size alone: that box already fits", async () => {
     const { share, applyConstraints } = capture({ width: 1920, height: 1080 }, { frameRate: 30 });
 

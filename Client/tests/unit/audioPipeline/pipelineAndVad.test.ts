@@ -97,6 +97,36 @@ describe("AudioPipeline", () => {
       ]);
     });
 
+    it.each([
+      ["a release", false, true, 0],
+      ["a press", true, false, 1],
+    ])(
+      "%s while the SDK takes the processor reaches the new one",
+      async (_, before: boolean, during: boolean, gain: number) => {
+        prefs.set("voiceSensitivity", 100);
+        const pipeline = new AudioPipeline();
+        pipeline.setPttGated(before);
+        const track = micTrack();
+        const entered = vi.fn();
+        let finish!: () => void;
+        const held = new Promise<void>((resolve) => (finish = resolve));
+        const setProcessor = track.setProcessor.bind(track);
+        vi.spyOn(track, "setProcessor").mockImplementation(async (processor) => {
+          entered();
+          await held;
+          return setProcessor(processor);
+        });
+
+        const attaching = pipeline.attach(track);
+        await vi.waitFor(() => expect(entered).toHaveBeenCalled());
+        pipeline.setPttGated(during);
+        finish();
+        await attaching;
+
+        expect(outputGain(contextOf(track)).value).toBe(gain);
+      },
+    );
+
     it("hands a release's delay to the processor's own clock", async () => {
       prefs.set("voiceSensitivity", 100);
       const pipeline = new AudioPipeline();

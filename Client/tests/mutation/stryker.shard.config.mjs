@@ -82,6 +82,7 @@ export const shards = {
   "livekit-8": [
     "src/features/voice/backgroundCamera.ts",
     "src/features/voice/joinBackoffText.ts",
+    "src/features/voice/native/nativePttGate.ts",
     "src/features/voice/native/nativeRoom.ts",
     "src/features/voice/sessionState.ts",
     "src/features/voice/sileroWorker.ts",
@@ -654,6 +655,7 @@ export const shards = {
     "src/lib/voice/appAudioShare.ts",
     "src/stores/auth.store.ts",
     "src/stores/channelModel.ts",
+    "src/stores/voicePttClose.ts",
     "src/stores/voicePttLive.ts",
   ],
   "stores-5": [

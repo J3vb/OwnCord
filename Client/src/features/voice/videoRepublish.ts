@@ -4,7 +4,7 @@
  */
 
 import type { LocalVideoTrack, LocalTrack, TrackPublishOptions } from "livekit-client";
-import { setH264GpuProfiles } from "@lib/voice/h264Profile";
+import { fitGpuH264Share, setH264GpuProfiles } from "@lib/voice/h264Profile";
 import { createLogger } from "@lib/logger";
 import { voiceText } from "../../i18n/voice";
 import type { PublishCodec } from "./videoCodec";
@@ -64,18 +64,21 @@ function republishOptions(
       );
 }
 
-function hintShareRepublish(
+/** Ready a share for its republish as a first publish does: hint its content
+ *  and, for the GPU H.264 encoder, hold it within the encoder's size. False
+ *  when the run went stale while the share's size was waited for. */
+async function prepareShareRepublish(
   state: ScreenTrackState,
   track: LocalTrack,
   quality: StreamQuality,
   codec: PublishCodec,
-): void {
-  if (isLinuxDesktop()) return;
-  applyScreenShareContentHint(
-    track.mediaStreamTrack,
-    getScreenShareCaptureOptions(quality, state.fps ?? getScreenShareFps()),
-    codec,
-  );
+  stale: () => boolean,
+): Promise<boolean> {
+  const capture = getScreenShareCaptureOptions(quality, state.fps ?? getScreenShareFps());
+  if (!isLinuxDesktop()) applyScreenShareContentHint(track.mediaStreamTrack, capture, codec);
+  if (!h264GpuPublish(codec)) return true;
+  await fitGpuH264Share(track, capture.resolution);
+  return !stale();
 }
 
 /** A failed republish takes the normal disable path, so no half state is left. */
@@ -145,7 +148,9 @@ export async function republishVideo(
     // A stop between the two awaits already unpublished and stopped the track
     // and sent its `false`: publishing now would resurrect it.
     if (stale()) return false;
-    if (kind === "screen") hintShareRepublish(state as ScreenTrackState, track, quality, codec);
+    const share = state as ScreenTrackState;
+    if (kind === "screen" && !(await prepareShareRepublish(share, track, quality, codec, stale)))
+      return false;
     setH264GpuProfiles(track.mediaStreamTrack, h264GpuPublish(codec));
     await room.localParticipant.publishTrack(track, options);
     if (stale()) {

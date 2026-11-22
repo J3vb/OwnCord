@@ -164,6 +164,8 @@ export function voiceStoreActionStubs() {
     setLocalScreenshare: vi.fn(),
     bumpLocalShareRev: vi.fn(),
     setPttGated: vi.fn(),
+    isPttClosePending: vi.fn(() => false),
+    cancelPttClose: vi.fn(),
     setSpeakers: vi.fn(),
     leaveVoiceChannel: vi.fn(),
     setListenOnly: vi.fn(),

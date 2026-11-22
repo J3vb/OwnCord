@@ -152,6 +152,21 @@ describe("createMicProcessor", () => {
       expect(output.gain.value).toBe(0);
     });
 
+    it("closes at once while the context is not running, whose stopped clock would hold the close", async () => {
+      const { processor, ctx, output } = await startedOnClock();
+      ctx.state = "suspended";
+      processor.setGate("ptt", true, 0.3);
+      expect(output.gain.value).toBe(0);
+
+      // Once it runs, a release waits out its delay again.
+      ctx.state = "running";
+      processor.setGate("ptt", false);
+      processor.setGate("ptt", true, 0.3);
+      expect(output.gain.value).toBe(1);
+      ctx.currentTime = 0.3;
+      expect(output.gain.value).toBe(0);
+    });
+
     it("a new press during the delay keeps the voice open; the next release closes", async () => {
       const { processor, ctx, output } = await startedOnClock();
       processor.setGate("ptt", true, 0.02);

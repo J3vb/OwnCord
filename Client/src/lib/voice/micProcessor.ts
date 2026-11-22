@@ -346,7 +346,10 @@ export function createMicProcessor(): MicProcessor {
     setGate(gate: GateSource, isClosed: boolean, closeAfterS = 0): void {
       if (closed[gate] === isClosed) return;
       closed[gate] = isClosed;
-      if (gate === "ptt") pttClosesAt = isClosed ? ctx.currentTime + closeAfterS : 0;
+      // A context that is not running yet has a stopped clock, and a close
+      // scheduled on it would wait until it starts: close at once instead.
+      if (gate === "ptt")
+        pttClosesAt = isClosed && ctx.state === "running" ? ctx.currentTime + closeAfterS : 0;
       // Closing is gentle; opening has to finish inside the lookahead.
       applyGain(isClosed ? GAIN_TIME_CONSTANT_S : GATE_OPEN_TIME_CONSTANT_S);
     },

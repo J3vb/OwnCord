@@ -366,7 +366,16 @@ the gate only after the saved release delay (`pttReleaseDelayMs`, 0–2000 ms,
 gate as soon as their event arrives (`setPttGated(true, delay)` on a release),
 and the processor schedules the close on its own `AudioContext` clock, never
 a page timer: WebView2 slows the timers of a hidden or minimised window down
-to about one a second. The Linux native room
+to about one a second. A context that is not running yet closes at once. The
+store's `pttGated` (the mic button's title, the self-speaking ring and the
+push-to-talk ticks) records a release only once the delay has run, when the
+voice stops, so a press inside the delay changes nothing on screen and makes
+no tick; that write is the one thing still on a page timer, so in a hidden
+window only the indicator and the tick may land late, never the mic. Until it
+lands, whatever opens a closed gate (a cleared key, a dead poller, switching to
+Voice Activity, a reconnect's restore) treats the closing gate as closed
+(`isPttClosePending`). The Android talk button takes the same path: letting go
+calls `setPttGated(true, delay)` at once. The Linux native room
 has no web microphone to gate: there the same `setPttGated` flips the Rust
 session's own gate (`NativeRoom.setPttGated` → `nativeVoice.setPttGated`),
 which zeroes the open capture's processed frames, so the capture also stays

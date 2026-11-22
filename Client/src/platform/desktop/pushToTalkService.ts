@@ -31,7 +31,12 @@
  */
 
 import { loadPref, savePref } from "@lib/prefs/preferences";
-import { voiceStore, setPttPollingLive, isPttPollingLive } from "@stores/voice.store";
+import {
+  voiceStore,
+  setPttPollingLive,
+  isPttPollingLive,
+  isPttClosePending,
+} from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { vkName, pttReleaseDelayMs } from "@lib/voice/ptt";
 import { inputMode } from "@lib/ui/inputMode";
@@ -113,9 +118,10 @@ function retainListener(attempt: PttBinding, unlisten: () => void): boolean {
 
 /** Open the gate when the poller can no longer produce a future press/release
  *  edge — clearing the key binding (stopPtt) or the polling thread dying
- *  (ptt-error) — so a closed gate is never stranded with no way to open it. */
+ *  (ptt-error) — so a closed gate is never stranded with no way to open it. A
+ *  release still waiting out its delay is a gate about to close: it opens too. */
 function ungateMic(): void {
-  if (voiceStore.getState().pttGated !== true) return;
+  if (voiceStore.getState().pttGated !== true && !isPttClosePending()) return;
   const version = generation;
   const { currentChannelId, joinedAt } = voiceStore.getState();
   void import("@lib/voice/livekitSession")
@@ -373,6 +379,7 @@ async function gateBoundMic(attempt: PttBinding): Promise<void> {
     currentChannelId === null ||
     !isPttPollingLive() ||
     pttGated === true ||
+    isPttClosePending() ||
     edge !== attempt.initialEdge
   )
     return;

@@ -54,6 +54,8 @@ export const GPU_H264_MAX_HEIGHT = 2160;
 export interface FrameSize {
   readonly width: number;
   readonly height: number;
+  /** The frame rate the capture was opened with, when the box carries one. */
+  readonly frameRate?: number;
 }
 
 /** The size box a GPU H.264 share is held to: `cap` (a quality preset's size,
@@ -85,7 +87,7 @@ export type FittableShare = Pick<LocalTrack, "mediaStreamTrack" | "waitForDimens
  *  arrives, which can be after getDisplayMedia resolves, so the size is
  *  waited for as livekit does before every publish. `applyConstraints`
  *  replaces every constraint the capture was opened with, so the frame rate
- *  is passed again. A size that never arrives or a refusal is only logged:
+ *  is passed again: `held`'s, else the one the capture reports. A size that never arrives or a refusal is only logged:
  *  the share then runs at full size and the live check still catches a
  *  software fallback on a first publish. */
 export async function fitGpuH264Share(share: FittableShare, held?: FrameSize): Promise<void> {
@@ -99,7 +101,9 @@ export async function fitGpuH264Share(share: FittableShare, held?: FrameSize): P
   }
   const { width, height } = size;
   const track = share.mediaStreamTrack;
-  const { frameRate } = track.getSettings();
+  // The rate the capture asked for first: a share whose settings report none
+  // would otherwise drop back to the browser's default rate.
+  const frameRate = held?.frameRate ?? track.getSettings().frameRate;
   try {
     await track.applyConstraints({
       width: { max: GPU_H264_MAX_WIDTH },

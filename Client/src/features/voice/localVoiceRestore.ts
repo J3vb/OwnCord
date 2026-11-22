@@ -5,6 +5,7 @@
 import {
   voiceStore,
   isPttPollingLive,
+  isPttClosePending,
   setPttGated as setPttGatedState,
   setListenOnly,
   type VoiceState,
@@ -58,7 +59,9 @@ function armPttGate(
   // gate is still supposed to be closed; reading it back here (instead of
   // silently reopening the mic) is what keeps that promise across a
   // reconnect.
-  const pttArmed = mode === "join" ? pttGates(isPttPollingLive()) : state.pttGated === true;
+  // A release still waiting out its delay counts as closed: its close is due.
+  const pttArmed =
+    mode === "join" ? pttGates(isPttPollingLive()) : state.pttGated === true || isPttClosePending();
   if (mode === "join") setPttGatedState(pttArmed);
   host.audioPipeline.setPttGated(pttArmed);
 }

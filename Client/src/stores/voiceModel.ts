@@ -94,8 +94,9 @@ export interface VoiceState {
    *  cleared by the widget's undeafen. Like localDeafened it outlives a leave, so a
    *  re-join restates the same pair. Optional for the fixture reason above. */
   readonly mutedBeforeDeafen?: boolean;
-  /** True while push-to-talk is bound and the key is NOT currently held —
-   *  i.e. the mic processor's push-to-talk gate is closed. Deliberately a
+  /** True while push-to-talk is bound and the key is NOT currently held, from
+   *  the end of a release's delay — i.e. once the mic processor's push-to-talk
+   *  gate has closed. Deliberately a
    *  separate flag from localMuted: PTT never writes the flag that represents
    *  the user's own explicit mute (livekitSession.setPttGated only closes and
    *  opens the gate), so a press can't undo a self-mute and a release can't

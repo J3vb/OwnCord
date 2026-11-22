@@ -237,6 +237,33 @@ describe("ptt-error event listener", () => {
     expect(pttState.localMuted).toBe(true);
   });
 
+  it("opens a gate still closing out a release's delay when the backend thread panics", async () => {
+    testPrefs.set("pttVk", 0x20);
+    const capturedHandlers = captureListeners();
+    await initPtt();
+    // Released: the mic is closing on the audio clock, the store not yet gated.
+    pttState.pttGated = false;
+    pttState.closePending = true;
+
+    capturedHandlers["ptt-error"]!({ payload: "PTT thread panicked" });
+
+    await vi.waitFor(() => {
+      expect(mockSetPttGated).toHaveBeenCalledWith(false);
+    });
+  });
+
+  it("leaves an open gate with no close pending alone when the backend thread panics", async () => {
+    testPrefs.set("pttVk", 0x20);
+    const capturedHandlers = captureListeners();
+    await initPtt();
+    mockSetPttGated.mockClear();
+
+    capturedHandlers["ptt-error"]!({ payload: "PTT thread panicked" });
+    await vi.dynamicImportSettled();
+
+    expect(mockSetPttGated).not.toHaveBeenCalled();
+  });
+
   // Deleted the "after a PTT release applied the mute" and "deafened, even if a
   // PTT release owns the mute" variants: no PTT-owned mute exists any more.
 });

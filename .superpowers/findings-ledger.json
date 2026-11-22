@@ -13924,8 +13924,8 @@
       "suggestedFix": "Hand the release delay to the gate and schedule the close on the AudioContext clock instead of a page setTimeout; keep a timer only for the native room's gate.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/mic-processor.test.ts (push-to-talk release delay: closes on the graph's own clock once the delay has run, not before; a new press during the delay keeps the voice open; closes at once with no delay); Client/tests/unit/ptt/eventsAndRaces.test.ts (ptt release delay); Client/src/features/voice/native/nativeRoom/connection.test.ts (keeps the session's gate open through a release's delay)",
-        "revertProof": "fail (3 of 3 processor cases, 5 of 6 release-delay cases, 1 of 1 native gate case)"
+        "test": "Client/tests/unit/mic-processor.test.ts (push-to-talk release delay: closes on the graph's own clock once the delay has run, not before; a new press during the delay keeps the voice open; closes at once with no delay); Client/tests/unit/ptt/eventsAndRaces.test.ts (ptt release delay); Client/src/features/voice/native/nativeRoom/connection.test.ts (keeps the session's gate open through a release's delay); Client/tests/unit/voice.store.test.ts (a release's close with its delay); Client/tests/unit/voice-link-sounds.test.ts (a release with a delay: ticks off when the delay has run, no tick for a press inside it); Client/src/features/voice/talkButton.test.ts (hands a release its delay at once; switching to Voice activity during a release's delay opens the closing gate); Client/tests/unit/ptt/eventsAndRaces.test.ts (opens a gate still closing out a release's delay when the backend thread panics); Client/tests/unit/livekitSession/voiceState.test.ts (mode reconnect re-closes the gate when a release was still waiting out its delay); Client/tests/unit/mic-processor.test.ts (closes at once while the context is not running); Client/tests/unit/audioPipeline/pipelineAndVad.test.ts (a press or release while the SDK takes the processor reaches the new one)",
+        "revertProof": "fail (3 of 3 processor cases, 5 of 6 release-delay cases, 1 of 1 native gate case; 5 of 8 store and tick cases; 1 of 1 each for the panic, talk-button mode switch, reconnect and stopped-context cases; 2 of 2 attach cases)"
       },
       "lens": "flow-voice",
       "confidence": "medium",
@@ -13970,8 +13970,8 @@
       "suggestedFix": "Always apply the gpuH264SizeCap max constraints to an uncapped GPU H.264 share; a capture opened with a quality's size already fits.",
       "fix": {
         "commit": "pending",
-        "test": "Client/src/lib/voice/h264Profile.test.ts (caps a share %s that fits now; leaves a share held to a quality's size alone; keeps a window share that starts small and grows past 3840 px inside the encoder)",
-        "revertProof": "fail (3 of 4 cases)"
+        "test": "Client/src/lib/voice/h264Profile.test.ts (caps a share %s that fits now; leaves a share held to a quality's size alone; keeps a window share that starts small and grows past 3840 px inside the encoder; keeps the rate a 60 fps Source share was opened with); Client/tests/unit/screen-share-republish.test.ts (a share switched up to the GPU H.264 encoder)",
+        "revertProof": "fail (3 of 4 cases; 2 of 2 frame-rate cases; 2 of 3 republish cases)"
       },
       "lens": "correctness",
       "confidence": "medium",

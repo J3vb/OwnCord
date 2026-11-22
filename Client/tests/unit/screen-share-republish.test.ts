@@ -20,9 +20,13 @@ import {
   type VideoTrackDeps,
 } from "../../src/features/voice/screenShare";
 import { voiceStore } from "@stores/voice.store";
+import { getScreenShareCaptureOptions } from "../../src/lib/voice/videoPresets";
 
-const setH264GpuProfiles = vi.hoisted(() => vi.fn());
-vi.mock("@lib/voice/h264Profile", () => ({ setH264GpuProfiles }));
+const { setH264GpuProfiles, fitGpuH264Share } = vi.hoisted(() => ({
+  setH264GpuProfiles: vi.fn(),
+  fitGpuH264Share: vi.fn((_share: unknown, _held?: unknown) => Promise.resolve()),
+}));
+vi.mock("@lib/voice/h264Profile", () => ({ setH264GpuProfiles, fitGpuH264Share }));
 vi.mock("../../src/features/voice/videoCodec", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../src/features/voice/videoCodec")>()),
   h264GpuPublish: (codec: string) => codec === "h264",
@@ -117,7 +121,11 @@ beforeEach(() => {
 });
 
 describe("republishVideo", () => {
-  beforeEach(() => setH264GpuProfiles.mockReset());
+  beforeEach(() => {
+    setH264GpuProfiles.mockReset();
+    fitGpuH264Share.mockReset();
+    fitGpuH264Share.mockResolvedValue(undefined);
+  });
 
   it("unmarks the track when the live switch republishes it as VP8, before the publish", async () => {
     const r = rig();
@@ -152,6 +160,51 @@ describe("republishVideo", () => {
       expect(hintAtPublish).toBe(after);
     },
   );
+
+  describe("a share switched up to the GPU H.264 encoder", () => {
+    it("is held within the encoder's size before it goes out, as a first publish is", async () => {
+      const r = rig();
+      const { state, video } = liveShare();
+      state.quality = "source";
+      state.fps = 60;
+      fitGpuH264Share.mockImplementationOnce(async () => {
+        r.calls.push("fit");
+      });
+
+      await expect(republishVideo("screen", state, r.deps, "h264")).resolves.toBe(true);
+
+      expect(fitGpuH264Share).toHaveBeenCalledExactlyOnceWith(
+        video,
+        getScreenShareCaptureOptions("source", 60).resolution,
+      );
+      expect(r.calls).toEqual(["unpublish:video", "fit", "publish:video"]);
+    });
+
+    it("is not fitted when it goes out as VP8", async () => {
+      const r = rig();
+      const { state } = liveShare();
+
+      await expect(republishVideo("screen", state, r.deps, "vp8")).resolves.toBe(true);
+
+      expect(fitGpuH264Share).not.toHaveBeenCalled();
+    });
+
+    it("publishes nothing when a stop lands while its size is awaited", async () => {
+      const r = rig();
+      const { state, video } = liveShare();
+      const fitted = deferred();
+      fitGpuH264Share.mockReturnValueOnce(fitted.promise);
+
+      const run = republishVideo("screen", state, r.deps, "h264");
+      await vi.waitFor(() => expect(fitGpuH264Share).toHaveBeenCalled());
+      state.generation = (state.generation ?? 0) + 1;
+      fitted.resolve();
+
+      await expect(run).resolves.toBe(false);
+      expect(r.publishTrack).not.toHaveBeenCalled();
+      expect(video.stop).not.toHaveBeenCalled();
+    });
+  });
 
   it("marks the track again when it republishes as H.264", async () => {
     const r = rig();
