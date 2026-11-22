@@ -120,6 +120,8 @@ release changes the database, and anything an operator must do first.)
 - A screen share at Source (native resolution) with the default frame rate went out at 1080p, like High; it now keeps the screen's or window's own size at every frame rate (Windows and Linux).
 - A Source screen share on the graphics card's H.264 encoder whose window later grew wider than 3840 pixels (a game going full screen on a super-ultrawide monitor) dropped to a few frames per second; it is now kept within the encoder's size for the whole share.
 - In a popped-out call on a monitor with a different display scale, video tiles asked for the wrong picture size (blurry on a high-DPI screen); they now use that window's scale and ask again when it moves to another monitor.
+- On Windows, sharing a Store app's window with its sound (Media Player, the Netflix app) sent silence; the app's own sound is shared now, and you are told when it cannot be found.
+- On Windows, sharing a window with its sound (often Chrome) could be refused without a word after Windows reused an old process number; that window's sound is shared now.
 
 **Settings**
 
@@ -166,6 +168,8 @@ release changes the database, and anything an operator must do first.)
 - Opening OwnCord while an update was starting its installer opened a second copy of the old version, which the installer later closed; the update now goes ahead without it.
 - After an update or a restart from Settings, OwnCord no longer opens the invite or message link it was first started from again; new links still open.
 - In-app updates always failed on computers whose antivirus or company network scans HTTPS; the update download now trusts what your computer and browser trust.
+- A message notification whose text was cut short in the middle of an emoji fell back to a plain web notification, or did not show at all; it shows as the app's own notification now.
+- On Windows, the log recorded a frozen window after every sleep or hibernate longer than a few seconds; time asleep is no longer counted as a freeze.
 
 ### Known issues
 

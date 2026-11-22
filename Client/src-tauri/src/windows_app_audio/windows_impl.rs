@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::ffi::c_void;
 use std::sync::mpsc;
 use std::time::Duration;
@@ -18,14 +19,17 @@ use windows::Win32::System::Com::{CoInitializeEx, CoUninitialize, COINIT_MULTITH
 use windows::Win32::System::Threading::{CreateEventW, SetEvent, WaitForSingleObject};
 use windows::Win32::System::Variant::VT_BLOB;
 use windows_sys::Wdk::System::SystemServices::RtlGetVersion;
-use windows_sys::Win32::Foundation::{INVALID_HANDLE_VALUE, LPARAM};
+use windows_sys::Win32::Foundation::{FILETIME, INVALID_HANDLE_VALUE, LPARAM};
 use windows_sys::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows_sys::Win32::System::SystemInformation::OSVERSIONINFOW;
+use windows_sys::Win32::System::Threading::{
+    GetProcessTimes, OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+};
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    EnumWindows, GetWindowTextLengthW, GetWindowTextW, GetWindowThreadProcessId, IsWindow,
-    IsWindowVisible,
+    EnumChildWindows, EnumWindows, GetClassNameW, GetWindowTextLengthW, GetWindowTextW,
+    GetWindowThreadProcessId, IsWindow, IsWindowVisible,
 };
 
 use super::*;
@@ -51,19 +55,67 @@ pub fn available() -> bool {
     build_supports_process_loopback(build)
 }
 
-/// The owner process of a live window handle.
+/// The process that owns a window; 0 when the handle is dead.
+fn window_owner(hwnd: *mut c_void) -> u32 {
+    let mut pid = 0u32;
+    // SAFETY: GetWindowThreadProcessId accepts any handle value and leaves
+    // `pid`, a valid out pointer, at 0 for a dead one.
+    unsafe { GetWindowThreadProcessId(hwnd, &mut pid) };
+    pid
+}
+
+/// A window's class name; empty when it cannot be read.
+fn window_class(hwnd: *mut c_void) -> String {
+    // A class name has at most 256 characters.
+    let mut buf = [0u16; 257];
+    // SAFETY: the buffer's length is passed with it; a dead handle gives 0.
+    let len = unsafe { GetClassNameW(hwnd, buf.as_mut_ptr(), buf.len() as i32) };
+    String::from_utf16_lossy(&buf[..len.clamp(0, 256) as usize])
+}
+
+unsafe extern "system" fn collect_child(
+    hwnd: *mut c_void,
+    lparam: LPARAM,
+) -> windows_sys::core::BOOL {
+    // SAFETY: lparam is the &mut Vec that child_windows passes for the
+    // duration of its EnumChildWindows call.
+    let children = unsafe { &mut *(lparam as *mut Vec<(String, u32)>) };
+    children.push((window_class(hwnd), window_owner(hwnd)));
+    1
+}
+
+/// Every window inside `hwnd`, as (class name, owner pid).
+fn child_windows(hwnd: *mut c_void) -> Vec<(String, u32)> {
+    let mut children = Vec::new();
+    // SAFETY: `collect_child` uses `children` only through lparam while
+    // EnumChildWindows runs.
+    unsafe {
+        EnumChildWindows(
+            hwnd,
+            Some(collect_child),
+            &mut children as *mut Vec<(String, u32)> as LPARAM,
+        );
+    }
+    children
+}
+
+/// The process whose sound window `hwnd` (owned by `pid`) plays: see
+/// [`window_sound_pid`].
+fn sound_pid(hwnd: *mut c_void, pid: u32) -> Option<u32> {
+    window_sound_pid(&window_class(hwnd), pid, || child_windows(hwnd))
+}
+
+/// The process whose sound a live window handle plays.
 fn hwnd_pid(hwnd: u64) -> Option<u32> {
     let handle = usize::try_from(hwnd).ok()? as *mut c_void;
-    let mut pid = 0u32;
-    // SAFETY: IsWindow and GetWindowThreadProcessId accept any handle
-    // value and report a dead one as 0; `pid` is a valid out pointer.
-    unsafe {
-        if IsWindow(handle) == 0 {
-            return None;
-        }
-        GetWindowThreadProcessId(handle, &mut pid);
+    // SAFETY: IsWindow accepts any handle value and reports a dead one as 0.
+    if unsafe { IsWindow(handle) } == 0 {
+        return None;
     }
-    (pid != 0).then_some(pid)
+    match window_owner(handle) {
+        0 => None,
+        pid => sound_pid(handle, pid),
+    }
 }
 
 unsafe extern "system" fn collect_window(
@@ -73,12 +125,15 @@ unsafe extern "system" fn collect_window(
     // SAFETY: lparam is the &mut Vec that enumerate_windows passes for the
     // duration of its EnumWindows call.
     let windows = unsafe { &mut *(lparam as *mut Vec<WindowInfo>) };
-    let mut pid = 0u32;
+    // A Store app's frame whose app is not found is left out, so a title
+    // match on it reports the app as not found.
+    let Some(pid) = sound_pid(hwnd, window_owner(hwnd)) else {
+        return 1;
+    };
     // SAFETY: plain Win32 queries on a handle EnumWindows just gave us.
     // The buffer is sized from the title length plus the terminator and
     // its length is passed alongside it, so a long title is not cut.
     let (visible, buf, len) = unsafe {
-        GetWindowThreadProcessId(hwnd, &mut pid);
         let want = GetWindowTextLengthW(hwnd).clamp(0, 32_768) as usize;
         let mut buf = vec![0u16; want + 1];
         let len = GetWindowTextW(hwnd, buf.as_mut_ptr(), buf.len() as i32);
@@ -128,12 +183,48 @@ pub(super) fn parent_map() -> Result<HashMap<u32, u32>, String> {
     }
 }
 
+/// When process `pid` was created, in FILETIME ticks; `None` when it cannot
+/// be opened (gone, or protected).
+fn process_created(pid: u32) -> Option<u64> {
+    // SAFETY: the handle is checked, used for one query with valid out
+    // pointers, and closed.
+    unsafe {
+        let process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid);
+        if process.is_null() {
+            return None;
+        }
+        let zero = FILETIME {
+            dwLowDateTime: 0,
+            dwHighDateTime: 0,
+        };
+        let (mut created, mut exited, mut kernel, mut user) = (zero, zero, zero, zero);
+        let read = GetProcessTimes(process, &mut created, &mut exited, &mut kernel, &mut user) != 0;
+        windows_sys::Win32::Foundation::CloseHandle(process);
+        read.then(|| (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime))
+    }
+}
+
+/// OwnCord's own process tree and the processes it descends from, by
+/// `parents`. Creation times are read only for the processes the two walks
+/// reach, each once.
+pub(super) fn own_family(parents: &HashMap<u32, u32>) -> (HashSet<u32>, HashSet<u32>) {
+    let read: RefCell<HashMap<u32, Option<u64>>> = RefCell::default();
+    let created = |pid: u32| {
+        *read
+            .borrow_mut()
+            .entry(pid)
+            .or_insert_with(|| process_created(pid))
+    };
+    let me = std::process::id();
+    (
+        own_process_tree(me, parents, created),
+        own_process_ancestors(me, parents, created),
+    )
+}
+
 /// The process to capture for a shared window's label.
 pub fn resolve_pid(label: &str) -> Result<u32, String> {
-    let parents = parent_map()?;
-    let me = std::process::id();
-    let own = own_process_tree(me, &parents);
-    let ancestors = own_process_ancestors(me, &parents);
+    let (own, ancestors) = own_family(&parent_map()?);
     pick_target_pid(label, hwnd_pid, &enumerate_windows(), &own, &ancestors)
         .map_err(|e| e.code().to_string())
 }
