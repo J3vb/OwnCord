@@ -13913,6 +13913,98 @@
       "fixedDate": "2026-11-12"
     },
     {
+      "id": "OC-0611",
+      "title": "A notification's title or body is cut at whole characters, so a cut inside an emoji still shows the app's own notification",
+      "file": "Client/src/lib/notificationDelivery.ts",
+      "line": 19,
+      "severity": "low",
+      "why": "The notification text cap now counts whole characters, so the text sent to the native notification command never holds half an emoji; the command's JSON parser accepts it and the app's own notification (with its click-to-open target) shows instead of the web fallback.",
+      "repro": "Receive a message in an unfocused channel whose text has an emoji across the 100th character (or an author and channel title with one across the 80th).",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Cut by code points in sanitizeNotif (Array.from), as musicActivity's clip() does.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/notifications/formatting.test.ts (a title cut that lands inside an emoji keeps it whole, a body cut that lands inside an emoji keeps it whole)",
+        "revertProof": "fail (2 of 2 cases)"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0612",
+      "title": "The desktop watchdog does not count time the machine slept as a main-thread or webview freeze",
+      "file": "Client/src-tauri/src/exit_watch.rs",
+      "line": 274,
+      "severity": "low",
+      "why": "Windows' monotonic clock keeps counting while the machine sleeps. The watchdog now treats a tick that arrives HANG_AFTER or more after its previous one as a resume and moves the stored answer, webview-stop and probe times past the sleep, so the log and the run file judge only the seconds the machine was awake; a real freeze still logs after 5 s.",
+      "repro": "On Windows, put the machine to sleep for more than 5 s with the app open, then wake it and read the client log.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Detect a resume from the watchdog's own tick gap and shift the stored times past it (pure MainCheck::tick with an injected clock).",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/exit_watch.rs (a_tick_after_the_machine_slept_is_no_freeze, a_freeze_that_spans_a_sleep_does_not_count_the_sleep, a_real_freeze_is_logged_after_five_seconds_and_so_is_its_end)",
+        "revertProof": "fail (2 of 3 tests; Hang(3601) logged on the first tick after a 1 h sleep)"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0613",
+      "title": "Sharing a Store app's window with its sound captures the app's own process, or reports the app as not found",
+      "file": "Client/src-tauri/src/windows_app_audio/mod.rs",
+      "line": 187,
+      "severity": "low",
+      "why": "A Store (UWP) app's top-level window is a frame owned by ApplicationFrameHost. The share now resolves such a frame to the process that owns the Windows.UI.Core.CoreWindow inside it, and answers not_found (which shows the app-sound warning) when there is none, instead of capturing the frame host.",
+      "repro": "On Windows, share the window of Media Player or the Netflix app with Share the app's sound on.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "For an ApplicationFrameWindow, enumerate its child windows and use the CoreWindow owned by another process (pure window_sound_pid; thin GetClassNameW/EnumChildWindows glue).",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/windows_app_audio/mod.rs (a_store_app_window_plays_from_its_app_process)",
+        "revertProof": "fail (1 of 1 test; Some(100) instead of Some(300))"
+      },
+      "lens": "correctness",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0614",
+      "title": "OwnCord's own process tree and ancestors skip a parent id that names a process created after its child",
+      "file": "Client/src-tauri/src/windows_app_audio/mod.rs",
+      "line": 207,
+      "severity": "low",
+      "why": "Windows keeps a child's parent id after the parent exits and later reuses it. The ancestor and own-tree walks now drop a link whose parent was created after the child (creation times read only for the processes the walks reach); a link with an unreadable time stays as recorded, which can only refuse a share and never lets a capture include OwnCord's own sound.",
+      "repro": "On Windows, after a long session (or after an in-app restart), share a Chrome window with Share the app's sound on.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Check each parent link against GetProcessTimes creation times in own_process_ancestors and own_process_tree (pure walk with injected times).",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/windows_app_audio/mod.rs (a_parent_created_after_its_child_is_a_reused_id, an_app_whose_parent_id_was_reused_by_owncord_is_not_its_child)",
+        "revertProof": "fail (2 of 2 tests)"
+      },
+      "lens": "correctness",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
       "id": "OC-0607",
       "title": "A push-to-talk release closes the mic after the release delay on the audio clock, also while the window is hidden or minimised",
       "file": "Client/src/platform/desktop/pushToTalkService.ts",

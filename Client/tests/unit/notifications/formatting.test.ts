@@ -215,6 +215,41 @@ describe("notifyIncomingMessage", () => {
       });
     });
 
+    // The native popup's command refuses half an emoji, so a cut that lands
+    // inside one keeps it whole: the text before "..." is the limit in
+    // characters, and no lone surrogate is left.
+    it.each([
+      {
+        part: "title" as const,
+        username: `${"U".repeat(79)}\u{1F600}`,
+        content: "x",
+        kept: `${"U".repeat(79)}\u{1F600}`,
+        limit: 80,
+      },
+      {
+        part: "body" as const,
+        username: "X",
+        content: `${"B".repeat(99)}\u{1F600}x`,
+        kept: `${"B".repeat(99)}\u{1F600}`,
+        limit: 100,
+      },
+    ])(
+      "a $part cut that lands inside an emoji keeps it whole",
+      async ({ part, username, content, kept, limit }) => {
+        const sendNotification = await armDesktopNotifications();
+
+        notifyAs(username, 1, content);
+
+        await vi.waitFor(() => {
+          const call = sendNotification.mock.calls[0]![0];
+          const text: string = call[part];
+          expect(/\p{Cs}/u.test(text)).toBe(false);
+          expect(text).toBe(`${kept}...`);
+          expect(Array.from(kept)).toHaveLength(limit);
+        });
+      },
+    );
+
     it("control chars are removed before length check (not counted)", async () => {
       const sendNotification = await armDesktopNotifications();
 
