@@ -630,9 +630,35 @@ describe("RemoteTracks listen (opt-in music)", () => {
     tracks.reviewListening();
     vi.advanceTimersByTime(LISTEN_GRACE_MS * 3);
 
+    // Still listening, so the new room's handleTrackPublished subscribes it.
     expect(tracks.isListening(7)).toBe(true);
-    // The new room's handleTrackPublished subscribes it because isListening is true.
+    expect(next.sub(7)).not.toHaveBeenCalledWith(false);
+  });
+
+  it("drops a listen when a join goes to another channel, and keeps it for the same one", () => {
+    const { room } = roomWithMusic([7]);
+    let channel: number | null = 10;
+    const tracks = new RemoteTracks(() => room);
+    tracks.currentChannel = () => channel;
+    tracks.listen(7);
+    // A rejoin through idle: the session has no channel while it reconnects.
+    channel = null;
+    tracks.keepListenFor(10);
     expect(tracks.isListening(7)).toBe(true);
+    tracks.keepListenFor(20);
+    expect(tracks.isListening(7)).toBe(false);
+  });
+
+  it("forgets a listen whose music comes back without encryption", () => {
+    vi.useFakeTimers();
+    const { room, participants } = roomWithMusic([7]);
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+    const pub = [...participants.get("user-7")!.trackPublications.values()][0]!;
+    Object.assign(pub, { trackInfo: { encryption: 0 } });
+    tracks.reviewListening();
+    vi.advanceTimersByTime(LISTEN_GRACE_MS + 1);
+    expect(tracks.isListening(7)).toBe(false);
   });
 
   it("forgets a pending listen once a live room still lacks the music for the grace", () => {

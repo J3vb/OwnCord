@@ -38,6 +38,7 @@ export abstract class SessionRemote extends SessionCore {
       if (!this._leavingVoice) this.sendWatching(ids);
     };
     // The session owns the subscription, so it is the one writer of the field.
+    tracks.currentChannel = () => voiceStore.getState().currentChannelId;
     tracks.onListeningChange = (userId) => {
       this._audioElements.setListenedMusicUser(userId);
       setListeningTo(userId);

@@ -103,6 +103,10 @@ export class RemoteTracks {
   /** Told the user being listened to (or null) whenever that changes, so the
    *  voice store can mirror it. */
   onListeningChange: ((userId: number | null) => void) | null = null;
+  /** The voice channel the session is in, recorded with a listen. */
+  currentChannel: (() => number | null) | null = null;
+  /** The channel the listen was taken in: a join elsewhere drops it. */
+  private listenChannel: number | null = null;
 
   constructor(
     private readonly getRoom: () => VoiceRoom | null,
@@ -266,8 +270,15 @@ export class RemoteTracks {
     this.cancelListenGrace();
     if (before !== null) this.musicPublication(before)?.setSubscribed(false);
     this.listening = userId;
+    this.listenChannel = userId === null ? null : (this.currentChannel?.() ?? null);
     pub?.setSubscribed(true);
     this.onListeningChange?.(userId);
+  }
+
+  /** A join into `channelId` is starting: a listen taken in another channel
+   *  is dropped; a rebuilt room of the same channel keeps it. */
+  keepListenFor(channelId: number): void {
+    if (this.listening !== null && this.listenChannel !== channelId) this.listen(null);
   }
 
   /** `userId`'s music was unpublished. A reconnect republishes it, so the
@@ -293,7 +304,10 @@ export class RemoteTracks {
    *  old room raised no unpublish). `startGrace`: begin it now. */
   reviewListening(startGrace = true): void {
     const id = this.listening;
-    if (id === null || !this.roomLive() || this.musicPublication(id) !== undefined) return;
+    const pub = id === null ? undefined : this.musicPublication(id);
+    // Music republished without encryption is refused, so it counts as gone.
+    if (id === null || !this.roomLive() || (pub !== undefined && !isUnencryptedPublication(pub)))
+      return;
     if (startGrace) {
       if (this.listenGrace === null) this.musicEnded(id);
       return;

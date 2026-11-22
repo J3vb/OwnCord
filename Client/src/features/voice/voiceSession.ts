@@ -246,8 +246,7 @@ export class LiveKitSession extends SessionReconnect {
     this.clearYield();
     // Listening is not carried to another channel; a rebuilt room of the
     // same channel keeps it.
-    const was = this._currentChannelId;
-    if (was !== null && was !== channelId) this._remoteTracks.listen(null);
+    this._remoteTracks.keepListenFor(channelId);
     return this._join.connectAndSetup(token, url, channelId, directUrl, isKeyHolder);
   }
 
