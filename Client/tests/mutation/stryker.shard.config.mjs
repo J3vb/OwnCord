@@ -381,8 +381,10 @@ export const shards = {
     "src/lib/notificationDelivery.ts",
     "src/lib/readStateNotices.ts",
     "src/lib/text/nameLimits.ts",
+    "src/lib/ui/phoneLayout.ts",
   ],
   "lib-rest-3": [
+    "src/features/connection/connectionBanner.ts",
     "src/features/direct-messages/keptCallDms.ts",
     "src/features/forums/NewPostDialog.ts",
     "src/features/messaging/spoilerAttachment.ts",
@@ -392,6 +394,7 @@ export const shards = {
   ],
   "lib-rest-4": [
     "src/features/forums/forumViewParts.ts",
+    "src/features/members/memberRowRenderer.ts",
     "src/features/threads/threadAgo.ts",
     "src/features/threads/threadCommands.ts",
     "src/lib/diagnostics/eventCodesShared.ts",

@@ -15,13 +15,13 @@ import {
 import { Disposable } from "@lib/disposable";
 import { createElement, appendChildren } from "@lib/dom";
 import { desktop } from "../../platform/desktop";
-import { createServerBanner, applyConnectionStatus } from "../../features/server-rail/ServerBanner";
+import { createServerBanner } from "../../features/server-rail/ServerBanner";
+import { wireConnectionBanner } from "../../features/connection/connectionBanner";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { focusFirst } from "@lib/ui/focusFirst";
 import { shellText } from "../../i18n/shell";
 import { startSessionNotice } from "@lib/net/sessionNotice";
-import { authStore } from "@stores/auth.store";
-import { setSessionReplaced, uiStore } from "@stores/ui.store";
+import { uiStore } from "@stores/ui.store";
 import { onPrefChange } from "@lib/prefs/preferences";
 import { startAutoIdle } from "@lib/presence/autoIdle";
 import { startStatusTimerWatcher } from "@lib/presence/statusTimer";
@@ -38,7 +38,7 @@ import { NAVIGATION_DESTINATIONS } from "../../features/navigation/destinations"
 import { createContentNavigator } from "../../features/navigation/contentView";
 import { createNoticesBanner } from "../../features/safety/Notices";
 import { notifySignIn } from "../../features/safety/lazySignInNotice";
-import { log, getCurrentUserId, deviceNetworkOffline } from "./pageShared";
+import { getCurrentUserId } from "./pageShared";
 import type { PageState, PageApi, MountScope } from "./pageState";
 
 export function mountConnectionBanner(st: PageState, pg: PageApi, ms: MountScope): void {
@@ -51,72 +51,6 @@ export function mountConnectionBanner(st: PageState, pg: PageApi, ms: MountScope
   // countdown every second, which a live region would read out each tick.
   st.root!.appendChild(st.banner.liveElement);
 
-  // "Use here" takes the connection back: this device connects again and
-  // the server displaces the other one (last connect wins). It serves both
-  // a displaced socket (SESSION_REPLACED) and a wake reconnect the server
-  // refused because another device held the session (ANOTHER_DEVICE_ACTIVE,
-  // U4) — the two are the same user choice, so they share one prompt.
-  ms.useHere = (): void => {
-    const token = authStore.getState().token;
-    if (token === null) return;
-    setSessionReplaced(false);
-    st.ws.connect({ host: st.api.getConfig().host, token }, { takeover: true });
-  };
-
-  // Retry is safe on a plain disconnect: connect() re-dials and the native
-  // proxy re-validates the certificate, so a TOFU mismatch re-latches rather
-  // than being bypassed. It also cancels any pending backoff attempt, so it
-  // cannot race the reconnect loop.
-  ms.retryConnection = (): void => {
-    const token = authStore.getState().token;
-    if (token === null) return;
-    st.ws.connect({ host: st.api.getConfig().host, token });
-  };
-
-  // Signed-in-elsewhere outranks the connection status it leaves behind
-  // ("disconnected"), so every banner refresh goes through here. The device's
-  // own network fact stays apart from the server's reachability: a LAN server
-  // with no internet still answers onLine, and `undefined` (host without the
-  // API) never claims the internet is required.
-  ms.syncBanner = (): void => {
-    if (st.banner === null) return;
-    const state = uiStore.getState();
-    if (state.sessionReplaced) st.banner.showSignedInElsewhere(ms.useHere);
-    else
-      applyConnectionStatus(st.banner, state.connectionStatus, {
-        offline: deviceNetworkOffline(),
-        dialFailed: state.connectionDialFailed,
-        onRetry: ms.retryConnection,
-      });
-  };
-
-  st.unsubscribers.push(uiStore.subscribeSelector((s) => s.sessionReplaced, ms.syncBanner));
-
-  st.unsubscribers.push(uiStore.subscribeSelector((s) => s.connectionDialFailed, ms.syncBanner));
-
-  // Losing or regaining the device's network only re-renders, so the banner
-  // says the true thing immediately; the reconnect loop and Retry own
-  // recovery. Only re-render while the socket is actually down — a network
-  // flap during a live connection (a VPN toggle, a Wi-Fi flap) must not
-  // route to `applyConnectionStatus("connected")` and clear an announced
-  // server-restart countdown. Owned by a Disposable so the lifecycle guard
-  // sees both listeners torn down with the page.
-  ms.networkOwner = new Disposable();
-
-  st.unsubscribers.push(() => ms.networkOwner.destroy());
-
-  ms.syncBannerIfNotConnected = (): void => {
-    if (uiStore.getState().connectionStatus !== "connected") ms.syncBanner();
-  };
-
-  window.addEventListener("online", ms.syncBannerIfNotConnected, {
-    signal: ms.networkOwner.signal,
-  });
-
-  window.addEventListener("offline", ms.syncBannerIfNotConnected, {
-    signal: ms.networkOwner.signal,
-  });
-
   // A sign-in not yet reviewed: listed on connect and on window focus.
   ms.sessionNotice = new Disposable();
 
@@ -128,32 +62,17 @@ export function mountConnectionBanner(st: PageState, pg: PageApi, ms: MountScope
     signal: ms.sessionNotice.signal,
   });
 
-  // Banner reacts to the store-backed connection status (single source of
-  // truth, docs/architecture/ux §3). "disconnected" keeps the banner visible
-  // — a fatal drop navigates away via clearAuth, and anything short of that
-  // must not leave a stale "Reconnecting..." on screen.
   st.unsubscribers.push(
-    uiStore.subscribeSelector(
-      (s) => s.connectionStatus,
-      (status) => {
-        try {
-          if (status === "connected") {
-            pg.restoreSavedPresence();
-            ms.pollSessions();
-          }
-          ms.syncBanner();
-        } catch (err) {
-          log.error("Connection status handler error", err);
-        }
+    wireConnectionBanner({
+      getBanner: () => st.banner,
+      ws: st.ws,
+      getHost: () => st.api.getConfig().host,
+      onConnected: () => {
+        pg.restoreSavedPresence();
+        ms.pollSessions();
       },
-    ),
+    }),
   );
-
-  // Synchronous initial sync: the selector subscription baselines on the
-  // current value and only fires on change, so a MainPage mounted mid-outage
-  // (status already "reconnecting") would otherwise never show the banner —
-  // the whole retry cycle maps to the same 3-state value.
-  ms.syncBanner();
 
   // Idle / Do Not Disturb / Invisible "for 1 hour": reverts to Online when
   // the stored timer ends, and at once if it ended while the app was closed.
@@ -177,30 +96,6 @@ export function mountConnectionBanner(st: PageState, pg: PageApi, ms: MountScope
   startDetectedActivities(st);
 
   st.unsubscribers.push(...followSpeakingActivity(st));
-
-  st.unsubscribers.push(
-    st.ws.on("server_restart", (payload) => {
-      try {
-        // Every reason counts down: the session survives the restart
-        // and ws.ts reconnects once the socket drops.
-        if (st.banner !== null) {
-          if (payload.delay_seconds <= 0) {
-            // A zero/negative delay is a cancel, not a countdown (e.g.
-            // "update_aborted" correcting an earlier restart announcement
-            // after the staged update failed to apply — the socket never
-            // actually dropped). Re-sync to the real connection status
-            // instead of letting showRestart's countdown fall straight
-            // through to a permanent "Reconnecting..." banner.
-            ms.syncBanner();
-          } else {
-            st.banner.showRestart(payload.delay_seconds);
-          }
-        }
-      } catch (err) {
-        log.error("Server restart handler error", err);
-      }
-    }),
-  );
 }
 
 export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {

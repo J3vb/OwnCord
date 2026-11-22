@@ -13,13 +13,8 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { membersStore } from "@stores/members.store";
 import { channelsStore } from "@stores/channels.store";
-import {
-  MEMBER_PATCH_FIELDS,
-  drawMemberItem,
-  patchMemberItem,
-  type MemberItemModel,
-} from "./memberRow.view";
-import { createAvatarElement } from "../profiles/avatar";
+import type { MemberItemModel } from "./memberRow.view";
+import { classicMemberRows } from "./memberRowRenderer";
 import { listenForFlyingScroll } from "./scrollReport";
 import {
   buildModel,
@@ -30,12 +25,8 @@ import {
 } from "./memberModel";
 import type { MemberListOptions } from "./memberListOptions";
 import {
-  ESTIMATED_HEIGHTS,
   OVERSCAN,
   VIRTUAL_ABOVE,
-  itemModel,
-  kindOf,
-  kindOfModel,
   measureKindHeights,
   createMemberSearchInput,
   memberModelFor,
@@ -54,6 +45,7 @@ export interface MemberListComponent extends MountableComponent {
 }
 
 export function createMemberList(opts: MemberListOptions): MemberListComponent {
+  const rowRenderer = opts.rows ?? classicMemberRows;
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
   let searchWrap: HTMLDivElement | null = null;
@@ -87,7 +79,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
   let offsets = buildOffsets([]);
   let offsetsDirty = true;
   let revealKey: string | null = null;
-  const heights = [...ESTIMATED_HEIGHTS];
+  const heights = [...rowRenderer.estimatedHeights];
   const kindByEl = new WeakMap<Element, number>();
   const topByKey = new Map<string, number>();
   const samples: (Element | null)[] = [null, null, null, null];
@@ -190,21 +182,21 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
         : undefined;
     reconcileModels<ListItem, MemberItemModel>(root, list, {
       key: (item) => item.key,
-      model: itemModel,
+      model: rowRenderer.model,
       // Status is a patch field: it changes the dot in place without a rebuild.
       // A row rebuilt while its context menu is open drops focus to the page
       // when the menu closes (accepted; only its own name, avatar, custom
       // status or role colour changing does this).
-      patch: { fields: MEMBER_PATCH_FIELDS, apply: patchMemberItem },
+      patch: rowRenderer.patch,
       create: (drawn, atEvent) => {
-        const el = drawMemberItem(drawn, createAvatarElement);
+        const el = rowRenderer.draw(drawn);
         if (drawn.kind === "row") {
           const owner = new Disposable();
           createMemberItem(el, atEvent, opts, hooks, owner.signal);
           ownerByEl.set(el, owner);
           idByEl.set(el, drawn.id);
         }
-        kindByEl.set(el, kindOfModel(drawn));
+        kindByEl.set(el, rowRenderer.modelKind(drawn));
         return el;
       },
       dispose: (el) => {
@@ -401,7 +393,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
   function paintPasses(): void {
     for (let pass = 0; pass < 2; pass++) {
       if (offsetsDirty) {
-        offsets = buildOffsets(items.map((item) => heights[kindOf(item)]!));
+        offsets = buildOffsets(items.map((item) => heights[rowRenderer.itemKind(item)]!));
         offsetsDirty = false;
       }
       paint();

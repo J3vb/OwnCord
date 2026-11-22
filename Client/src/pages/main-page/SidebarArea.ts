@@ -90,6 +90,13 @@ export interface SidebarAreaResult {
   readonly renameGroup: (channelId: number) => void;
   /** Open the call in a channel, as the voice widget's channel name does. */
   readonly openCall: (channelId: number) => void;
+  /** The user bar's and the voice widget's slots. Classic leaves them at the end of
+   *  `sidebarWrapper`; the Deck frame moves them into its status bar. The
+   *  components mounted in them stay owned by this SidebarArea. */
+  readonly frameSlots: {
+    readonly userBar: HTMLDivElement;
+    readonly voiceWidget: HTMLDivElement;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -256,5 +263,6 @@ export function createSidebarArea(opts: SidebarAreaOptions): SidebarAreaResult {
     syncMemberSection: sc.syncMemberSection,
     renameGroup: sc.renameGroup,
     openCall: sc.openCall,
+    frameSlots: { userBar: sc.userBarSlot, voiceWidget: sc.voiceWidgetSlot },
   };
 }

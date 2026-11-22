@@ -4,6 +4,7 @@
 
 import type { VoiceUser } from "@stores/voice.store";
 import type { VoiceModMenuOptions } from "../channels/sidebar/volumeMenu";
+import type { MemberRowRenderer } from "./memberRowRenderer";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
@@ -46,4 +47,6 @@ export interface MemberListOptions {
     channelId: number,
     user: VoiceUser,
   ) => VoiceModMenuOptions | string | undefined;
+  /** How a row is drawn. Absent: the Classic rows. */
+  readonly rows?: MemberRowRenderer;
 }
