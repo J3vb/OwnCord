@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"math"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -239,11 +240,18 @@ func scanLinesBackward(ctx context.Context, f io.ReaderAt, end int64, fn func(li
 	return nil
 }
 
+// logHistoryAfterListHook, when set, runs between the folder listing and the file reads; tests use it to
+// write to a file after its listed size was taken.
+var logHistoryAfterListHook func()
+
 func readLogHistory(ctx context.Context, dir string, q logHistoryQuery) (logHistoryResponse, error) {
 	resp := logHistoryResponse{Enabled: true, Entries: []LogEntry{}}
 	files, err := listLogFiles(dir)
 	if err != nil {
 		return resp, err
+	}
+	if logHistoryAfterListHook != nil {
+		logHistoryAfterListHook()
 	}
 	fromDay := ""
 	if !q.from.IsZero() {
@@ -261,11 +269,11 @@ func readLogHistory(ctx context.Context, dir string, q logHistoryQuery) (logHist
 		if fi.key.day < fromDay {
 			break
 		}
-		end := fi.size
+		bound := int64(math.MaxInt64)
 		if q.cursor.set && fi.key == q.cursor.key {
-			end = min(end, q.cursor.offset)
+			bound = q.cursor.offset
 		}
-		done, err := readLogFile(ctx, dir, fi.key, end, &q, &resp, &scanned)
+		done, err := readLogFile(ctx, dir, fi.key, bound, &q, &resp, &scanned)
 		if err != nil {
 			return resp, err
 		}
@@ -293,10 +301,12 @@ func openLogFile(ctx context.Context, path string) (*os.File, error) {
 	return f, err
 }
 
-// readLogFile scans one file backwards from end, adding matches to resp. True means the page is complete, the
-// scan limit was hit, or the scan passed "from", so no older file is needed. A file deleted by cleanup after
-// listing reads as empty.
-func readLogFile(ctx context.Context, dir string, key logFileKey, end int64, q *logHistoryQuery, resp *logHistoryResponse, scanned *int64) (bool, error) {
+// readLogFile scans one file backwards from its end, or from bound when that is earlier (a cursor into it),
+// adding matches to resp. The end is the open file's own size: the size in the folder listing can lag behind a
+// file still being written (Windows updates it late). True means the page is complete, the scan limit was
+// hit, or the scan passed "from", so no older file is needed. A file deleted by cleanup after listing reads
+// as empty.
+func readLogFile(ctx context.Context, dir string, key logFileKey, bound int64, q *logHistoryQuery, resp *logHistoryResponse, scanned *int64) (bool, error) {
 	f, err := openLogFile(ctx, filepath.Join(dir, key.name()))
 	if err != nil {
 		if logFileGone(err) {
@@ -305,6 +315,11 @@ func readLogFile(ctx context.Context, dir string, key logFileKey, end int64, q *
 		return false, err
 	}
 	defer func() { _ = f.Close() }()
+	info, err := f.Stat()
+	if err != nil {
+		return false, fmt.Errorf("reading log history file size: %w", err)
+	}
+	end := min(info.Size(), bound)
 	pastFrom := false
 	err = scanLinesBackward(ctx, f, end, func(line []byte, start int64) error {
 		*scanned += int64(len(line)) + 1

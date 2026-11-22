@@ -283,3 +283,33 @@ func TestLogHistory_OutOfOrderLineBeforeFromDoesNotEndTheScan(t *testing.T) {
 		t.Fatalf("entries = %+v", all)
 	}
 }
+
+// Edge case: today's file is still open in the writer while history is read,
+// and lines reach it after the folder was listed (on Windows the listed size of
+// a file being written lags behind it). The newest lines are still returned:
+// the scan ends at the open file's own size.
+func TestLogHistory_ReturnsLinesWrittenAfterTheListing(t *testing.T) {
+	dir := t.TempDir()
+	clock := newTestClock(historyBase)
+	lf := newLogFile(LogFileOptions{Dir: dir, MaxAge: 7 * 24 * time.Hour, MaxBytes: 1 << 30, now: clock.now}, func() {})
+	t.Cleanup(lf.closeFile)
+	lf.write(entryAt(clock.now(), "INFO", "before listing"))
+	lf.flush()
+	logHistoryAfterListHook = func() {
+		lf.write(entryAt(clock.now().Add(time.Second), "INFO", "after listing"))
+		lf.flush()
+	}
+	t.Cleanup(func() { logHistoryAfterListHook = nil })
+
+	resp, err := readLogHistory(t.Context(), dir, historyQuery(t, ""))
+	if err != nil {
+		t.Fatalf("readLogHistory: %v", err)
+	}
+	got := make([]string, 0, len(resp.Entries))
+	for _, e := range resp.Entries {
+		got = append(got, e.Message)
+	}
+	if len(got) != 2 || got[0] != "after listing" || got[1] != "before listing" {
+		t.Fatalf("entries = %q, want the line written after the listing first, then the older one", got)
+	}
+}

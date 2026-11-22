@@ -219,8 +219,8 @@ func checkArchiveSpace(dir string, need, floor uint64) error {
 }
 
 // planTrees plans the data directory as "data/..." and uploads outside it as "data/uploads/...". Left out:
-// the backup and work dirs, the database's WAL sidecars and in-progress *.tmp files; the live database is
-// replaced by the snapshot.
+// the backup and work dirs, the database's WAL sidecars and process lock file, and in-progress *.tmp files;
+// the live database is replaced by the snapshot.
 func planTrees(ctx context.Context, dataDir, uploadsDir string, paths backupPaths, work, snapshot string) (*archiveTree, error) {
 	absData, err := filepath.Abs(dataDir)
 	if err != nil {
@@ -233,6 +233,9 @@ func planTrees(ctx context.Context, dataDir, uploadsDir string, paths backupPath
 	t := &archiveTree{ctx: ctx, snapshot: snapshot}
 	if t.db, err = resolvePath(paths.dbFile); err != nil {
 		return nil, fmt.Errorf("resolving database path: %w", err)
+	}
+	if t.dbLock, err = resolvePath(db.LockFilePath(paths.dbFile)); err != nil {
+		return nil, fmt.Errorf("resolving database lock path: %w", err)
 	}
 	if t.uploads, err = resolvePath(uploadsDir); err != nil {
 		return nil, fmt.Errorf("resolving uploads dir: %w", err)
@@ -271,6 +274,7 @@ type archiveEntry struct {
 type archiveTree struct {
 	ctx           context.Context
 	db            string
+	dbLock        string
 	uploads       string
 	snapshot      string
 	skip          []string
@@ -341,8 +345,9 @@ func (t *archiveTree) visit(root, prefix, path string, d os.DirEntry, walkErr er
 		return err
 	}
 	name := filepath.ToSlash(filepath.Join(prefix, rel))
-	// WAL sidecars are superseded by the snapshot; *.tmp files are in-progress writes.
-	if !d.IsDir() && (strings.HasPrefix(path, t.db+"-") || strings.HasSuffix(path, ".tmp")) {
+	// WAL sidecars are superseded by the snapshot; the lock file holds no data and the running server keeps it
+	// open (on Windows with no sharing, so it cannot be read); *.tmp files are in-progress writes.
+	if !d.IsDir() && (strings.HasPrefix(path, t.db+"-") || path == t.dbLock || strings.HasSuffix(path, ".tmp")) {
 		return nil
 	}
 	info, err := d.Info()
