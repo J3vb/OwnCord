@@ -337,7 +337,12 @@ export function handleVoiceWatching(payload: Payload<"voice_watching">): void {
         (a, b) => a - b,
       )
     : [];
-  setPeerWatching(payload.user_id, ids);
+  const music: unknown = payload.music_id;
+  setPeerWatching(
+    payload.user_id,
+    ids,
+    typeof music === "number" && Number.isInteger(music) && music > 0 ? music : 0,
+  );
 }
 
 /** The speaking ring a member of our channel reports for itself. The wire is

@@ -75,6 +75,7 @@ const music = (over: Partial<GridMusic> = {}): GridMusic => ({
   userId: SAM,
   name: "Sam",
   listening: false,
+  listeners: [],
   volume: () => 70,
   onListen: vi.fn(),
   onStop: vi.fn(),
@@ -160,6 +161,26 @@ describe("music tile in the video grid", () => {
     const slider = cell()!.querySelector(".tile-volume-slider");
     grid.setMusic([music({ listening: true })]);
     expect(cell()!.querySelector(".tile-volume-slider")).toBe(slider);
+  });
+
+  const listenersLine = (): string | undefined =>
+    cell()!.querySelector("[data-testid='music-tile-listeners']")?.textContent ?? undefined;
+
+  it("names the others who listen, then you, under the disc", () => {
+    grid.setMusic([music({ listeners: ["Alex"], listening: true })]);
+    expect(listenersLine()).toBe("Listening: You, Alex");
+    grid.setMusic([music({ listeners: ["Alex", "Kim"] })]);
+    expect(listenersLine()).toBe("Listening: Alex, Kim");
+    grid.setMusic([music({ listening: true })]);
+    expect(listenersLine()).toBe("Listening: You");
+  });
+
+  it("shows no listeners line when nobody listens, and caps a long list", () => {
+    grid.setMusic([music()]);
+    expect(listenersLine()).toBeUndefined();
+    const many = Array.from({ length: 12 }, (_, i) => `P${i}`);
+    grid.setMusic([music({ listeners: many })]);
+    expect(listenersLine()).toMatch(/and 2 more$/);
   });
 
   it("keeps a tile per sharer", () => {

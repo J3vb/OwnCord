@@ -197,6 +197,22 @@ describe("syncVideoGrid music tiles", () => {
     expect(deps.music.setVolume).toHaveBeenCalledWith(2, 40);
   });
 
+  it("names the members listening to each sharer, and pushes again when they change", () => {
+    const { grid, deps, memo: m } = setup();
+    const state = voiceState(5, [user(2), user(3), user(4)], {
+      musicSharers: sharers(2),
+      peerListening: new Map([
+        [4, 2],
+        [3, 2],
+      ]),
+    });
+    syncVideoGrid(state, m, deps);
+    const tiles = grid.setMusic.mock.calls[0]![0] as { listeners: string[] }[];
+    expect(tiles[0]!.listeners).toEqual(["p3", "p4"]);
+    syncVideoGrid({ ...state, peerListening: new Map([[3, 2]]) }, m, deps);
+    expect(grid.setMusic).toHaveBeenCalledTimes(2);
+  });
+
   it("pushes again only when the sharers or who is listened to change", () => {
     const { grid, deps, memo: m } = setup();
     const state = voiceState(5, [user(2)], { musicSharers: sharers(2) });

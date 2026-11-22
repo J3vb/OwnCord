@@ -8,6 +8,7 @@
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { voiceText } from "../../../i18n/voice";
+import { listenersLabel } from "./viewers";
 import type { GridState, GridApi } from "./gridState";
 import type { GridMusic } from "./VideoGrid";
 
@@ -16,7 +17,14 @@ export const MUSIC_CELL_CLASS = "video-cell--music";
 /** What the cell was last drawn from: a change in it redraws the card, any
  *  other update leaves it alone (a slider being dragged keeps its thumb). */
 function drawKey(music: GridMusic): string {
-  return `${music.listening ? "on" : "off"}|${music.name}`;
+  return `${music.listening ? "on" : "off"}|${music.name}|${music.listeners.join("\u0000")}`;
+}
+
+/** Who listens, you first like the Watching badge ("You, Alex"); empty when nobody. */
+function listenerNames(music: GridMusic): string[] {
+  return music.listening
+    ? [voiceText("tile.viewersYou"), ...music.listeners]
+    : [...music.listeners];
 }
 
 function buildLabel(name: string): HTMLElement {
@@ -78,7 +86,18 @@ function buildBody(music: GridMusic): HTMLElement {
     ),
   );
   button.addEventListener("click", music.listening ? music.onStop : music.onListen);
-  appendChildren(body, disc, text, button);
+  appendChildren(body, disc, text);
+  const names = listenerNames(music);
+  if (names.length > 0) {
+    body.appendChild(
+      createElement(
+        "div",
+        { class: "video-music__listeners", "data-testid": "music-tile-listeners" },
+        listenersLabel(names),
+      ),
+    );
+  }
+  body.appendChild(button);
   if (music.listening) body.appendChild(buildVolume(music));
   return body;
 }

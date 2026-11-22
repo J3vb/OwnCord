@@ -48,14 +48,21 @@ export function withPeerBoundOffers(
 }
 
 /** A frame for a user who is not in the current channel's roster is ignored;
- *  an empty list clears the entry. */
+ *  an empty list clears the entry. `musicId` is the sharer whose music the
+ *  member listens to (0 = nobody, which clears that entry). */
 export function withPeerWatching(
   prev: VoiceState,
   userId: number,
   watching: readonly number[],
+  musicId = 0,
 ): VoiceState {
   const channelId = prev.currentChannelId;
   if (channelId === null || prev.voiceUsers.get(channelId)?.has(userId) !== true) return prev;
+  const watchState = withWatchedSet(prev, userId, watching);
+  return withListenedMusic(watchState, userId, musicId);
+}
+
+function withWatchedSet(prev: VoiceState, userId: number, watching: readonly number[]): VoiceState {
   const current = prev.peerWatching;
   const had = current?.get(userId);
   if (watching.length === 0) {
@@ -69,6 +76,37 @@ export function withPeerWatching(
   const next = new Map(current);
   next.set(userId, [...watching]);
   return { ...prev, peerWatching: next };
+}
+
+function withListenedMusic(prev: VoiceState, userId: number, musicId: number): VoiceState {
+  const current = prev.peerListening;
+  if ((current?.get(userId) ?? 0) === musicId) return prev;
+  const next = new Map(current);
+  if (musicId > 0) next.set(userId, musicId);
+  else next.delete(userId);
+  return { ...prev, peerListening: next };
+}
+
+/** Every member's watch set and music listen forgotten (the server re-sends them). */
+export function withoutPeerWatching(prev: VoiceState): VoiceState {
+  if ((prev.peerWatching?.size ?? 0) === 0 && (prev.peerListening?.size ?? 0) === 0) return prev;
+  return { ...prev, peerWatching: new Map(), peerListening: new Map() };
+}
+
+/** The channel members who listen to a sharer's music, as sorted user ids:
+ *  the members whose `music_id` is the sharer, plus `selfId` when it is you
+ *  who listens (`listeningTo`), never the sharer. Empty unless the sharer is
+ *  sharing music. */
+export function listenersOfMusic(state: VoiceState, sharerId: number, selfId: number): number[] {
+  const channelId = state.currentChannelId;
+  if (channelId === null || state.musicSharers?.has(sharerId) !== true) return [];
+  const members = state.voiceUsers.get(channelId);
+  const out: number[] = [];
+  for (const id of members?.keys() ?? []) {
+    if (id === sharerId || id === selfId) continue;
+    if (state.peerListening?.get(id) === sharerId) out.push(id);
+  }
+  return out.toSorted((a, b) => a - b);
 }
 
 /** The channel members who watch a sharer's screen, as sorted user ids: the

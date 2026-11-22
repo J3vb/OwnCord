@@ -956,6 +956,14 @@ video[hidden] + .video-surface {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.video-music__listeners {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
 .video-music__btn {
   display: inline-flex;
   align-items: center;

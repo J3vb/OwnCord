@@ -167,10 +167,20 @@ export function withoutVoiceUser(prev: VoiceState, payload: VoiceLeavePayload): 
   }
 
   const watching = prev.peerWatching;
-  if (watching?.has(payload.user_id) !== true) return { ...prev, voiceUsers: nextChannels };
+  const listening = prev.peerListening;
+  const hadWatching = watching?.has(payload.user_id) === true;
+  const hadListening = listening?.has(payload.user_id) === true;
+  if (!hadWatching && !hadListening) return { ...prev, voiceUsers: nextChannels };
   const nextWatching = new Map(watching);
   nextWatching.delete(payload.user_id);
-  return { ...prev, voiceUsers: nextChannels, peerWatching: nextWatching };
+  const nextListening = new Map(listening);
+  nextListening.delete(payload.user_id);
+  return {
+    ...prev,
+    voiceUsers: nextChannels,
+    peerWatching: nextWatching,
+    peerListening: nextListening,
+  };
 }
 
 /** No LiveKit update reaches a channel this client is no longer in, so a ring
@@ -203,6 +213,7 @@ export function withJoinedChannel(prev: VoiceState, channelId: number, now: numb
     ...prev,
     // A direct switch: the old channel's watch sets are not this one's.
     peerWatching: new Map<number, readonly number[]>(),
+    peerListening: new Map<number, number>(),
     voiceUsers: withoutRings(prev.voiceUsers, prev.currentChannelId),
     currentChannelId: channelId,
     joinedAt: now,
@@ -249,6 +260,7 @@ export function withLeftChannel(prev: VoiceState, currentUserId: number): VoiceS
     peerKeySlots: new Set<number>(),
     peerBoundOffers: new Set<number>(),
     peerWatching: new Map<number, readonly number[]>(),
+    peerListening: new Map<number, number>(),
     localMusic: false,
     musicSharers: new Set<number>(),
     listeningTo: null,

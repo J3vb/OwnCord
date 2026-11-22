@@ -39,6 +39,7 @@ type slotSnap struct {
 	completed bool
 	e2ee      e2eeAnnounce
 	watching  []int64
+	musicID   int64
 }
 
 type modFlags struct {
@@ -59,6 +60,7 @@ type voiceSlot struct {
 	voiceJoinCompleted bool
 	e2ee               e2eeAnnounce // the last voice_e2ee_announce (key, signature, video decode list)
 	watching           []int64      // users whose screen share this member watches (voice_watch); sorted, replaced and never changed in place
+	listeningTo        int64        // the sharer whose music this member listens to (voice_watch music_id); 0 = nobody
 	// pendingModServerMuted/Deafened stash a moderator mute/deafen across a server-driven leave
 	// (voice_mod_move), which deletes the row they live in before the re-join. See
 	// stashModFlags/takeModFlags.
@@ -88,6 +90,7 @@ func (s *voiceSlot) setState(chID int64, joinToken string) {
 	s.voiceJoinToken = joinToken
 	s.voiceJoinCompleted = false
 	s.watching = nil // a new join instance watches nothing yet
+	s.listeningTo = 0
 }
 
 func (s *voiceSlot) adoptJoinToken(joinToken string) bool {
@@ -114,7 +117,7 @@ func (s *voiceSlot) markCompletedIfMatch(chID int64, joinToken string) bool {
 }
 
 func (s *voiceSlot) snapLocked() slotSnap {
-	return slotSnap{chID: s.voiceChID, joinToken: s.voiceJoinToken, completed: s.voiceJoinCompleted, e2ee: s.e2ee, watching: s.watching}
+	return slotSnap{chID: s.voiceChID, joinToken: s.voiceJoinToken, completed: s.voiceJoinCompleted, e2ee: s.e2ee, watching: s.watching, musicID: s.listeningTo}
 }
 
 func (s *voiceSlot) resetLocked() {
@@ -123,6 +126,7 @@ func (s *voiceSlot) resetLocked() {
 	s.voiceJoinCompleted = false
 	s.e2ee = e2eeAnnounce{}
 	s.watching = nil
+	s.listeningTo = 0
 }
 
 // clearState clears the membership and returns the old channel, token and completion, which
@@ -195,6 +199,7 @@ func (s *voiceSlot) adopt(snap slotSnap) bool {
 	s.voiceJoinCompleted = snap.completed
 	s.e2ee = snap.e2ee
 	s.watching = snap.watching
+	s.listeningTo = snap.musicID
 	return true
 }
 
@@ -232,15 +237,17 @@ func (s *voiceSlot) e2eeCopy() e2eeAnnounce {
 	return s.e2ee.clone()
 }
 
-// setWatchingIfChannel stores a copy of ids as the watched-screen-share set only while the
-// slot is in chID, so a frame decided against an old channel cannot land on a newer membership.
-func (s *voiceSlot) setWatchingIfChannel(chID int64, ids []int64) bool {
+// setWatchingIfChannel stores a copy of ids as the watched-screen-share set, and musicID as
+// the sharer whose music is listened to (0 = nobody), only while the slot is in chID, so a
+// frame decided against an old channel cannot land on a newer membership.
+func (s *voiceSlot) setWatchingIfChannel(chID int64, ids []int64, musicID int64) bool {
 	s.voiceMu.Lock()
 	defer s.voiceMu.Unlock()
 	if chID == 0 || s.voiceChID != chID {
 		return false
 	}
 	s.watching = append([]int64(nil), ids...)
+	s.listeningTo = musicID
 	return true
 }
 
@@ -250,13 +257,20 @@ func (s *voiceSlot) watchingCopy() []int64 {
 	return append([]int64(nil), s.watching...)
 }
 
-// watchingIfChannel returns a copy only while the slot is in chID, in one voiceMu hold, so a peer that moved
-// on is not reported for its old channel.
-func (s *voiceSlot) watchingIfChannel(chID int64) []int64 {
+// watchStateIfChannel returns the watched set and the listened-to sharer only while the slot is
+// in chID, in one voiceMu hold, like watchingIfChannel.
+func (s *voiceSlot) watchStateIfChannel(chID int64) ([]int64, int64) {
 	s.voiceMu.Lock()
 	defer s.voiceMu.Unlock()
 	if chID == 0 || s.voiceChID != chID {
-		return nil
+		return nil, 0
 	}
-	return append([]int64(nil), s.watching...)
+	return append([]int64(nil), s.watching...), s.listeningTo
+}
+
+// listeningCopy returns the sharer whose music the member listens to (0 = nobody).
+func (s *voiceSlot) listeningCopy() int64 {
+	s.voiceMu.Lock()
+	defer s.voiceMu.Unlock()
+	return s.listeningTo
 }

@@ -3493,21 +3493,26 @@ verifies the signature itself.
 ### voice_watch (Client -> Server)
 
 The whole set of users whose **screen share** this participant watches now
-(cameras are not counted). It is idempotent, so a lost or reordered frame
+(cameras are not counted), and optionally the one sharer whose **music** it
+listens to (`music_id`). It is idempotent, so a lost or reordered frame
 heals on the next send; clients re-send after a join and after a resume. An
-empty list is valid and means "watching nothing".
+empty list is valid and means "watching nothing". `music_id` is a single
+integer because a listener hears one music share at a time; `0` or an absent
+field means "listening to nobody", so an older client that never sends it
+reads as none.
 
 ```json
-{ "type": "voice_watch", "payload": { "user_ids": [2, 5] } }
+{ "type": "voice_watch", "payload": { "user_ids": [2, 5], "music_id": 7 } }
 ```
 
 The sender must be in a voice channel (otherwise `VOICE_ERROR`). More than 16
 ids answers `BAD_PAYLOAD`. The server drops ids that are not positive and the
 sender's own id, removes duplicates and sorts ascending; it does not check
-that the ids are in the channel or sharing (clients filter on display).
+that the ids are in the channel or sharing (clients filter on display). A
+`music_id` that is not positive, or is the sender's own id, is stored as `0`.
 Rate limited at 10 per 5 seconds per user (`RATE_LIMITED`). The set lives in
 memory on the member's voice slot, survives a resume, and is cleared on leave
-and on a new join.
+and on a new join, together with the `music_id`.
 
 ### voice_watching (Server -> Client, broadcast to voice channel)
 
@@ -3515,11 +3520,20 @@ Relayed to the other members of the same voice channel only (never the
 sender, nobody outside the channel) when a member's set is stored. It is an
 unsequenced pub/sub frame like `voice_e2ee_announce`: no `seq`, never
 replayed. The server therefore re-sends it on join and on resume, one frame
-per other member whose set is non-empty. There is no frame on leave; peers
-drop that user's entry on `voice_leave`. `user_ids` is always an array.
+per other member whose set is non-empty or who listens to someone's music.
+There is no frame on leave; peers drop that user's entry on `voice_leave`.
+`user_ids` is always an array. `music_id` is the sharer whose music `user_id`
+listens to; it is omitted when nobody is (so a frame is unchanged for a member
+who listens to no one); a member who only listens, with an empty
+`user_ids`, still gets a frame. An older server ignores `music_id` on
+`voice_watch` and never sends it, so listener names need a server with this
+field.
 
 ```json
-{ "type": "voice_watching", "payload": { "user_id": 1, "user_ids": [2, 5] } }
+{
+  "type": "voice_watching",
+  "payload": { "user_id": 1, "user_ids": [2, 5], "music_id": 7 }
+}
 ```
 
 ### voice_speak (Client -> Server)
