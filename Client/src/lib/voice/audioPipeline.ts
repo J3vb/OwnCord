@@ -365,12 +365,15 @@ export class AudioPipeline {
 
   /** Close (true) or open (false) the push-to-talk gate. It is applied to the
    *  live processor and to every one attached later, so a press or release
-   *  never touches the capture device or the SDK's mute. A room that gates
-   *  its own capture (NativeRoom) gets it too. */
-  setPttGated(gated: boolean): void {
+   *  never touches the capture device or the SDK's mute. A release's delay
+   *  (`releaseDelayMs`) runs on the processor's own audio clock, which a
+   *  hidden or minimised window does not slow down, and a press inside it
+   *  keeps the voice going. A room that gates its own capture (NativeRoom)
+   *  gets both too. */
+  setPttGated(gated: boolean, releaseDelayMs = 0): void {
     this.pttGated = gated;
-    this.processor?.setGate("ptt", gated);
-    (this.room as Partial<PttGatedRoom> | null)?.setPttGated?.(gated);
+    this.processor?.setGate("ptt", gated, releaseDelayMs / 1000);
+    (this.room as Partial<PttGatedRoom> | null)?.setPttGated?.(gated, releaseDelayMs);
   }
 
   /**

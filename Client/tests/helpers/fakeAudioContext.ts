@@ -92,7 +92,12 @@ export class FakeAudioContext {
   }
 
   createGain() {
-    const gain = { value: 1, setValueAtTime: vi.fn(), setTargetAtTime: vi.fn() };
+    const gain = {
+      value: 1,
+      setValueAtTime: vi.fn(),
+      setTargetAtTime: vi.fn(),
+      cancelScheduledValues: vi.fn(),
+    };
     gain.setValueAtTime.mockImplementation((v: number) => {
       gain.value = v;
     });

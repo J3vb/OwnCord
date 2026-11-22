@@ -156,6 +156,8 @@ export class NativeRoom extends NativeRoomRemote {
   private micBitrate: number | undefined;
   /** Push-to-talk's key is up: the session's open capture sends silence. */
   private pttGated = false;
+  /** A release's close waiting out its delay (setPttGated). */
+  private pttRelease: ReturnType<typeof setTimeout> | undefined;
   /** The input-sensitivity gate's threshold (0: none) and who hears its
    *  verdicts. */
   private voiceThreshold = 0;
@@ -228,8 +230,35 @@ export class NativeRoom extends NativeRoomRemote {
    *  gate (AudioPipeline.setPttGated): the key flips the session's gate,
    *  which zeroes the open capture's frames. It never opens or
    *  closes the capture, so a press is not clipped by a device reopen and
-   *  never opens a microphone the user muted. */
-  setPttGated(gated: boolean): void {
+   *  never opens a microphone the user muted. A release keeps the gate open
+   *  for `releaseDelayMs` first (the session's gate has no clock of its own),
+   *  and a press inside it cancels the close. */
+  setPttGated(gated: boolean, releaseDelayMs = 0): void {
+    this.dropPttRelease();
+    if (gated && releaseDelayMs > 0 && !this.pttGated) {
+      this.pttRelease = setTimeout(() => {
+        this.pttRelease = undefined;
+        this.applyPttGate(true);
+      }, releaseDelayMs);
+      return;
+    }
+    this.applyPttGate(gated);
+  }
+
+  private dropPttRelease(): void {
+    clearTimeout(this.pttRelease);
+    this.pttRelease = undefined;
+  }
+
+  /** The session ends: a close still waiting out its delay is recorded, not
+   *  sent, so a later connect starts with the key's real state. */
+  private settlePttRelease(): void {
+    if (this.pttRelease === undefined) return;
+    this.dropPttRelease();
+    this.pttGated = true;
+  }
+
+  private applyPttGate(gated: boolean): void {
     if (this.pttGated === gated) return;
     this.pttGated = gated;
     if (this.sessionId === null) return;
@@ -364,6 +393,7 @@ export class NativeRoom extends NativeRoomRemote {
     this.pending = null;
     this.releaseVideo();
     this.clearDecryptTimers();
+    this.settlePttRelease();
     this.stopInputLevels();
     if (id === null) return;
     this.sessionId = null;
@@ -474,6 +504,7 @@ export class NativeRoom extends NativeRoomRemote {
     this.state = "disconnected";
     this.statsTick = null;
     this.clearDecryptTimers();
+    this.settlePttRelease();
     this.emit(
       RoomEvent.Disconnected,
       reason === "ClientInitiated"

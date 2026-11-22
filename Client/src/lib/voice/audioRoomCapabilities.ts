@@ -2,9 +2,10 @@
 // room), which AudioPipeline probes for. Split from audioPipeline.ts.
 
 /** A room that gates its own capture for push-to-talk: the Linux NativeRoom,
- *  whose microphone is the Rust session's and never has a web processor. */
+ *  whose microphone is the Rust session's and never has a web processor. A
+ *  close keeps the voice going for `releaseDelayMs` first. */
 export interface PttGatedRoom {
-  setPttGated(gated: boolean): void;
+  setPttGated(gated: boolean, releaseDelayMs?: number): void;
 }
 
 /** A room that runs the sensitivity gate on its own capture (NativeRoom),

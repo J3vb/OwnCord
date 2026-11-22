@@ -160,10 +160,11 @@ export abstract class SessionMedia extends SessionShare {
   /** Push-to-talk: close (key up) or open (key down) the gate — the mic
    *  processor's, or the native room's own (AudioPipeline.setPttGated).
    *  Recorded in the store for the widget, applied to the live processor and
-   *  to every one attached later. */
-  setPttGated(gated: boolean): void {
+   *  to every one attached later. A key-up's `releaseDelayMs` keeps the
+   *  voice going that long after it. */
+  setPttGated(gated: boolean, releaseDelayMs = 0): void {
     setPttGatedState(gated);
-    this._media.setPttGated(gated);
+    this._media.setPttGated(gated, releaseDelayMs);
   }
 
   async reapplyAudioProcessing(): Promise<void> {

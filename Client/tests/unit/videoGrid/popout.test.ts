@@ -15,6 +15,7 @@ import {
   fakePopup,
   SCREEN_TILE,
   screenTileConfig,
+  stubTileSizes,
   tileLookups,
   makeTileConfig,
   useVideoGridHarness,
@@ -796,6 +797,50 @@ describe("VideoGrid", () => {
       popRow().click();
       grid.destroy?.();
       expect(popup.win.close).toHaveBeenCalled();
+    });
+
+    it("asks for tile sizes at the window's own pixel ratio, and again when that ratio changes", () => {
+      const { resize } = stubTileSizes();
+      const queries: Array<EventTarget & { media: string }> = [];
+      // The pop-out sits on a 200% monitor; the app window (jsdom) is at 100%.
+      const popWin = {
+        devicePixelRatio: 2,
+        matchMedia: (media: string) => {
+          const query = Object.assign(new EventTarget(), { media, matches: true });
+          queries.push(query);
+          return query;
+        },
+        requestAnimationFrame: (cb: FrameRequestCallback) => window.requestAnimationFrame(cb),
+        cancelAnimationFrame: (id: number) => window.cancelAnimationFrame(id),
+      };
+      Object.defineProperty(popup.doc, "defaultView", { configurable: true, value: popWin });
+      Object.defineProperty(popup.doc, "hidden", { configurable: true, value: false });
+      const setStreamView = vi.fn();
+      try {
+        grid.setCallbacks({ callControls: controls(), setStreamView, onExitGrid: vi.fn() });
+        grid.setExitVisible(true);
+        grid.addStream(OTTO, "Otto", fakeStream(), makeTileConfig({ audioUserId: OTTO }));
+        popRow().click();
+
+        resize({ [OTTO]: [640, 360] });
+        expect(setStreamView).toHaveBeenLastCalledWith(OTTO, {
+          enabled: true,
+          size: { width: 1280, height: 720 },
+        });
+
+        // Dragged onto a 150% monitor: the ratio changes, the CSS size does not.
+        popWin.devicePixelRatio = 1.5;
+        queries.at(-1)!.dispatchEvent(new Event("change"));
+        vi.advanceTimersByTime(150);
+        expect(setStreamView).toHaveBeenLastCalledWith(OTTO, {
+          enabled: true,
+          size: { width: 960, height: 540 },
+        });
+        // The next change is watched at the new ratio.
+        expect(queries.at(-1)!.media).toBe("(resolution: 1.5dppx)");
+      } finally {
+        vi.restoreAllMocks();
+      }
     });
 
     it("stays in the app window, with a toast, when no window opens", () => {

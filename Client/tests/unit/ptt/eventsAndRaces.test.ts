@@ -111,7 +111,8 @@ describe("ptt-state event listener", () => {
     press({ payload: false }); // key released
 
     await vi.waitFor(() => {
-      expect(mockSetPttGated).toHaveBeenCalledWith(true);
+      // With the default 20 ms release delay.
+      expect(mockSetPttGated).toHaveBeenCalledWith(true, 20);
     });
     expect(mockSetMuted).not.toHaveBeenCalled();
   });
@@ -525,9 +526,11 @@ describe("PTT binding lifecycle races", () => {
   });
 });
 
-// DP-30: a release keeps the gate open for the saved delay (D5: 20 ms by
+// DP-30: a release keeps transmitting for the saved delay (D5: 20 ms by
 // default, 0–2000 ms), and a press inside it cancels the close, so a short
-// pause between words never cuts the next one.
+// pause between words never cuts the next one. The delay runs on the mic
+// processor's own audio clock (micProcessor's setGate), never on a page timer:
+// a hidden or minimised window slows page timers down, the audio clock not.
 describe("ptt release delay", () => {
   beforeEach(() => {
     resetAll();
@@ -557,75 +560,52 @@ describe("ptt release delay", () => {
     await vi.dynamicImportSettled();
   }
 
-  const gateCalls = () => mockSetPttGated.mock.calls.map((c) => c[0]);
+  const gateCalls = () => mockSetPttGated.mock.calls;
 
-  it("a press after a release only toggles the gate and never touches mute", async () => {
+  it("a release reaches the gate at once with its delay, leaving no page timer to wait on", async () => {
     pttState.currentChannelId = 7;
     const key = await bind();
 
     await edgeOf(key, true);
     await edgeOf(key, false);
-    await vi.advanceTimersByTimeAsync(20);
-    await edgeOf(key, true);
 
-    expect(gateCalls()).toEqual([false, true, false]);
+    expect(gateCalls()).toEqual([[false], [true, 20]]);
+    expect(vi.getTimerCount()).toBe(0);
     expect(mockSetMuted).not.toHaveBeenCalled();
   });
 
-  it("release then press within the delay transmits continuously; release past the delay gates once", async () => {
+  it("a press during the delay opens the gate again at once, cancelling the close", async () => {
     pttState.currentChannelId = 7;
     const key = await bind();
 
     await edgeOf(key, true);
     await edgeOf(key, false);
-    await vi.advanceTimersByTimeAsync(10);
     await edgeOf(key, true);
-    await vi.advanceTimersByTimeAsync(100);
-    expect(gateCalls()).not.toContain(true);
 
-    await edgeOf(key, false);
-    await vi.advanceTimersByTimeAsync(19);
-    expect(gateCalls()).not.toContain(true);
-    await vi.advanceTimersByTimeAsync(1);
-    await vi.advanceTimersByTimeAsync(500);
-    expect(gateCalls().filter((g) => g)).toEqual([true]);
+    expect(gateCalls()).toEqual([[false], [true, 20], [false]]);
+    expect(pttState.pttGated).toBe(false);
   });
 
-  it("follows the saved delay, and a delay of 0 closes on the release itself", async () => {
+  it.each([
+    ["the saved delay", 300, 300],
+    ["a delay of 0, which closes on the release itself", 0, 0],
+    ["a saved delay capped at 2000 ms", 60_000, 2000],
+  ])("hands the gate %s", async (_, saved, sent) => {
     pttState.currentChannelId = 7;
-    testPrefs.set("pttReleaseDelayMs", 300);
+    testPrefs.set("pttReleaseDelayMs", saved);
     const key = await bind();
     await edgeOf(key, true);
     await edgeOf(key, false);
-    await vi.advanceTimersByTimeAsync(299);
-    expect(gateCalls()).toEqual([false]);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(gateCalls()).toEqual([false, true]);
-
-    testPrefs.set("pttReleaseDelayMs", 0);
-    await edgeOf(key, true);
-    await edgeOf(key, false);
-    expect(gateCalls()).toEqual([false, true, false, true]);
+    expect(gateCalls()).toEqual([[false], [true, sent]]);
   });
 
-  it("caps a saved delay at 2000 ms", async () => {
-    pttState.currentChannelId = 7;
-    testPrefs.set("pttReleaseDelayMs", 60_000);
-    const key = await bind();
-    await edgeOf(key, true);
-    await edgeOf(key, false);
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(gateCalls()).toEqual([false, true]);
-  });
-
-  it("a pending close is dropped when the call ends or the binding is cleared", async () => {
+  it("a release after the call ended gates nothing", async () => {
     pttState.currentChannelId = 7;
     const key = await bind();
     await edgeOf(key, true);
-    await edgeOf(key, false);
     pttState.currentChannelId = null;
-    await vi.advanceTimersByTimeAsync(100);
-    expect(gateCalls()).toEqual([false]);
+    await edgeOf(key, false);
+    expect(gateCalls()).toEqual([[false]]);
   });
 });
 

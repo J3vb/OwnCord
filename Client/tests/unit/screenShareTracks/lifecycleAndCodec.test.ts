@@ -382,7 +382,11 @@ describe("video codec", () => {
 
     await enableScreenshare({ manualScreenTracks: [] }, fakeDeps(rig.room));
 
-    expect(fitGpuH264Share).toHaveBeenCalledExactlyOnceWith(video);
+    // With the size box the capture was opened with (the default, medium).
+    expect(fitGpuH264Share).toHaveBeenCalledExactlyOnceWith(
+      video,
+      expect.objectContaining({ width: 1280, height: 720 }),
+    );
     expect(fitGpuH264Share.mock.invocationCallOrder[0]!).toBeLessThan(
       rig.publishTrack.mock.invocationCallOrder[0]!,
     );

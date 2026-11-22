@@ -22,6 +22,8 @@ export interface GridState {
   people: readonly GridPerson[];
   readonly personCells: Map<number, HTMLDivElement>;
   resizeObserver: ResizeObserver | null;
+  /** Owns the grid window's pixel-ratio change listener (observeGrid). */
+  pixelRatioWatch: Disposable | null;
   resizeRafId: number;
   /** The window `resizeRafId` was requested on. */
   rafWindow: Window;
@@ -115,6 +117,7 @@ export interface GridApi {
   onFullscreenChange(): void;
   syncFullscreenUi(): void;
   observeGrid(): void;
+  unobserveGrid(): void;
   windowFullscreen(on: boolean): void;
   dropFullscreen(): void;
   buildCallControls(

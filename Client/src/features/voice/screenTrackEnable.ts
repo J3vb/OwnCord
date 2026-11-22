@@ -289,7 +289,7 @@ async function prepareShareCodec(
   if (!isLinuxDesktop())
     applyScreenShareContentHint(videoTrack.mediaStreamTrack, captureOptions, choice.codec);
   if (h264GpuPublish(choice.codec)) {
-    await fitGpuH264Share(videoTrack);
+    await fitGpuH264Share(videoTrack, captureOptions.resolution);
   }
   return choice;
 }

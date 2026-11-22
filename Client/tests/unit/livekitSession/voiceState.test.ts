@@ -817,12 +817,13 @@ describe("LiveKitSession", () => {
       const gateSpy = vi.spyOn((session as any)._audioPipeline, "setPttGated");
 
       session.setPttGated(false);
-      session.setPttGated(true);
+      session.setPttGated(true, 20);
 
       expect(setPttGated).toHaveBeenNthCalledWith(1, false);
       expect(setPttGated).toHaveBeenNthCalledWith(2, true);
-      expect(gateSpy).toHaveBeenNthCalledWith(1, false);
-      expect(gateSpy).toHaveBeenNthCalledWith(2, true);
+      // The release delay goes to the pipeline, which counts it on the audio clock.
+      expect(gateSpy).toHaveBeenNthCalledWith(1, false, 0);
+      expect(gateSpy).toHaveBeenNthCalledWith(2, true, 20);
       // Never a mute: PTT does not touch setMicrophoneEnabled.
       expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
       gateSpy.mockRestore();

@@ -156,7 +156,7 @@ async function prepareFreshVideo(
   applyScreenShareContentHint(freshVideo.mediaStreamTrack, captureOptions, codec);
   // A window swapped for a wide screen must still fit the GPU encoder.
   if (h264GpuPublish(codec)) {
-    await fitGpuH264Share(freshVideo);
+    await fitGpuH264Share(freshVideo, captureOptions.resolution);
     if (superseded(state, deps, live)) {
       for (const t of run.fresh) t.stop();
       return null;

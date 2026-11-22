@@ -1204,8 +1204,8 @@ describe("session wiring", () => {
     expect(made.audioPipeline.setVoiceSensitivity).toHaveBeenCalledWith(12);
     made.media.applyInputMode();
     expect(made.audioPipeline.applyInputMode).toHaveBeenCalledTimes(1);
-    made.media.setPttGated(true);
-    expect(made.audioPipeline.setPttGated).toHaveBeenCalledWith(true);
+    made.media.setPttGated(true, 20);
+    expect(made.audioPipeline.setPttGated).toHaveBeenCalledWith(true, 20);
     await made.media.reapplyAudioProcessing();
     expect(made.audioPipeline.reapplyAudioProcessing).toHaveBeenCalledWith(made.onError);
     await made.media.reapplyEnhancedNoiseSuppression();

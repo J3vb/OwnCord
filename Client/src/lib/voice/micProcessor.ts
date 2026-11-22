@@ -113,8 +113,11 @@ export interface MicProcessor extends TrackProcessor<Track.Kind.Audio, AudioProc
   readonly inputGain: number;
   readonly enhanced: boolean;
   setInputGain(gain: number): void;
-  /** Close or open one of the two gates; the output is open only when both are. */
-  setGate(source: GateSource, closed: boolean): void;
+  /** Close or open one of the two gates; the output is open only when both are.
+   *  A push-to-talk close with `closeAfterS` (the release delay) takes effect
+   *  that many seconds later on the graph's own clock, which keeps time while
+   *  the window is hidden; an open before then cancels it. */
+  setGate(source: GateSource, closed: boolean, closeAfterS?: number): void;
   isGateClosed(source: GateSource): boolean;
   setLookahead(seconds: number): void;
   setSileroBufferMs(ms: number): void;
@@ -149,11 +152,19 @@ export function createMicProcessor(): MicProcessor {
   let detecting = false;
   let inputGain = 1;
   const closed: Record<GateSource, boolean> = { vad: false, ptt: false };
+  /** When a delayed push-to-talk close takes effect, on `ctx`'s clock. */
+  let pttClosesAt = 0;
   let destroyed = false;
 
   function applyGain(timeConstant: number): void {
     if (gain === null) return;
-    gain.gain.setTargetAtTime(closed.vad || closed.ptt ? 0 : 1, ctx.currentTime, timeConstant);
+    const now = ctx.currentTime;
+    // A release still inside its delay keeps the voice going until then.
+    const releasing = closed.ptt && pttClosesAt > now;
+    const open = !closed.vad && (!closed.ptt || releasing);
+    gain.gain.cancelScheduledValues(now);
+    gain.gain.setTargetAtTime(open ? 1 : 0, now, timeConstant);
+    if (open && releasing) gain.gain.setTargetAtTime(0, pttClosesAt, GAIN_TIME_CONSTANT_S);
   }
 
   function applyLookahead(): void {
@@ -332,9 +343,10 @@ export function createMicProcessor(): MicProcessor {
       entry?.gain.setTargetAtTime(next, ctx.currentTime, GAIN_TIME_CONSTANT_S);
     },
 
-    setGate(gate: GateSource, isClosed: boolean): void {
+    setGate(gate: GateSource, isClosed: boolean, closeAfterS = 0): void {
       if (closed[gate] === isClosed) return;
       closed[gate] = isClosed;
+      if (gate === "ptt") pttClosesAt = isClosed ? ctx.currentTime + closeAfterS : 0;
       // Closing is gentle; opening has to finish inside the lookahead.
       applyGain(isClosed ? GAIN_TIME_CONSTANT_S : GATE_OPEN_TIME_CONSTANT_S);
     },

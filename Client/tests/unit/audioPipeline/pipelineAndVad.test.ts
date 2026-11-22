@@ -87,10 +87,27 @@ describe("AudioPipeline", () => {
         setPttGated,
       } as never);
 
-      pipeline.setPttGated(true);
+      pipeline.setPttGated(true, 20);
       pipeline.setPttGated(false);
 
-      expect(setPttGated.mock.calls).toEqual([[true], [false]]);
+      // The release delay goes along: that room counts it itself.
+      expect(setPttGated.mock.calls).toEqual([
+        [true, 20],
+        [false, 0],
+      ]);
+    });
+
+    it("hands a release's delay to the processor's own clock", async () => {
+      prefs.set("voiceSensitivity", 100);
+      const pipeline = new AudioPipeline();
+      const track = micTrack();
+      await pipeline.attach(track);
+      const gain = outputGain(contextOf(track));
+
+      pipeline.setPttGated(true, 20);
+
+      expect(gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 0.02, expect.any(Number));
+      expect(pipeline.isPttGated).toBe(true);
     });
   });
 

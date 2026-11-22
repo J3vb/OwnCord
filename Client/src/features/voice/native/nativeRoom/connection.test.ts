@@ -319,6 +319,44 @@ describe("NativeRoom room surface", () => {
       ]);
     });
 
+    it("keeps the session's gate open through a release's delay; a press inside it keeps it open", async () => {
+      vi.useFakeTimers();
+      try {
+        const room = createNativeRoom(audio);
+        await room.connect("u", "t");
+        await room.localParticipant.setMicrophoneEnabled(true);
+        host.calls.length = 0;
+
+        room.setPttGated(true, 300);
+        vi.advanceTimersByTime(299);
+        expect(gateCalls()).toEqual([]);
+        // A new press during the delay: the gate never closed.
+        room.setPttGated(false);
+        vi.advanceTimersByTime(1000);
+        expect(gateCalls()).toEqual([]);
+
+        room.setPttGated(true, 300);
+        vi.advanceTimersByTime(300);
+        expect(gateCalls()).toEqual([["setPttGated", [1, true]]]);
+        room.setPttGated(false);
+        room.setPttGated(true, 0);
+        expect(gateCalls().slice(1)).toEqual([
+          ["setPttGated", [1, false]],
+          ["setPttGated", [1, true]],
+        ]);
+
+        // A disconnect settles a close still waiting out its delay, unsent.
+        room.setPttGated(false);
+        room.setPttGated(true, 300);
+        await room.disconnect();
+        host.calls.length = 0;
+        vi.advanceTimersByTime(300);
+        expect(gateCalls()).toEqual([]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
     it("an explicit mute still stops the capture, and a press never reopens it", async () => {
       const room = createNativeRoom(audio);
       await room.connect("u", "t");
