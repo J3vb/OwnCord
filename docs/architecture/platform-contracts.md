@@ -103,8 +103,8 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 32    |
-| Distinct `invoke` command names called from `Client/src/`  | 132   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 135   |
+| Distinct `invoke` command names called from `Client/src/`  | 133   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 136   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
