@@ -270,6 +270,7 @@ export class LiveKitSession extends SessionReconnect {
     this._eventHandlers.handleConnected(room);
     this._remoteTracks.dropUnpublishedWatches();
     this._remoteTracks.removeUnpublishedTiles();
+    this._remoteTracks.reviewListening();
   }
 
   /** Resolves once the room's disconnect has completed (the native room's,

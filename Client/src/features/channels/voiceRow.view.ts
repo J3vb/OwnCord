@@ -66,6 +66,9 @@ export type VoiceUserRowModel = {
   readonly music?: boolean;
   /** Mute music is on for a member who shares: the note is dimmed. */
   readonly musicMuted?: boolean;
+  /** The Listen pill after the note: "on" while you listen to this member
+   *  (drawn as Listening). Absent draws none. */
+  readonly listen?: "off" | "on";
   readonly audio: VoiceAudioModel | null;
   /** Muted for this client only. */
   readonly localMuted: boolean;
@@ -136,6 +139,31 @@ function musicNote(muted: boolean): HTMLElement {
   return note;
 }
 
+/** The pill that starts or stops listening to a member's music. */
+function listenPill(model: VoiceUserRowModel): HTMLElement {
+  const on = model.listen === "on";
+  const pill = createElement("button", {
+    type: "button",
+    class: on ? "vu-listen vu-listen--on" : "vu-listen",
+    "aria-pressed": String(on),
+    "aria-label": shellText(on ? "channel.stopListeningTo" : "channel.listenTo", {
+      name: model.name,
+    }),
+    "data-testid": `voice-listen-${model.userId}`,
+  });
+  pill.appendChild(createIcon(on ? "audio-lines" : "headphones", 12));
+  pill.appendChild(
+    createElement("span", {}, shellText(on ? "channel.listening" : "channel.listen")),
+  );
+  return pill;
+}
+
+/** The note beside a sharer, and the Listen pill after it. */
+function appendMusic(row: HTMLElement, model: VoiceUserRowModel): void {
+  if (model.music === true) row.appendChild(musicNote(model.musicMuted === true));
+  if (model.listen !== undefined) row.appendChild(listenPill(model));
+}
+
 export function drawVoiceUserRow(
   model: VoiceUserRowModel,
   createAvatar: CreateAvatar,
@@ -160,7 +188,7 @@ export function drawVoiceUserRow(
   row.appendChild(avatar);
   row.appendChild(createElement("span", { class: "vu-name" }, model.name));
 
-  if (model.music === true) row.appendChild(musicNote(model.musicMuted === true));
+  appendMusic(row, model);
   if (model.camera) row.appendChild(iconSpan("vu-status", "camera"));
   if (model.live) {
     row.appendChild(iconSpan("vu-status", "monitor"));

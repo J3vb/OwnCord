@@ -492,14 +492,38 @@ describe("music shares", () => {
     voiceStore.setState((prev) => ({ ...prev, musicSharers: new Set<number>() }));
   });
 
-  it("subscribes a published music track without a watch and notes its sharer", () => {
+  it("notes the sharer of a published music track but keeps it unsubscribed until listened to", () => {
     const h = build();
     const music = musicPub();
 
     h.handlers.handleTrackPublished(music, participant("user-7:tok"));
 
-    expect(music.setSubscribed).toHaveBeenCalledWith(true);
+    expect(music.setSubscribed).toHaveBeenCalledWith(false);
+    expect(music.setSubscribed).not.toHaveBeenCalledWith(true);
     expect(sharers().has(7)).toBe(true);
+  });
+
+  it("subscribes a published music track of the sharer being listened to", () => {
+    const h = build();
+    h.spies.isListening.mockImplementation((id: number) => id === 7);
+    const music = musicPub();
+
+    h.handlers.handleTrackPublished(music, participant("user-7:tok"));
+
+    expect(music.setSubscribed).toHaveBeenCalledWith(true);
+  });
+
+  it("subscribes only the listened-to sharer's music when two are published", () => {
+    const h = build();
+    h.spies.isListening.mockImplementation((id: number) => id === 7);
+    const alex = musicPub();
+    const sam = musicPub();
+
+    h.handlers.handleTrackPublished(sam, participant("user-8:tok"));
+    h.handlers.handleTrackPublished(alex, participant("user-7:tok"));
+
+    expect(alex.setSubscribed).toHaveBeenLastCalledWith(true);
+    expect(sam.setSubscribed).toHaveBeenLastCalledWith(false);
   });
 
   it("still holds a screen share's sound until it is watched", () => {
@@ -512,8 +536,9 @@ describe("music shares", () => {
     expect(sharers().has(7)).toBe(false);
   });
 
-  it("plays a subscribed music track without the watch gate", () => {
+  it("plays a subscribed music track of the sharer being listened to", () => {
     const h = build();
+    h.spies.isListening.mockImplementation((id: number) => id === 7);
     const music = musicPub();
     const track = audioTrack();
 
@@ -521,6 +546,26 @@ describe("music shares", () => {
 
     expect(music.setSubscribed).not.toHaveBeenCalledWith(false);
     expect(h.audioElements.handleTrackSubscribedAudio).toHaveBeenCalled();
+  });
+
+  it("drops a late subscription of music nobody listens to, as for an unwatched share", () => {
+    const h = build();
+    // The viewer switched to Alex (7) while Sam's (8) subscription was arriving.
+    h.spies.isListening.mockImplementation((id: number) => id === 7);
+    const sam = musicPub();
+
+    h.handlers.handleTrackSubscribed(audioTrack(), sam, participant("user-8:tok"));
+
+    expect(sam.setSubscribed).toHaveBeenCalledWith(false);
+    expect(h.audioElements.handleTrackSubscribedAudio).not.toHaveBeenCalled();
+  });
+
+  it("tells the session when a sharer's music is unpublished, so a reconnect can bring it back", () => {
+    const h = build();
+
+    h.handlers.handleTrackUnpublished(musicPub(), participant("user-7:tok"));
+
+    expect(h.spies.musicEnded).toHaveBeenCalledWith(7);
   });
 
   it("drops the sharer when its music track is unpublished", () => {

@@ -19,6 +19,7 @@ import { createLazyScreen } from "@lib/ui/lazyScreen";
 import { createLogger } from "@lib/logger";
 import type {
   CallState,
+  GridMusic,
   GridPerson,
   TileConfig,
   VideoGridCallbacks,
@@ -64,6 +65,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
   let callState: CallState | null = null;
   let exitVisible = false;
   let people: readonly GridPerson[] = [];
+  let music: readonly GridMusic[] = [];
   let speaking: ReadonlySet<number> | null = null;
   let audioState: ReadonlyMap<number, { muted: boolean; deafened: boolean }> | null = null;
   let viewers: ReadonlyMap<number, readonly string[]> | null = null;
@@ -86,6 +88,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
     callbacks = null;
     callState = null;
     people = [];
+    music = [];
     speaking = null;
     audioState = null;
     viewers = null;
@@ -102,6 +105,7 @@ export function createLazyVideoGrid(): LazyVideoGrid {
     if (viewers !== null) grid.setStreamViewers(viewers);
     if (speaking !== null) grid.setSpeaking(speaking);
     if (people.length > 0) grid.setPeople(people);
+    if (music.length > 0) grid.setMusic(music);
     for (const [tileId, s] of streams) {
       grid.addStream(tileId, s.username, liveOrNull(s.stream), s.config);
       if (s.relabel !== undefined) grid.setLabel(tileId, s.relabel.username, s.relabel.name);
@@ -254,6 +258,15 @@ export function createLazyVideoGrid(): LazyVideoGrid {
         return;
       }
       people = next;
+      if (next.length > 0) load(true);
+    },
+
+    setMusic(next): void {
+      if (real !== null) {
+        real.setMusic(next);
+        return;
+      }
+      music = next;
       if (next.length > 0) load(true);
     },
 

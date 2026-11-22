@@ -4,6 +4,7 @@
 import type { StreamSample, VideoView } from "./remoteTracks";
 import { RemoteTracks } from "./remoteTracks";
 import { voiceStore } from "@stores/voice.store";
+import { withListeningTo } from "@stores/voicePeers";
 import { noteWatchSent } from "@lib/voice/watchRequest";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
 import { SessionCore } from "./sessionCore";
@@ -34,6 +35,9 @@ export abstract class SessionRemote extends SessionCore {
     tracks.onWatchingChange = (ids) => {
       if (!this._leavingVoice) this.sendWatching(ids);
     };
+    // The session owns the subscription, so it is the one writer of the field.
+    tracks.onListeningChange = (userId) =>
+      voiceStore.setState((prev) => withListeningTo(prev, userId));
     return tracks;
   }
 
@@ -111,5 +115,11 @@ export abstract class SessionRemote extends SessionCore {
   /** A remote stream ended: drop its watch without counting as Stop watching. */
   forgetRemoteVideoWatch(userId: number, type: "camera" | "screenshare"): void {
     this._remoteTracks.forgetWatch(userId, type);
+  }
+
+  /** Listen to a remote sharer's music, or to nobody (null): one at a time,
+   *  and silent until asked for. */
+  listenToMusic(userId: number | null): void {
+    this._remoteTracks.listen(userId);
   }
 }

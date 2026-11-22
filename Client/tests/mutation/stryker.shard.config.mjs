@@ -97,6 +97,8 @@ export const shards = {
     "src/features/voice/routeSlot.ts",
     "src/features/voice/shareSenderStats.ts",
     "src/features/voice/videoGrid/gridCards.ts",
+    "src/features/voice/videoGrid/gridMusicTile.ts",
+    "src/features/voice/widget/listeningBar.ts",
   ],
   "livekit-10": [
     "src/features/voice/backgroundCall.ts",

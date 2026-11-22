@@ -38,6 +38,10 @@ export interface RoomEventDeps {
   getOnRemoteVideoRemovedCallback: () => RemoteVideoRemovedCallback | null;
   /** The viewer chose to watch this user's camera or screen share. */
   isWatched: (userId: number, isScreenshare: boolean) => boolean;
+  /** The viewer chose to listen to this user's music share. */
+  isListening: (userId: number) => boolean;
+  /** This user's music share was unpublished (a reconnect republishes it). */
+  musicEnded: (userId: number) => void;
   getOnErrorCallback: () => ((message: string) => void) | null;
   isConnecting: () => boolean;
   isReconnecting: () => boolean;

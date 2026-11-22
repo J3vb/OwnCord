@@ -17,6 +17,7 @@ export function subscribeVoiceWidget(render: () => void): Array<() => void> {
         camera: s.localCamera,
         screenshare: s.localScreenshare,
         music: s.localMusic === true,
+        listeningTo: s.listeningTo ?? null,
         shareRev: s.localShareRev,
         listenOnly: s.listenOnly,
         voiceStatus: s.voiceStatus,
@@ -32,6 +33,7 @@ export function subscribeVoiceWidget(render: () => void): Array<() => void> {
         a.camera === b.camera &&
         a.screenshare === b.screenshare &&
         a.music === b.music &&
+        a.listeningTo === b.listeningTo &&
         a.shareRev === b.shareRev &&
         a.listenOnly === b.listenOnly &&
         a.voiceStatus === b.voiceStatus &&

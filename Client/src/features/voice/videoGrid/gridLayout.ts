@@ -84,9 +84,10 @@ export function createGridLayout(st: GridState, api: GridApi) {
     return allTiles().filter((el) => !el.hidden);
   }
 
-  /** Every tile in layout order: streams, then the avatar tiles. */
+  /** Every tile in layout order: streams, the music cards, then the avatar tiles. */
   function allTiles(): HTMLDivElement[] {
     const tiles = [...st.cells.values()].map((e) => e.el);
+    tiles.push(...api.musicTiles());
     for (const person of st.people) {
       const cell = st.personCells.get(person.userId);
       if (cell !== undefined) tiles.push(cell);
@@ -94,9 +95,10 @@ export function createGridLayout(st: GridState, api: GridApi) {
     return tiles;
   }
 
-  /** Re-seat the tiles after a change: people follow the streams. */
+  /** Re-seat the tiles after a change: music and people follow the streams. */
   function relayout(): void {
     syncPeople();
+    api.syncMusic();
     // A focused tile the view toggles hide drops focus: back to the grid.
     const focusBefore = st.focusedTileId;
     const savedFocus = focusBefore === null ? null : captureFocusedControl();

@@ -119,6 +119,10 @@ export interface VoiceState {
    *  included while you share. Read from the room's publications, not the
    *  server, and cleared on leave. Optional for the fixture reason above. */
   readonly musicSharers?: ReadonlySet<number>;
+  /** The remote sharer whose music you listen to (one at a time), or null.
+   *  Written from the voice session's RemoteTracks, which owns the
+   *  subscription; reset on leave. Optional for the fixture reason above. */
+  readonly listeningTo?: number | null;
   /** Bumped when the live camera's capture is replaced without the camera
    *  going off (a device switch): the self tile redraws on the new track. */
   readonly localCameraRev?: number;
@@ -223,6 +227,7 @@ export function createVoiceState(): VoiceState {
     peerWatching: new Map(),
     localMusic: false,
     musicSharers: new Set(),
+    listeningTo: null,
     localGateSpeaking: null,
   };
 }

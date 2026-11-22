@@ -2,7 +2,7 @@
  *  badges, stream viewers, tile labels, your call controls, and the grid's
  *  load on a join. */
 
-import type { CallState } from "./videoGrid/VideoGrid";
+import type { CallState, GridMusic } from "./videoGrid/VideoGrid";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { uiStore } from "@stores/ui.store";
 import { isSelfMuted, streamViewers, type VoiceState, type VoiceUser } from "@stores/voice.store";
@@ -19,6 +19,7 @@ export type GridSyncMemo = Pick<
   | "prevSpeaking"
   | "prevAudioState"
   | "prevViewers"
+  | "prevMusic"
   | "prevCallState"
   | "prevTileLabels"
   | "gridLoadChannel"
@@ -33,6 +34,15 @@ export interface GridSyncDeps {
   readonly tileLabel: (userId: number, isScreenshare: boolean) => string;
   readonly personName: (userId: number) => string | undefined;
   readonly syncCallState: (state: VoiceState) => void;
+  /** Your own user id (0 when not signed in): you never get a music tile. */
+  readonly selfId: () => number;
+  /** The music card's actions: listen to a sharer (null stops), and the
+   *  per-user Music volume the slider shows and sets. */
+  readonly music: {
+    readonly listen: (userId: number | null) => void;
+    readonly volume: (userId: number) => number;
+    readonly setVolume: (userId: number, percent: number) => void;
+  };
 }
 
 function rosterOf(state: VoiceState, channelId: number | null): Iterable<VoiceUser> {
@@ -143,6 +153,38 @@ function syncViewers(
   deps.grid()?.setStreamViewers(viewerNames);
 }
 
+/** A music card for each other member of the channel sharing music, in user
+ *  id order; the one you listen to shows the volume and Stop listening. Pushed
+ *  only when the sharers, who is listened to or a name changed. */
+function syncMusic(
+  state: VoiceState,
+  channelId: number | null,
+  memo: GridSyncMemo,
+  deps: GridSyncDeps,
+): void {
+  const self = deps.selfId();
+  const listeningTo = state.listeningTo ?? null;
+  const roster = channelId === null ? undefined : state.voiceUsers.get(channelId);
+  const tiles: GridMusic[] = [];
+  for (const userId of [...(state.musicSharers ?? [])].toSorted((a, b) => a - b)) {
+    if (userId === self) continue;
+    const name = deps.personName(userId) || roster?.get(userId)?.username || "";
+    tiles.push({
+      userId,
+      name,
+      listening: userId === listeningTo,
+      volume: deps.music.volume(userId),
+      onListen: () => deps.music.listen(userId),
+      onStop: () => deps.music.listen(null),
+      onVolume: (percent) => deps.music.setVolume(userId, percent),
+    });
+  }
+  const key = tiles.map((t) => `${t.userId}:${t.listening ? 1 : 0}:${t.name}`).join(";");
+  if (key === memo.prevMusic) return;
+  memo.prevMusic = key;
+  deps.grid()?.setMusic(tiles);
+}
+
 /**
  * Relabel an already-open remote tile whose display name changed (mid-call
  * rename) — addStream only runs once per tile, so nothing else keeps its
@@ -205,6 +247,7 @@ export function syncVideoGrid(state: VoiceState, memo: GridSyncMemo, deps: GridS
   syncSpeaking(state, channelId, memo, deps);
   syncAudioBadges(state, channelId, memo, deps);
   syncViewers(state, channelId, memo, deps);
+  syncMusic(state, channelId, memo, deps);
   deps.syncCallState(state);
   const sig = voiceSignature(state, channelId, memo, deps);
   if (sig !== memo.prevVideoSignature) {

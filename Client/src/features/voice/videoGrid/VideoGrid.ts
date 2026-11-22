@@ -19,6 +19,7 @@ import { createGridLayout } from "./gridLayout";
 import { createGridCallBar } from "./gridCallBar";
 import { createGridWatch } from "./gridWatch";
 import { createGridStreams } from "./gridStreams";
+import { createGridMusic } from "./gridMusicTile";
 import { createGridTileSize } from "./gridTileSize";
 import { createGridStats } from "./gridStats";
 
@@ -115,6 +116,20 @@ export interface GridPerson {
   readonly marksOwnState?: true;
 }
 
+/** A remote member sharing music, drawn as a card with Listen to music (or,
+ *  while you listen to them, the volume and Stop listening). The host owns
+ *  the state and the actions; the grid only draws. */
+export interface GridMusic {
+  readonly userId: number;
+  readonly name: string;
+  readonly listening: boolean;
+  /** Their Music volume, 0 to 100, as the slider starts. */
+  readonly volume: number;
+  readonly onListen: () => void;
+  readonly onStop: () => void;
+  readonly onVolume: (percent: number) => void;
+}
+
 export interface CallState {
   readonly muted: boolean;
   readonly deafened: boolean;
@@ -167,6 +182,9 @@ export interface VideoGridComponent extends MountableComponent {
   /** The people to draw as avatar tiles, after the streams. A person's tile
    *  steps aside while their camera tile is up. Not counted by hasStreams. */
   setPeople(people: readonly GridPerson[]): void;
+  /** The remote members sharing music, each a card beside the tiles. Not
+   *  counted by hasStreams. */
+  setMusic(music: readonly GridMusic[]): void;
   /** Ring the camera and avatar tiles of the users speaking now. */
   setSpeaking(userIds: ReadonlySet<number>): void;
   /** Mute/deafen state by userId, shown as a badge on the camera and avatar
@@ -207,6 +225,8 @@ export function createVideoGrid(): VideoGridComponent {
     pinned: new Set(),
     people: [],
     personCells: new Map<number, HTMLDivElement>(),
+    music: [],
+    musicCells: new Map<number, HTMLDivElement>(),
     resizeObserver: null,
     pixelRatioWatch: null,
     resizeRafId: 0,
@@ -254,6 +274,7 @@ export function createVideoGrid(): VideoGridComponent {
     createGridWatch(st, api),
     createGridTileSize(st, api),
     createGridStreams(st, api),
+    createGridMusic(st, api),
   );
 
   function setPeople(next: readonly GridPerson[]): void {
@@ -356,6 +377,7 @@ export function createVideoGrid(): VideoGridComponent {
     st.focusedTileId = null;
     st.people = [];
     st.personCells.clear();
+    api.resetMusic();
     st.callView = false;
     st.viewBar = null;
     st.viewBtn = null;
@@ -379,6 +401,7 @@ export function createVideoGrid(): VideoGridComponent {
     setFocusedTile: api.setFocusedTile,
     getFocusedTileId: api.getFocusedTileIdFn,
     setPeople,
+    setMusic: api.setMusic,
     setSpeaking,
     setUserAudioState,
     setStreamViewers,

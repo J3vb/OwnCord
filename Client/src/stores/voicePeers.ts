@@ -188,3 +188,8 @@ export function withLocalMusic(prev: VoiceState, sharing: boolean, self: number)
   }
   return { ...prev, localMusic: sharing, musicSharers: next };
 }
+
+/** You listen to `userId`'s music, or to nobody (null). */
+export function withListeningTo(prev: VoiceState, userId: number | null): VoiceState {
+  return (prev.listeningTo ?? null) === userId ? prev : { ...prev, listeningTo: userId };
+}

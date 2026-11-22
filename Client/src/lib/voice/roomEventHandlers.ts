@@ -181,13 +181,12 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     markFirstRemoteTrackSubscribed();
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
-      // A music share is heard by default; only a screen share's sound waits
-      // for its Watch.
+      // A late subscription nobody asked for is dropped: a share's sound
+      // waits for its Watch, music for its Listen.
       if (
         publication.source === Track.Source.ScreenShareAudio &&
-        !isMusicPublication(publication) &&
         userId > 0 &&
-        !deps.isWatched(userId, true)
+        !(isMusicPublication(publication) ? deps.isListening(userId) : deps.isWatched(userId, true))
       ) {
         publication.setSubscribed(false);
         return;
@@ -228,7 +227,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
   /** Opt-in watching: the room connects without auto-subscribe, so this is
    *  what subscribes. A voice plays unless deafened; a camera or a screen
    *  share (and its audio) only once the viewer watches it, and until then
-   *  its tile offers Watch. */
+   *  its tile offers Watch; music only while listened to. */
   const handleTrackPublished = (
     publication: VoiceRemotePublication,
     participant: VoiceRemoteParticipant,
@@ -240,9 +239,9 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     const userId = parseUserId(participant.identity);
     const isVideo = publication.kind === Track.Kind.Video;
     if (isMusicPublication(publication)) {
-      // Heard by default, at the user's remembered level; deafen mutes it.
+      // Silent until listened to (one sharer at a time); deafen mutes it.
       if (userId > 0) setMusicSharer(userId, true);
-      publication.setSubscribed(true);
+      publication.setSubscribed(userId > 0 && deps.isListening(userId));
       return;
     }
     if (!isVideo && publication.source !== Track.Source.ScreenShareAudio) {
@@ -264,6 +263,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     const userId = parseUserId(participant.identity);
     if (isMusicPublication(publication)) {
       if (userId > 0) setMusicSharer(userId, false);
+      deps.musicEnded(userId);
       return;
     }
     if (publication.kind !== Track.Kind.Video || userId <= 0) return;
