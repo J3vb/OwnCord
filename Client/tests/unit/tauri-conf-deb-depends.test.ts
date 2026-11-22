@@ -49,6 +49,14 @@ describe("tauri.conf.json — Linux GStreamer runtime", () => {
     }
   });
 
+  // The page calls AbortSignal.any (Settings, the connection test) with no
+  // fallback, and WebKitGTK has it from 2.44. Without the floor the package
+  // installs on an older WebKitGTK and Settings opens empty; with it apt (and
+  // the in-app update, which runs apt-get) pulls the newer WebKitGTK.
+  it("requires a WebKitGTK that runs the page", () => {
+    expect(tauriConf.bundle.linux.deb.depends).toContain("libwebkit2gtk-4.1-0 (>= 2.44)");
+  });
+
   it("bundles GStreamer into the AppImage", () => {
     expect(tauriConf.bundle.linux.appimage.bundleMediaFramework).toBe(true);
   });

@@ -75,13 +75,27 @@ function recordExit(exit: ExitRecord, platform: Platform, now: number): void {
 type WebviewProcess = "browser" | "renderer" | "gpu" | "utility" | "unknown";
 type WebviewReason = "exited" | "crashed" | "unresponsive" | "killed" | "out_of_memory" | "unknown";
 
-/** "[exit] webview gpu process failed: crashed, …" (Windows) or
- *  "[webview] render process gone: process=renderer reason=killed" (Android). */
+/** WebKit's termination reasons in the Linux line, as the native side
+ *  prints them. */
+const LINUX_ENDED: ReadonlyMap<string, WebviewReason> = new Map([
+  ["Crashed", "crashed"], // i18n-exempt: native log token, never shown
+  ["ExceededMemoryLimit", "out_of_memory"],
+  ["TerminatedByApi", "killed"],
+]);
+
+/** "[exit] webview gpu process failed: crashed, …" (Windows),
+ *  "[webview] render process gone: process=renderer reason=killed" (Android) or
+ *  "[exit] webview process ended: Crashed; …" (Linux, whose only page process
+ *  is WebKit's renderer). */
 export function webviewFailureFields(failure: WebviewFailure): {
   process: WebviewProcess;
   reason: WebviewReason;
 } {
   const line = failure.line;
+  const ended = /webview process ended: (\w+)/.exec(line);
+  if (ended !== null) {
+    return { process: "renderer", reason: LINUX_ENDED.get(ended[1]!) ?? "unknown" };
+  }
   const named = /webview (\w+) process failed|process=(\w+)/.exec(line);
   const word = named?.[1] ?? named?.[2] ?? (/render process/.test(line) ? "renderer" : "");
   const process = oneOf(["browser", "renderer", "gpu", "utility"] as const, word);
