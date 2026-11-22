@@ -208,6 +208,7 @@ export function createVideoGrid(): VideoGridComponent {
     people: [],
     personCells: new Map<number, HTMLDivElement>(),
     resizeObserver: null,
+    pixelRatioWatch: null,
     resizeRafId: 0,
     rafWindow: window,
     callbacks: {},
@@ -332,10 +333,7 @@ export function createVideoGrid(): VideoGridComponent {
     if (st.viewResizeTimer !== null) clearTimeout(st.viewResizeTimer);
     st.viewResizeTimer = null;
 
-    if (st.resizeObserver !== null) {
-      st.resizeObserver.disconnect();
-      st.resizeObserver = null;
-    }
+    api.unobserveGrid();
 
     for (const [tileId, entry] of st.cells) {
       // An ended tile still holds its stream's watch for a re-share.

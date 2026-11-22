@@ -362,11 +362,26 @@ PTT is a Rust key-poller (`ptt.rs`, 20 ms) emitting `ptt-state{pressed}` →
 a gate inside the microphone processor (§8), never the mute, so the capture
 stays open across presses and no press publishes a raw track. A release closes
 the gate only after the saved release delay (`pttReleaseDelayMs`, 0–2000 ms,
-20 ms by default); a press inside it cancels the close. The Linux native room
+20 ms by default); a press inside it cancels the close. Both edges reach the
+gate as soon as their event arrives (`setPttGated(true, delay)` on a release),
+and the processor schedules the close on its own `AudioContext` clock, never
+a page timer: WebView2 slows the timers of a hidden or minimised window down
+to about one a second. A context that is not running yet closes at once. The
+store's `pttGated` (the mic button's title, the self-speaking ring and the
+push-to-talk ticks) records a release only once the delay has run, when the
+voice stops, so a press inside the delay changes nothing on screen and makes
+no tick; that write is the one thing still on a page timer, so in a hidden
+window only the indicator and the tick may land late, never the mic. Until it
+lands, whatever opens a closed gate (a cleared key, a dead poller, switching to
+Voice Activity, a reconnect's restore) treats the closing gate as closed
+(`isPttClosePending`). The Android talk button takes the same path: letting go
+calls `setPttGated(true, delay)` at once. The Linux native room
 has no web microphone to gate: there the same `setPttGated` flips the Rust
 session's own gate (`NativeRoom.setPttGated` → `nativeVoice.setPttGated`),
 which zeroes the open capture's processed frames, so the capture also stays
 open across presses; every enable sends the gate before the capture opens.
+That gate has no clock of its own, so the room waits out the release delay on
+a timer it clears on a press or a disconnect.
 Only a mute or deafen closes the capture, on both paths.
 
 The saved Input Mode (`inputMode`, `lib/ui/inputMode.ts`) decides whether a bound

@@ -5,6 +5,7 @@
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { Disposable } from "@lib/disposable";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { voiceText } from "../../../i18n/voice";
 import { beginPhoneFullscreen } from "../phoneFullscreen";
@@ -348,10 +349,32 @@ export function createGridLayout(st: GridState, api: GridApi) {
     });
   }
 
-  /** Watch the grid's sizes with its own window's observer: the pop-out's
-   *  layout runs there. */
+  /** Send the tile sizes again when the grid's window changes its pixel
+   *  ratio (moved onto a monitor with another scale): the CSS sizes stay the
+   *  same, so no resize reports it. A resolution query matches one ratio
+   *  only, so each change watches the new one. */
+  function watchPixelRatio(): void {
+    st.pixelRatioWatch?.destroy();
+    st.pixelRatioWatch = null;
+    const view = doc().defaultView ?? window;
+    if (st.root === null || typeof view.matchMedia !== "function") return;
+    const watch = new Disposable();
+    st.pixelRatioWatch = watch;
+    view.matchMedia(`(resolution: ${view.devicePixelRatio}dppx)`).addEventListener(
+      "change",
+      () => {
+        watchPixelRatio();
+        api.scheduleViewSync();
+      },
+      { once: true, signal: watch.signal },
+    );
+  }
+
+  /** Watch the grid's sizes, and its pixel ratio, with its own window's
+   *  observer: the pop-out's layout runs there. */
   function observeGrid(): void {
     st.resizeObserver?.disconnect();
+    watchPixelRatio();
     if (st.root === null) return;
     const Observer = doc().defaultView?.ResizeObserver ?? ResizeObserver;
     st.resizeObserver = new Observer(() => {
@@ -362,6 +385,14 @@ export function createGridLayout(st: GridState, api: GridApi) {
     for (const entry of st.cells.values()) {
       if (entry.config !== undefined && !entry.config.isSelf) st.resizeObserver.observe(entry.el);
     }
+  }
+
+  /** Stop watching the grid's sizes and pixel ratio (teardown). */
+  function unobserveGrid(): void {
+    st.resizeObserver?.disconnect();
+    st.resizeObserver = null;
+    st.pixelRatioWatch?.destroy();
+    st.pixelRatioWatch = null;
   }
 
   /** The full-screen state of the window the grid is in. */
@@ -408,6 +439,7 @@ export function createGridLayout(st: GridState, api: GridApi) {
     onFullscreenChange,
     syncFullscreenUi,
     observeGrid,
+    unobserveGrid,
     windowFullscreen,
     dropFullscreen,
   };

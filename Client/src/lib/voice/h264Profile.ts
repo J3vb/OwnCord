@@ -54,6 +54,8 @@ export const GPU_H264_MAX_HEIGHT = 2160;
 export interface FrameSize {
   readonly width: number;
   readonly height: number;
+  /** The frame rate the capture was opened with, when the box carries one. */
+  readonly frameRate?: number;
 }
 
 /** The size box a GPU H.264 share is held to: `cap` (a quality preset's size,
@@ -65,19 +67,31 @@ export function gpuH264SizeCap(cap?: FrameSize): FrameSize {
   };
 }
 
+function fitsGpuH264({ width, height }: FrameSize): boolean {
+  return width <= GPU_H264_MAX_WIDTH && height <= GPU_H264_MAX_HEIGHT;
+}
+
 /** The part of a livekit `LocalVideoTrack` the fit needs. */
 export type FittableShare = Pick<LocalTrack, "mediaStreamTrack" | "waitForDimensions">;
 
-/** Shrink a GPU H.264 share's capture to fit the encoder before it reaches
- *  the sender, keeping its aspect ratio and frame rate. Chromium reports a
- *  display capture's size only once its first frame arrives, which can be
- *  after getDisplayMedia resolves, so the size is waited for as livekit does
- *  before every publish. A capture that already fits is left alone.
- *  `applyConstraints` replaces every constraint the capture was opened with,
- *  so the frame rate is passed again. A size that never arrives or a refusal
- *  is only logged: the share then runs at full size and the live check still
- *  catches a software fallback on a first publish. */
-export async function fitGpuH264Share(share: FittableShare): Promise<void> {
+/** Hold a GPU H.264 share's capture inside the encoder's limit for the whole
+ *  share, keeping its aspect ratio and frame rate. `held` is the size box the
+ *  capture was opened with (the capture options' resolution): a quality's box
+ *  inside the limit already holds every frame there and is left alone. An
+ *  uncapped capture (Source: none, or livekit's zero size) gets the limit as
+ *  max constraints even when its first frame fits, because a window capture
+ *  follows the window: one maximised later on a screen wider than the limit
+ *  would otherwise outgrow the encoder mid-share and fall back to software.
+ *  Max constraints only shrink a larger frame; a smaller one keeps its own
+ *  size. Chromium reports a display capture's size only once its first frame
+ *  arrives, which can be after getDisplayMedia resolves, so the size is
+ *  waited for as livekit does before every publish. `applyConstraints`
+ *  replaces every constraint the capture was opened with, so the frame rate
+ *  is passed again: `held`'s, else the one the capture reports. A size that never arrives or a refusal is only logged:
+ *  the share then runs at full size and the live check still catches a
+ *  software fallback on a first publish. */
+export async function fitGpuH264Share(share: FittableShare, held?: FrameSize): Promise<void> {
+  if (held !== undefined && held.width > 0 && held.height > 0 && fitsGpuH264(held)) return;
   let size: { width: number; height: number };
   try {
     size = await share.waitForDimensions();
@@ -86,16 +100,17 @@ export async function fitGpuH264Share(share: FittableShare): Promise<void> {
     return;
   }
   const { width, height } = size;
-  if (width <= GPU_H264_MAX_WIDTH && height <= GPU_H264_MAX_HEIGHT) return;
   const track = share.mediaStreamTrack;
-  const { frameRate } = track.getSettings();
+  // The rate the capture asked for first: a share whose settings report none
+  // would otherwise drop back to the browser's default rate.
+  const frameRate = held?.frameRate ?? track.getSettings().frameRate;
   try {
     await track.applyConstraints({
       width: { max: GPU_H264_MAX_WIDTH },
       height: { max: GPU_H264_MAX_HEIGHT },
       ...(frameRate === undefined ? {} : { frameRate }),
     });
-    log.info("Screen share shrunk to fit the GPU H.264 encoder", {
+    log.info("Screen share held within the GPU H.264 encoder's size", {
       from: `${width}x${height}`,
       frameRate,
     });

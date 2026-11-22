@@ -87,10 +87,57 @@ describe("AudioPipeline", () => {
         setPttGated,
       } as never);
 
-      pipeline.setPttGated(true);
+      pipeline.setPttGated(true, 20);
       pipeline.setPttGated(false);
 
-      expect(setPttGated.mock.calls).toEqual([[true], [false]]);
+      // The release delay goes along: that room counts it itself.
+      expect(setPttGated.mock.calls).toEqual([
+        [true, 20],
+        [false, 0],
+      ]);
+    });
+
+    it.each([
+      ["a release", false, true, 0],
+      ["a press", true, false, 1],
+    ])(
+      "%s while the SDK takes the processor reaches the new one",
+      async (_, before: boolean, during: boolean, gain: number) => {
+        prefs.set("voiceSensitivity", 100);
+        const pipeline = new AudioPipeline();
+        pipeline.setPttGated(before);
+        const track = micTrack();
+        const entered = vi.fn();
+        let finish!: () => void;
+        const held = new Promise<void>((resolve) => (finish = resolve));
+        const setProcessor = track.setProcessor.bind(track);
+        vi.spyOn(track, "setProcessor").mockImplementation(async (processor) => {
+          entered();
+          await held;
+          return setProcessor(processor);
+        });
+
+        const attaching = pipeline.attach(track);
+        await vi.waitFor(() => expect(entered).toHaveBeenCalled());
+        pipeline.setPttGated(during);
+        finish();
+        await attaching;
+
+        expect(outputGain(contextOf(track)).value).toBe(gain);
+      },
+    );
+
+    it("hands a release's delay to the processor's own clock", async () => {
+      prefs.set("voiceSensitivity", 100);
+      const pipeline = new AudioPipeline();
+      const track = micTrack();
+      await pipeline.attach(track);
+      const gain = outputGain(contextOf(track));
+
+      pipeline.setPttGated(true, 20);
+
+      expect(gain.setTargetAtTime).toHaveBeenLastCalledWith(0, 0.02, expect.any(Number));
+      expect(pipeline.isPttGated).toBe(true);
     });
   });
 

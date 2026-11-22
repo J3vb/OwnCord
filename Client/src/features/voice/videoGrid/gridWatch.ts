@@ -25,6 +25,12 @@ function drawsPicture(entry: CellEntry): boolean {
   );
 }
 
+/** Device pixels per CSS pixel in the window `d` is shown in: a popped-out
+ *  call can sit on a monitor with another scale than the app window's. */
+function pixelRatioOf(d: Document): number {
+  return (d.defaultView ?? window).devicePixelRatio;
+}
+
 export function createGridWatch(st: GridState, api: GridApi) {
   // --- Video layers -------------------------------------------------------
 
@@ -38,11 +44,12 @@ export function createGridWatch(st: GridState, api: GridApi) {
     if (entry.mini !== undefined) {
       if (document.hidden) return { enabled: false };
       const box = entry.mini.element.getBoundingClientRect();
+      const ratio = pixelRatioOf(entry.mini.element.ownerDocument);
       return {
         enabled: true,
         size: {
-          width: Math.round(box.width * devicePixelRatio),
-          height: Math.round(box.height * devicePixelRatio),
+          width: Math.round(box.width * ratio),
+          height: Math.round(box.height * ratio),
         },
       };
     }
@@ -51,11 +58,12 @@ export function createGridWatch(st: GridState, api: GridApi) {
       return { enabled: false };
     }
     if (id === st.focusedTileId || api.isFullscreen(id)) return { enabled: true };
+    const ratio = pixelRatioOf(api.doc());
     return {
       enabled: true,
       size: {
-        width: Math.round(width * devicePixelRatio),
-        height: Math.round(height * devicePixelRatio),
+        width: Math.round(width * ratio),
+        height: Math.round(height * ratio),
       },
     };
   }

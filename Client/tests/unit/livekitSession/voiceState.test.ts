@@ -2,7 +2,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import { LiveKitSession, setPttPollingLive } from "../../../src/lib/voice/livekitSession";
 import { setTalkButton } from "../../../src/lib/ui/inputMode";
-import { setLocalMuted, setLocalDeafened, setPttGated, setListenOnly } from "@stores/voice.store";
+import {
+  setLocalMuted,
+  setLocalDeafened,
+  setPttGated,
+  setListenOnly,
+  isPttClosePending,
+} from "@stores/voice.store";
 import { getLiveKitProxyPort } from "../../../src/platform/desktop/nativeProxies";
 import { takeWatchRefusal } from "../../../src/lib/voice/watchRequest";
 import {
@@ -817,12 +823,14 @@ describe("LiveKitSession", () => {
       const gateSpy = vi.spyOn((session as any)._audioPipeline, "setPttGated");
 
       session.setPttGated(false);
-      session.setPttGated(true);
+      session.setPttGated(true, 20);
 
-      expect(setPttGated).toHaveBeenNthCalledWith(1, false);
-      expect(setPttGated).toHaveBeenNthCalledWith(2, true);
-      expect(gateSpy).toHaveBeenNthCalledWith(1, false);
-      expect(gateSpy).toHaveBeenNthCalledWith(2, true);
+      // The store records a release's close once its delay has run (the
+      // indicator and the ticks); the pipeline counts it on the audio clock.
+      expect(setPttGated).toHaveBeenNthCalledWith(1, false, 0);
+      expect(setPttGated).toHaveBeenNthCalledWith(2, true, 20);
+      expect(gateSpy).toHaveBeenNthCalledWith(1, false, 0);
+      expect(gateSpy).toHaveBeenNthCalledWith(2, true, 20);
       // Never a mute: PTT does not touch setMicrophoneEnabled.
       expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
       gateSpy.mockRestore();
@@ -1174,6 +1182,24 @@ describe("LiveKitSession", () => {
       expect(gateSpy).toHaveBeenCalledWith(true);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(false);
+      gateSpy.mockRestore();
+    });
+
+    // A release's close lands in the store only once its delay has run; a
+    // reconnect inside it must not reopen the mic the release is closing.
+    it("mode reconnect re-closes the pipeline's PTT gate when a release was still waiting out its delay", async () => {
+      const gateSpy = vi.spyOn((session as any)._audioPipeline, "setPttGated");
+      mockVoiceState.localMuted = false;
+      mockVoiceState.localDeafened = false;
+      mockVoiceState.pttGated = false;
+      vi.mocked(isPttClosePending).mockReturnValueOnce(true);
+
+      enterReconnecting(session, 7, { latestToken: "token", lastUrl: "/lk" });
+      const ac = new AbortController();
+      await runReconnect(session, 7, { url: "/lk", signal: ac.signal });
+
+      expect(gateSpy).toHaveBeenCalledWith(true);
+      expect(gateSpy).not.toHaveBeenCalledWith(false);
       gateSpy.mockRestore();
     });
 

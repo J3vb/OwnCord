@@ -116,6 +116,10 @@ release changes the database, and anything an operator must do first.)
 - In a popped-out call the Music button brings the call back first so its app picker is in view, like Share. Double-clicking a control in a stream pop-out no longer switches full screen, and the voice shortcuts (mute, deafen, camera, share, disconnect) work while a pop-out has focus.
 - Pop-out windows use the theme's colours, also after a custom theme changes.
 - The tile Pop out button is gone on Android and on your own screen share, a tile you are not watching offers Watch stream instead of Stop watching, and the Stream info box closes when you leave focus.
+- Windows: with OwnCord minimised or behind a game, push-to-talk could keep your mic open up to a second after you let go of the key; it now closes after your release delay, as when the window is in front.
+- A screen share at Source (native resolution) with the default frame rate went out at 1080p, like High; it now keeps the screen's or window's own size at every frame rate (Windows and Linux).
+- A Source screen share on the graphics card's H.264 encoder whose window later grew wider than 3840 pixels (a game going full screen on a super-ultrawide monitor) dropped to a few frames per second; it is now kept within the encoder's size for the whole share.
+- In a popped-out call on a monitor with a different display scale, video tiles asked for the wrong picture size (blurry on a high-DPI screen); they now use that window's scale and ask again when it moves to another monitor.
 
 **Settings**
 

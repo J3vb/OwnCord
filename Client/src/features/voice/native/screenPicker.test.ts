@@ -116,7 +116,7 @@ describe("pickScreenSource", () => {
     });
   });
 
-  it("uncaps the size for Source at 60/120 fps and caps it at 1080p30 otherwise", async () => {
+  it("uncaps the size for Source at every frame rate", async () => {
     host.pick = () => ({ source: "screen:277", quality: "source", fps: 60 });
     await expect(pickScreenSource()).resolves.toEqual({
       source: "screen:277",
@@ -134,7 +134,7 @@ describe("pickScreenSource", () => {
     });
     host.pick = () => ({ source: "screen:277", quality: "source", fps: 30 });
     await expect(pickScreenSource()).resolves.toMatchObject({
-      capture: { fps: 30, maxWidth: 1920, maxHeight: 1080 },
+      capture: { fps: 30, maxWidth: 0, maxHeight: 0 },
       maxFramerate: 30,
     });
   });

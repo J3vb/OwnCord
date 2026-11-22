@@ -484,8 +484,8 @@ export class MediaControl {
   }
 
   /** Close or open the push-to-talk gate (AudioPipeline.setPttGated). */
-  setPttGated(gated: boolean): void {
-    this._audioPipeline.setPttGated(gated);
+  setPttGated(gated: boolean, releaseDelayMs = 0): void {
+    this._audioPipeline.setPttGated(gated, releaseDelayMs);
   }
 
   async reapplyAudioProcessing(): Promise<void> {

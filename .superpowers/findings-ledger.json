@@ -13913,6 +13913,98 @@
       "fixedDate": "2026-11-12"
     },
     {
+      "id": "OC-0607",
+      "title": "A push-to-talk release closes the mic after the release delay on the audio clock, also while the window is hidden or minimised",
+      "file": "Client/src/platform/desktop/pushToTalkService.ts",
+      "line": 174,
+      "severity": "medium",
+      "why": "The release delay now runs on the mic processor's AudioContext clock (a scheduled gain close that a press cancels), so the gate closes on time while the window is hidden or minimised; the key edge reaches the gate as soon as its event arrives.",
+      "repro": "On Windows, minimise OwnCord in a quiet call with push-to-talk, press and release the key, and keep talking right after letting go.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Hand the release delay to the gate and schedule the close on the AudioContext clock instead of a page setTimeout; keep a timer only for the native room's gate.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/mic-processor.test.ts (push-to-talk release delay: closes on the graph's own clock once the delay has run, not before; a new press during the delay keeps the voice open; closes at once with no delay); Client/tests/unit/ptt/eventsAndRaces.test.ts (ptt release delay); Client/src/features/voice/native/nativeRoom/connection.test.ts (keeps the session's gate open through a release's delay); Client/tests/unit/voice.store.test.ts (a release's close with its delay); Client/tests/unit/voice-link-sounds.test.ts (a release with a delay: ticks off when the delay has run, no tick for a press inside it); Client/src/features/voice/talkButton.test.ts (hands a release its delay at once; switching to Voice activity during a release's delay opens the closing gate); Client/tests/unit/ptt/eventsAndRaces.test.ts (opens a gate still closing out a release's delay when the backend thread panics); Client/tests/unit/livekitSession/voiceState.test.ts (mode reconnect re-closes the gate when a release was still waiting out its delay); Client/tests/unit/mic-processor.test.ts (closes at once while the context is not running); Client/tests/unit/audioPipeline/pipelineAndVad.test.ts (a press or release while the SDK takes the processor reaches the new one)",
+        "revertProof": "fail (3 of 3 processor cases, 5 of 6 release-delay cases, 1 of 1 native gate case; 5 of 8 store and tick cases; 1 of 1 each for the panic, talk-button mode switch, reconnect and stopped-context cases; 2 of 2 attach cases)"
+      },
+      "lens": "flow-voice",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0608",
+      "title": "A Source screen share keeps the capture's own size at every frame rate",
+      "file": "Client/src/lib/voice/videoPresets.ts",
+      "line": 300,
+      "severity": "medium",
+      "why": "Source sends livekit's zero-size resolution at every frame rate, so the 1080p30 default is never filled in and the Linux host gets no size cap either.",
+      "repro": "Share a 2560x1440 or larger screen at Source with the default 30 fps.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Return the zero-size sentinel and the matching video frameRate for the Source preset at every frame rate.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/screen-share-fps.test.ts (gives source the zero-size sentinel at %i fps; sends source at the default frame rate to getDisplayMedia with no size cap; maps %s at %i fps to the Linux host's capture)",
+        "revertProof": "fail (3 of 7 cases)"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0609",
+      "title": "A Source GPU H.264 screen share stays within the encoder's size for the whole share",
+      "file": "Client/src/lib/voice/h264Profile.ts",
+      "line": 86,
+      "severity": "medium",
+      "why": "An uncapped GPU H.264 share now gets the encoder's size limit as max constraints even when its first frame fits, so a window that grows later is shrunk inside the limit instead of falling back to the software encoder.",
+      "repro": "Share a window at Source 60 fps with GPU H.264, then make it borderless full screen on a 5120x1440 monitor.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Always apply the gpuH264SizeCap max constraints to an uncapped GPU H.264 share; a capture opened with a quality's size already fits.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src/lib/voice/h264Profile.test.ts (caps a share %s that fits now; leaves a share held to a quality's size alone; keeps a window share that starts small and grows past 3840 px inside the encoder; keeps the rate a 60 fps Source share was opened with); Client/tests/unit/screen-share-republish.test.ts (a share switched up to the GPU H.264 encoder)",
+        "revertProof": "fail (3 of 4 cases; 2 of 2 frame-rate cases; 2 of 3 republish cases)"
+      },
+      "lens": "correctness",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0610",
+      "title": "Video grid tiles request their size at the grid window's own pixel ratio and again when it changes",
+      "file": "Client/src/features/voice/videoGrid/gridWatch.ts",
+      "line": 30,
+      "severity": "low",
+      "why": "Tile sizes use the device pixel ratio of the window the grid is shown in, and a resolution media query on that window re-sends the sizes when the ratio changes.",
+      "repro": "Pop out a call and move it to a monitor with a different display scale.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Read devicePixelRatio from the grid document's window and listen for a matchMedia resolution change there, owned by a Disposable.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/videoGrid/popout.test.ts (asks for tile sizes at the window's own pixel ratio, and again when that ratio changes)",
+        "revertProof": "fail (1 of 1 case)"
+      },
+      "lens": "client-state",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
       "id": "OC-0606",
       "title": "The desktop app's tunnels race the server's IPv6 and IPv4 addresses and keep the first that answers",
       "file": "Client/src-tauri/src/proxy_common.rs",

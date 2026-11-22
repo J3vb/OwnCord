@@ -32,6 +32,7 @@
 import { DisconnectReason, RoomEvent } from "livekit-client";
 import { createLogger } from "../../../lib/logger";
 import { NoiseFloorTracker } from "../../../lib/voice/noiseFloor";
+import { NativePttGate } from "./nativePttGate";
 import { desktop } from "../../../platform/desktop";
 import type {
   NativeVoiceAudioOptions,
@@ -90,7 +91,7 @@ export class NativeRoom extends NativeRoomRemote {
       // i18n-exempt: internal native-room state guard, consumed by joinOrchestration's catalog toast
       if (this.sessionId === null) throw new Error("native room is not connected");
       if (enabled) {
-        await desktop.nativeVoice.setPttGated(this.sessionId, this.pttGated);
+        await desktop.nativeVoice.setPttGated(this.sessionId, this.ptt.gated);
         // A new session starts with no sensitivity gate and at 100 %.
         if (this.voiceThreshold > 0) {
           await desktop.nativeVoice.setVoiceGate(this.sessionId, this.voiceThreshold, false, true);
@@ -154,8 +155,8 @@ export class NativeRoom extends NativeRoomRemote {
 
   /** The last audio bitrate the voice config set; reused by option-less enables. */
   private micBitrate: number | undefined;
-  /** Push-to-talk's key is up: the session's open capture sends silence. */
-  private pttGated = false;
+  /** Push-to-talk's gate on the session's capture, with a release's delay. */
+  private readonly ptt = new NativePttGate((gated) => this.sendPttGate(gated));
   /** The input-sensitivity gate's threshold (0: none) and who hears its
    *  verdicts. */
   private voiceThreshold = 0;
@@ -228,10 +229,13 @@ export class NativeRoom extends NativeRoomRemote {
    *  gate (AudioPipeline.setPttGated): the key flips the session's gate,
    *  which zeroes the open capture's frames. It never opens or
    *  closes the capture, so a press is not clipped by a device reopen and
-   *  never opens a microphone the user muted. */
-  setPttGated(gated: boolean): void {
-    if (this.pttGated === gated) return;
-    this.pttGated = gated;
+   *  never opens a microphone the user muted. A release keeps the gate open
+   *  for `releaseDelayMs` first (NativePttGate). */
+  setPttGated(gated: boolean, releaseDelayMs = 0): void {
+    this.ptt.set(gated, releaseDelayMs);
+  }
+
+  private sendPttGate(gated: boolean): void {
     if (this.sessionId === null) return;
     desktop.nativeVoice
       .setPttGated(this.sessionId, gated)
@@ -364,6 +368,7 @@ export class NativeRoom extends NativeRoomRemote {
     this.pending = null;
     this.releaseVideo();
     this.clearDecryptTimers();
+    this.ptt.settle();
     this.stopInputLevels();
     if (id === null) return;
     this.sessionId = null;
@@ -474,6 +479,7 @@ export class NativeRoom extends NativeRoomRemote {
     this.state = "disconnected";
     this.statsTick = null;
     this.clearDecryptTimers();
+    this.ptt.settle();
     this.emit(
       RoomEvent.Disconnected,
       reason === "ClientInitiated"

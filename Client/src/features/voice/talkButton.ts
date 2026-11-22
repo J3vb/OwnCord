@@ -21,6 +21,7 @@ import {
   voiceStore,
   setPttPollingLive,
   onPttPollingLiveChange,
+  isPttClosePending,
   type VoiceState,
 } from "../../stores/voice.store";
 import { voiceText } from "../../i18n/voice";
@@ -34,7 +35,6 @@ let held = false;
 /** Bumped by every press, release and mode change, so a late gate write from
  *  an older one is dropped. */
 let edge = 0;
-let releaseTimer: ReturnType<typeof setTimeout> | undefined;
 /** The touch holding the button, so lifting that finger anywhere lets go even
  *  when the button moved or was redrawn under it. */
 let holdPointer: number | null = null;
@@ -51,31 +51,29 @@ function setHeld(next: boolean): void {
   for (const listener of heldListeners) listener();
 }
 
-/** Close (`gated`) or open the gate for the call in progress, after `delay`
- *  ms. Dropped when a newer edge came first or the call changed meanwhile. */
+/** Close (`gated`) or open the gate for the call in progress. A close with a
+ *  `delay` in ms keeps the voice going that long, as a released key does: the
+ *  session closes the mic on the audio clock and a press inside the delay
+ *  cancels it. Dropped when a newer edge came first or the call changed while
+ *  the session module loaded. */
 function writeGate(gated: boolean, delay: number, stillWanted: () => boolean): void {
   const { currentChannelId, joinedAt } = voiceStore.getState();
   if (currentChannelId === null) return;
   const at = ++edge;
-  clearTimeout(releaseTimer);
-  releaseTimer = undefined;
   // In a call the session module is already loaded, so this resolves from the
   // module cache; importing it lazily keeps the voice SDK out of this module.
   void import("../../lib/voice/livekitSession")
     .then(({ setPttGated }) => {
-      const apply = (): void => {
-        const state = voiceStore.getState();
-        if (
-          at !== edge ||
-          state.currentChannelId !== currentChannelId ||
-          state.joinedAt !== joinedAt ||
-          !stillWanted()
-        )
-          return;
-        setPttGated(gated);
-      };
-      if (delay > 0) releaseTimer = setTimeout(apply, delay);
-      else apply();
+      const state = voiceStore.getState();
+      if (
+        at !== edge ||
+        state.currentChannelId !== currentChannelId ||
+        state.joinedAt !== joinedAt ||
+        !stillWanted()
+      )
+        return;
+      if (delay > 0) setPttGated(gated, delay);
+      else setPttGated(gated);
     })
     .catch((e: unknown) => log.warn("Failed to apply the talk button's gate", e));
 }
@@ -105,8 +103,10 @@ export function syncTalkSource(): void {
   setPttPollingLive(ptt);
   const state = voiceStore.getState();
   if (state.currentChannelId === null) return;
-  if (ptt && state.pttGated !== true && !held) writeGate(true, 0, talkMode);
-  else if (!ptt && state.pttGated === true) writeGate(false, 0, () => inputMode() !== "ptt");
+  // A release still waiting out its delay is a gate about to close.
+  const closed = state.pttGated === true || isPttClosePending();
+  if (ptt && !closed && !held) writeGate(true, 0, talkMode);
+  else if (!ptt && closed) writeGate(false, 0, () => inputMode() !== "ptt");
 }
 
 /** Make the talk button the Push to Talk trigger, for the app's lifetime. */
@@ -251,8 +251,6 @@ export function createTalkButton(variant: TalkVariant, signal: AbortSignal): HTM
 
 /** Test-only: forget the module state between tests. */
 export function resetTalkButtonForTest(): void {
-  clearTimeout(releaseTimer);
-  releaseTimer = undefined;
   started = false;
   held = false;
   edge = 0;

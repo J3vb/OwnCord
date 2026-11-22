@@ -45,6 +45,7 @@ vi.mock("@stores/voice.store", () => ({
     pollingLive = live;
   },
   isPttPollingLive: () => pollingLive,
+  isPttClosePending: () => false,
 }));
 
 describePushToTalkSuite(async () => {

@@ -77,7 +77,11 @@ vi.mock("livekit-client", () => ({
     Kind: { Audio: "audio", Video: "video" },
   },
   VideoPresets: { h360: {}, h720: {}, h1080: {} },
-  ScreenSharePresets: { h720fps5: {}, h720fps30: {}, h1080fps30: {} },
+  ScreenSharePresets: {
+    h720fps5: { resolution: { width: 1280, height: 720 } },
+    h720fps30: { resolution: { width: 1280, height: 720 } },
+    h1080fps30: { resolution: { width: 1920, height: 1080 } },
+  },
   VideoPreset: vi.fn(),
   DisconnectReason: { UNKNOWN_REASON: 0, CLIENT_INITIATED: 1 },
   ExternalE2EEKeyProvider: vi.fn(function () {
@@ -623,7 +627,7 @@ describe("LiveKitSession on the Linux native backend", () => {
       expect(picker).toHaveBeenCalledOnce();
       expect(host.commands).toContainEqual([
         "startScreen",
-        [2, "window:81", { fps: 30, maxWidth: 1920, maxHeight: 1080 }],
+        [2, "window:81", { fps: 30, maxWidth: 1280, maxHeight: 720 }],
       ]);
       expect(toasts.show).not.toHaveBeenCalled();
     });
@@ -776,9 +780,8 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(host.commands).toEqual([
       ["screenSources", []],
       // The default (medium) share: 3 Mbps at 30 fps as one layer (the
-      // backup copy is off by default). This file's livekit mock presets carry no resolution, so the
-      // capture keeps its 1080p fallback.
-      ["startScreen", [1, "portal", { fps: 30, maxWidth: 1920, maxHeight: 1080 }]],
+      // backup copy is off by default), its capture held to 720p.
+      ["startScreen", [1, "portal", { fps: 30, maxWidth: 1280, maxHeight: 720 }]],
       [
         "publishScreen",
         [

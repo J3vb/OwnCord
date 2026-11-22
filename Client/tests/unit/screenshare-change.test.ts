@@ -225,7 +225,11 @@ describe("changeScreenshareSource", () => {
 
     await changeScreenshareSource(rig.state, rig.deps);
 
-    expect(fitGpuH264Share).toHaveBeenCalledExactlyOnceWith(freshVideo);
+    // With the size box the capture was opened with (the default, medium).
+    expect(fitGpuH264Share).toHaveBeenCalledExactlyOnceWith(
+      freshVideo,
+      expect.objectContaining({ width: 1280, height: 720 }),
+    );
     expect(fitGpuH264Share.mock.invocationCallOrder[0]!).toBeLessThan(
       rig.video.replaceTrack.mock.invocationCallOrder[0]!,
     );

@@ -30,9 +30,10 @@ export interface ScreenCaptureRequest {
   resolution?: { width: number; height: number; frameRate?: number };
 }
 
-/** Map the web path's capture options onto the host's. An unset resolution
- *  is what `createLocalScreenTracks` turns into 1080p at 30 fps; a zero size
- *  is its "no cap". */
+/** Map the web path's capture options onto the host's. A zero size is
+ *  livekit's "no cap", which Source sends at every frame rate (the host then
+ *  captures at the source's own size); an unset resolution is what
+ *  `createLocalScreenTracks` turns into 1080p at 30 fps. */
 export function captureOptions(options: ScreenCaptureRequest): NativeVoiceScreenCapture {
   const resolution = options.resolution ?? { width: 1920, height: 1080, frameRate: 30 };
   return {

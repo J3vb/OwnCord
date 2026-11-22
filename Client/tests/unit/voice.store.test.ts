@@ -12,6 +12,7 @@ import {
   setLocalMuted,
   setLocalDeafened,
   setPttGated,
+  isPttClosePending,
   setPhoneCallHold,
   setLocalCamera,
   setLocalScreenshare,
@@ -529,6 +530,60 @@ describe("voice store", () => {
       const before = voiceStore.getState();
       setPttGated(true);
       expect(voiceStore.getState()).toBe(before);
+    });
+
+    describe("a release's close with its delay", () => {
+      const inCall = (): void =>
+        voiceStore.setState((s) => ({
+          ...s,
+          currentChannelId: 7,
+          joinedAt: 1000,
+          pttGated: false,
+        }));
+
+      beforeEach(() => {
+        vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+        inCall();
+      });
+      afterEach(() => vi.useRealTimers());
+
+      it("is recorded once the delay has run, pending until then", () => {
+        setPttGated(true, 200);
+        expect(voiceStore.getState().pttGated).toBe(false);
+        expect(isPttClosePending()).toBe(true);
+        vi.advanceTimersByTime(199);
+        expect(voiceStore.getState().pttGated).toBe(false);
+        vi.advanceTimersByTime(1);
+        expect(voiceStore.getState().pttGated).toBe(true);
+        expect(isPttClosePending()).toBe(false);
+      });
+
+      it("is cancelled by a newer write", () => {
+        setPttGated(true, 200);
+        setPttGated(false);
+        expect(isPttClosePending()).toBe(false);
+        vi.advanceTimersByTime(1_000);
+        expect(voiceStore.getState().pttGated).toBe(false);
+      });
+
+      it("writes nothing into a later call, even one joined without a leave", () => {
+        setPttGated(true, 200);
+        voiceStore.setState((s) => ({ ...s, joinedAt: 2000 }));
+        vi.advanceTimersByTime(1_000);
+        expect(voiceStore.getState().pttGated).toBe(false);
+      });
+
+      it.each([
+        ["leaving the call", leaveVoiceChannel],
+        ["a session reset", resetVoiceStore],
+      ])("is dropped by %s", (_, end) => {
+        setPttGated(true, 200);
+        end();
+        expect(isPttClosePending()).toBe(false);
+        inCall();
+        vi.advanceTimersByTime(1_000);
+        expect(voiceStore.getState().pttGated).toBe(false);
+      });
     });
   });
 
