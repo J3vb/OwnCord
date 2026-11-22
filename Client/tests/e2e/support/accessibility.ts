@@ -24,7 +24,7 @@ import { contrastRatio, parseColor, type Rgb } from "../../../src/lib/text/color
 export const Q1 = { text: 4.5, nonText: 3, focus: 3 } as const;
 
 export interface AppearancePrefs {
-  readonly theme?: "dark" | "neon-glow" | "midnight" | "light";
+  readonly theme?: "dark" | "neon-glow" | "midnight" | "gunmetal" | "light";
   /** `#rrggbb`, or null to clear a stored custom accent. */
   readonly accent?: string | null;
   readonly highContrast?: boolean;

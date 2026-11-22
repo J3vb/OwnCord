@@ -12,13 +12,14 @@ import {
 } from "../helpers";
 import { type AppearancePrefs, contrastMeter, setAppearance } from "./accessibility";
 
-export const THEMES = ["dark", "neon-glow", "midnight", "light"] as const;
+export const THEMES = ["dark", "neon-glow", "midnight", "gunmetal", "light"] as const;
 
 /** Every theme, High contrast and a custom accent. */
 export const APPEARANCE_MATRIX: AppearancePrefs[] = [
   { theme: "dark" },
   { theme: "midnight" },
   { theme: "neon-glow" },
+  { theme: "gunmetal" },
   { theme: "light" },
   { theme: "dark", highContrast: true },
   { theme: "light", accent: "#fee75c" }, // below 3:1 on light: falls back (Q8)

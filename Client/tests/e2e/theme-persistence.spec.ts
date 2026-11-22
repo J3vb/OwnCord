@@ -33,7 +33,7 @@ test.describe("Theme Persistence", () => {
     await expect(inactiveOption.first()).toBeVisible();
     const themeName = await inactiveOption.first().evaluate((el) => {
       const value = el.getAttribute("data-value") ?? "";
-      return ["dark", "neon-glow", "midnight", "light"].includes(value) ? value : "";
+      return ["dark", "neon-glow", "midnight", "gunmetal", "light"].includes(value) ? value : "";
     });
     expect(themeName).not.toBe("");
 

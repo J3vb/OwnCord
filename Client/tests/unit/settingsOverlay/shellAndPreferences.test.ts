@@ -421,8 +421,8 @@ describe("SettingsOverlay", () => {
     getTab(container, 1).click();
 
     const themeOptions = container.querySelectorAll(".theme-tiles [role='radio']");
-    // Four palettes plus Match my computer.
-    expect(themeOptions.length).toBe(5);
+    // Five palettes plus Match my computer.
+    expect(themeOptions.length).toBe(6);
 
     const midnight = themeOptions[2] as HTMLElement;
     midnight.click();

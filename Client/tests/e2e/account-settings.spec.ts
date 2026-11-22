@@ -220,7 +220,7 @@ test.describe("account settings feedback and disclosure", () => {
     expect(ratio).toBeGreaterThanOrEqual(Q1.text);
   });
 
-  for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
+  for (const theme of ["dark", "neon-glow", "midnight", "gunmetal", "light"] as const) {
     for (const highContrast of [false, true]) {
       test(`${theme}${highContrast ? " + High contrast" : ""}: the Security card's status text reads at 4.5:1`, async ({
         page,

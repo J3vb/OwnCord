@@ -179,7 +179,7 @@ test.describe("Settings — Appearance Tab", () => {
     await expect(second).toHaveAttribute("aria-checked", "true");
     const themeName = await second.evaluate((el) => {
       const value = el.getAttribute("data-value") ?? "";
-      return ["dark", "neon-glow", "midnight", "light"].includes(value) ? value : "";
+      return ["dark", "neon-glow", "midnight", "gunmetal", "light"].includes(value) ? value : "";
     });
     expect(themeName).not.toBe("");
     await expect(page.locator("body")).toHaveClass(new RegExp(`theme-${themeName}`));

@@ -46,6 +46,16 @@ describe("deriveAccentTokens (Q8)", () => {
     expect(t.text).toBe("#00c8ff");
   });
 
+  it("derives gunmetal's orange accent tokens, the literals in theme-gunmetal.css", () => {
+    const surfaces = ["#181d24", "#12161b", "#0c0f13", "#202731"].map((c) => parseColor(c)!);
+    const t = deriveAccentTokens(parseColor("#ff7a45")!, surfaces);
+    expect(t.onAccent).toBe("#000000");
+    expect(t.hover).toBe("#ff8e61");
+    expect(t.active).toBe("#ffa27d");
+    expect(t.text).toBe("#ff7a45");
+    expect(t.focus).toBe("#ff7a45");
+  });
+
   it("puts white on a dark accent and darkens hover/active", () => {
     const t = deriveAccentTokens(parseColor("#5865f2")!, DARK_SURFACES);
     expect(t.onAccent).toBe("#ffffff");

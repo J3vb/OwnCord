@@ -1,0 +1,18 @@
+/* Gunmetal theme: blue-grey surfaces with an Ember orange accent.
+   The palette is THEMES.gunmetal in lib/prefs/themes.ts; this rule only owns
+   the accent block, which tokens.css keeps out of applyTheme's cleared keys.
+   Accent tokens are what applyAccent() derives from #ff7a45 on these surfaces
+   (pinned in tests/unit/color-contrast.test.ts); a stored custom accent's
+   inline values still win over this rule. */
+
+body.theme-gunmetal {
+  --accent: #ff7a45;
+  --accent-hover: #ff8e61;
+  --accent-active: #ffa27d;
+  --on-accent: #000000;
+  --accent-text: #ff7a45;
+  --focus-ring: #ff7a45;
+  --accent-primary: var(--accent);
+  --accent-secondary: #d9572a;
+  --accent-gradient: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
+}

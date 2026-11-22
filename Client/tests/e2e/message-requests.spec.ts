@@ -245,7 +245,7 @@ test.describe("Message Requests inbox", () => {
   });
 
   test("text contrast meets Q1 in every built-in theme and High contrast", async ({ page }) => {
-    const themes = ["neon-glow", "dark", "midnight", "light"] as const;
+    const themes = ["neon-glow", "dark", "midnight", "gunmetal", "light"] as const;
     for (const theme of themes) {
       for (const highContrast of [false, true]) {
         await setAppearance(page, { theme, highContrast });
@@ -437,7 +437,7 @@ test.describe("Message Request decisions", () => {
     await page.addInitScript(mockScript([failing]));
     await page.goto("/");
     await signIn(page);
-    for (const theme of ["neon-glow", "dark", "midnight", "light"] as const) {
+    for (const theme of ["neon-glow", "dark", "midnight", "gunmetal", "light"] as const) {
       for (const highContrast of [false, true]) {
         const label = `${theme}${highContrast ? "+HC" : ""}`;
         await setAppearance(page, { theme, highContrast });

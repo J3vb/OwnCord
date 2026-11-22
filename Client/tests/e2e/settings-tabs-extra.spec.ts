@@ -547,7 +547,7 @@ test.describe("Settings — Advanced Tab button contrast", () => {
   // The cache actions are secondary buttons and Clear & restart is destructive
   // (danger text at rest, danger fill once armed); each must read at 4.5:1 on
   // its composited background in every theme, with and without High contrast.
-  for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
+  for (const theme of ["dark", "neon-glow", "midnight", "gunmetal", "light"] as const) {
     test(`${theme}: secondary and destructive buttons read at 4.5:1`, async ({ page }) => {
       await mockSession(page);
       await page.goto("/");
