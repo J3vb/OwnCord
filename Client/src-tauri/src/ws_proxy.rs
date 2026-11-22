@@ -189,8 +189,7 @@ pub async fn ws_connect<R: Runtime>(
 
     let connector = tokio_tungstenite::Connector::Rustls(Arc::new(tls_config));
 
-    let connect_future =
-        tokio_tungstenite::connect_async_tls_with_config(&url, None, false, Some(connector));
+    let connect_future = connect_ws(&url, connector);
 
     let (ws_stream, _response) = tokio::time::timeout(CONNECT_TIMEOUT, connect_future)
         .await
@@ -438,6 +437,53 @@ pub(crate) fn is_tls_failure(error: &tokio_tungstenite::tungstenite::Error) -> b
         Error::Io(e) => e.kind() == std::io::ErrorKind::InvalidData,
         _ => false,
     }
+}
+
+/// The chat socket's stream once its TLS and WebSocket handshakes are done.
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// Open the chat socket to `url`: dial the server with the dialer the REST and
+/// LiveKit tunnels share (both address families raced), then run the TLS and
+/// WebSocket handshakes over that stream with `connector`, whose verifier
+/// captures the certificate for the TOFU check. TLS names the server by the
+/// URL's host. Errors keep tungstenite's shape: a failed dial is
+/// `Error::Io`, as when tungstenite dialed itself.
+async fn connect_ws(
+    url: &str,
+    connector: tokio_tungstenite::Connector,
+) -> Result<
+    (
+        WsStream,
+        tokio_tungstenite::tungstenite::handshake::client::Response,
+    ),
+    tokio_tungstenite::tungstenite::Error,
+> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let request = url.into_client_request()?;
+    let dial_target = ws_dial_target(request.uri())?;
+    let socket = crate::proxy_common::dial_any(&dial_target)
+        .await
+        .map_err(tokio_tungstenite::tungstenite::Error::Io)?;
+    tokio_tungstenite::client_async_tls_with_config(request, socket, None, Some(connector)).await
+}
+
+/// The `host:port` to dial for a WebSocket URI, an IPv6 host in brackets, with
+/// the scheme's default port when the URI names none.
+fn ws_dial_target(
+    uri: &tokio_tungstenite::tungstenite::http::Uri,
+) -> Result<String, tokio_tungstenite::tungstenite::Error> {
+    use tokio_tungstenite::tungstenite::error::{Error, UrlError};
+    let host = uri.host().ok_or(Error::Url(UrlError::NoHostName))?;
+    let port = uri
+        .port_u16()
+        .or_else(|| match uri.scheme_str() {
+            Some("wss") => Some(443),
+            Some("ws") => Some(80),
+            _ => None,
+        })
+        .ok_or(Error::Url(UrlError::UnsupportedUrlScheme))?;
+    Ok(format!("{host}:{port}"))
 }
 
 /// Why [`read_frames`] stopped.
@@ -769,6 +815,66 @@ mod tests {
             std::io::ErrorKind::ConnectionRefused,
             "Connection refused",
         ))));
+    }
+
+    #[test]
+    fn the_dial_target_is_the_url_host_and_port() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        for (url, expected) in [
+            ("wss://chat.example.com/api/v1/ws", "chat.example.com:443"),
+            (
+                "wss://chat.example.com:8443/api/v1/ws",
+                "chat.example.com:8443",
+            ),
+            ("wss://127.0.0.1/api/v1/ws", "127.0.0.1:443"),
+            ("wss://[2001:db8::7]:8443/api/v1/ws", "[2001:db8::7]:8443"),
+            ("ws://chat.example.com/api/v1/ws", "chat.example.com:80"),
+        ] {
+            let request = url.into_client_request().expect("request");
+            assert_eq!(
+                ws_dial_target(request.uri()).expect("dial target"),
+                expected,
+                "{url}"
+            );
+        }
+    }
+
+    // The chat socket dials a host name through the shared dialer and starts
+    // TLS on the stream it gets back.
+    #[tokio::test]
+    async fn the_chat_socket_dials_by_name_and_starts_tls_on_that_stream() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let server = tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.expect("accept");
+            let mut record = [0u8; 2];
+            conn.read_exact(&mut record).await.expect("read");
+            record
+        });
+        let (verifier, _captured) = tofu::CaptureVerifier::new();
+        let config = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier))
+            .with_no_client_auth();
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            connect_ws(
+                &format!("wss://localhost:{port}/api/v1/ws"),
+                tokio_tungstenite::Connector::Rustls(Arc::new(config)),
+            ),
+        )
+        .await
+        .expect("the connect ends once the server hangs up");
+        assert!(outcome.is_err(), "the server hung up without a handshake");
+        assert_eq!(
+            server.await.expect("server"),
+            [0x16, 0x03],
+            "the first bytes on the dialed stream are a TLS handshake record"
+        );
     }
 
     #[test]
