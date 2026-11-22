@@ -29,7 +29,7 @@ import { contrastRatio, parseColor } from "../../src/lib/text/colorContrast";
 // matrix and screenshots are attached to the report as evidence.
 // ---------------------------------------------------------------------------
 
-const THEMES = ["dark", "neon-glow", "midnight", "light"] as const;
+const THEMES = ["dark", "neon-glow", "midnight", "gunmetal", "light"] as const;
 type Theme = (typeof THEMES)[number];
 
 /** AppearanceTab's ten preset swatches. */
@@ -69,6 +69,7 @@ const THEME_ACCENT_TEXT: Record<Theme, string> = {
   dark: "#a3aaf8",
   "neon-glow": "#2fd0ff",
   midnight: "#a3aaf8",
+  gunmetal: "#ff7a45",
   light: "#4150c4",
 };
 const THEME_FOCUS_RING: Record<Theme, string> = { ...THEME_ACCENT_TEXT, light: "#4752c4" };

@@ -19,6 +19,17 @@ describe("themes", () => {
     document.body.className = "";
   });
 
+  it("knows gunmetal: applies its palette and class, and clears them again", () => {
+    applyThemeChoice("gunmetal");
+    expect(getActiveThemeName()).toBe("gunmetal");
+    expect(document.body.classList.contains("theme-gunmetal")).toBe(true);
+    expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#181d24");
+    applyThemeChoice("dark");
+    expect(document.body.classList.contains("theme-gunmetal")).toBe(false);
+    expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#313338");
+    expect(document.documentElement.style.getPropertyValue("--border-control")).toBe("");
+  });
+
   it("applies neon-glow theme class to body", () => {
     applyThemeByName("neon-glow");
     expect(document.body.classList.contains("theme-neon-glow")).toBe(true);

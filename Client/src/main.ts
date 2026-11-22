@@ -5,6 +5,7 @@ import "@styles/base.css";
 import "@styles/login.css";
 import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
+import "@styles/theme-gunmetal.css";
 
 import { installGlobalErrorHandlers } from "@lib/text/safeRender";
 import { createApiClient } from "@lib/api";

@@ -29,7 +29,8 @@ the owner on 2026-09-23:
    measured but not qualified.
 4. The Q8 fallback target is the theme's tested `--accent-text`/`--focus-ring`
    token. Since Q13 it is `#2fd0ff` on neon-glow, `#a3aaf8` on dark and
-   midnight, and on light `#4150c4` as text and `#4752c4` as the focus ring.
+   midnight, `#ff7a45` (text and focus ring) on gunmetal, and on light
+   `#4150c4` as text and `#4752c4` as the focus ring.
    The default fill accents (`#00c8ff`, `#5865f2`, light's `#4f5bd5`) are
    below Q1 as text on at least one of their surfaces.
 
@@ -59,8 +60,9 @@ paths at the 640×400 zoom viewport.
 
 `Client/src/styles/tokens.css` holds the dark defaults, which midnight shares
 where its `THEMES` entry does not override them, and light's accent fills
-(`body.theme-light`). `theme-neon-glow.css` and the midnight and light entries
-in `lib/prefs/themes.ts` `THEMES` override them.
+(`body.theme-light`). `theme-neon-glow.css`, `theme-gunmetal.css` (the Ember
+orange accent block) and the midnight, gunmetal and light entries in
+`lib/prefs/themes.ts` `THEMES` override them.
 `app/accessibility.css` holds High Contrast. A "surface" is any of
 `--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-input`. The values
 are the owner's Q13 direction A, Refined Neon.

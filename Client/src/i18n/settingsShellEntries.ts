@@ -78,6 +78,7 @@ export const settingsShellEntries = {
   "appearance.theme.dark": "Dark",
   "appearance.theme.neon-glow": "Neon glow",
   "appearance.theme.midnight": "Midnight",
+  "appearance.theme.gunmetal": "Gunmetal",
   "appearance.theme.light": "Light",
   "appearance.theme.system": "Match my computer",
   "appearance.theme.system.android": "Match my device",

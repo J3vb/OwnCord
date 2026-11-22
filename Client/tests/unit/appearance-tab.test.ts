@@ -52,8 +52,8 @@ describe("AppearanceTab — Accessibility", () => {
     container.appendChild(section);
 
     const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
-    // Four palettes plus Match my computer.
-    expect(tiles.length).toBe(5);
+    // Five palettes plus Match my computer.
+    expect(tiles.length).toBe(6);
 
     for (const tile of tiles) {
       expect(tile.tagName).toBe("BUTTON");
@@ -142,6 +142,18 @@ describe("AppearanceTab — Accessibility", () => {
     expect(hexInput.placeholder).toBe("00c8ff");
   });
 
+  it("picking Gunmetal sets the body class and shows its orange as the default accent", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    container.querySelector<HTMLElement>("[data-testid='theme-gunmetal']")!.click();
+    expect(document.body.classList.contains("theme-gunmetal")).toBe(true);
+    expect(localStorage.getItem("owncord:theme:active")).toBe("gunmetal");
+    expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#181d24");
+    const preview = container.querySelector<HTMLElement>(
+      "[data-testid='theme-gunmetal'] .theme-preview",
+    )!;
+    expect(preview.style.getPropertyValue("--pv-accent")).toBe("#ff7a45");
+  });
+
   it("uses blurple as the displayed default accent for non-neon built-in themes", () => {
     mockGetActiveThemeName.mockReturnValue("dark");
 
@@ -214,7 +226,14 @@ describe("AppearanceTab — Accessibility", () => {
     const names = Array.from(group.querySelectorAll("[role='radio']")).map((tile) =>
       tile.textContent?.trim(),
     );
-    expect(names).toEqual(["Dark", "Neon glow", "Midnight", "Light", "Match my computer"]);
+    expect(names).toEqual([
+      "Dark",
+      "Neon glow",
+      "Midnight",
+      "Gunmetal",
+      "Light",
+      "Match my computer",
+    ]);
     // The preview is a picture only: the tile's name is its label text.
     for (const preview of group.querySelectorAll(".radio-card-preview")) {
       expect(preview.getAttribute("aria-hidden")).toBe("true");
@@ -556,7 +575,7 @@ describe("AppearanceTab — Accessibility", () => {
     container.appendChild(section);
 
     const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
-    const light = tiles[3] as HTMLElement;
+    const light = tiles[4] as HTMLElement;
 
     light.click();
 

@@ -98,6 +98,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("appearance.theme.dark"),
     s("appearance.theme.neon-glow"),
     s("appearance.theme.midnight"),
+    s("appearance.theme.gunmetal"),
     s("appearance.theme.light"),
     platformText(s("appearance.theme.system"), s("appearance.theme.system.android")),
     s("appearance.accentColor"),

@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { loadPref, savePref, STORAGE_PREFIX } from "../../src/features/settings/helpers";
-import { applyTheme, THEMES } from "../../src/lib/prefs/themes";
+import { applyTheme, applyThemeChoice, THEMES } from "../../src/lib/prefs/themes";
 
 describe("settings/helpers", () => {
   let container: HTMLDivElement;
@@ -150,6 +150,30 @@ describe("settings/helpers", () => {
       }
     });
 
+    it("switching away from gunmetal leaves none of its tokens inline and drops its body class", () => {
+      const others = (Object.keys(THEMES) as (keyof typeof THEMES)[]).filter(
+        (name) => name !== "gunmetal",
+      );
+      const root = document.documentElement;
+      for (const next of [...others, "system"]) {
+        applyThemeChoice("gunmetal");
+        expect(document.body.classList.contains("theme-gunmetal")).toBe(true);
+        expect(root.style.getPropertyValue("--border-control")).toBe("#6b7787");
+
+        applyThemeChoice(next);
+
+        expect(document.body.classList.contains("theme-gunmetal"), next).toBe(false);
+        const own = Object.keys(THEMES.gunmetal).filter((key) => {
+          const incoming: Record<string, string> =
+            next in THEMES ? THEMES[next as keyof typeof THEMES] : THEMES.dark;
+          return !(key in incoming);
+        });
+        for (const key of own) {
+          expect(root.style.getPropertyValue(key), `${key} after gunmetal -> ${next}`).toBe("");
+        }
+      }
+    });
+
     it("does not clear unrelated inline custom properties like --accent or --font-size", () => {
       const root = document.documentElement;
       root.style.setProperty("--accent", "#00c8ff");
@@ -194,10 +218,11 @@ describe("settings/helpers", () => {
   });
 
   describe("THEMES", () => {
-    it("contains dark, midnight, and light themes", () => {
+    it("contains dark, midnight, gunmetal, and light themes", () => {
       const themeNames = Object.keys(THEMES);
       expect(themeNames).toContain("dark");
       expect(themeNames).toContain("midnight");
+      expect(themeNames).toContain("gunmetal");
       expect(themeNames).toContain("light");
     });
 

@@ -8,6 +8,7 @@ import { THEMES, type ThemeName } from "@lib/prefs/themes";
 /** The accent each theme starts with before the user picks one. */
 export function defaultAccentOf(themeName: string): string {
   if (themeName === "neon-glow") return "#00c8ff";
+  if (themeName === "gunmetal") return "#ff7a45";
   // Light's own accent: white on it reads at 5.54:1.
   return themeName === "light" ? "#4f5bd5" : "#5865f2";
 }

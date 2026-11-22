@@ -72,6 +72,7 @@ test.describe("reconnect media notice", () => {
     const matrix: AppearancePrefs[] = [
       { theme: "dark" },
       { theme: "midnight" },
+      { theme: "gunmetal" },
       { theme: "neon-glow" },
       { theme: "light" },
       { theme: "dark", highContrast: true },
