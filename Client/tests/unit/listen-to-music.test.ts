@@ -71,6 +71,17 @@ describe("voice store listeningTo", () => {
   });
 });
 
+const music = (over: Partial<GridMusic> = {}): GridMusic => ({
+  userId: SAM,
+  name: "Sam",
+  listening: false,
+  volume: 70,
+  onListen: vi.fn(),
+  onStop: vi.fn(),
+  onVolume: vi.fn(),
+  ...over,
+});
+
 describe("music tile in the video grid", () => {
   let container: HTMLDivElement;
   let grid: ReturnType<typeof createVideoGrid>;
@@ -82,16 +93,6 @@ describe("music tile in the video grid", () => {
   });
   afterEach(() => grid.destroy?.());
 
-  const music = (over: Partial<GridMusic> = {}): GridMusic => ({
-    userId: SAM,
-    name: "Sam",
-    listening: false,
-    volume: 70,
-    onListen: vi.fn(),
-    onStop: vi.fn(),
-    onVolume: vi.fn(),
-    ...over,
-  });
   const cell = (id = SAM) => container.querySelector<HTMLElement>(`[data-music-id='${id}']`);
 
   it("shows a tile with no camera or share in the call, offering Listen to music", () => {
@@ -154,35 +155,36 @@ describe("music tile in the video grid", () => {
   });
 });
 
+const snap = (over: Partial<VoiceRowInputs> = {}): VoiceRowInputs => ({
+  voiceUsers: new Map([
+    [
+      10,
+      new Map([
+        [SELF, user(SELF)],
+        [SAM, user(SAM)],
+      ]),
+    ],
+  ]),
+  currentChannelId: 10,
+  peerVerifications: new Map(),
+  localSessionFingerprint: null,
+  localSafetyNumber: null,
+  voiceMembers: new Map(),
+  selfId: SELF,
+  connectionStatus: "connected",
+  timeout: null,
+  movable: [],
+  localMute: {},
+  musicSharers: new Set([SELF, SAM]),
+  ...over,
+});
+
 describe("Listen pill on a sidebar row", () => {
   const ctx: VoiceUserContext = {
     avatarColor: () => "#5865f2",
     localSilenced: () => false,
     moderation: false,
   };
-  const snap = (over: Partial<VoiceRowInputs> = {}): VoiceRowInputs => ({
-    voiceUsers: new Map([
-      [
-        10,
-        new Map([
-          [SELF, user(SELF)],
-          [SAM, user(SAM)],
-        ]),
-      ],
-    ]),
-    currentChannelId: 10,
-    peerVerifications: new Map(),
-    localSessionFingerprint: null,
-    localSafetyNumber: null,
-    voiceMembers: new Map(),
-    selfId: SELF,
-    connectionStatus: "connected",
-    timeout: null,
-    movable: [],
-    localMute: {},
-    musicSharers: new Set([SELF, SAM]),
-    ...over,
-  });
   const pill = (inputs: VoiceRowInputs, userId = SAM, channelId = 10) =>
     drawVoiceUserRow(
       voiceUserModel(user(userId), channelId, inputs, ctx),
@@ -216,9 +218,9 @@ describe("Listen pill on a sidebar row", () => {
   });
 });
 
-describe("voice widget listening bar", () => {
-  const sync = () => voiceStore.getState();
+const sync = () => voiceStore.getState();
 
+describe("voice widget listening bar", () => {
   it("is hidden until you listen, then names the sharer, the level and offers Stop", () => {
     const ac = new AbortController();
     const bar = createListeningBar(ac.signal, vi.fn());

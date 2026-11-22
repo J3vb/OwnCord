@@ -4,8 +4,9 @@
 import type { StreamSample, VideoView } from "./remoteTracks";
 import { RemoteTracks } from "./remoteTracks";
 import { voiceStore } from "@stores/voice.store";
-import { withListeningTo } from "@stores/voicePeers";
+import { setListeningTo } from "@stores/voiceListening";
 import { noteWatchSent } from "@lib/voice/watchRequest";
+import type { AudioElements } from "@lib/voice/audioElements";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
 import { SessionCore } from "./sessionCore";
 
@@ -16,6 +17,7 @@ const MAX_WATCH_IDS = 16;
 const WATCH_RETRY_MS = 1000;
 
 export abstract class SessionRemote extends SessionCore {
+  protected abstract readonly _audioElements: AudioElements;
   /** Remote-video callbacks and the video stream lookups. */
   protected _remoteTracks = this.createRemoteTracks();
   /** True while leaveVoice clears the watch set: the server clears on leave,
@@ -36,8 +38,10 @@ export abstract class SessionRemote extends SessionCore {
       if (!this._leavingVoice) this.sendWatching(ids);
     };
     // The session owns the subscription, so it is the one writer of the field.
-    tracks.onListeningChange = (userId) =>
-      voiceStore.setState((prev) => withListeningTo(prev, userId));
+    tracks.onListeningChange = (userId) => {
+      this._audioElements.setListenedMusicUser(userId);
+      setListeningTo(userId);
+    };
     return tracks;
   }
 

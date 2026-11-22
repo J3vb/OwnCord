@@ -89,6 +89,8 @@ vi.mock("livekit-client", () => ({
   }),
 }));
 
+vi.mock("@stores/voiceListening", () => ({ setListeningTo: vi.fn() }));
+
 vi.mock("@stores/voice.store", () => ({
   voiceStore: {
     getState: vi.fn(() => mockVoiceState),
@@ -482,15 +484,17 @@ describe("LiveKitSession on the Linux native backend", () => {
   it("per-user and output volume reach the native playout mixer", async () => {
     prefs.set("userVolume_3", 50);
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    session.listenToMusic(4);
     host.commands.length = 0;
     // A participant starts at their saved volume: the web path applies it on
-    // the audio TrackSubscribed, which the native room never raises.
+    // the audio TrackSubscribed, which the native room never raises. Music
+    // plays only for the sharer listened to (user 4), at 0 for the rest.
     emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
     emit({ session: 1, event: { type: "participantConnected", identity: "user-4" } });
     expect(host.commands).toEqual([
       ["setVolume", [1, "user-3", 0.5]],
       ["setScreenshareVolume", [1, "user-3", 1]],
-      ["setMusicVolume", [1, "user-3", 1]],
+      ["setMusicVolume", [1, "user-3", 0]],
       ["setVolume", [1, "user-4", 1]],
       ["setScreenshareVolume", [1, "user-4", 1]],
       ["setMusicVolume", [1, "user-4", 1]],

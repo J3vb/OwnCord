@@ -11,7 +11,6 @@ import {
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { authStore } from "@stores/auth.store";
-import type { AudioElements } from "@lib/voice/audioElements";
 import { attemptAutoReconnect } from "@lib/voice/livekitReconnect";
 import { type RoomEventHandlers, createRoomEventHandlers } from "@lib/voice/roomEventHandlers";
 import {
@@ -40,7 +39,6 @@ const log = createLogger("sessionReconnect");
 
 export abstract class SessionReconnect extends SessionTokens {
   protected abstract readonly _join: JoinOrchestration;
-  protected abstract readonly _audioElements: AudioElements;
   protected abstract readonly _cameraState: CameraTrackState;
   protected abstract _music: MusicShare | null;
   abstract startMusic(appId: string, options?: MusicStartOptions): Promise<MusicStartOutcome>;

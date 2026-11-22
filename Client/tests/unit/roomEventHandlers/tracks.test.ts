@@ -480,14 +480,15 @@ describe("track routing edge cases", () => {
 
 // ── music shares ──────────────────────────────────────────────────────────
 
-describe("music shares", () => {
-  const musicPub = () => {
-    const publication = remotePub(Track.Source.ScreenShareAudio);
-    Object.assign(publication, { trackName: "music" });
-    return publication;
-  };
-  const sharers = () => voiceStore.getState().musicSharers ?? new Set<number>();
+const musicPub = () => {
+  const publication = remotePub(Track.Source.ScreenShareAudio);
+  Object.assign(publication, { trackName: "music" });
+  return publication;
+};
 
+const sharers = () => voiceStore.getState().musicSharers ?? new Set<number>();
+
+describe("music shares", () => {
   beforeEach(() => {
     voiceStore.setState((prev) => ({ ...prev, musicSharers: new Set<number>() }));
   });

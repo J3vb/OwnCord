@@ -698,6 +698,7 @@ export const shards = {
     "src/stores/messagesSelectors.ts",
     "src/stores/voiceModel.ts",
     "src/stores/voicePeers.ts",
+    "src/stores/voiceListening.ts",
   ],
   "safety-moderation-1": [
     "src/features/people-home/activeStrip.ts",
