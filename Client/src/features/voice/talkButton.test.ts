@@ -13,6 +13,7 @@ import {
 } from "./talkButton";
 import { pttGates } from "../../lib/ui/inputMode";
 import {
+  isPttClosePending,
   isPttPollingLive,
   resetVoiceStore,
   setPttGated,
@@ -103,6 +104,7 @@ describe("talk button", () => {
     await settle();
     expect(session.setPttGated).toHaveBeenLastCalledWith(false);
     expect(voiceStore.getState().pttGated).toBe(false);
+    expect(isPttClosePending()).toBe(false);
   });
 
   it("does nothing outside a call or in Voice activity mode", async () => {
