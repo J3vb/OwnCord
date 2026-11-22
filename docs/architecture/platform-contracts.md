@@ -216,7 +216,6 @@ global_keys_portal_bind
 global_keys_portal_configure
 global_keys_status
 is_metered
-launch_was_restart
 list_audio_apps
 list_running_programs
 load_credential
@@ -289,6 +288,7 @@ push_register
 push_status
 push_unregister
 read_staged_file
+restart_startup_link
 resume_saved_session
 save_credential
 save_file

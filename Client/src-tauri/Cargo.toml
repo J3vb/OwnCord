@@ -79,9 +79,12 @@ tauri-plugin-fs = "2"
 tauri-plugin-deep-link = "2"
 # Minor-pinned per the plugin's own guidance: configure_client hands it a
 # preconfigured rustls ClientConfig, and a 2.x minor bump can change the
-# plugin's bundled reqwest/rustls and break that seam at runtime. 2.13 is the
-# floor: older releases ignore tauri.conf.json's `requireSignedVersion`.
-tauri-plugin-updater = "2.13"
+# plugin's bundled reqwest/rustls and break that seam at runtime. 2.14.1 is the
+# floor: older releases ignore tauri.conf.json's `requireSignedVersion`, and
+# update_commands/handoff.rs relies on its Windows install, where an app-set
+# on_before_exit replaces the default step and a failed installer launch
+# returns an error instead of exiting.
+tauri-plugin-updater = "2.14.1"
 # Read authenticated artifact metadata with the same verifier as the updater.
 # Already present transitively through tauri-plugin-updater.
 minisign-verify = "0.3"

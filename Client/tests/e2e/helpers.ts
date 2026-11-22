@@ -1094,8 +1094,8 @@ export function buildTauriMockScript(opts: {
         // Close to tray / Start minimized (WP 2B-3): the host's defaults.
         if (cmd === "get_window_prefs") return { minimizeToTray: true, startMinimized: false };
         if (cmd === "set_window_pref" || cmd === "show_next_launch") return null;
-        // A fresh start, not an app restart: the start-up link opens.
-        if (cmd === "launch_was_restart") return false;
+        // A fresh start, not an app restart: no start-up link was copied.
+        if (cmd === "restart_startup_link") return null;
         // Graphics card for video: no cards, so the row stays hidden.
         if (cmd === "get_gpu_adapters")
           return { cards: [], saved: "auto", active: null, notFound: false, resetAfterCrash: false };

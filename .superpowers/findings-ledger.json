@@ -13960,18 +13960,18 @@
     },
     {
       "id": "OC-0604",
-      "title": "An app restart does not open the start-up owncord:// link again; links that arrive later still open",
+      "title": "An app restart does not open the start-up owncord:// link it copied from the old process; any other link still opens",
       "file": "Client/src/platform/desktop/deepLinks.ts",
-      "line": 83,
+      "line": 84,
       "severity": "low",
-      "why": "An update or in-app restart starts the new process with the old command line. The start-up marker every restart writes is now kept for the process and read through launch_was_restart, and the deep-link start-up skips only its getCurrent() link when it is set.",
+      "why": "An update or in-app restart starts the new process with the old command line. The restart marker now also keeps the old process's own start-up link (read from its argv the way the deep-link plugin reads it); the new process exposes it through restart_startup_link, and the deep-link start-up skips a getCurrent() link only when it equals that link. A stale marker, a newer link handed over before the listener is up, and a launch that is no restart all open their link.",
       "repro": "Start OwnCord from an invite or toast link, then use Clear & Restart or install an update.",
       "evidence": "Windows bug hunt 2026-11-22.",
-      "suggestedFix": "Expose the show-next-launch marker read at start-up as a command and skip the getCurrent() dispatch when it is set; keep onOpenUrl.",
+      "suggestedFix": "Store the restarting process's own start-up link with the show-next-launch marker, expose it to the new process, and skip only an equal getCurrent() link; keep onOpenUrl.",
       "fix": {
         "commit": "pending",
-        "test": "Client/tests/unit/deep-link-init.test.ts (the start-up link after an app restart: is not opened again, while a link that arrives later still opens; opens the start-up link after a launch that is not a restart / a host that cannot answer / an answer that is not a boolean)",
-        "revertProof": "fail (1 of 4 cases)"
+        "test": "Client/tests/unit/deep-link-init.test.ts (the start-up link after an app restart: does not open the copied link again, while a link that arrives later still opens; opens a different link than the restart copied / a newer link handed over after the restart / a launch that is no restart / a restart of a process started without a link; opens the start-up link after a host that cannot answer / an answer that is not a link), Client/src-tauri/src/window_prefs.rs (a_start_up_link_is_read_the_way_the_deep_link_plugin_reads_it, the_link_scheme_is_the_one_the_desktop_app_registers)",
+        "revertProof": "fail (1 of 7 cases)"
       },
       "lens": "client-state",
       "confidence": "high",

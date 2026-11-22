@@ -305,7 +305,7 @@ pub fn run() {
             #[cfg(desktop)]
             window_prefs::show_next_launch,
             #[cfg(desktop)]
-            window_prefs::launch_was_restart,
+            window_prefs::restart_startup_link,
             #[cfg(desktop)]
             gpu_adapter::get_gpu_adapters,
             #[cfg(desktop)]
@@ -611,10 +611,10 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         app.manage(window_prefs::WindowPrefs::load(app.handle()));
         let prefs = app.state::<window_prefs::WindowPrefs>();
         // Always consumed, so the marker never outlives one launch.
-        let show_next = window_prefs::take_show_next_launch(app.handle());
-        app.manage(window_prefs::LaunchOrigin::new(show_next));
+        let next = window_prefs::take_show_next_launch(app.handle());
+        app.manage(window_prefs::LaunchOrigin::new(next.restart_link));
         let hidden = window_prefs::should_start_hidden(
-            show_next,
+            next.show,
             window_prefs::launched_minimized(),
             prefs.start_minimized(),
             window_prefs::tray_available,
