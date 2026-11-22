@@ -1,11 +1,15 @@
 /**
  * YouTube embeds: video ID extraction and the player card with its cached
- * title. A leaf of media.ts; it imports only the attachment layer.
+ * title. A leaf of media.ts; it imports only the attachment layer and the
+ * desktop link opener.
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { pageIsWebOrigin } from "@lib/hostPlatform";
+import { desktop } from "../../../platform/desktop";
 import { fetchExternalImage, previewExternal, recoverEvictedImage } from "./attachments";
+import { log } from "./attachmentUrls";
 import { clearImageSizes } from "./imageSizes";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { admitDerived, externalAllowed, requestExternalItem } from "../../content-consent/external";
@@ -233,6 +237,15 @@ export function renderYouTubeEmbed(
   let started = false;
   let asking = false;
   thumbWrap.addEventListener("click", () => {
+    // YouTube's player refuses a frame that arrives with no Referer (its error
+    // 153), and a page outside http(s) sends none: the browser plays it there,
+    // as the title link does, and the app itself contacts nothing.
+    if (!pageIsWebOrigin()) {
+      desktop.urlOpener
+        .open(originalUrl)
+        .catch((err: unknown) => log.warn("YouTube open failed", { error: String(err) }));
+      return;
+    }
     if (started || asking) return;
     const key = `url:${originalUrl}`;
     if (server === undefined || externalAllowed(key)) {

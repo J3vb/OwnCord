@@ -1,5 +1,5 @@
 {
-  "nextId": 602,
+  "nextId": 621,
   "findings": [
     {
       "id": "OC-0001",
@@ -13911,6 +13911,75 @@
       "hunt": "release-review-2.9.0",
       "finder": "claude",
       "fixedDate": "2026-11-12"
+    },
+    {
+      "id": "OC-0618",
+      "title": "On Linux, Play on a YouTube card opens the video in the browser instead of a player that YouTube refuses",
+      "file": "Client/src/features/messaging/content/mediaYouTube.ts",
+      "line": 240,
+      "severity": "medium",
+      "why": "The Linux app page is served from tauri://localhost, and WebKit sends no Referer from a page that is not http(s) (checked on WebKitGTK 2.52: a frame from a tauri: page got none, one from an http page got one). YouTube shows player error 153 for an embed without a Referer, so the in-page player could never play on Linux.",
+      "repro": "Linux desktop: open a channel with a YouTube link and press Play on its card.",
+      "evidence": "mediaYouTube.ts mounted https://www.youtube.com/embed/<id> straight into the page; Server/api/livekit_proxy.go lists tauri://localhost as the WebKitGTK origin.",
+      "suggestedFix": "When the page is not http(s), open the video with the desktop link opener instead of mounting the frame.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/media/lightboxAndYoutube.test.ts (on a page outside http(s), Play opens the video in the browser, not a frame)",
+        "revertProof": "fail (a frame is mounted and nothing opens)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0619",
+      "title": "A Linux page-process crash or out-of-memory kill is named in the diagnostics event log instead of unknown/unknown",
+      "file": "Client/src/lib/diagnostics/appEvents.ts",
+      "line": 80,
+      "severity": "low",
+      "why": "webviewFailureFields read only the Windows and Android wording; the Linux line \"[exit] webview process ended: Crashed; ...\" matched neither, so process and reason were both \"unknown\".",
+      "repro": "Linux: the WebKitGTK web process crashes or is killed for memory; the next page load copies the line into the event log.",
+      "evidence": "exit_watch/linux.rs logs \"[exit] webview process ended: {reason:?}\"; lastExit.ts accepts the line but appEvents.ts could not parse it.",
+      "suggestedFix": "Recognise \"webview process ended: <Reason>\" as the renderer and map WebKit's Crashed, ExceededMemoryLimit and TerminatedByApi.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src/lib/diagnostics/appEvents.test.ts (reads the Linux page process ending)",
+        "revertProof": "fail (unknown/unknown)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0620",
+      "title": "The Linux .deb requires a WebKitGTK that has AbortSignal.any, so Settings never opens empty on an old one",
+      "file": "Client/src-tauri/tauri.conf.json",
+      "line": 41,
+      "severity": "low",
+      "why": "Settings, the connection test and its panel call AbortSignal.any with no fallback, which WebKitGTK has from 2.44, while the .deb accepted any libwebkit2gtk-4.1-0. On a host not updated since early 2024 every Settings tab threw before drawing.",
+      "repro": ".deb install on a host with WebKitGTK older than 2.44, then open Settings.",
+      "evidence": "SettingsOverlay.ts:117, connectionDiagnostics.ts:185, ConnectionDiagnosticsPanel.ts:284; tauri.conf.json deb depends had no version.",
+      "suggestedFix": "Depend on libwebkit2gtk-4.1-0 (>= 2.44); apt and the in-app update (apt-get) pull the newer WebKitGTK.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/tauri-conf-deb-depends.test.ts (requires a WebKitGTK that runs the page)",
+        "revertProof": "fail (no version floor)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
     }
   ]
 }

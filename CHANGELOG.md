@@ -134,6 +134,12 @@ release changes the database, and anything an operator must do first.)
 - A mention badge on a voice channel can be cleared with Mark as Read, and the DM header no longer shows a Media button left over from the last channel.
 - Screen readers read a revealed spoiler's text and the member list's collapse arrow.
 
+**Linux**
+
+- Pressing Play on a YouTube card showed YouTube's "Error 153" instead of the video; Play now opens the video in your browser.
+- The .deb now needs WebKitGTK 2.44 or newer, and apt installs it with the update: on an older WebKitGTK, Settings opened empty.
+- The diagnostics event log names a page crash or an out-of-memory kill instead of "unknown".
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

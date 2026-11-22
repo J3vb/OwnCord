@@ -21,6 +21,8 @@ const GPU = stamp(
 
 const fiveMinutesLater = () => Date.parse("2026-11-03T10:05:00Z");
 const webviewFields = (line: string) => webviewFailureFields({ at: "", file: "", line });
+const linux = (reason: string) =>
+  webviewFields(`[exit] webview process ended: ${reason}; ending the call and reloading`);
 
 describe("copying how the last run ended", () => {
   let seen: Seen[];
@@ -99,6 +101,13 @@ describe("webview failure fields", () => {
       process: "renderer",
       reason: "killed",
     });
+  });
+
+  it("reads the Linux page process ending", () => {
+    expect(linux("Crashed")).toEqual({ process: "renderer", reason: "crashed" });
+    expect(linux("ExceededMemoryLimit")).toEqual({ process: "renderer", reason: "out_of_memory" });
+    expect(linux("TerminatedByApi")).toEqual({ process: "renderer", reason: "killed" });
+    expect(linux("__Unknown")).toEqual({ process: "renderer", reason: "unknown" });
   });
 
   it("says unknown for words it does not know", () => {
