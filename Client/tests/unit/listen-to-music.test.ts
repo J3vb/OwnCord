@@ -168,11 +168,11 @@ describe("music tile in the video grid", () => {
 
   it("names the others who listen, then you, under the disc", () => {
     grid.setMusic([music({ listeners: ["Alex"], listening: true })]);
-    expect(listenersLine()).toBe("Listening: Alex, you");
+    expect(listenersLine()).toBe("Listening: You, Alex");
     grid.setMusic([music({ listeners: ["Alex", "Kim"] })]);
     expect(listenersLine()).toBe("Listening: Alex, Kim");
     grid.setMusic([music({ listening: true })]);
-    expect(listenersLine()).toBe("Listening: you");
+    expect(listenersLine()).toBe("Listening: You");
   });
 
   it("shows no listeners line when nobody listens, and caps a long list", () => {

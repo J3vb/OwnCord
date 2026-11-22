@@ -105,7 +105,7 @@ release changes the database, and anything an operator must do first.)
 **Voice**
 
 - Shared music is silent until you choose to listen, one person at a time. Tap Listen to music on their tile in the call view, or Listen beside their name in the channel list; the tile and the voice panel show who you are listening to with a volume control and Stop. Listening to someone else switches over, and leaving the call clears it; if their connection drops and their music comes back, you keep listening. Mute music and each person's Music volume work as before. Needs this version of the app on the listener's side only.
-- The music tile shows who is listening ("Listening: Alex, you"), like a screen share shows who is watching. Needs this version of the server and app; with an older server the tile shows only you.
+- The music tile shows who is listening ("Listening: You, Alex"), like a screen share shows who is watching. Needs this version of the server and app; with an older server the tile shows only you.
 
 ### Fixed
 

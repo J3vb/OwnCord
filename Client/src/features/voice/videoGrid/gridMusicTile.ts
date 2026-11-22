@@ -20,10 +20,10 @@ function drawKey(music: GridMusic): string {
   return `${music.listening ? "on" : "off"}|${music.name}|${music.listeners.join("\u0000")}`;
 }
 
-/** Who listens, others first and you last ("Alex, you"); empty when nobody. */
+/** Who listens, you first like the Watching badge ("You, Alex"); empty when nobody. */
 function listenerNames(music: GridMusic): string[] {
   return music.listening
-    ? [...music.listeners, voiceText("tile.listenersYou")]
+    ? [voiceText("tile.viewersYou"), ...music.listeners]
     : [...music.listeners];
 }
 

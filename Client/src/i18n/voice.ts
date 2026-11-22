@@ -131,7 +131,6 @@ export const voiceText = defineCatalog("voice", {
   "tile.viewersYou": "You",
   "tile.listeners": "Listening: {names}",
   "tile.listenersMore": "Listening: {names} and {count} more",
-  "tile.listenersYou": "you",
   "tile.backToGrid": "Back to grid",
   "grid.showChat": "Show chat",
   "grid.viewOptions": "View options",
