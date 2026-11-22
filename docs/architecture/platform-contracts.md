@@ -194,6 +194,7 @@ android_notification_channels
 android_notification_permission
 android_notify
 app_audio_available
+autostart_fix_entry
 check_client_update
 clear_call_notification
 clear_call_ring

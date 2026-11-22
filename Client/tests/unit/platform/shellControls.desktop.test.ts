@@ -4,7 +4,7 @@
 // first (proving they could fail and pinning today's behaviour), then re-bound
 // them here. The legacy bindings are deleted with this commit: their exports
 // are gone.
-import { vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AppProcess } from "../../../src/platform/contracts/appProcess";
 import type { DevTools } from "../../../src/platform/contracts/devTools";
 import type { Autostart } from "../../../src/platform/contracts/updater";
@@ -84,4 +84,16 @@ describeAutostartSuite(async () => {
       state: () => autostart.enabled,
     },
   };
+});
+
+describe("desktop autostart", () => {
+  it("has the host fix the login entry's path after turning it on", async () => {
+    autostart.enabled = false;
+    autostart.error = null;
+    invoke.mockReset().mockRejectedValue(new Error("no such command"));
+    const { autostart: binding } = await import("../../../src/platform/desktop/autostart");
+    await binding.enable();
+    expect(autostart.enabled).toBe(true);
+    expect(invoke.mock.calls.map((call) => call[0])).toEqual(["autostart_fix_entry"]);
+  });
 });

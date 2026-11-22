@@ -10,6 +10,10 @@ extern "C" {
 }
 
 fn main() {
+    // Before any library can print or GStreamer can read its settings.
+    #[cfg(target_os = "linux")]
+    owncord_client_lib::prepare_linux_launch();
+
     // Xlib is not thread-safe unless XInitThreads runs before any other Xlib
     // call, and libwebrtc and device_query open and query their own X displays
     // from worker threads while GTK uses Xlib on the main one. Without this the

@@ -3,6 +3,8 @@ mod active_session;
 mod android_notifications;
 #[cfg(target_os = "android")]
 mod android_secrets;
+#[cfg(desktop)]
+mod autostart_entry;
 #[cfg(target_os = "android")]
 mod call_service;
 mod commands;
@@ -51,6 +53,8 @@ mod idle_android;
 #[cfg(target_os = "linux")]
 mod idle_wayland;
 mod json_store;
+#[cfg(target_os = "linux")]
+mod launch_env;
 #[cfg(target_os = "linux")]
 mod linux_media;
 #[cfg(target_os = "linux")]
@@ -183,6 +187,15 @@ fn should_restore_on_second_launch(installer_launching: bool) -> bool {
     !installer_launching
 }
 
+/// Process setup that must come before GTK, GLib or GStreamer start, so
+/// `main` calls it first, with one thread: stderr goes to its file for the
+/// next start's report, and an AppImage's GStreamer gets its own registry.
+#[cfg(target_os = "linux")]
+pub fn prepare_linux_launch() {
+    stderr_capture::start_at_launch();
+    launch_env::use_private_gstreamer_registry();
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // First, so a panic anywhere after the log plugin starts reaches the log.
@@ -298,6 +311,8 @@ pub fn run() {
         .manage(windows_app_audio::MusicAudioState::new())
         .invoke_handler(tauri::generate_handler![
             diagnostics::frontend_ready,
+            #[cfg(desktop)]
+            autostart_entry::autostart_fix_entry,
             #[cfg(desktop)]
             window_prefs::get_window_prefs,
             #[cfg(desktop)]
@@ -593,6 +608,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         // by the next start; freezes and memory are logged as they happen.
         exit_watch::start(app.handle(), &dir, &app.package_info().version.to_string());
     }
+    // Launch on login: an existing entry follows this app's current path.
+    #[cfg(target_os = "linux")]
+    autostart_entry::repair(app.handle());
     // How earlier runs ended, from Android, into the same native log.
     #[cfg(target_os = "android")]
     if let Ok(dir) = tauri::Manager::path(app).app_log_dir() {
