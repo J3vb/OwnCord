@@ -182,7 +182,7 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 			}
 			// The lock mechanism itself failed (e.g. NFS rejecting advisory locks); SQLite still protects the file.
 			slog.Warn("db: could not take the single-process lock; continuing unprotected",
-				"path", lockFilePath(path), "error", lockErr)
+				"path", LockFilePath(path), "error", lockErr)
 			release = nil
 		}
 	}

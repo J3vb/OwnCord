@@ -388,6 +388,11 @@ func (a *App) startHTTP() error {
 // startSignals arms the shutdown context under the coordinator's context, so a
 // programmatic restart drains like a SIGTERM, including on Windows.
 func (a *App) startSignals() error {
+	if installed, err := installLogoffFilter(); err != nil {
+		a.log.Warn("could not filter Windows sign-out events; a user signing out of this machine may stop the server", "error", err)
+	} else if installed {
+		a.log.Info("running in the Windows services session: a user signing out of this machine does not stop the server")
+	}
 	parent, cancelParent := context.WithCancel(a.rootCtx)
 	// AfterFunc rather than a goroutine, so nothing leaks if the restart
 	// context never fires.

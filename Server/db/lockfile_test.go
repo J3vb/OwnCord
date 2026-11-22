@@ -17,7 +17,7 @@ import (
 // latter's 30s restart-handoff retry would stall the contended case.
 func TestTryLockFile_Exclusive(t *testing.T) {
 	t.Parallel()
-	path := lockFilePath(filepath.Join(t.TempDir(), "test.db"))
+	path := LockFilePath(filepath.Join(t.TempDir(), "test.db"))
 
 	release1, err := tryLockFile(path)
 	if err != nil {

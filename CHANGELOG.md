@@ -134,6 +134,12 @@ release changes the database, and anything an operator must do first.)
 - A mention badge on a voice channel can be cleared with Mark as Read, and the DM header no longer shows a Media button left over from the last channel.
 - Screen readers read a revealed spoiler's text and the member list's collapse arrow.
 
+**Server (Windows hosting)**
+
+- Download full archive always failed on a Windows server ("could not build the archive"); it now builds while the server runs.
+- The saved-log history on a Windows server could miss the newest lines of today's log; it now shows them.
+- A Windows server run as a service (NSSM) or as a scheduled task stopped whenever any user signed out of the machine; it now keeps running. Stopping the service and shutting down still stop it cleanly.
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

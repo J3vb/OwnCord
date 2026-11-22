@@ -16,7 +16,7 @@ var ErrAlreadyLocked = errors.New("database lock held by another process")
 // for short-lived tooling (the `chatserver restore` CLI) that must refuse when a
 // server is running. It tries once; a refusal wraps ErrAlreadyLocked.
 func AcquireProcessLock(dbPath string) (release func(), err error) {
-	release, err = tryLockFile(lockFilePath(dbPath))
+	release, err = tryLockFile(LockFilePath(dbPath))
 	if errors.Is(err, ErrAlreadyLocked) {
 		return nil, fmt.Errorf("database %s is in use by another process (stop the server first): %w", dbPath, err)
 	}
@@ -26,7 +26,9 @@ func AcquireProcessLock(dbPath string) (release func(), err error) {
 	return release, nil
 }
 
-func lockFilePath(dbPath string) string { return dbPath + ".lock" }
+// LockFilePath is the file beside dbPath that carries its single-process lock. A running server holds it open
+// for its whole life (on Windows with no sharing, so no other handle can open it); it holds no data.
+func LockFilePath(dbPath string) string { return dbPath + ".lock" }
 
 // acquireProcessLock takes the lock for dbPath, retrying for a bounded window
 // before ErrAlreadyLocked. A restart handoff does not overlap by design (the old
@@ -41,7 +43,7 @@ func acquireProcessLock(dbPath string) (release func(), err error) {
 	deadline := time.Now().Add(retryFor)
 	logged := false
 	for {
-		release, err = tryLockFile(lockFilePath(dbPath))
+		release, err = tryLockFile(LockFilePath(dbPath))
 		if err == nil || !errors.Is(err, ErrAlreadyLocked) {
 			return release, err
 		}
