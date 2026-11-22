@@ -52,7 +52,9 @@ export function createListeningBar(signal: AbortSignal, onLevel: () => void): Li
 
   function sync(voice: VoiceState): void {
     const userId = voice.listeningTo ?? null;
-    el.hidden = userId === null;
+    // Gone with the tile and the pill when the sharer stopped (the listen
+    // lingers a moment in case their music comes back).
+    el.hidden = userId === null || voice.musicSharers?.has(userId) !== true;
     if (userId === null) return;
     const name = nameOf(userId, voice);
     setText(title, t("music.bar.listening", { name }));

@@ -123,8 +123,8 @@ export interface GridMusic {
   readonly userId: number;
   readonly name: string;
   readonly listening: boolean;
-  /** Their Music volume, 0 to 100, as the slider starts. */
-  readonly volume: number;
+  /** Their Music volume, 0 to 100, read when the slider is drawn or the level changes. */
+  readonly volume: () => number;
   readonly onListen: () => void;
   readonly onStop: () => void;
   readonly onVolume: (percent: number) => void;
@@ -324,6 +324,9 @@ export function createVideoGrid(): VideoGridComponent {
     });
     // A level set from another surface (the voice roster's menu) too.
     window.addEventListener(USER_VOLUME_CHANGED, api.onUserLocalMute, {
+      signal: st.gridListeners.signal,
+    });
+    window.addEventListener(USER_VOLUME_CHANGED, api.onMusicVolume, {
       signal: st.gridListeners.signal,
     });
 

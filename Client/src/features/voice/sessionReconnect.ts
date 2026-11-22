@@ -75,6 +75,7 @@ export abstract class SessionReconnect extends SessionTokens {
         this._remoteTracks.isWatched(userId, isScreenshare ? "screenshare" : "camera"),
       isListening: (userId) => this._remoteTracks.isListening(userId),
       musicEnded: (userId) => this._remoteTracks.musicEnded(userId),
+      reviewListening: () => this._remoteTracks.reviewListening(),
       getOnErrorCallback: () => this.onErrorCallback,
       isConnecting: () => this._connecting,
       isReconnecting: () => this._state.type === "reconnecting",

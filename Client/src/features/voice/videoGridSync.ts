@@ -173,7 +173,7 @@ function syncMusic(
       userId,
       name,
       listening: userId === listeningTo,
-      volume: deps.music.volume(userId),
+      volume: () => deps.music.volume(userId),
       onListen: () => deps.music.listen(userId),
       onStop: () => deps.music.listen(null),
       onVolume: (percent) => deps.music.setVolume(userId, percent),

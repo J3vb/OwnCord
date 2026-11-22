@@ -168,3 +168,15 @@ describe("routing by track name", () => {
     expect(state.screenshareAudioElements.get(42)?.size).toBe(1);
   });
 });
+
+describe("Music volume announcement", () => {
+  it("announces every level change, so the tile slider and the panel bar follow", () => {
+    const seen = vi.fn();
+    window.addEventListener("owncord:user-volume-changed", seen, { once: true });
+
+    elements.setMusicVolume(42, 55);
+
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect((seen.mock.calls[0]![0] as CustomEvent<{ userId: number }>).detail.userId).toBe(42);
+  });
+});

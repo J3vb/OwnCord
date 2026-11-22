@@ -181,8 +181,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     markFirstRemoteTrackSubscribed();
     const userId = parseUserId(participant.identity);
     if (track.kind === Track.Kind.Audio) {
-      // A late subscription nobody asked for is dropped: a share's sound
-      // waits for its Watch, music for its Listen.
+      // A late subscription nobody asked for is dropped (Watch, Listen).
       if (
         publication.source === Track.Source.ScreenShareAudio &&
         userId > 0 &&
@@ -418,6 +417,7 @@ export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers 
     room.activeSpeakers = [];
     resetSpeakers();
     if (voiceStore.getState().voiceStatus === "reconnecting") setVoiceStatus("connected");
+    deps.reviewListening();
   };
 
   /** livekit-client's E2eeManager emits RoomEvent.EncryptionError

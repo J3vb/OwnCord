@@ -8,6 +8,7 @@ import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import {
   announceLocalMute,
+  announceVolume,
   clampPercent,
   userMusicMuteKey,
   userMusicVolumeKey,
@@ -127,6 +128,8 @@ export abstract class MusicAudioState extends ScreenshareAudioState {
     this.musicGainListener?.();
     // A level of 0 shows as muted too, so moving to or from it is announced.
     if (wasSilent !== (level === 0)) announceLocalMute(userId);
+    // The tile slider and the voice panel bar show the level.
+    announceVolume(userId);
   }
 
   setMusicMuted(userId: number, muted: boolean): void {

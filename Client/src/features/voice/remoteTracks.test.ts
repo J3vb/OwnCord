@@ -508,7 +508,7 @@ function roomWithMusic(ids: number[]) {
       ];
     }),
   );
-  const room = { remoteParticipants: participants } as unknown as Room;
+  const room = { state: "connected", remoteParticipants: participants } as unknown as Room;
   return { room, participants, sub: (id: number) => spies.get(id)! };
 }
 
@@ -568,8 +568,13 @@ describe("RemoteTracks listen (opt-in music)", () => {
       trackInfo: unknown;
     };
     pub.trackInfo = { encryption: Encryption_Type.NONE };
-    new RemoteTracks(() => room).listen(7);
+    const tracks = new RemoteTracks(() => room);
+    const onChange = vi.fn();
+    tracks.onListeningChange = onChange;
+    tracks.listen(7);
     expect(sub(7)).not.toHaveBeenCalledWith(true);
+    expect(tracks.isListening(7)).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
   });
 
   it("keeps listening when the music is unpublished and published again (their reconnect)", () => {
@@ -606,6 +611,57 @@ describe("RemoteTracks listen (opt-in music)", () => {
 
     expect(tracks.isListening(7)).toBe(false);
     expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it("keeps listening across your own reconnect that outlasts the grace, and picks the music up in the new room", () => {
+    vi.useFakeTimers();
+    const first = roomWithMusic([7]);
+    let room: Room | null = first.room;
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+    // The full restart unpublishes the music and leaves no room for a while.
+    room = null;
+    tracks.musicEnded(7);
+    vi.advanceTimersByTime(LISTEN_GRACE_MS * 3);
+    expect(tracks.isListening(7)).toBe(true);
+
+    const next = roomWithMusic([7]);
+    room = next.room;
+    tracks.reviewListening();
+    vi.advanceTimersByTime(LISTEN_GRACE_MS * 3);
+
+    expect(tracks.isListening(7)).toBe(true);
+    // The new room's handleTrackPublished subscribes it because isListening is true.
+    expect(tracks.isListening(7)).toBe(true);
+  });
+
+  it("forgets a pending listen once a live room still lacks the music for the grace", () => {
+    vi.useFakeTimers();
+    let room: Room | null = null;
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+    tracks.musicEnded(7);
+    vi.advanceTimersByTime(LISTEN_GRACE_MS * 2);
+    room = roomWithMusic([]).room;
+
+    tracks.reviewListening();
+    vi.advanceTimersByTime(LISTEN_GRACE_MS + 1);
+
+    expect(tracks.isListening(7)).toBe(false);
+  });
+
+  it("does not restart or cancel anything when told to listen to the same sharer again", () => {
+    const { room, sub } = roomWithMusic([7]);
+    const tracks = new RemoteTracks(() => room);
+    const onChange = vi.fn();
+    tracks.listen(7);
+    tracks.onListeningChange = onChange;
+    sub(7).mockClear();
+
+    tracks.listen(7);
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(sub(7)).not.toHaveBeenCalled();
   });
 
   it("ignores another sharer's music ending", () => {

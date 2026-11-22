@@ -258,36 +258,47 @@ export class RemoteTracks {
    *  published is subscribed when it is (roomEventHandlers'
    *  handleTrackPublished asks isListening). */
   listen(userId: number | null): void {
-    this.cancelListenGrace();
     const before = this.listening;
-    if (before !== null && before !== userId) this.musicPublication(before)?.setSubscribed(false);
+    if (before === userId) return;
+    // Music published without encryption is refused: there is nothing to listen to.
+    const pub = userId === null ? undefined : this.musicPublication(userId);
+    if (pub !== undefined && isUnencryptedPublication(pub)) return;
+    this.cancelListenGrace();
+    if (before !== null) this.musicPublication(before)?.setSubscribed(false);
     this.listening = userId;
-    if (userId !== null) {
-      const pub = this.musicPublication(userId);
-      if (pub !== undefined && !isUnencryptedPublication(pub)) pub.setSubscribed(true);
-    }
-    if (before !== userId) this.onListeningChange?.(userId);
+    pub?.setSubscribed(true);
+    this.onListeningChange?.(userId);
   }
 
   /** `userId`'s music was unpublished. A reconnect republishes it, so the
-   *  listen is only forgotten once it stays gone for LISTEN_GRACE_MS. */
+   *  listen is only forgotten once it stays gone for LISTEN_GRACE_MS while a
+   *  room is live: with none (your own reconnect is still running) it stays
+   *  pending, and reviewListening decides once a room is. */
   musicEnded(userId: number): void {
     if (this.listening !== userId) return;
     this.cancelListenGrace();
     this.listenGrace = setTimeout(() => {
       this.listenGrace = null;
-      if (this.listening === userId && this.musicPublication(userId) === undefined) {
-        this.listen(null);
-      }
+      this.reviewListening(false);
     }, LISTEN_GRACE_MS);
   }
 
-  /** After a room swap: start the grace for a listened-to sharer whose music
-   *  the new room does not publish (the old room raised no unpublish). */
-  reviewListening(): void {
-    if (this.listening !== null && this.musicPublication(this.listening) === undefined) {
-      this.musicEnded(this.listening);
+  /** Whether the room is connected, so a missing music share is really gone. */
+  private roomLive(): boolean {
+    return this.getRoom()?.state === "connected";
+  }
+
+  /** After a room swap or a resume: with a live room, a listened-to sharer
+   *  whose music is not published is forgotten once the grace has run (the
+   *  old room raised no unpublish). `startGrace`: begin it now. */
+  reviewListening(startGrace = true): void {
+    const id = this.listening;
+    if (id === null || !this.roomLive() || this.musicPublication(id) !== undefined) return;
+    if (startGrace) {
+      if (this.listenGrace === null) this.musicEnded(id);
+      return;
     }
+    this.listen(null);
   }
 
   private cancelListenGrace(): void {

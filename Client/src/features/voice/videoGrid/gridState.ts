@@ -103,6 +103,8 @@ export interface GridApi {
   syncMusic(): void;
   setMusic(music: readonly GridMusic[]): void;
   resetMusic(): void;
+  /** A Music volume changed: move the slider of that sharer's card. */
+  onMusicVolume(e: Event): void;
   /** The music cards in layout order. */
   musicTiles(): HTMLDivElement[];
   hiddenByView(el: HTMLDivElement, config: TileConfig | undefined): boolean;

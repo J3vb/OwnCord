@@ -244,6 +244,10 @@ export class LiveKitSession extends SessionReconnect {
     // The join a reconnect was cleared for has its answer: from here the
     // attempt itself is the session.
     this.clearYield();
+    // Listening is not carried to another channel; a rebuilt room of the
+    // same channel keeps it.
+    const was = this._currentChannelId;
+    if (was !== null && was !== channelId) this._remoteTracks.listen(null);
     return this._join.connectAndSetup(token, url, channelId, directUrl, isKeyHolder);
   }
 

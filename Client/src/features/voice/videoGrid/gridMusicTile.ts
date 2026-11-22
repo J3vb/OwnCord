@@ -29,16 +29,17 @@ function buildLabel(name: string): HTMLElement {
 
 function buildVolume(music: GridMusic): HTMLElement {
   const row = createElement("div", { class: "video-music__volume" });
+  const level = music.volume();
   const slider = createElement("input", {
     type: "range",
     class: "tile-volume-slider",
     min: "0",
     max: "100",
-    value: String(music.volume),
+    value: String(level),
     "aria-label": voiceText("music.tile.volume", { name: music.name }),
     "data-testid": "music-tile-volume",
   });
-  const value = createElement("span", { class: "tile-volume-value" }, `${music.volume}%`);
+  const value = createElement("span", { class: "tile-volume-value" }, `${level}%`);
   slider.addEventListener("input", () => {
     const percent = Number(slider.value);
     value.textContent = `${percent}%`;
@@ -136,5 +137,21 @@ export function createGridMusic(st: GridState, api: GridApi) {
     st.music = [];
   }
 
-  return { syncMusic, musicTiles, setMusic, resetMusic };
+  /** The level changed elsewhere (the volume menu, another surface): the
+   *  slider follows without a redraw, so a drag in progress is not broken. */
+  function onMusicVolume(e: Event): void {
+    const userId = (e as CustomEvent<{ userId?: number }>).detail?.userId;
+    for (const music of st.music) {
+      if (userId !== undefined && music.userId !== userId) continue;
+      const slider = st.musicCells.get(music.userId)?.querySelector<HTMLInputElement>("input");
+      if (slider === null || slider === undefined) continue;
+      const level = String(music.volume());
+      if (slider.value === level) continue;
+      slider.value = level;
+      const value = slider.parentElement?.querySelector(".tile-volume-value");
+      if (value !== null && value !== undefined) value.textContent = `${level}%`;
+    }
+  }
+
+  return { syncMusic, musicTiles, setMusic, resetMusic, onMusicVolume };
 }

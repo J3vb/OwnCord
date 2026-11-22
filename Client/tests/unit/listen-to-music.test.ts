@@ -75,7 +75,7 @@ const music = (over: Partial<GridMusic> = {}): GridMusic => ({
   userId: SAM,
   name: "Sam",
   listening: false,
-  volume: 70,
+  volume: () => 70,
   onListen: vi.fn(),
   onStop: vi.fn(),
   onVolume: vi.fn(),
@@ -140,6 +140,19 @@ describe("music tile in the video grid", () => {
 
     grid.setMusic([]);
     expect(cell()).toBeNull();
+  });
+
+  it("moves the slider with a Music volume change elsewhere, without a redraw", () => {
+    let level = 70;
+    grid.setMusic([music({ listening: true, volume: () => level })]);
+    const slider = cell()!.querySelector<HTMLInputElement>(".tile-volume-slider")!;
+
+    level = 20;
+    window.dispatchEvent(new CustomEvent(USER_VOLUME_CHANGED, { detail: { userId: SAM } }));
+
+    expect(cell()!.querySelector(".tile-volume-slider")).toBe(slider);
+    expect(slider.value).toBe("20");
+    expect(cell()!.querySelector(".tile-volume-value")!.textContent).toBe("20%");
   });
 
   it("does not redraw (and so does not drop a dragged slider) when nothing it shows changed", () => {
@@ -229,6 +242,7 @@ describe("voice widget listening bar", () => {
       ...prev,
       currentChannelId: 10,
       voiceUsers: new Map([[10, new Map([[SAM, user(SAM, { username: "Sam" })]])]]),
+      musicSharers: new Set([SAM]),
     }));
     bar.sync(sync());
     expect(bar.el.hidden).toBe(true);
@@ -242,6 +256,14 @@ describe("voice widget listening bar", () => {
     bar.el.querySelector<HTMLButtonElement>("[data-testid='vw-listening-stop']")!.click();
     expect(mockListen).toHaveBeenCalledWith(null);
 
+    // The sharer stopped while the listen lingers: the bar goes with the tile.
+    voiceStore.setState((prev) => ({ ...prev, musicSharers: new Set<number>() }));
+    bar.sync(sync());
+    expect(bar.el.hidden).toBe(true);
+
+    voiceStore.setState((prev) => ({ ...prev, musicSharers: new Set([SAM]) }));
+    bar.sync(sync());
+    expect(bar.el.hidden).toBe(false);
     setListeningTo(null);
     bar.sync(sync());
     expect(bar.el.hidden).toBe(true);

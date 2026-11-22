@@ -42,6 +42,8 @@ export interface RoomEventDeps {
   isListening: (userId: number) => boolean;
   /** This user's music share was unpublished (a reconnect republishes it). */
   musicEnded: (userId: number) => void;
+  /** A live room is back: decide the fate of a listened-to sharer whose music is gone. */
+  reviewListening: () => void;
   getOnErrorCallback: () => ((message: string) => void) | null;
   isConnecting: () => boolean;
   isReconnecting: () => boolean;

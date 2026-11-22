@@ -579,6 +579,25 @@ describe("music shares", () => {
     expect(h.spies.onRemoteVideoRemoved).not.toHaveBeenCalled();
   });
 
+  it("subscribes the listened-to sharer's republished music when a rebuilt room connects", () => {
+    const h = build();
+    h.spies.isListening.mockImplementation((id: number) => id === 7);
+    const music = musicPub();
+    const room = roomWithRemotePubs({ m: music });
+
+    h.handlers.handleConnected(room);
+
+    expect(music.setSubscribed).toHaveBeenLastCalledWith(true);
+  });
+
+  it("asks the session to review the listen once the SDK has resumed", () => {
+    const h = build();
+
+    h.handlers.handleSdkReconnected();
+
+    expect(h.spies.reviewListening).toHaveBeenCalled();
+  });
+
   it("takes the sharers from the room on connect, and drops the stale ones", () => {
     const h = build();
     h.handlers.handleTrackPublished(musicPub(), participant("user-3:tok"));
