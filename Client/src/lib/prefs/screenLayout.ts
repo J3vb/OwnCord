@@ -12,15 +12,17 @@
  */
 
 import { isAndroidHost } from "../hostPlatform";
+import { isPhoneLayout } from "../ui/phoneLayout";
 import { loadPref, savePref } from "./preferences";
 
 export type ScreenLayout = "classic" | "deck";
 
 export const SCREEN_LAYOUT_PREF = "screenLayout";
 
-/** Whether the preview can run here: Developer mode on, and not the Android app. */
+/** Whether the preview can run here: Developer mode on, and neither the Android
+ *  app nor a phone-sized touch screen (which has its own layout). */
 export function screenLayoutAvailable(): boolean {
-  return loadPref<boolean>("developerMode", false) && !isAndroidHost();
+  return loadPref<boolean>("developerMode", false) && !isAndroidHost() && !isPhoneLayout();
 }
 
 /** The stored choice, as the row shows it: `"deck"` only when stored as such,
