@@ -121,6 +121,28 @@ pub fn show_next_launch(app: AppHandle) {
     set_show_next_launch(&app, true);
 }
 
+/// Whether this process was started by a restart the app made itself: the
+/// one-shot marker [`take_show_next_launch`] consumed at start-up. Every such
+/// restart (an update, Clear & Restart, a graphics card change) sets that
+/// marker and copies the old process's argv, so an owncord:// link the first
+/// launch carried comes back as this launch's start-up link. The webview asks
+/// [`launch_was_restart`] before it opens that link.
+pub struct LaunchOrigin {
+    app_restart: bool,
+}
+
+impl LaunchOrigin {
+    pub fn new(app_restart: bool) -> Self {
+        Self { app_restart }
+    }
+}
+
+/// Read once by the webview's deep-link start-up.
+#[tauri::command]
+pub fn launch_was_restart(origin: State<'_, LaunchOrigin>) -> bool {
+    origin.app_restart
+}
+
 /// Whether the process was launched with the autostart flag.
 pub fn launched_minimized() -> bool {
     std::env::args().any(|a| a == MINIMIZED_ARG)

@@ -215,6 +215,9 @@ export async function installRealTransport(page: Page, server: TestServer) {
         case "set_window_pref":
         case "show_next_launch":
           return null;
+        // A fresh start, not an app restart: the start-up link opens.
+        case "launch_was_restart":
+          return false;
         // Graphics card for video: no cards, so the row stays hidden.
         case "get_gpu_adapters":
           return {

@@ -8,15 +8,31 @@ import { isAndroidHost } from "@lib/hostPlatform";
 import { createLogger } from "@lib/logger";
 import { parseChannelLink, parseInviteLink, parseMessageLink } from "@lib/nav/deepLink";
 import type { DeepLinks } from "../contracts/deepLinks";
+import { tryInvoke } from "./nativeInvoke";
 
 const log = createLogger("deep-link");
 
 const SCHEME = "owncord";
 
 /**
+ * Whether the host says this process was started by an app restart (an update
+ * or Clear & Restart). A restart copies the old process's command line, so an
+ * owncord:// link the first launch carried is this launch's start-up link too.
+ * False on Android (no such restart) and whenever the host cannot answer: the
+ * start-up link then opens as before.
+ */
+async function startedByAppRestart(): Promise<boolean> {
+  if (isAndroidHost()) return false;
+  const answer = await tryInvoke<unknown>("launch_was_restart");
+  return answer.ok && answer.value === true;
+}
+
+/**
  * Wire owncord:// deep links on desktop and Android. No-op outside Tauri. `onInvite` is called once per
  * recognized invite link and `onMessage` once per message permalink, or per
- * channel link with no message id, on both cold start and warm launches.
+ * channel link with no message id, on both cold start and warm launches. The
+ * start-up link of an app restart is skipped: it is the link the app was first
+ * started with, already opened then. Links that arrive later still open.
  */
 async function init(
   onInvite: (code: string, host?: string) => void,
@@ -64,7 +80,13 @@ async function init(
         // Already registered, or not permitted on this platform — ignore.
       }
     }
-    dispatch(await plugin.getCurrent());
+    const restarted = await startedByAppRestart();
+    const current = await plugin.getCurrent();
+    if (restarted && (current?.length ?? 0) > 0) {
+      log.info("Skipping the start-up link of an app restart");
+    } else {
+      dispatch(current);
+    }
     await plugin.onOpenUrl((urls) => dispatch(urls));
   } catch (err) {
     log.warn("Failed to initialize deep links", { error: String(err) });

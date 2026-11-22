@@ -13913,6 +13913,98 @@
       "fixedDate": "2026-11-12"
     },
     {
+      "id": "OC-0602",
+      "title": "A Windows update installer that does not start brings the window and tray icon back",
+      "file": "Client/src-tauri/src/update_commands.rs",
+      "line": 279,
+      "severity": "medium",
+      "why": "The app now sets its own pre-exit step for the installer launch: it hides the windows and the tray icon only, and when the launch returns an error (SmartScreen \"Don't run\", antivirus) the window and tray icon are shown again with the failed-update banner, so the app no longer keeps running unseen.",
+      "repro": "Windows: click Update Now, then choose \"Don't run\" on the \"Windows protected your PC\" prompt.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Set UpdaterBuilder::on_before_exit to a step that hides the windows and sets the tray invisible without AppHandle::cleanup_before_exit, and show them again when install() returns an error.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/update_commands/handoff.rs (a_launch_that_fails_after_the_pre_exit_step_brings_the_windows_and_tray_back, a_failure_before_the_pre_exit_step_leaves_the_screen_alone, a_launch_keeps_the_screen_hidden_until_the_process_exits, the_updater_runs_the_app_pre_exit_step_and_keeps_the_single_instance_lock)",
+        "revertProof": "fail (2 of 4 cases)"
+      },
+      "lens": "error-paths",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0603",
+      "title": "A launch made while the update installer starts is handed to the running app instead of starting a second copy",
+      "file": "Client/src-tauri/src/lib.rs",
+      "line": 182,
+      "severity": "low",
+      "why": "The app's pre-exit step keeps the single-instance lock until the process exits, so a shortcut click, toast or owncord:// link during the installer gap reaches the running app, which keeps its window hidden (installer_launching); the comments now say what holds.",
+      "repro": "Windows: click Update Now and open OwnCord from the Start menu while the installer is starting.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Do not release the single-instance lock in the pre-exit step (no AppHandle::cleanup_before_exit); process exit releases it.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/update_commands/handoff.rs (the_updater_runs_the_app_pre_exit_step_and_keeps_the_single_instance_lock)",
+        "revertProof": "fail (1 of 1 case)"
+      },
+      "lens": "concurrency",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0604",
+      "title": "An app restart does not open the start-up owncord:// link again; links that arrive later still open",
+      "file": "Client/src/platform/desktop/deepLinks.ts",
+      "line": 83,
+      "severity": "low",
+      "why": "An update or in-app restart starts the new process with the old command line. The start-up marker every restart writes is now kept for the process and read through launch_was_restart, and the deep-link start-up skips only its getCurrent() link when it is set.",
+      "repro": "Start OwnCord from an invite or toast link, then use Clear & Restart or install an update.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Expose the show-next-launch marker read at start-up as a command and skip the getCurrent() dispatch when it is set; keep onOpenUrl.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/deep-link-init.test.ts (the start-up link after an app restart: is not opened again, while a link that arrives later still opens; opens the start-up link after a launch that is not a restart / a host that cannot answer / an answer that is not a boolean)",
+        "revertProof": "fail (1 of 4 cases)"
+      },
+      "lens": "client-state",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0605",
+      "title": "The update download checks hosts other than the pinned server against the system trust store",
+      "file": "Client/src-tauri/src/tofu.rs",
+      "line": 123,
+      "severity": "low",
+      "why": "HostScopedVerifier now uses the operating system's verifier (rustls-platform-verifier, as the updater plugin does without a pin) for every host but the pinned server, with the bundled roots as the fallback and on Android, so an update downloads wherever the system and the browser trust the connection. The pinned server's check and the proxies' verifiers are unchanged.",
+      "repro": "Sign in to a server, then click Update Now on a computer whose HTTPS goes through a company proxy or antivirus HTTPS scanning.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Build HostScopedVerifier's default verifier from rustls_platform_verifier::Verifier, falling back to the webpki-roots verifier.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/tofu.rs (an_unpinned_host_is_checked_against_the_system_trust_store, the_bundled_roots_do_not_trust_the_test_root)",
+        "revertProof": "fail (1 of 2 cases)"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
       "id": "OC-0606",
       "title": "The desktop app's tunnels race the server's IPv6 and IPv4 addresses and keep the first that answers",
       "file": "Client/src-tauri/src/proxy_common.rs",

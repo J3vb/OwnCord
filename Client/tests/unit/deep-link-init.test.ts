@@ -16,11 +16,16 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const register = vi.fn();
 const getCurrent = vi.fn();
 const onOpenUrl = vi.fn();
+// The host's answer to `launch_was_restart`.
+const invoke = vi.fn();
 
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: (...args: unknown[]) => register(...args) as unknown,
   getCurrent: (...args: unknown[]) => getCurrent(...args) as unknown,
   onOpenUrl: (...args: unknown[]) => onOpenUrl(...args) as unknown,
+}));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => invoke(...args) as unknown,
 }));
 
 const { parseInviteLink } = await import("@lib/nav/deepLink");
@@ -33,7 +38,14 @@ beforeEach(() => {
   register.mockReset().mockResolvedValue(undefined);
   getCurrent.mockReset().mockResolvedValue(null);
   onOpenUrl.mockReset().mockResolvedValue(undefined);
+  invoke.mockReset().mockResolvedValue(false);
 });
+
+function warmHandler(): (urls: readonly string[]) => void {
+  const handler = onOpenUrl.mock.calls[0]?.[0] as ((urls: readonly string[]) => void) | undefined;
+  expect(handler).toBeTypeOf("function");
+  return handler as (urls: readonly string[]) => void;
+}
 
 describe("initDeepLinks", () => {
   it("registers the owncord scheme", async () => {
@@ -208,6 +220,41 @@ describe("initDeepLinks", () => {
 
     await expect(initDeepLinks(vi.fn())).resolves.toBeUndefined();
     expectConsole("warn", /\[deep-link\] Failed to initialize deep links/);
+  });
+});
+
+describe("the start-up link after an app restart", () => {
+  // An update or Clear & Restart starts the new process with the old one's
+  // command line, so the link the app was first started with comes back as
+  // this launch's start-up link.
+  it("is not opened again, while a link that arrives later still opens", async () => {
+    invoke.mockResolvedValue(true);
+    getCurrent.mockResolvedValue(["owncord://invite/FIRST", "owncord://message/5/42"]);
+    const onInvite = vi.fn();
+    const onMessage = vi.fn();
+
+    await initDeepLinks(onInvite, onMessage);
+
+    expect(onInvite).not.toHaveBeenCalled();
+    expect(onMessage).not.toHaveBeenCalled();
+    expect(invoke).toHaveBeenCalledWith("launch_was_restart");
+    warmHandler()(["owncord://invite/LATER", "owncord://message/9/7"]);
+    expect(onInvite).toHaveBeenCalledWith("LATER", undefined);
+    expect(onMessage).toHaveBeenCalledWith(9, 7, undefined);
+  });
+
+  it.each([
+    ["a launch that is not a restart", () => invoke.mockResolvedValue(false)],
+    ["a host that cannot answer", () => invoke.mockRejectedValue(new Error("unknown command"))],
+    ["an answer that is not a boolean", () => invoke.mockResolvedValue("true")],
+  ])("opens the start-up link after %s", async (_case, arrange) => {
+    arrange();
+    getCurrent.mockResolvedValue(["owncord://invite/COLD"]);
+    const onInvite = vi.fn();
+
+    await initDeepLinks(onInvite);
+
+    expect(onInvite).toHaveBeenCalledWith("COLD", undefined);
   });
 });
 
