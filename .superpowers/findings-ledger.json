@@ -13913,6 +13913,29 @@
       "fixedDate": "2026-11-12"
     },
     {
+      "id": "OC-0606",
+      "title": "The desktop app's tunnels race the server's IPv6 and IPv4 addresses and keep the first that answers",
+      "file": "Client/src-tauri/src/proxy_common.rs",
+      "line": 102,
+      "severity": "medium",
+      "why": "The REST, LiveKit and chat-socket tunnels now dial through one shared dialer: it resolves the host inside the 10 s connect limit, alternates address families starting with the first address returned, starts the next address 250 ms after the previous one or at once when one fails, keeps the first connection and closes the others, and returns the last error when all fail. Before, one sequential connect spent the whole limit on an IPv6 address whose path drops packets (Windows gives up on it after about 21 s), so the IPv4 address was never tried and login, chat and voice timed out while a browser reached the server.",
+      "repro": "On a dual-stack PC, point the app at a server host name that has an AAAA record whose path drops packets (port forwarded or opened for IPv4 only) and a working A record, then log in.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Replace the single TcpStream::connect in proxy_common with an RFC 8305 dialer used by http_proxy, livekit_proxy and ws_proxy; ws_proxy dials the stream itself and hands it to tokio-tungstenite's client_async_tls_with_config with the same rustls connector.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/proxy_common.rs (a_silent_address_hands_over_to_the_next_one_well_inside_the_limit, when_every_address_fails_the_last_error_returns_inside_the_limit, each_address_starts_on_time_and_the_first_answer_wins, addresses_alternate_families_starting_with_the_first_returned, dial_tcp_reaches_a_listener_by_host_name); Client/src-tauri/src/ws_proxy.rs (the_dial_target_is_the_url_host_and_port, the_chat_socket_dials_by_name_and_starts_tls_on_that_stream)",
+        "revertProof": "fail (3 of 5 dialer tests: the dial does not finish inside the limit)"
+      },
+      "lens": "win-net-secrets",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
       "id": "OC-0618",
       "title": "On Linux, Play on a YouTube card opens the video in the browser instead of a player that YouTube refuses",
       "file": "Client/src/features/messaging/content/mediaYouTube.ts",
