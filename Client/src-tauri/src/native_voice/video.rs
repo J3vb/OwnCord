@@ -24,9 +24,15 @@
 //!   only reads them back for the self-view and the settings preview.
 //! - `/<token>/screen`: the local screen capture's preview, server to
 //!   webview, acknowledged like a remote track; it ends with the capture.
+//!
+//! Both previews are scaled to fit [`PREVIEW_MAX`] and sent at most once per
+//! [`PREVIEW_INTERVAL`]: they are only ever drawn in a tile, and a 4K60 share
+//! at full size would push about 750 MB/s through this socket and WebKit on
+//! top of its encode. The published track keeps the capture's size and rate.
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use livekit::prelude::*;
@@ -284,17 +290,64 @@ async fn send_remote(ws: Ws, track: RemoteVideoTrack) {
     frames.close();
 }
 
+/// The largest preview frame sent: a local preview is drawn in a tile, never
+/// at the capture's full size.
+const PREVIEW_MAX: (u32, u32) = (1280, 720);
+
+/// The shortest time between two preview frames (about 30 a second).
+const PREVIEW_INTERVAL: Duration = Duration::from_millis(33);
+
 async fn send_preview(ws: Ws, preview: tokio::sync::watch::Receiver<Option<Arc<I420Buffer>>>) {
-    // Ends when the capture drops its sender.
-    let mut frames = Box::pin(futures_util::stream::unfold(preview, |mut rx| async move {
-        rx.changed().await.ok()?;
-        let frame = rx.borrow_and_update().clone();
-        Some((frame, rx))
-    }));
+    // Ends when the capture drops its sender. The watch keeps only the
+    // newest frame, so the wait between frames never shows a stale one.
+    let mut frames = Box::pin(futures_util::stream::unfold(
+        (preview, None),
+        |(mut rx, last): (_, Option<tokio::time::Instant>)| async move {
+            if let Some(last) = last {
+                tokio::time::sleep_until(last + PREVIEW_INTERVAL).await;
+            }
+            rx.changed().await.ok()?;
+            let frame = rx.borrow_and_update().clone();
+            Some((frame, (rx, Some(tokio::time::Instant::now()))))
+        },
+    ));
     send_acked(ws, &mut frames, |frame| {
-        frame.map(|f| pack_i420(&f)).unwrap_or_default()
+        frame.map(|f| pack_preview(&f)).unwrap_or_default()
     })
     .await;
+}
+
+/// `frame` packed like [`pack_i420`], scaled down first when it is larger
+/// than [`PREVIEW_MAX`]. The capture shares the frame, so the scale works on
+/// a copy.
+fn pack_preview(frame: &I420Buffer) -> Vec<u8> {
+    let raw = (frame.width(), frame.height());
+    let (w, h) = preview_size(raw);
+    if (w, h) == raw {
+        return pack_i420(frame);
+    }
+    // `to_i420` is reachable only through the trait object; for an I420
+    // buffer it is a copy.
+    let shared: &dyn VideoBuffer = frame;
+    pack_i420(&shared.to_i420().scale(w as i32, h as i32))
+}
+
+/// The size a `raw` frame is sent at: unchanged when it fits [`PREVIEW_MAX`],
+/// otherwise the largest size that fits it with the same aspect ratio, in
+/// even pixels so the chroma planes stay whole.
+fn preview_size(raw: (u32, u32)) -> (u32, u32) {
+    let (w, h) = (u64::from(raw.0), u64::from(raw.1));
+    let (max_w, max_h) = (u64::from(PREVIEW_MAX.0), u64::from(PREVIEW_MAX.1));
+    if w <= max_w && h <= max_h {
+        return raw;
+    }
+    let (w, h) = if w * max_h >= h * max_w {
+        (max_w, h * max_w / w)
+    } else {
+        (w * max_h / h, max_h)
+    };
+    let even = |v: u64| (v as u32 & !1).max(2);
+    (even(w), even(h))
 }
 
 /// Send `frames` one at a time, each only after the previous one was
@@ -513,6 +566,59 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(recv(&mut client).await, Some(vec![3]));
+        server.abort();
+    }
+
+    #[test]
+    fn previews_fit_the_tile_size_and_keep_their_shape() {
+        assert_eq!(preview_size((3840, 2160)), (1280, 720));
+        assert_eq!(preview_size((2560, 1440)), (1280, 720));
+        assert_eq!(preview_size((1920, 1080)), (1280, 720));
+        assert_eq!(preview_size((3440, 1440)), (1280, 534));
+        assert_eq!(preview_size((1080, 1920)), (404, 720));
+        assert_eq!(preview_size((1280, 720)), (1280, 720));
+        assert_eq!(preview_size((640, 480)), (640, 480));
+        assert_eq!(preview_size((100_000, 2)), (1280, 2));
+    }
+
+    fn frame_size(data: &[u8]) -> (u32, u32) {
+        let word = |at: usize| u32::from_le_bytes(data[at..at + 4].try_into().unwrap());
+        (word(0), word(4))
+    }
+
+    #[tokio::test]
+    async fn previews_are_scaled_and_sent_at_most_30_times_a_second() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}", listener.local_addr().unwrap());
+        let (preview, frames) = tokio::sync::watch::channel(None);
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let ws = tokio_tungstenite::accept_async(stream).await.unwrap();
+            send_preview(ws, frames).await;
+        });
+        let (mut client, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let frame = |w, h| Some(Arc::new(I420Buffer::new_black(w, h)));
+
+        // A small first frame, so the interval is not met by the work of
+        // sending it.
+        let first_sent = std::time::Instant::now();
+        preview.send_replace(frame(320, 180));
+        let first = recv(&mut client).await.expect("the first preview frame");
+        assert_eq!(frame_size(&first), (320, 180));
+        client
+            .send(Message::Binary(Vec::new().into()))
+            .await
+            .unwrap();
+        preview.send_replace(frame(640, 360));
+        preview.send_replace(frame(1920, 1080));
+        let next = recv(&mut client).await.expect("the next preview frame");
+        assert!(
+            first_sent.elapsed() >= PREVIEW_INTERVAL,
+            "the next frame waited out the interval: {:?}",
+            first_sent.elapsed()
+        );
+        assert_eq!(frame_size(&next), (1280, 720), "the newest frame, scaled");
+        assert_eq!(next.len(), 8 + 1280 * 720 * 3 / 2);
         server.abort();
     }
 

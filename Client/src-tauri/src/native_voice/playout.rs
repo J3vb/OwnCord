@@ -1002,7 +1002,8 @@ where
             log::warn!("[native_voice] {label} stream: {e}");
             dead.store(true, Ordering::Relaxed);
         },
-        None,
+        // Building waits on the sound server; bounded like the capture's.
+        Some(super::capture::OPEN_TIMEOUT),
     )
 }
 

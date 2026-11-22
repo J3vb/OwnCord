@@ -33,7 +33,9 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   `GstDeviceMonitor`/`v4l2src`/`pipewiresrc` → `decodebin` → I420 `appsink`),
   so the camera keeps working while the window is hidden; the
   `NativeCameraTrack` (`native/nativeCameraTrack.ts`) is its preview, read
-  back over the frame socket. Screen share captures in the backend
+  back over the frame socket. The camera and screen-share previews are scaled
+  to fit 1280x720 and sent at most 30 times a second; the published tracks keep
+  the capture's size and rate. Screen share captures in the backend
   (`src-tauri/src/native_voice/screen.rs`, libwebrtc's `DesktopCapturer`):
   `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
   on Wayland, and `features/voice/screenShare.ts`'s one `isLinuxDesktop()` branch swaps

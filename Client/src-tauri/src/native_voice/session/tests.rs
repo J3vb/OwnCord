@@ -787,3 +787,42 @@ fn a_first_publish_always_opens_a_stream_of_its_own() {
     assert!(*first_stops && *second_stops);
     assert!(first_ticket < second_ticket, "tickets follow call order");
 }
+
+/// A microphone start whose device never sends a sound gives the device back
+/// within its limit, so the stop a leave queues behind it still runs.
+#[test]
+fn a_stuck_capture_start_frees_the_device_for_the_next_step() {
+    let audio = Arc::new(Audio::new(Vec::<&str>::new()));
+    let start = audio.ticket(Class::Running);
+    let stop = audio.ticket(Class::Running);
+    let (_never, wait) = std::sync::mpsc::channel::<()>();
+    let starting = {
+        let audio = audio.clone();
+        std::thread::spawn(move || {
+            audio.apply(Class::Running, start, |v| {
+                v.push("start");
+                capture::start_within(
+                    (),
+                    std::time::Duration::from_millis(100),
+                    &Arc::new(capture::Attempt::default()),
+                    Arc::default(),
+                    move |()| {
+                        let _ = wait.recv();
+                        Ok(())
+                    },
+                )
+            })
+        })
+    };
+    let began = std::time::Instant::now();
+    // Let the start take the device first, as a leave right after an unmute.
+    while lock(&audio.device).is_empty() {
+        std::thread::yield_now();
+    }
+    assert!(audio
+        .apply(Class::Running, stop, |v| v.push("stop"))
+        .is_some());
+    assert!(began.elapsed() < std::time::Duration::from_secs(2));
+    assert!(matches!(starting.join().unwrap(), Some(Err(_))));
+    assert_eq!(*lock(&audio.device), vec!["start", "stop"]);
+}
