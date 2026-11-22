@@ -20,7 +20,7 @@ export function viewersLabel(names: readonly string[]): string {
   return capped(names, "tile.viewers", "tile.viewersMore");
 }
 
-/** "Listening: Ann, you", or "Listening: Ann, … and 3 more" past ten names:
+/** "Listening: You, Ann", or "Listening: Ann, … and 3 more" past ten names:
  *  the line under a music tile's disc. */
 export function listenersLabel(names: readonly string[]): string {
   return capped(names, "tile.listeners", "tile.listenersMore");
