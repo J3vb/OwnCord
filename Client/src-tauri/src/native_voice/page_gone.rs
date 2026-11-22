@@ -23,7 +23,7 @@ pub async fn end_for_dead_page<R: Runtime>(app: &AppHandle<R>) -> Option<u64> {
         // own room instead of taking the slot when it finishes.
         inner.next_id += 1;
         inner.clear_keys();
-        (session, inner.clear_standalone(), inner.take_mic_test())
+        (session, inner.standalone.clear(), inner.take_mic_test())
     };
     let closed = session.as_ref().map(|(id, _)| *id);
     if let Some((id, s)) = session {

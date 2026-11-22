@@ -139,6 +139,9 @@ release changes the database, and anything an operator must do first.)
 - Pressing Play on a YouTube card showed YouTube's "Error 153" instead of the video; Play now opens the video in your browser.
 - The .deb now needs WebKitGTK 2.44 or newer, and apt installs it with the update: on an older WebKitGTK, Settings opened empty.
 - The diagnostics event log names a page crash or an out-of-memory kill instead of "unknown".
+- Mute, switching your mic and leaving a call no longer hang when the mic accepts the call but never sends sound (a Bluetooth headset that failed to switch, a mic busy in another app): the app stops waiting for it after 5 seconds.
+- Turning your camera on right after opening Voice & Video settings no longer fails with "camera capture failed to start".
+- Your own camera and screen-share preview is now sent at tile size and at most 30 times a second, so a large or fast screen share puts much less load on the app. What others see is unchanged.
 
 ### Known issues
 

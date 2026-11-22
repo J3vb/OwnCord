@@ -1,5 +1,5 @@
 {
-  "nextId": 621,
+  "nextId": 624,
   "findings": [
     {
       "id": "OC-0001",
@@ -13972,6 +13972,75 @@
         "commit": "pending",
         "test": "Client/tests/unit/tauri-conf-deb-depends.test.ts (requires a WebKitGTK that runs the page)",
         "revertProof": "fail (no version floor)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0621",
+      "title": "On Linux, a mic that never sends sound no longer hangs mute, input switch and Leave",
+      "file": "Client/src-tauri/src/native_voice/capture.rs",
+      "line": 1137,
+      "severity": "medium",
+      "why": "cpal's PulseAudio input was built with no timeout and its play() waits for the first audio data with no limit, while the capture lock that mute, input switch and close need was held. A source that accepts the stream but never delivers (a failed Bluetooth profile switch, a source busy elsewhere) left unmute unfinished and Leave unable to close the native room until the app restarted.",
+      "repro": "Linux native voice: join with an input that accepts the stream but sends nothing, then mute, switch input or leave.",
+      "evidence": "capture.rs open_input built the stream with timeout None and called play() inline; session/audio_line.rs and session.rs wait on the same lock.",
+      "suggestedFix": "Bound the whole open (build and play) by one deadline, give up with an error, silence an abandoned stream and cap the starts left waiting per device.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/native_voice/capture/tests.rs (a_start_that_never_plays_gives_up_within_its_limit, starts_left_waiting_are_capped)",
+        "revertProof": "n/a (new bounded start; the inline play() it replaces has no limit to test)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0622",
+      "title": "On Linux, your own camera and screen-share preview is scaled to the tile and sent at most 30 times a second",
+      "file": "Client/src-tauri/src/native_voice/video.rs",
+      "line": 300,
+      "severity": "medium",
+      "why": "The self-preview got every captured frame at full size and full rate over the loopback socket into WebKit: about 330 MB/s for a 1440p60 share and 750 MB/s at 4K60, on top of the software encode of the same frames.",
+      "repro": "Linux native voice: share a 1440p or 4K screen at 60 fps and watch the app's CPU and memory traffic.",
+      "evidence": "video.rs send_preview packed each frame as captured; the renderer acks every frame right after drawing it.",
+      "suggestedFix": "Scale the preview to fit 1280x720 on the sending side and send at most one frame per 33 ms, keeping only the newest frame.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/native_voice/video.rs (previews_fit_the_tile_size_and_keep_their_shape, previews_are_scaled_and_sent_at_most_30_times_a_second)",
+        "revertProof": "fail (full-size frame sent at once)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0623",
+      "title": "On Linux, turning the call camera on right after opening Voice & Video settings no longer fails",
+      "file": "Client/src-tauri/src/native_voice/mod.rs",
+      "line": 974,
+      "severity": "low",
+      "why": "The settings preview dropped the camera lock before its first frame and kept the capture in a local, so the call camera's step that frees the device could not reach it and its own start failed with \"camera capture failed to start\".",
+      "repro": "Linux: open Voice & Video settings and turn the camera on with its keybind within a second or two.",
+      "evidence": "mod.rs native_voice_start_camera_preview awaited the first frame with the capture held only in a local.",
+      "suggestedFix": "Keep the preview still waiting for its first frame in shared state, so the call camera and a newer preview stop it, and retake the lock before keeping it.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/native_voice/camera_preview.rs (clearing_takes_out_a_start_still_waiting_for_its_first_frame, a_stop_supersedes_a_start_in_flight)",
+        "revertProof": "n/a (new shared slot; the local it replaces could not be reached)"
       },
       "lens": "linux-hunt",
       "confidence": "medium",

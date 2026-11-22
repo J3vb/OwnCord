@@ -53,8 +53,6 @@ fn key_after_connect_applies_a_rotation_and_rejects_supersession() {
     let mut inner = Inner {
         key: Some(vec![1]),
         session: None,
-        standalone: None,
-        standalone_generation: 0,
         next_id: 3,
         ..Default::default()
     };
@@ -124,20 +122,6 @@ fn stale_session_ids_are_rejected() {
     let mut inner = Inner::default();
     assert!(inner.current(1).is_err());
     assert_eq!(inner.resources().rooms, 0);
-}
-
-#[test]
-fn a_superseded_camera_preview_start_does_not_claim_the_slot() {
-    let mut inner = Inner::default();
-    let older = inner.begin_standalone();
-    let newer = inner.begin_standalone();
-    // The older start finishes last: it must not claim the slot the newer
-    // start owns.
-    assert!(!inner.standalone_is_latest(older));
-    assert!(inner.standalone_is_latest(newer));
-    // A stop while a start is in flight supersedes it too.
-    inner.clear_standalone();
-    assert!(!inner.standalone_is_latest(newer));
 }
 
 /// A double start: the older one is superseded and drops its own test.
@@ -243,18 +227,6 @@ fn a_monitor_that_finishes_after_a_connect_is_refused() {
         inner.admit_mic_test(id, seen),
         Err(MIC_TEST_IN_CALL.to_string())
     );
-}
-
-/// A stop supersedes a preview start still in flight, so the late start
-/// releases its own capture instead of claiming the slot.
-#[test]
-fn a_preview_stop_supersedes_a_start_in_flight() {
-    let mut inner = Inner::default();
-    let generation = inner.begin_standalone();
-    assert!(inner.clear_standalone().is_none());
-    assert!(!inner.standalone_is_latest(generation));
-    let replacement = inner.begin_standalone();
-    assert!(inner.standalone_is_latest(replacement));
 }
 
 /// Releasing waits for the drop, which runs on a blocking thread and not on
