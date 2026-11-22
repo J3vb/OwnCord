@@ -139,6 +139,7 @@ release changes the database, and anything an operator must do first.)
 - Download full archive always failed on a Windows server ("could not build the archive"); it now builds while the server runs.
 - The saved-log history on a Windows server could miss the newest lines of today's log; it now shows them.
 - A Windows server run as a service (NSSM) or as a scheduled task stopped whenever any user signed out of the machine; it now keeps running. Stopping the service and shutting down still stop it cleanly.
+
 **Linux**
 
 - Pressing Play on a YouTube card showed YouTube's "Error 153" instead of the video; Play now opens the video in your browser.
