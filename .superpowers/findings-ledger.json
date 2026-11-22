@@ -1,5 +1,5 @@
 {
-  "nextId": 624,
+  "nextId": 628,
   "findings": [
     {
       "id": "OC-0001",
@@ -13982,75 +13982,6 @@
       "fixedDate": "2026-11-22"
     },
     {
-      "id": "OC-0615",
-      "title": "The full archive download leaves out the database's process lock file, so it builds while the server runs on Windows",
-      "file": "Server/admin/handlers_archive.go",
-      "line": 350,
-      "severity": "medium",
-      "why": "The archive walk now skips the database's lock file (db.LockFilePath) next to its WAL sidecars. The running server holds that file open for its whole life, on Windows with no sharing, and it holds no data a restore needs.",
-      "repro": "Windows host with the default database path: Admin panel > Server > Download full archive.",
-      "evidence": "Windows bug hunt 2026-11-22.",
-      "suggestedFix": "Export the lock-path helper from db and skip that path in the archive walk.",
-      "fix": {
-        "commit": "pending",
-        "test": "Server/admin/handlers_archive_test.go (TestHandleArchive_LeavesOutTheDatabaseLock)",
-        "revertProof": "fail (archive carried data/chatserver.db.lock)"
-      },
-      "lens": "win-server-host",
-      "confidence": "high",
-      "status": "fixed",
-      "found": "2026-11-22",
-      "hunt": "bug-hunt-2026-11-22-windows",
-      "finder": "claude",
-      "fixedDate": "2026-11-22"
-    },
-    {
-      "id": "OC-0616",
-      "title": "Saved-log history returns the newest lines of a log file that is still being written",
-      "file": "Server/admin/handlers_log_history.go",
-      "line": 322,
-      "severity": "low",
-      "why": "Each file's scan now ends at the open file's own size (File.Stat), capped by the page cursor, instead of the size from the folder listing, which Windows updates late for a file still being written.",
-      "repro": "Windows host with file logging on: open the saved-log history while today's log file is open in the writer.",
-      "evidence": "Windows bug hunt 2026-11-22.",
-      "suggestedFix": "In readLogFile, take the end from f.Stat() on the opened file and cap it by the cursor offset.",
-      "fix": {
-        "commit": "pending",
-        "test": "Server/admin/handlers_log_history_internal_test.go (TestLogHistory_ReturnsLinesWrittenAfterTheListing)",
-        "revertProof": "fail (1 of 2 entries returned)"
-      },
-      "lens": "win-server-host",
-      "confidence": "medium",
-      "status": "fixed",
-      "found": "2026-11-22",
-      "hunt": "bug-hunt-2026-11-22-windows",
-      "finder": "claude",
-      "fixedDate": "2026-11-22"
-    },
-    {
-      "id": "OC-0617",
-      "title": "A server in the Windows services session keeps running when a user signs out of the machine",
-      "file": "Server/internal/app/lifecycle.go",
-      "line": 391,
-      "severity": "medium",
-      "why": "In session 0 (NSSM, or a scheduled task that runs whether a user is logged on or not) the server now registers a console control handler, after the Go runtime's, that consumes CTRL_LOGOFF_EVENT, so a sign-out no longer becomes SIGTERM. Ctrl+C, Ctrl+Break, closing the console and shutdown still stop it, and an interactive session's sign-out still drains it.",
-      "repro": "Run the server under NSSM, sign in to the host as another user (or over RDP) and sign out.",
-      "evidence": "Windows bug hunt 2026-11-22.",
-      "suggestedFix": "On Windows, when the process session is 0, register a SetConsoleCtrlHandler that returns TRUE for CTRL_LOGOFF_EVENT only; keep the decision in a cross-platform function.",
-      "fix": {
-        "commit": "pending",
-        "test": "Server/internal/app/console_ctrl_test.go (TestConsumeConsoleCtrl); Server/internal/app/console_ctrl_windows_test.go (TestConsoleCtrlConstantsMatchWindows, TestInstallLogoffFilter)",
-        "revertProof": "fail (1 of 10 cases)"
-      },
-      "lens": "win-server-host",
-      "confidence": "medium",
-      "status": "fixed",
-      "found": "2026-11-22",
-      "hunt": "bug-hunt-2026-11-22-windows",
-      "finder": "claude",
-      "fixedDate": "2026-11-22"
-    },
-    {
       "id": "OC-0621",
       "title": "On Linux, a mic that never sends sound no longer hangs mute, input switch and Leave",
       "file": "Client/src-tauri/src/native_voice/capture.rs",
@@ -14117,6 +14048,167 @@
       "found": "2026-11-22",
       "hunt": "2026-11-22-linux",
       "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0624",
+      "title": "On Linux, a run started by an in-app restart keeps its stderr file for the next start's report",
+      "file": "Client/src-tauri/src/stderr_capture.rs",
+      "line": 104,
+      "severity": "medium",
+      "why": "Tauri's restart starts the new process with the old one's stderr, which is our own stderr-<pid>.log. The new run deleted that file as left by a dead process, then refused to capture because stderr was already a file, so a later silent close reported nothing and the hidden file lost its size cap.",
+      "repro": "Linux: Update and restart, or Clear & Restart, then have the new run close without a word; the next start reports nothing.",
+      "evidence": "stderr_capture.rs treated any regular-file stderr as a launcher's choice; report_previous deleted files of dead pids.",
+      "suggestedFix": "Treat an inherited stderr-<pid>.log of ours in the log directory (there or deleted) as ours and capture anew; keep this run's own file in the report sweep.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/stderr_capture.rs (a_restarts_inherited_file_is_captured_again_and_a_launchers_kept)",
+        "revertProof": "fail (outcome LauncherFile, no new file)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0625",
+      "title": "On Linux, an AppImage's Launch on login keeps working after it is renamed or moved, or sits in a folder with a space",
+      "file": "Client/src-tauri/src/autostart_entry.rs",
+      "line": 54,
+      "severity": "low",
+      "why": "tauri-plugin-autostart writes ~/.config/autostart/<name>.desktop with the path unquoted and never rewrites it. A renamed or moved AppImage left an entry that started nothing while Settings showed it on, and a path with a space never worked.",
+      "repro": "Linux AppImage: turn on Launch on login, rename or move the AppImage (or keep it in a folder with a space), log out and in.",
+      "evidence": "auto-launch 0.6 writes Exec={path} {args} unquoted from APPIMAGE or current_exe; nothing refreshes it.",
+      "suggestedFix": "After the webview turns the entry on, rewrite Exec with the path quoted per the Desktop Entry spec; at each start, point an entry whose program is gone at this app. Leave entries that still start something, symlinked entries and missing entries alone.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/autostart_entry.rs (at_start_only_an_entry_whose_program_is_gone_is_rewritten, the_program_is_read_back_as_written, a_symlinked_entry_is_left_alone)",
+        "revertProof": "n/a (new module)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0626",
+      "title": "On Linux, an AppImage's GStreamer keeps its own plugin registry instead of rewriting the host's",
+      "file": "Client/src-tauri/src/launch_env.rs",
+      "line": 45,
+      "severity": "low",
+      "why": "The AppImage's bundled GStreamer used the shared ~/.cache/gstreamer-1.0 registry while its plugins sit under a mount path that changes each launch, so every run rewrote the host's cache with paths gone by the next and the host's media apps rescanned every plugin after it.",
+      "repro": "Linux AppImage: start OwnCord, open the camera, then start a GStreamer app on the host and watch it rescan.",
+      "evidence": "tauri.conf.json bundles GStreamer media for the AppImage; nothing set GST_REGISTRY_1_0.",
+      "suggestedFix": "Set GST_REGISTRY_1_0 to a file in OwnCord's cache at launch inside an AppImage, unless the user chose one, and keep it out of the programs OwnCord starts.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/launch_env.rs (only_an_appimage_without_a_chosen_registry_gets_its_own), external_open.rs (only_the_registry_set_at_launch_is_removed)",
+        "revertProof": "n/a (new launch step)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0627",
+      "title": "On Linux, stderr is captured before GTK starts, so GLib's messages reach the stderr file",
+      "file": "Client/src-tauri/src/main.rs",
+      "line": 15,
+      "severity": "low",
+      "why": "GLib picks the journal or stderr at its first message and keeps that choice. The capture started inside Tauri's setup, after GTK; if GLib logged before it, GDK's last Wayland error on a menu-launched .deb went to the journal instead of the file the next start reports from.",
+      "repro": ".deb on Wayland started from the menu: GLib logs before setup, then the app ends on a display error.",
+      "evidence": "stderr_capture::start ran from setup; GLib's g_log_writer_default caches its journal choice.",
+      "suggestedFix": "Capture stderr first thing in main, before GTK, with the log directory worked out the way Tauri's path resolver does.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/launch_env.rs (the_identifier_is_the_bundle_identifier_with_no_directory_override, base_directories_follow_xdg_with_the_home_fallback)",
+        "revertProof": "n/a (call order in main)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0615",
+      "title": "The full archive download leaves out the database's process lock file, so it builds while the server runs on Windows",
+      "file": "Server/admin/handlers_archive.go",
+      "line": 350,
+      "severity": "medium",
+      "why": "The archive walk now skips the database's lock file (db.LockFilePath) next to its WAL sidecars. The running server holds that file open for its whole life, on Windows with no sharing, and it holds no data a restore needs.",
+      "repro": "Windows host with the default database path: Admin panel > Server > Download full archive.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Export the lock-path helper from db and skip that path in the archive walk.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/handlers_archive_test.go (TestHandleArchive_LeavesOutTheDatabaseLock)",
+        "revertProof": "fail (archive carried data/chatserver.db.lock)"
+      },
+      "lens": "win-server-host",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0616",
+      "title": "Saved-log history returns the newest lines of a log file that is still being written",
+      "file": "Server/admin/handlers_log_history.go",
+      "line": 322,
+      "severity": "low",
+      "why": "Each file's scan now ends at the open file's own size (File.Stat), capped by the page cursor, instead of the size from the folder listing, which Windows updates late for a file still being written.",
+      "repro": "Windows host with file logging on: open the saved-log history while today's log file is open in the writer.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "In readLogFile, take the end from f.Stat() on the opened file and cap it by the cursor offset.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/handlers_log_history_internal_test.go (TestLogHistory_ReturnsLinesWrittenAfterTheListing)",
+        "revertProof": "fail (1 of 2 entries returned)"
+      },
+      "lens": "win-server-host",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0617",
+      "title": "A server in the Windows services session keeps running when a user signs out of the machine",
+      "file": "Server/internal/app/lifecycle.go",
+      "line": 391,
+      "severity": "medium",
+      "why": "In session 0 (NSSM, or a scheduled task that runs whether a user is logged on or not) the server now registers a console control handler, after the Go runtime's, that consumes CTRL_LOGOFF_EVENT, so a sign-out no longer becomes SIGTERM. Ctrl+C, Ctrl+Break, closing the console and shutdown still stop it, and an interactive session's sign-out still drains it.",
+      "repro": "Run the server under NSSM, sign in to the host as another user (or over RDP) and sign out.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "On Windows, when the process session is 0, register a SetConsoleCtrlHandler that returns TRUE for CTRL_LOGOFF_EVENT only; keep the decision in a cross-platform function.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/internal/app/console_ctrl_test.go (TestConsumeConsoleCtrl); Server/internal/app/console_ctrl_windows_test.go (TestConsoleCtrlConstantsMatchWindows, TestInstallLogoffFilter)",
+        "revertProof": "fail (1 of 10 cases)"
+      },
+      "lens": "win-server-host",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
       "fixedDate": "2026-11-22"
     }
   ]

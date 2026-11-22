@@ -146,6 +146,9 @@ release changes the database, and anything an operator must do first.)
 - The .deb now needs WebKitGTK 2.44 or newer, and apt installs it with the update: on an older WebKitGTK, Settings opened empty.
 - The diagnostics event log names a page crash or an out-of-memory kill instead of "unknown".
 - Mute, switching your mic and leaving a call no longer hang when the mic accepts the call but never sends sound (a Bluetooth headset that failed to switch, a mic busy in another app): the app stops waiting for it after 5 seconds.
+- After Update and restart or Clear & Restart, the app keeps its error output for the next start's report again, so a silent close after an update is reported. The start that logs a close also keeps the display error GTK printed when the app was started from the menu.
+- AppImage: Launch on login keeps working after you rename or move the AppImage, and when it sits in a folder with a space in its name.
+- AppImage: the app no longer rewrites your system's shared GStreamer plugin cache each time it starts, so your other media apps no longer rescan their plugins after OwnCord ran.
 - Turning your camera on right after opening Voice & Video settings no longer fails with "camera capture failed to start".
 - Your own camera and screen-share preview is now sent at tile size and at most 30 times a second, so a large or fast screen share puts much less load on the app. What others see is unchanged.
 
