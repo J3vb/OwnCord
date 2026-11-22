@@ -257,6 +257,11 @@ export class RemoteTracks {
     return this.listening === userId;
   }
 
+  /** The sharer whose music the viewer listens to, or null. */
+  listeningTo(): number | null {
+    return this.listening;
+  }
+
   /** Listen to `userId`'s music, or to nobody (null). One sharer at a time:
    *  the one listened to before is unsubscribed first. A music share not yet
    *  published is subscribed when it is (roomEventHandlers'

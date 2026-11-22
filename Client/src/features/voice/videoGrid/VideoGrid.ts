@@ -123,6 +123,9 @@ export interface GridMusic {
   readonly userId: number;
   readonly name: string;
   readonly listening: boolean;
+  /** The other members listening to them, by name; you are added after them
+   *  while `listening`. */
+  readonly listeners: readonly string[];
   /** Their Music volume, 0 to 100, read when the slider is drawn or the level changes. */
   readonly volume: () => number;
   readonly onListen: () => void;

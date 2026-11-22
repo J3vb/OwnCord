@@ -26,6 +26,7 @@ vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@lib/prefs/preferences", (importOriginal) => mocks.prefsPreferencesMock(importOriginal));
+vi.mock("@stores/voiceListening", () => ({ setListeningTo: vi.fn() }));
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
@@ -436,6 +437,52 @@ describe("LiveKitSession", () => {
       session.leaveVoice(false);
       vi.advanceTimersByTime(2000);
       expect(watchFrames(ws)).toEqual([[]]);
+    });
+
+    const musicFrames = (ws: { send: ReturnType<typeof vi.fn> }) =>
+      ws.send.mock.calls.filter(([m]) => m.type === "voice_watch").map(([m]) => m.payload.music_id);
+
+    it("sends music_id with every frame, 0 when listening to nobody", () => {
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
+      session.setWsClient(ws);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      expect(musicFrames(ws)).toEqual([0]);
+    });
+
+    it("sends a voice_watch when the listening changes, and none while leaving", () => {
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
+      session.setWsClient(ws);
+      session.listenToMusic(7);
+      session.listenToMusic(8);
+      session.listenToMusic(null);
+      expect(musicFrames(ws)).toEqual([7, 8, 0]);
+      session.listenToMusic(7);
+      ws.send.mockClear();
+      session.leaveVoice(true);
+      expect(musicFrames(ws)).toEqual([]);
+    });
+
+    it("a rate-limited frame is retried with the latest music_id, not the one that failed", () => {
+      vi.useFakeTimers();
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
+      session.setWsClient(ws);
+      session.listenToMusic(7); // refused by the server (rate limited)
+      session.retryWatching();
+      ws.send.mockClear();
+      session.listenToMusic(8); // the listen changes during the back-off
+      vi.advanceTimersByTime(1000);
+      expect(musicFrames(ws)).toEqual([8, 8]);
+    });
+
+    it("a fresh join restores a kept listen even with nothing watched", () => {
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
+      session.setWsClient(ws);
+      (session as any).sendWatching(undefined, true);
+      expect(musicFrames(ws)).toEqual([]);
+      session.listenToMusic(7);
+      ws.send.mockClear();
+      (session as any).sendWatching(undefined, true);
+      expect(musicFrames(ws)).toEqual([7]);
     });
 
     it("an error reply to a voice_watch is recognised and dropped", () => {

@@ -181,6 +181,11 @@ export interface VoiceState {
    *  and resetVoiceStore clear it. Your own watching is read from the local
    *  RemoteTracks set, not from here. Optional for the fixture reason above. */
   readonly peerWatching?: ReadonlyMap<number, readonly number[]>;
+  /** Whose music each member of the current channel listens to (the sharer's
+   *  user id), from the `music_id` of their `voice_watching` frames. Only
+   *  members who listen to someone have an entry. Same writer and lifetime as
+   *  peerWatching. Your own listening is `listeningTo`. */
+  readonly peerListening?: ReadonlyMap<number, number>;
   /** Fingerprint of the local user's own ephemeral session key, so
    *  it can be read out to a peer who sees us as unverified. Null outside a
    *  voice session. Optional for the same fixture reason as peerVerifications. */
@@ -225,6 +230,7 @@ export function createVoiceState(): VoiceState {
     peerKeySlots: new Set(),
     peerBoundOffers: new Set(),
     peerWatching: new Map(),
+    peerListening: new Map(),
     localMusic: false,
     musicSharers: new Set(),
     listeningTo: null,

@@ -42,25 +42,32 @@ export abstract class SessionRemote extends SessionCore {
     tracks.onListeningChange = (userId) => {
       this._audioElements.setListenedMusicUser(userId);
       setListeningTo(userId);
+      // Others show who listens: a change is sent like a watch change.
+      if (!this._leavingVoice) this.sendWatching();
     };
     return tracks;
   }
 
-  /** Tell the server whose screen shares we watch (voice_watch), while we are
-   *  in a voice channel with the socket up. A re-send (no `ids`) always sends
-   *  the current set, empty included, because the server keeps the old set
-   *  across a resume; `skipEmpty` is for a fresh join, where the server just
-   *  cleared it. A refusal (a server from before 6.6) is ignored by the
+  /** Tell the server whose screen shares we watch and whose music we listen
+   *  to (voice_watch), while we are in a voice channel with the socket up.
+   *  Every frame carries the current `music_id` (0 = nobody; an older server
+   *  ignores it). A re-send (no `ids`) always sends the current state, empty
+   *  included, because the server keeps the old one across a resume;
+   *  `skipEmpty` is for a fresh join, where the server just cleared it, so it
+   *  skips only when there is neither a watch nor a listen to restore. A refusal (a server from before 6.6) is ignored by the
    *  dispatcher via watchRequest. */
   protected sendWatching(ids?: readonly number[], skipEmpty = false): void {
     // Deduped, sorted and within the server's cap of 16 (it counts the raw list).
     const current = [...new Set(ids ?? this._remoteTracks.watchedScreenshares())]
       .toSorted((a, b) => a - b)
       .slice(0, MAX_WATCH_IDS);
-    if (skipEmpty && current.length === 0) return;
+    const musicId = this._remoteTracks.listeningTo() ?? 0;
+    if (skipEmpty && current.length === 0 && musicId === 0) return;
     if (this.ws === null || this.ws.getState() !== "connected") return;
     if (voiceStore.getState().currentChannelId === null) return;
-    noteWatchSent(this.ws.send({ type: "voice_watch", payload: { user_ids: [...current] } }));
+    noteWatchSent(
+      this.ws.send({ type: "voice_watch", payload: { user_ids: [...current], music_id: musicId } }),
+    );
   }
 
   /** The socket resumed while in voice: re-send our own set (the server keeps

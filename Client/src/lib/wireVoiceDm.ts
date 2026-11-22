@@ -42,10 +42,14 @@ export interface VoiceE2EEOfferPayload {
   readonly iv: string;
 }
 
-/** Server→Client: whose screen shares a member of the voice channel watches. */
+/** Server→Client: whose screen shares a member of the voice channel watches,
+ *  and whose music they listen to. */
 export interface VoiceWatchingPayload {
   readonly user_id: number;
   readonly user_ids: readonly number[];
+  /** The sharer whose music the member listens to; 0 or absent = nobody (an
+   *  older server never sends it). */
+  readonly music_id?: number;
 }
 
 /** Server→Client: the speaking ring a member of the voice channel reports for

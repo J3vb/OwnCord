@@ -41,6 +41,7 @@ import {
   withPeerKeySlots,
   withPeerBoundOffers,
   withPeerWatching,
+  withoutPeerWatching,
   withMusicSharer,
   withRemoteMusicSharers,
   withLocalMusic,
@@ -435,9 +436,7 @@ export function noteWatchingResync(): void {
  *  resume or full resync): a member who stopped while we were away sends no
  *  frame, so the old entry must not outlive the re-sync. */
 export function clearPeerWatching(): void {
-  voiceStore.setState((prev) =>
-    (prev.peerWatching?.size ?? 0) === 0 ? prev : { ...prev, peerWatching: new Map() },
-  );
+  voiceStore.setState(withoutPeerWatching);
 }
 
 /** True for a short while after `noteWatchingResync`. */
@@ -449,8 +448,8 @@ export function isWatchingResync(windowMs = 2000): boolean {
  *  frame for a user who is not in that channel's roster (one that already
  *  left, or another channel's) is ignored; an empty list clears the entry.
  *  Single writer: the dispatcher's voice_watching handler. */
-export function setPeerWatching(userId: number, watching: readonly number[]): void {
-  voiceStore.setState((prev) => withPeerWatching(prev, userId, watching));
+export function setPeerWatching(userId: number, watching: readonly number[], musicId = 0): void {
+  voiceStore.setState((prev) => withPeerWatching(prev, userId, watching, musicId));
 }
 
 /** Who watches a member's screen share, as user ids: the channel members

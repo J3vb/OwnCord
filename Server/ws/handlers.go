@@ -266,8 +266,8 @@ func (h *Hub) handleMessageApply(ctx, fctx context.Context, c *Client, env envel
 	if sw := result.SetVoiceWatching; sw != nil {
 		// Relay only while the slot is still in the channel the handler decided
 		// against; a frame that lost a channel switch reaches nobody.
-		if c.voice.setWatchingIfChannel(sw.chID, sw.ids) {
-			h.sendToVoiceChannelExcept(sw.chID, c.userID, buildVoiceWatching(c.userID, sw.ids))
+		if c.voice.setWatchingIfChannel(sw.chID, sw.ids, sw.musicID) {
+			h.sendToVoiceChannelExcept(sw.chID, c.userID, buildVoiceWatching(c.userID, sw.ids, sw.musicID))
 		}
 	}
 	if vs := result.RelayVoiceSpeaking; vs != nil && c.voice.channel() == vs.chID {

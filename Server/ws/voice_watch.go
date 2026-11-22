@@ -17,12 +17,13 @@ const (
 )
 
 type voiceWatchSet struct {
-	chID int64
-	ids  []int64
+	chID    int64
+	ids     []int64
+	musicID int64 // the one sharer whose music the sender listens to; 0 = nobody
 }
 
 // handleVoiceWatchV2 validates and normalises the set (ids > 0, own id dropped, deduped,
-// ascending) and returns SetVoiceWatching; the applier stores and relays it only if the
+// ascending, music_id kept only when > 0 and not the sender's own id, else 0) and returns SetVoiceWatching; the applier stores and relays it only if the
 // sender is still in the channel. An empty set means "watching nothing". Ids are not
 // checked against the roster: clients filter on display.
 func handleVoiceWatchV2(_ context.Context, cmd Command, info ClientInfo, deps any) Result {
@@ -49,11 +50,16 @@ func handleVoiceWatchV2(_ context.Context, cmd Command, info ClientInfo, deps an
 	slices.Sort(ids)
 	ids = slices.Compact(ids)
 
-	return Result{SetVoiceWatching: &voiceWatchSet{chID: info.VoiceChannelID, ids: ids}}
+	musicID := watchCmd.MusicID
+	if musicID <= 0 || musicID == info.UserID {
+		musicID = 0
+	}
+
+	return Result{SetVoiceWatching: &voiceWatchSet{chID: info.VoiceChannelID, ids: ids, musicID: musicID}}
 }
 
 // sendVoicePeerWatching sends c one voice_watching for every other member of channelID with
-// a non-empty watched set. It is an unsequenced pub/sub frame no replay can recover, so a
+// a non-empty watched set or a music listen. It is an unsequenced pub/sub frame no replay can recover, so a
 // joiner and a resumed socket get it here, beside sendVoicePeerKeys. Peers are looked up
 // under h.mu.RLock; the sends happen outside it.
 func (h *Hub) sendVoicePeerWatching(c *Client, channelID int64) {
@@ -62,8 +68,8 @@ func (h *Hub) sendVoicePeerWatching(c *Client, channelID int64) {
 		if peer == nil {
 			continue
 		}
-		if ids := peer.voice.watchingIfChannel(channelID); len(ids) > 0 {
-			c.sendMsg(buildVoiceWatching(uid, ids))
+		if ids, musicID := peer.voice.watchStateIfChannel(channelID); len(ids) > 0 || musicID > 0 {
+			c.sendMsg(buildVoiceWatching(uid, ids, musicID))
 		}
 	}
 }
@@ -71,15 +77,16 @@ func (h *Hub) sendVoicePeerWatching(c *Client, channelID int64) {
 type voiceWatchingBroadcast struct {
 	UserID  int64   `json:"user_id"`
 	UserIDs []int64 `json:"user_ids"`
+	MusicID int64   `json:"music_id,omitempty"` // the sharer whose music the member listens to; 0 = nobody
 }
 
 // buildVoiceWatching constructs a voice_watching relay; user_ids is always an array, never null.
-func buildVoiceWatching(userID int64, ids []int64) []byte {
+func buildVoiceWatching(userID int64, ids []int64, musicID int64) []byte {
 	if ids == nil {
 		ids = []int64{}
 	}
 	return buildJSON(wsMsg{
 		Type:    MsgTypeVoiceWatching,
-		Payload: voiceWatchingBroadcast{UserID: userID, UserIDs: ids},
+		Payload: voiceWatchingBroadcast{UserID: userID, UserIDs: ids, MusicID: musicID},
 	})
 }

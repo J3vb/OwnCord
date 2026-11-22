@@ -132,7 +132,7 @@ export const SHAPES: readonly Shape[] = [
   [2,["channel_id","reason"],[1,0]],
   [2,["user_id","public_key"],[1,0],["signature","identity_public_key","video_decode","key_slots","bound_offers"],[0,0,8,2,2]],
   [2,["from_user_id","encrypted_key","iv"],[1,0,0]],
-  [2,["user_id","user_ids"],[1,5]],
+  [2,["user_id","user_ids"],[1,5],["music_id"],[1]],
   [4,2],
   [2,["user_id","speaking"],[1,108]],
   [2,["user"],[7],["status"],[0]],

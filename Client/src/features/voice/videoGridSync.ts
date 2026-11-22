@@ -5,6 +5,7 @@
 import type { CallState, GridMusic } from "./videoGrid/VideoGrid";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import { uiStore } from "@stores/ui.store";
+import { listenersOfMusic } from "@stores/voicePeers";
 import { isSelfMuted, streamViewers, type VoiceState, type VoiceUser } from "@stores/voice.store";
 import { isConnecting, isPhoneCallHold } from "./voiceStatusText";
 import { shareBlockReason } from "./shareGate";
@@ -173,13 +174,18 @@ function syncMusic(
       userId,
       name,
       listening: userId === listeningTo,
+      listeners: listenersOfMusic(state, userId, self).map(
+        (id) => deps.personName(id) || roster?.get(id)?.username || "",
+      ),
       volume: () => deps.music.volume(userId),
       onListen: () => deps.music.listen(userId),
       onStop: () => deps.music.listen(null),
       onVolume: (percent) => deps.music.setVolume(userId, percent),
     });
   }
-  const key = tiles.map((t) => `${t.userId}:${t.listening ? 1 : 0}:${t.name}`).join(";");
+  const key = tiles
+    .map((t) => `${t.userId}:${t.listening ? 1 : 0}:${t.name}:${t.listeners.join("\u0000")}`)
+    .join(";");
   if (key === memo.prevMusic) return;
   memo.prevMusic = key;
   deps.grid()?.setMusic(tiles);
