@@ -40,6 +40,8 @@ import { loadMemberLayout, MEMBER_LAYOUT_PREF, type MemberLayout } from "../memb
 import { appZoom, hostCanZoom, ZOOM_LEVELS, zoomIndex } from "../zoom";
 import { buildCustomThemeSection } from "../custom-themes/customThemeSection";
 import { buildChoiceRow, buildSettingRow } from "./settingRow";
+import { buildScreenLayoutRow } from "./screenLayoutRow";
+import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { settingsText as t } from "../../i18n/settings";
 
 /** "system" is a choice, not a palette: the accent default follows what it shows. */
@@ -274,7 +276,12 @@ export function buildAppearanceTab(
     save: (value) => savePref(MEMBER_LAYOUT_PREF, value),
   }).row;
   // A phone shows the member list as an overlay, so it has no side to pick.
-  if (!isAndroidApp()) layoutGroup.card.appendChild(memberLayoutRow);
+  // Command Deck owns the member list's place, so it hides the row too.
+  if (!isAndroidApp() && runningScreenLayout() !== "deck") {
+    layoutGroup.card.appendChild(memberLayoutRow);
+  }
+  const screenLayoutRow = buildScreenLayoutRow(signal);
+  if (screenLayoutRow !== null) layoutGroup.card.appendChild(screenLayoutRow);
 
   // Accent color picker
   const ACCENT_PRESETS: readonly string[] = [

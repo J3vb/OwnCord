@@ -100,6 +100,12 @@ export const settingsShellEntries = {
   "appearance.memberLayout.desc": "Show the member list beside the chat or under the channels",
   "appearance.memberLayout.right": "Right side",
   "appearance.memberLayout.left": "Under channels",
+  "appearance.screenLayout": "Screen layout",
+  "appearance.screenLayout.desc":
+    "Classic is the standard layout. Command Deck is a compact layout with a server tree.",
+  "appearance.screenLayout.classic": "Classic",
+  "appearance.screenLayout.deck": "Command Deck (preview)",
+  "appearance.screenLayout.pending": "Applies the next time OwnCord starts or reloads.",
   "appearance.accentColor": "Accent color",
   "appearance.accentAria": "Custom accent color (hex)",
   "appearance.accentNote":

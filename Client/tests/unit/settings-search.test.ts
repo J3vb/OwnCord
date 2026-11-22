@@ -72,6 +72,7 @@ import {
   clearHighlights,
 } from "../../src/features/settings/settingsSearch";
 import { settingsText } from "../../src/i18n/settings";
+import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
 import { whatsNewText } from "../../src/i18n/whatsNew";
 import { gameActivityText } from "../../src/i18n/gameActivity";
 import { listeningDetailsText } from "../../src/i18n/listeningDetails";
@@ -245,6 +246,59 @@ describe("settings search", () => {
           .map((el) => (el.textContent ?? "").trim())
           .filter((text) => text !== "" && !known.has(text) && !STATE_TEXT.has(text));
         expect(unindexed).toEqual([]);
+      });
+    });
+
+    describe("Screen layout entries", () => {
+      const rowText = settingsText("appearance.screenLayout");
+      const memberText = settingsText("appearance.memberLayout");
+      const appearance = (): readonly string[] => SETTINGS_SEARCH_INDEX.Appearance();
+      const openAppearance = (): string => {
+        mountOverlay();
+        tabs()
+          .find((t) => labelFor(t) === "Appearance")!
+          .click();
+        return (
+          container.querySelector<HTMLElement>(".settings-content")!.textContent ?? ""
+        ).replace(/\s+/g, " ");
+      };
+      const devOn = (): void => localStorage.setItem("owncord:settings:developerMode", "true");
+      afterEach(() => setRunningScreenLayout("classic"));
+
+      it("are absent with Developer mode off, and the on-screen row agrees", () => {
+        expect(appearance()).not.toContain(rowText);
+        expect(openAppearance()).not.toContain(rowText);
+      });
+
+      it("are present with Developer mode on, and match the screen and the index", () => {
+        // The cached index must not hand back the Developer-mode-off answer.
+        expect(appearance()).not.toContain(rowText);
+        devOn();
+        expect(appearance()).toContain(rowText);
+        expect(appearance()).toContain(settingsText("appearance.screenLayout.desc"));
+        const shown = openAppearance();
+        for (const text of appearance()) expect(shown).toContain(text);
+        expect(appearance()).not.toContain(settingsText("appearance.screenLayout.pending"));
+      });
+
+      it("drop the member position entries while Command Deck runs", () => {
+        devOn();
+        expect(appearance()).toContain(memberText);
+        setRunningScreenLayout("deck");
+        expect(appearance()).not.toContain(memberText);
+        const shown = openAppearance();
+        expect(shown).not.toContain(memberText);
+        for (const text of appearance()) expect(shown).toContain(text);
+      });
+
+      it("are absent in the Android app with Developer mode on", () => {
+        devOn();
+        hostAndroidApp();
+        try {
+          expect(appearance()).not.toContain(rowText);
+        } finally {
+          clearHost();
+        }
       });
     });
 
