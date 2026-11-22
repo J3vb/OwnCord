@@ -208,8 +208,17 @@ Desktop pinning details, each with its test:
   `decide_prompts_when_new_leaf_is_not_web_pki_valid`,
   `decide_prompts_when_pinned_leaf_was_not_web_pki_valid`,
   `decide_prompts_when_web_pki_record_is_for_another_leaf`,
-  `capture_verifier_never_marks_an_ip_host_web_pki_valid`. The updater's
-  `HostScopedVerifier` also uses web-PKI, for the GitHub download.
+  `capture_verifier_never_marks_an_ip_host_web_pki_valid`.
+- The updater's `tofu::HostScopedVerifier` keeps the pin check for the
+  OwnCord server and checks every other host it reaches (the GitHub
+  installer download) against the operating system's trust store
+  (`rustls-platform-verifier`, `tofu::unpinned_host_verifier`), as the
+  updater plugin's own client does with no pin. The bundled `webpki-roots`
+  set stands in on Android and when the system store cannot be loaded. The
+  renewal rule above keeps the bundled set. Tests:
+  `an_unpinned_host_is_checked_against_the_system_trust_store`,
+  `the_bundled_roots_do_not_trust_the_test_root`,
+  `host_scoped_rejects_wrong_cert_on_pinned_host`.
 - The three native tunnels share one TOFU module (`tofu.rs`) and one pin store
   keyed by `tofu::cert_store_key`. The WebSocket and HTTP tunnels connect
   through `tofu::CaptureVerifier` and decide after the handshake with
@@ -652,7 +661,8 @@ always directly, to the SFU's advertised ICE endpoints on TCP 7881 and UDP
 embeds (titles and thumbnails through the external-content broker, the player
 as a `frame-src` iframe on click); the Klipy CDN for GIF media, through the
 broker; for its own updates, the installer download from GitHub release
-assets, under normal web-PKI validation (`tofu::HostScopedVerifier`), once the
+assets, checked against the operating system's trust store (the bundled
+roots on Android; `tofu::HostScopedVerifier`), once the
 server's `client-update` endpoint has named it; and any URL
 a user posted, for link previews, through the broker. The C-09 contract above
 governs every broker fetch: nothing is fetched through the broker (YouTube,

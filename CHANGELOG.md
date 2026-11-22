@@ -156,6 +156,13 @@ release changes the database, and anything an operator must do first.)
 - Turning your camera on right after opening Voice & Video settings no longer fails with "camera capture failed to start".
 - Your own camera and screen-share preview is now sent at tile size and at most 30 times a second, so a large or fast screen share puts much less load on the app. What others see is unchanged.
 
+**Desktop app**
+
+- If Windows SmartScreen or antivirus stopped the update installer, OwnCord kept running with no window and no tray icon; the window and tray icon now come back and show that the update failed.
+- Opening OwnCord while an update was starting its installer opened a second copy of the old version, which the installer later closed; the update now goes ahead without it.
+- After an update or a restart from Settings, OwnCord no longer opens the invite or message link it was first started from again; new links still open.
+- In-app updates always failed on computers whose antivirus or company network scans HTTPS; the update download now trusts what your computer and browser trust.
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

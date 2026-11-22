@@ -34,6 +34,12 @@ const TRAY_NOTICE_SHOWN_KEY: &str = "owncord:window:trayNoticeShown";
 /// A restart the app starts itself (update, Clear & Restart) copies this
 /// process's argv, `--minimized` included, and must not come back hidden.
 const SHOW_NEXT_LAUNCH_KEY: &str = "owncord:window:showNextLaunch";
+/// Written and cleared with that marker: the owncord:// link the restarting
+/// process was started with, absent when it had none. The restart copies that
+/// link into the new process's argv; any other start-up link is a new one.
+const RESTART_LINK_KEY: &str = "owncord:window:restartLink";
+/// The app's link scheme (`tauri.conf.json`, `plugins.deep-link`).
+const DEEP_LINK_SCHEME: &str = "owncord";
 
 /// Closing to the tray is on unless the user turned it off.
 const MINIMIZE_TO_TRAY_DEFAULT: bool = true;
@@ -78,39 +84,77 @@ pub fn should_start_hidden(
     !show_next_launch && has_minimized_arg && start_minimized && tray_available()
 }
 
+/// What the one-shot marker tells this launch.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct NextLaunch {
+    /// Show the window whatever the flag and the pref say.
+    pub show: bool,
+    /// The start-up link the restarting process had, which this launch's
+    /// argv repeats. Only with `show`: the link is part of the marker.
+    pub restart_link: Option<String>,
+}
+
 /// Read and clear the one-shot marker. A store that cannot be read or saved
-/// gives false: the launch then follows the flag and the pref.
-pub fn take_show_next_launch<R: Runtime>(app: &AppHandle<R>) -> bool {
+/// gives nothing: the launch then follows the flag and the pref.
+pub fn take_show_next_launch<R: Runtime>(app: &AppHandle<R>) -> NextLaunch {
     let Ok(store) = json_store::open(app, SETTINGS_STORE) else {
-        return false;
+        return NextLaunch::default();
     };
-    let set = store
+    let show = store
         .get(SHOW_NEXT_LAUNCH_KEY)
         .and_then(|v| v.as_bool())
         .unwrap_or(false);
-    if set {
-        store.delete(SHOW_NEXT_LAUNCH_KEY);
+    let link = store
+        .get(RESTART_LINK_KEY)
+        .and_then(|v| v.as_str().map(str::to_owned));
+    // Both always go, so neither outlives one launch.
+    let cleared = store.delete(SHOW_NEXT_LAUNCH_KEY) | store.delete(RESTART_LINK_KEY);
+    if cleared {
         if let Err(e) = store.save() {
             log::warn!("[window] cannot clear the show-next-launch marker: {e}");
         }
     }
-    set
+    NextLaunch {
+        show,
+        restart_link: link.filter(|_| show),
+    }
 }
 
 /// Record (or withdraw) the marker. Called just before this process starts
-/// its own replacement.
+/// its own replacement, which gets this process's argv: the marker keeps this
+/// process's own start-up link, so the new process can tell it from a new one.
 pub fn set_show_next_launch<R: Runtime>(app: &AppHandle<R>, on: bool) {
     let Ok(store) = json_store::open(app, SETTINGS_STORE) else {
         return;
     };
     if on {
         store.set(SHOW_NEXT_LAUNCH_KEY, serde_json::Value::Bool(true));
-    } else if !store.delete(SHOW_NEXT_LAUNCH_KEY) {
+        match startup_link(std::env::args_os()) {
+            Some(link) => store.set(RESTART_LINK_KEY, serde_json::Value::String(link)),
+            None => {
+                store.delete(RESTART_LINK_KEY);
+            }
+        }
+    } else if !(store.delete(SHOW_NEXT_LAUNCH_KEY) | store.delete(RESTART_LINK_KEY)) {
         return;
     }
     if let Err(e) = store.save() {
         log::warn!("[window] cannot save the show-next-launch marker: {e}");
     }
+}
+
+/// The owncord:// link a process with this argv was started from, read the
+/// way the deep-link plugin reads it at start-up on Windows and Linux: exactly
+/// one argument after the program, a URL with the app's scheme. Returned in
+/// the URL's normal form, which is what the webview's `getCurrent()` gives.
+fn startup_link<S: AsRef<std::ffi::OsStr>>(args: impl IntoIterator<Item = S>) -> Option<String> {
+    let mut args = args.into_iter().skip(1);
+    let first = args.next()?;
+    if args.next().is_some() {
+        return None;
+    }
+    let url = url::Url::parse(first.as_ref().to_str()?).ok()?;
+    (url.scheme() == DEEP_LINK_SCHEME).then(|| url.to_string())
 }
 
 /// The frontend calls this just before `relaunch()`. Async, like the
@@ -119,6 +163,29 @@ pub fn set_show_next_launch<R: Runtime>(app: &AppHandle<R>, on: bool) {
 #[tauri::command(async)]
 pub fn show_next_launch(app: AppHandle) {
     set_show_next_launch(&app, true);
+}
+
+/// The start-up link this process repeats from the one it was restarted
+/// from: [`NextLaunch::restart_link`], taken once at start-up. Every restart
+/// the app makes itself (an update, Clear & Restart, a graphics card change)
+/// sets the marker and copies the old process's argv, so that link comes back
+/// as this launch's start-up link. The webview asks
+/// [`restart_startup_link`] before it opens its start-up link.
+pub struct LaunchOrigin {
+    restart_link: Option<String>,
+}
+
+impl LaunchOrigin {
+    pub fn new(restart_link: Option<String>) -> Self {
+        Self { restart_link }
+    }
+}
+
+/// Asked by the webview's deep-link start-up at each page load; the answer is
+/// fixed for the life of the process.
+#[tauri::command]
+pub fn restart_startup_link(origin: State<'_, LaunchOrigin>) -> Option<String> {
+    origin.restart_link.clone()
 }
 
 /// Whether the process was launched with the autostart flag.
@@ -472,12 +539,47 @@ mod tests {
             WindowPref::StartMinimized.store_key(),
         ];
         assert_ne!(keys[0], keys[1]);
-        for key in keys
-            .into_iter()
-            .chain([TRAY_NOTICE_SHOWN_KEY, SHOW_NEXT_LAUNCH_KEY])
-        {
+        for key in keys.into_iter().chain([
+            TRAY_NOTICE_SHOWN_KEY,
+            SHOW_NEXT_LAUNCH_KEY,
+            RESTART_LINK_KEY,
+        ]) {
             assert!(key.starts_with("owncord:"), "{key} would be rejected");
         }
+    }
+
+    #[test]
+    fn a_start_up_link_is_read_the_way_the_deep_link_plugin_reads_it() {
+        let link = |args: &[&str]| startup_link(args.iter().copied());
+        // One link after the program, in the URL's normal form.
+        assert_eq!(
+            link(&["owncord.exe", "owncord://invite/ABC?host=chat.example:8443"]),
+            Some("owncord://invite/ABC?host=chat.example:8443".into())
+        );
+        assert_eq!(
+            link(&["owncord", "OWNCORD://message/7/42"]),
+            Some("owncord://message/7/42".into())
+        );
+        // Anything the plugin would not take as a start-up link.
+        for args in [
+            &["owncord.exe"][..],
+            &["owncord.exe", "--minimized"],
+            &["owncord.exe", "https://chat.example.com/invite/ABC"],
+            &["owncord.exe", "owncord://invite/ABC", "--minimized"],
+            &["owncord.exe", "--minimized", "owncord://invite/ABC"],
+        ] {
+            assert_eq!(link(args), None, "{args:?}");
+        }
+    }
+
+    #[test]
+    fn the_link_scheme_is_the_one_the_desktop_app_registers() {
+        let conf: serde_json::Value =
+            serde_json::from_str(include_str!("../tauri.conf.json")).expect("tauri.conf.json");
+        assert_eq!(
+            conf["plugins"]["deep-link"]["desktop"]["schemes"],
+            serde_json::json!([DEEP_LINK_SCHEME])
+        );
     }
 
     #[test]

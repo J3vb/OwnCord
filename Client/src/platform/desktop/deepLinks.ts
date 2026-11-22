@@ -8,15 +8,32 @@ import { isAndroidHost } from "@lib/hostPlatform";
 import { createLogger } from "@lib/logger";
 import { parseChannelLink, parseInviteLink, parseMessageLink } from "@lib/nav/deepLink";
 import type { DeepLinks } from "../contracts/deepLinks";
+import { tryInvoke } from "./nativeInvoke";
 
 const log = createLogger("deep-link");
 
 const SCHEME = "owncord";
 
 /**
+ * The owncord:// link an app restart (an update, Clear & Restart) copied into
+ * this launch: the restart starts the new process with the old one's command
+ * line, so the link the old process was started from comes back as this
+ * launch's start-up link. Null when this launch is no restart, the old process
+ * had no link, on Android (no such restart) and whenever the host cannot
+ * answer: the start-up link then opens as before.
+ */
+async function linkCopiedByRestart(): Promise<string | null> {
+  if (isAndroidHost()) return null;
+  const answer = await tryInvoke<unknown>("restart_startup_link");
+  return answer.ok && typeof answer.value === "string" ? answer.value : null;
+}
+
+/**
  * Wire owncord:// deep links on desktop and Android. No-op outside Tauri. `onInvite` is called once per
  * recognized invite link and `onMessage` once per message permalink, or per
- * channel link with no message id, on both cold start and warm launches.
+ * channel link with no message id, on both cold start and warm launches. A
+ * start-up link that an app restart copied from the old process is skipped:
+ * that process opened it already. Any other link opens.
  */
 async function init(
   onInvite: (code: string, host?: string) => void,
@@ -64,7 +81,11 @@ async function init(
         // Already registered, or not permitted on this platform — ignore.
       }
     }
-    dispatch(await plugin.getCurrent());
+    const copied = await linkCopiedByRestart();
+    const startup = (await plugin.getCurrent()) ?? [];
+    const fresh = startup.filter((url) => url !== copied);
+    if (fresh.length < startup.length) log.info("Skipping the start-up link an app restart copied");
+    dispatch(fresh);
     await plugin.onOpenUrl((urls) => dispatch(urls));
   } catch (err) {
     log.warn("Failed to initialize deep links", { error: String(err) });
