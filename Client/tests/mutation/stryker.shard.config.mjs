@@ -375,6 +375,7 @@ export const shards = {
   ],
   "lib-rest-1": ["src/lib/text/markdown.ts"],
   "lib-rest-2": [
+    "src/features/deck/mountDeckFrame.ts",
     "src/features/unread-badge/unreadBadge.ts",
     "src/features/whats-new/seenVersion.ts",
     "src/lib/nav/messageNavigation.ts",
@@ -393,6 +394,7 @@ export const shards = {
     "src/lib/voice/callRing.ts",
   ],
   "lib-rest-4": [
+    "src/features/deck/deckStatusBar.ts",
     "src/features/forums/forumViewParts.ts",
     "src/features/members/memberRowRenderer.ts",
     "src/features/threads/threadAgo.ts",

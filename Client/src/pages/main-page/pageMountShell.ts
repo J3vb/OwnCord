@@ -29,6 +29,8 @@ import { getActiveChannel } from "@stores/channels.store";
 import { setChatHeaderCallChat } from "./ChatHeader";
 import { createCallChat } from "../../features/voice/callChat";
 import { createVideoModeController } from "../../features/voice/VideoModeController";
+import { mountDeckFrame } from "../../features/deck/mountDeckFrame";
+import { showToast } from "@lib/ui/toast";
 import { createSidebarArea } from "./SidebarArea";
 import { createChatArea } from "./ChatArea";
 import { installPhoneNavWhenPhone } from "./lazyPhoneNav";
@@ -390,4 +392,15 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
     }),
     ms.app,
   );
+}
+
+/** The Command Deck bars (a preview layout; a no-op in Classic). Runs after the toast
+ *  system is up, so a bar that fails to build can say so. */
+export function mountDeck(st: PageState, ms: MountScope): void {
+  const teardown = mountDeckFrame({
+    root: st.root!,
+    slots: ms.sidebar.frameSlots,
+    notify: (text) => showToast(text, "error"),
+  });
+  if (teardown !== null) st.unsubscribers.push(teardown);
 }
