@@ -244,6 +244,9 @@ export class LiveKitSession extends SessionReconnect {
     // The join a reconnect was cleared for has its answer: from here the
     // attempt itself is the session.
     this.clearYield();
+    // Listening is not carried to another channel; a rebuilt room of the
+    // same channel keeps it.
+    this._remoteTracks.keepListenFor(channelId);
     return this._join.connectAndSetup(token, url, channelId, directUrl, isKeyHolder);
   }
 
@@ -270,6 +273,7 @@ export class LiveKitSession extends SessionReconnect {
     this._eventHandlers.handleConnected(room);
     this._remoteTracks.dropUnpublishedWatches();
     this._remoteTracks.removeUnpublishedTiles();
+    this._remoteTracks.reviewListening();
   }
 
   /** Resolves once the room's disconnect has completed (the native room's,

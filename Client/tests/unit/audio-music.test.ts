@@ -44,6 +44,28 @@ beforeEach(() => {
   prefs.clear();
   voice.localDeafened = false;
   elements = new AudioElements();
+  // Music plays only for the sharer listened to; these cases listen to 42.
+  elements.setListenedMusicUser(42);
+});
+
+describe("listening", () => {
+  it("plays only the listened-to sharer's music, at 0 for everyone else", () => {
+    expect(elements.getMusicGain(7)).toBe(0);
+    elements.setListenedMusicUser(7);
+    expect(elements.getMusicGain(7)).toBe(1);
+    expect(elements.getMusicGain(42)).toBe(0);
+    elements.setListenedMusicUser(null);
+    expect(elements.getMusicGain(7)).toBe(0);
+  });
+
+  it("tells a native mixer when the listened-to sharer changes", () => {
+    const listener = vi.fn();
+    elements.setMusicGainListener(listener);
+    elements.setListenedMusicUser(7);
+    expect(listener).toHaveBeenCalledTimes(1);
+    elements.setListenedMusicUser(7);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("music volume and mute", () => {
@@ -144,5 +166,17 @@ describe("routing by track name", () => {
     const state = elements as unknown as Played;
     expect(state.musicAudioElements.get(42)?.size ?? 0).toBe(0);
     expect(state.screenshareAudioElements.get(42)?.size).toBe(1);
+  });
+});
+
+describe("Music volume announcement", () => {
+  it("announces every level change, so the tile slider and the panel bar follow", () => {
+    const seen = vi.fn();
+    window.addEventListener("owncord:user-volume-changed", seen, { once: true });
+
+    elements.setMusicVolume(42, 55);
+
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect((seen.mock.calls[0]![0] as CustomEvent<{ userId: number }>).detail.userId).toBe(42);
   });
 });

@@ -103,6 +103,7 @@ export const getRemoteVideoStats = session.getRemoteVideoStats.bind(session);
 export const setRemoteVideoView = session.setRemoteVideoView.bind(session);
 export const setRemoteVideoWatched = session.setRemoteVideoWatched.bind(session);
 export const forgetRemoteVideoWatch = session.forgetRemoteVideoWatch.bind(session);
+export const listenToMusic = session.listenToMusic.bind(session);
 export const getSessionDebugInfo = session.getSessionDebugInfo.bind(session);
 export const getShareDiagnostics = session.getShareDiagnostics.bind(session);
 export const getLocalMicSettings = session.getLocalMicSettings.bind(session);

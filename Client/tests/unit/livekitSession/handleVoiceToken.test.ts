@@ -1,6 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
+import { setListeningTo } from "@stores/voiceListening";
 import {
   setLocalMuted,
   setListenOnly,
@@ -20,6 +21,7 @@ import {
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
+vi.mock("@stores/voiceListening", () => ({ setListeningTo: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@lib/prefs/preferences", (importOriginal) => mocks.prefsPreferencesMock(importOriginal));
 vi.mock("@lib/logger", () => mocks.loggerMock());
@@ -48,6 +50,18 @@ describe("LiveKitSession", () => {
         autoSubscribe: false,
       });
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
+    });
+
+    it("drops the music listen when the new room is another channel's", async () => {
+      session.setServerHost("localhost:7880");
+      enterConnected(session, 1);
+      session.listenToMusic(7);
+      expect(setListeningTo).toHaveBeenLastCalledWith(7);
+
+      // Another channel starts from nobody.
+      mockVoiceState.currentChannelId = 2;
+      await session.handleVoiceToken("t3", "/livekit", 2, "ws://localhost:7880", true);
+      expect(setListeningTo).toHaveBeenLastCalledWith(null);
     });
 
     it("publishes no microphone in the AFK channel and keeps the session up", async () => {

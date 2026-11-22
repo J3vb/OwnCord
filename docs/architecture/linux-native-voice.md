@@ -117,6 +117,13 @@ The host's `musicShareEnded` event ends a share the host dropped on its own.
 
 - A listener tells music from a screen share's sound by the track name alone
   (`lib/voice/musicTrack.ts`), in the native roster as on the web path.
+- A music track is subscribed only for the one sharer the viewer listens to
+  (`RemoteTracks.listen`, mirrored in `voiceStore.listeningTo`), through the
+  same `setSubscribed` switch as a watched screen share. The host
+  auto-subscribes every track and the native room raises no `TrackSubscribed`
+  for audio, so the music gain is the gate there: `AudioElements.getMusicGain`
+  is 0 for every sharer but the one listened to, and that gain is pushed to the
+  mixer when a participant appears and whenever the listen changes.
 - Music has its own per-user volume and Mute music, folded into one gain
   together with deafen and the output volume (`AudioElements.getMusicGain`);
   the room pushes that gain to the playout mixer with

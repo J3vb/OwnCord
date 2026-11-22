@@ -251,6 +251,7 @@ export function withLeftChannel(prev: VoiceState, currentUserId: number): VoiceS
     peerWatching: new Map<number, readonly number[]>(),
     localMusic: false,
     musicSharers: new Set<number>(),
+    listeningTo: null,
   };
   const channelId = prev.currentChannelId;
   const voiceUsers = withoutRings(prev.voiceUsers, channelId);

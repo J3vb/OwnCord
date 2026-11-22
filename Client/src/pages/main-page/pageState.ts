@@ -236,6 +236,7 @@ export interface MountScope {
   prevSpeaking: string;
   prevAudioState: string;
   prevViewers: string;
+  prevMusic: string;
   prevCallState: string;
   /** Your call state for the grid's call controls, from the voice store and
    *  the chat socket (camera and share freeze while it is down). */

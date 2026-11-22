@@ -14,7 +14,7 @@ import { reconcileModels, sameModel } from "@lib/net/reconcile";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createLazyScreen } from "../../lib/ui/lazyScreen";
-import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
+import { getUserLocalMute, getUserVolume, listenToMusic } from "@lib/voice/livekitSession";
 import { loadPref } from "@lib/prefs/preferences";
 import { userMusicMuteKey, userMusicVolumeKey } from "@lib/voice/audioVolumePrefs";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
@@ -321,6 +321,14 @@ export function createVoiceRows(
       );
     }
 
+    row.querySelector(":scope > .vu-listen")?.addEventListener(
+      "click",
+      (e) => {
+        e.stopPropagation();
+        listenToMusic(model.listen === "on" ? null : model.userId);
+      },
+      { signal },
+    );
     // Right-click (or Shift+F10 / the Menu key, A11Y-01) for the per-user
     // volume and moderation menu; never on the local user's own row.
     if (!model.self) bindOtherUserHandlers(row, model, channelId, atEvent, signal);

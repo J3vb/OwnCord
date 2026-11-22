@@ -4,7 +4,9 @@
 import type { StreamSample, VideoView } from "./remoteTracks";
 import { RemoteTracks } from "./remoteTracks";
 import { voiceStore } from "@stores/voice.store";
+import { setListeningTo } from "@stores/voiceListening";
 import { noteWatchSent } from "@lib/voice/watchRequest";
+import type { AudioElements } from "@lib/voice/audioElements";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
 import { SessionCore } from "./sessionCore";
 
@@ -15,6 +17,7 @@ const MAX_WATCH_IDS = 16;
 const WATCH_RETRY_MS = 1000;
 
 export abstract class SessionRemote extends SessionCore {
+  protected abstract readonly _audioElements: AudioElements;
   /** Remote-video callbacks and the video stream lookups. */
   protected _remoteTracks = this.createRemoteTracks();
   /** True while leaveVoice clears the watch set: the server clears on leave,
@@ -33,6 +36,12 @@ export abstract class SessionRemote extends SessionCore {
     const tracks = new RemoteTracks(() => this._room);
     tracks.onWatchingChange = (ids) => {
       if (!this._leavingVoice) this.sendWatching(ids);
+    };
+    // The session owns the subscription, so it is the one writer of the field.
+    tracks.currentChannel = () => voiceStore.getState().currentChannelId;
+    tracks.onListeningChange = (userId) => {
+      this._audioElements.setListenedMusicUser(userId);
+      setListeningTo(userId);
     };
     return tracks;
   }
@@ -111,5 +120,11 @@ export abstract class SessionRemote extends SessionCore {
   /** A remote stream ended: drop its watch without counting as Stop watching. */
   forgetRemoteVideoWatch(userId: number, type: "camera" | "screenshare"): void {
     this._remoteTracks.forgetWatch(userId, type);
+  }
+
+  /** Listen to a remote sharer's music, or to nobody (null): one at a time,
+   *  and silent until asked for. */
+  listenToMusic(userId: number | null): void {
+    this._remoteTracks.listen(userId);
   }
 }

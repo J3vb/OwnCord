@@ -48,6 +48,7 @@ export function defaults() {
     isVoiceSessionActive: vi.fn(() => false),
     joinVoice: vi.fn(),
     leaveVoice: vi.fn(),
+    listenToMusic: vi.fn(),
     muteScreenshareAudio: vi.fn(),
     onNativeInputLevel: () => () => {},
     parseUserId: vi.fn(),

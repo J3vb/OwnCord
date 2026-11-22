@@ -520,6 +520,36 @@
   opacity: 0.5;
   text-decoration: line-through;
 }
+/* Listen to a sharer's music: a small pill after the note, green while on. */
+.voice-user-item .vu-listen {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  margin-left: 4px;
+  padding: 1px 7px;
+  border: 1px solid var(--accent);
+  border-radius: var(--radius-pill, 999px);
+  background: transparent;
+  color: var(--accent-text);
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+.voice-user-item .vu-listen:hover {
+  background: var(--bg-hover);
+}
+.voice-user-item .vu-listen--on {
+  border-color: transparent;
+  background: var(--success-fill);
+  color: var(--on-fill);
+}
+.voice-user-item .vu-listen--on:hover {
+  background: var(--success-fill);
+}
+.voice-user-item .vu-music + .vu-listen {
+  margin-left: auto;
+}
 /* A self-mute is grey; a moderator's mute stays red (.vu-server-muted). */
 .voice-user-item .vu-muted {
   color: var(--text-muted);

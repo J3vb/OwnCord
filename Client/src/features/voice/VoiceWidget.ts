@@ -38,6 +38,7 @@ import {
 import { subscribeVoiceWidget } from "./widget/subscriptions";
 import { isShareLive } from "./widget/liveShare";
 import { createListenOnlyUi, type ListenOnlyUi } from "./widget/listenOnly";
+import { createListeningBar, type ListeningBar } from "./widget/listeningBar";
 import { formatDuration } from "@lib/text/duration";
 
 export interface VoiceWidgetOptions {
@@ -86,6 +87,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
   // Listen-only mode: "Grant Microphone" button + its persistent explanation.
   let listenOnly: ListenOnlyUi | null = null;
+  /** "Listening to {name}" with Stop, above the call block while you listen. */
+  let listeningBar: ListeningBar | null = null;
 
   // Connection stats
   let signalBtn: SignalButton | null = null;
@@ -286,6 +289,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     renderMediaButtons(voice.localCamera, voice.localScreenshare);
     if (musicBtn !== null) syncMusicButton(musicBtn, voice);
     listenOnly?.sync(voice.listenOnly);
+    listeningBar?.sync(voice);
   }
 
   function syncStreamCard(sharing: boolean): void {
@@ -429,6 +433,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     statsPane = createStatsPane();
     const controls = buildControls();
     listenOnly = createListenOnlyUi(disposable.signal, render);
+    listeningBar = createListeningBar(disposable.signal, render);
 
     // A live region present from mount (screen readers skip one inserted
     // already filled) that only fills when a moderator-imposed state lands.
@@ -441,6 +446,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     appendChildren(
       root,
+      listeningBar.el,
       header,
       statsPane.el,
       modStatusEl,
@@ -481,6 +487,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     modStatusEl = null;
     listenOnly?.dispose();
     listenOnly = null;
+    listeningBar = null;
     signalBtn = null;
     timerEl = null;
     statsPane = null;

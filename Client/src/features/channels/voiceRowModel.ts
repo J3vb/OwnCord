@@ -44,6 +44,8 @@ export interface VoiceRowInputs {
   readonly movable: readonly number[];
   /** Members sharing music (you included), or absent when none does. */
   readonly musicSharers?: ReadonlySet<number>;
+  /** The sharer whose music you listen to, or absent when none. */
+  readonly listeningTo?: number;
   /** A fresh token per local-mute event: `localSilenced` answers differ after it. */
   readonly localMute: object;
 }
@@ -95,6 +97,19 @@ function verifyModel(v: PeerVerification | undefined): VoiceVerifyModel | null {
   return { cls: v.status, icon, color, title };
 }
 
+/** The Listen pill of a remote sharer in the channel you are in: absent for
+ *  yourself, for a member who does not share, and for any other channel. */
+function listenModel(
+  userId: number,
+  channelId: number,
+  self: boolean,
+  inputs: VoiceRowInputs,
+): { readonly listen: "off" | "on" } | Record<string, never> {
+  if (self || inputs.currentChannelId !== channelId) return {};
+  if (inputs.musicSharers?.has(userId) !== true) return {};
+  return { listen: inputs.listeningTo === userId ? "on" : "off" };
+}
+
 /** One participant row's model, from the snapshot. */
 export function voiceUserModel(
   user: VoiceUser,
@@ -119,6 +134,7 @@ export function voiceUserModel(
     live: user.screenshare,
     music: inputs.musicSharers?.has(user.userId) === true,
     musicMuted: !self && ctx.musicMuted?.(user.userId) === true,
+    ...listenModel(user.userId, channelId, self, inputs),
     audio: audioModel(user),
     localMuted: !self && ctx.localSilenced(user.userId),
     ownFingerprintTitle: self

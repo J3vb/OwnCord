@@ -8,6 +8,7 @@ import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import {
   announceLocalMute,
+  announceVolume,
   clampPercent,
   userMusicMuteKey,
   userMusicVolumeKey,
@@ -35,6 +36,10 @@ export abstract class MusicAudioState extends ScreenshareAudioState {
   /** Told after a music volume, mute, deafen or the output volume changes, for
    *  a room that plays music itself (the Linux native room). */
   protected musicGainListener: (() => void) | null = null;
+
+  /** The one sharer whose music the viewer listens to; everyone else's music
+   *  plays at 0, also in a host that subscribes every track itself. */
+  private listenedMusicUser: number | null = null;
 
   /** Whether a stream or music publication is silent for `userId`. */
   protected isStreamSilenced(publication: NamedPublication, userId: number): boolean {
@@ -86,9 +91,20 @@ export abstract class MusicAudioState extends ScreenshareAudioState {
     return loadPref<boolean>(userMusicMuteKey(userId), false) === true;
   }
 
-  /** Music is silent while Mute music is on or while deafened. */
+  /** Music is silent unless it is the one listened to, and while Mute music
+   *  is on or while deafened. */
   protected isMusicSilenced(userId: number): boolean {
-    return this.isLocalDeafened() || this.getMusicMuted(userId);
+    return (
+      this.listenedMusicUser !== userId || this.isLocalDeafened() || this.getMusicMuted(userId)
+    );
+  }
+
+  /** Whose music plays (null: nobody's); every music gain is pushed again. */
+  setListenedMusicUser(userId: number | null): void {
+    if (this.listenedMusicUser === userId) return;
+    this.listenedMusicUser = userId;
+    this.applyMusicVolumes();
+    this.syncScreenshareDelivery();
   }
 
   /** The element volume for a user's music: their level scaled by the master
@@ -98,7 +114,7 @@ export abstract class MusicAudioState extends ScreenshareAudioState {
     return Math.max(0, Math.min(1, level * this.outputVolumeMultiplier));
   }
 
-  /** The gain a user's music plays at: 0 while Mute music is on or deafened,
+  /** The gain a user's music plays at: 0 unless listened to, while Mute music is on or deafened,
    *  so a native mixer needs no other state. */
   getMusicGain(userId: number): number {
     return this.isMusicSilenced(userId) ? 0 : this.getEffectiveMusicVolume(userId);
@@ -112,6 +128,8 @@ export abstract class MusicAudioState extends ScreenshareAudioState {
     this.musicGainListener?.();
     // A level of 0 shows as muted too, so moving to or from it is announced.
     if (wasSilent !== (level === 0)) announceLocalMute(userId);
+    // The tile slider and the voice panel bar show the level.
+    announceVolume(userId);
   }
 
   setMusicMuted(userId: number, muted: boolean): void {

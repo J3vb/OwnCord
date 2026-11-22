@@ -59,6 +59,9 @@ export interface Harness {
     onRemoteVideoRemoved: ReturnType<typeof vi.fn>;
     onError: ReturnType<typeof vi.fn>;
     isWatched: ReturnType<typeof vi.fn>;
+    isListening: ReturnType<typeof vi.fn>;
+    musicEnded: ReturnType<typeof vi.fn>;
+    reviewListening: ReturnType<typeof vi.fn>;
   };
 }
 
@@ -87,6 +90,9 @@ export function build(over: Partial<RoomEventDeps> = {}): Harness {
     onRemoteVideoRemoved: vi.fn(),
     onError: vi.fn(),
     isWatched: vi.fn((_userId: number, _isScreenshare: boolean) => false),
+    isListening: vi.fn((_userId: number) => false),
+    musicEnded: vi.fn((_userId: number) => {}),
+    reviewListening: vi.fn(),
   };
 
   const deps: RoomEventDeps = {
@@ -97,6 +103,9 @@ export function build(over: Partial<RoomEventDeps> = {}): Harness {
     getOnRemoteVideoCallback: () => spies.onRemoteVideo,
     getOnRemoteVideoRemovedCallback: () => spies.onRemoteVideoRemoved,
     isWatched: spies.isWatched,
+    isListening: spies.isListening,
+    musicEnded: spies.musicEnded,
+    reviewListening: spies.reviewListening,
     getOnErrorCallback: () => spies.onError,
     isConnecting: () => false,
     isReconnecting: () => false,
