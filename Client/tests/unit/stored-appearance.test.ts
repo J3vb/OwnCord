@@ -14,6 +14,7 @@ vi.mock("@lib/prefs/themes", async (importOriginal) => ({
 
 import { applyStoredAppearance } from "@lib/prefs/appearance";
 import { syncOsMotionListener } from "@lib/ui/osMotion";
+import { runningScreenLayout, setRunningScreenLayout } from "@lib/prefs/screenLayout";
 
 /** jsdom has no matchMedia; startup syncs with the OS by default (B9-2, Q1). */
 function stubOsReducedMotion(matches: boolean): void {
@@ -42,6 +43,40 @@ describe("applyStoredAppearance", () => {
     document.documentElement.className = "";
     document.documentElement.removeAttribute("style");
     document.body.removeAttribute("style");
+  });
+
+  it.each([
+    ["deck with Developer mode on", '"deck"', "true", true],
+    ["deck with Developer mode off", '"deck"', "false", false],
+    ["classic with Developer mode on", '"classic"', "true", false],
+    ["nothing stored", null, null, false],
+  ])("marks layout-deck only when Command Deck runs: %s", (_name, stored, dev, deck) => {
+    if (stored !== null) localStorage.setItem("owncord:settings:screenLayout", stored);
+    if (dev !== null) localStorage.setItem("owncord:settings:developerMode", dev);
+    try {
+      applyStoredAppearance();
+      const root = document.documentElement;
+      expect(root.classList.contains("layout-deck")).toBe(deck);
+      expect(runningScreenLayout()).toBe(deck ? "deck" : "classic");
+      expect(localStorage.getItem("owncord:settings:screenLayout")).toBe(stored);
+    } finally {
+      setRunningScreenLayout("classic");
+    }
+  });
+
+  it("clears layout-deck on a later load that runs Classic", () => {
+    localStorage.setItem("owncord:settings:screenLayout", '"deck"');
+    localStorage.setItem("owncord:settings:developerMode", "true");
+    try {
+      applyStoredAppearance();
+      expect(document.documentElement.classList.contains("layout-deck")).toBe(true);
+      localStorage.setItem("owncord:settings:developerMode", "false");
+      applyStoredAppearance();
+      expect(document.documentElement.classList.contains("layout-deck")).toBe(false);
+      expect(runningScreenLayout()).toBe("classic");
+    } finally {
+      setRunningScreenLayout("classic");
+    }
   });
 
   it("shows your own camera unmirrored by default, and mirrored once it is switched on", () => {

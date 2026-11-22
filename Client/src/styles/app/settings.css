@@ -195,6 +195,13 @@
   color: var(--text-muted);
   margin-top: 4px;
 }
+.setting-note {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.setting-note:not(:empty) {
+  margin-top: 4px;
+}
 .toggle {
   width: 40px;
   height: 24px;

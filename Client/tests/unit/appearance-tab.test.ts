@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
+import { clearHost, hostAndroidApp } from "../helpers/androidHost";
+import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
 import { buildAppearanceTab } from "../../src/features/settings/AppearanceTab";
 import { refreshTimeFormat, refreshDateFormat, getDateFormat } from "@lib/text/timeFormat";
 import {
@@ -748,6 +750,103 @@ describe("AppearanceTab - member list position (3C-6b)", () => {
       .querySelector('[data-testid="member-layout"]')!
       .querySelector<HTMLElement>("[aria-checked='true']")!;
     expect(selected.dataset["value"]).toBe("right");
+  });
+});
+
+describe("AppearanceTab - screen layout", () => {
+  let container: HTMLDivElement;
+  const ac = new AbortController();
+  useMountContainer(
+    (mounted) => {
+      container = mounted;
+      localStorage.clear();
+    },
+    () => {
+      clearHost();
+      setRunningScreenLayout("classic");
+    },
+  );
+
+  const KEY = "owncord:settings:screenLayout";
+  const q = (id: string): HTMLElement | null => container.querySelector(`[data-testid="${id}"]`);
+  const selected = (): string | undefined =>
+    q("screen-layout")!.querySelector<HTMLElement>("[aria-checked='true']")!.dataset["value"];
+  const note = (): HTMLElement => container.querySelector<HTMLElement>("[role='status']")!;
+  const mount = (dev: boolean, stored: string | null, running: "classic" | "deck"): void => {
+    if (dev) localStorage.setItem("owncord:settings:developerMode", "true");
+    if (stored !== null) localStorage.setItem(KEY, stored);
+    setRunningScreenLayout(running);
+    container.appendChild(buildAppearanceTab(ac.signal));
+  };
+
+  it("hides the row with Developer mode off, and shows the member position row", () => {
+    mount(false, '"deck"', "classic");
+    expect(q("screen-layout")).toBeNull();
+    expect(q("member-layout")).not.toBeNull();
+  });
+
+  it("hides the row in the Android app even with Developer mode on", () => {
+    hostAndroidApp();
+    mount(true, null, "classic");
+    expect(q("screen-layout")).toBeNull();
+  });
+
+  it.each(['"classic"', '"xyz"', null])(
+    "shows Classic selected and no note for stored %s",
+    (stored) => {
+      mount(true, stored, "classic");
+      expect(q("screen-layout")!.getAttribute("role")).toBe("radiogroup");
+      expect(selected()).toBe("classic");
+      expect(note().textContent).toBe("");
+      expect(q("member-layout")).not.toBeNull();
+    },
+  );
+
+  it("places the row right after the member list position row", () => {
+    mount(true, null, "classic");
+    const member = q("member-layout")!.closest(".setting-row")!;
+    expect(member.nextElementSibling).toBe(q("screen-layout")!.closest(".setting-row"));
+  });
+
+  it("picking Command Deck stores it, shows the note and keeps the running layout", () => {
+    mount(true, null, "classic");
+    q("screen-layout-deck")!.click();
+    expect(localStorage.getItem(KEY)).toBe('"deck"');
+    expect(selected()).toBe("deck");
+    expect(note().textContent).toBe("Applies the next time OwnCord starts or reloads.");
+    expect(note().closest(".setting-desc")).toBeNull();
+    expect(document.documentElement.classList.contains("layout-deck")).toBe(false);
+    // Picking Classic again clears the note.
+    q("screen-layout-classic")!.click();
+    expect(note().textContent).toBe("");
+  });
+
+  it("shows Command Deck with no note while it runs, and hides the member position row", () => {
+    mount(true, '"deck"', "deck");
+    expect(selected()).toBe("deck");
+    expect(note().textContent).toBe("");
+    expect(q("member-layout")).toBeNull();
+  });
+
+  it("picking Classic while Deck runs shows the note and keeps the member row hidden", () => {
+    mount(true, '"deck"', "deck");
+    q("screen-layout-classic")!.click();
+    expect(localStorage.getItem(KEY)).toBe('"classic"');
+    expect(note().textContent).toBe("Applies the next time OwnCord starts or reloads.");
+    expect(q("member-layout")).toBeNull();
+  });
+
+  it("deck stored but Developer mode turned on later: Deck selected, note shown", () => {
+    mount(true, '"deck"', "classic");
+    expect(selected()).toBe("deck");
+    expect(note().textContent).not.toBe("");
+    expect(q("member-layout")).not.toBeNull();
+  });
+
+  it("Developer mode turned off while Deck runs: row hidden, member row still hidden", () => {
+    mount(false, '"deck"', "deck");
+    expect(q("screen-layout")).toBeNull();
+    expect(q("member-layout")).toBeNull();
   });
 });
 

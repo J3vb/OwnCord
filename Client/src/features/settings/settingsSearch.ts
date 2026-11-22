@@ -30,6 +30,7 @@ import { whatsNewText } from "../../i18n/whatsNew";
 import { isAndroidApp, isLinuxDesktop, isWindowsDesktop } from "../voice/native/platform";
 import { desktop } from "../../platform/desktop";
 import { platformText } from "./helpers";
+import { layoutSearchEntries, layoutSearchKey } from "./screenLayoutRow";
 
 const s = settingsText;
 const a = accountText;
@@ -109,7 +110,7 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("appearance.timeFormat.desc"),
     s("appearance.dateFormat"),
     s("appearance.dateFormat.desc"),
-    ...desktopOnly(s("appearance.memberLayout"), s("appearance.memberLayout.desc")),
+    ...layoutSearchEntries(),
     s("appearance.accentNote"),
     s("appearance.customThemes"),
     platformText(s("appearance.customThemes.desc"), s("appearance.customThemes.desc.android")),
@@ -382,7 +383,7 @@ export function normalizeQuery(raw: string): string {
 const searchTextCache = new Map<string, string>();
 
 function indexedText(tab: SearchableTab): string {
-  const key = `${tab}:${isAndroidApp() ? "android" : "desktop"}`;
+  const key = `${tab}:${isAndroidApp() ? "android" : "desktop"}:${layoutSearchKey()}`;
   let text = searchTextCache.get(key);
   if (text === undefined) {
     text = SETTINGS_SEARCH_INDEX[tab]().join("\n").toLowerCase();

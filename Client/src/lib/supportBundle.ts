@@ -175,6 +175,7 @@ const SETTINGS_ALLOWLIST = [
   "shareDiagnosticsV2",
   "shareMotionPolicy",
   "developerMode",
+  "screenLayout",
   "logs_min_level",
 ] as const;
 
