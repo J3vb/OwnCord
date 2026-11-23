@@ -62,6 +62,7 @@ const EAGER_SITES = [
   "features/direct-messages/dm-call/dmCallVerify.ts",
   "features/channels/ChannelSidebar.ts",
   "features/channels/voiceSidebarRows.ts",
+  "features/channels/voiceChannelClick.ts",
   "pages/main-page/ChatArea.ts",
 ] as const;
 

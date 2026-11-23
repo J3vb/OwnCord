@@ -225,6 +225,7 @@ export const shards = {
   ],
   "audio-media-7": [
     "src/features/channels/voiceRow.view.ts",
+    "src/features/channels/voiceUserRow.view.ts",
     "src/features/profiles/banner.ts",
     "src/features/voice/miniPlayer.ts",
     "src/lib/media/publicAssets.ts",
@@ -467,6 +468,7 @@ export const shards = {
     "src/lib/diagnostics/identifiers.ts",
     "src/lib/presence/statusTimer.ts",
     "src/lib/ui/inlineError.ts",
+    "src/lib/ui/treeKeys.ts",
     "src/lib/ui/typeAhead.ts",
   ],
   "lib-rest-14": [

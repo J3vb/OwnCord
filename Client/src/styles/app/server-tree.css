@@ -82,3 +82,174 @@ html.layout-deck .server-root .server-online {
   color: var(--text-muted);
   font-size: var(--font-size-xs);
 }
+
+/* ── The tree (look A: opt-R1 rows, opt-E1 chevron, opt-G1 guides, opt-A1 active bar) ──
+   ChannelSidebar draws the channel list inside .server-tree when the layout is
+   Deck; its rows carry role=treeitem and treeKeys stamps aria-level. Every size
+   is a minimum, so Large Font grows the rows. */
+html.layout-deck .server-tree {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 2px 0;
+}
+/* The tree scrolls, not the list. */
+html.layout-deck .server-tree .channel-list {
+  flex: none;
+  overflow: visible;
+  padding: 0;
+}
+/* The ring is drawn inside the row, so the tree's scroll box does not clip it. */
+html.layout-deck .server-tree [role="treeitem"]:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Category header: chevron and label; the "+" shows on hover or focus as in Classic. */
+html.layout-deck .server-tree .category {
+  min-height: 24px;
+  padding: 2px 6px;
+  gap: 6px;
+}
+html.layout-deck .server-tree .category:hover {
+  background: var(--bg-hover);
+}
+html.layout-deck .server-tree .category-arrow {
+  flex: none;
+  color: var(--text-muted);
+}
+html.layout-deck .server-tree .category-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+}
+
+/* Each headed group hangs from a dotted guide; each child has a 9px connector. */
+html.layout-deck .server-tree [data-tree-group] {
+  margin-left: 12px;
+  border-left: 1px dotted var(--border-strong);
+}
+html.layout-deck .server-tree .channel-item,
+html.layout-deck .server-tree .voice-user-item {
+  position: relative;
+  min-height: 24px;
+  margin: 0;
+  padding: 2px 6px;
+  gap: 6px;
+  border-radius: 0;
+  color: var(--text-normal);
+}
+html.layout-deck .server-tree [aria-level="2"] {
+  padding-left: 14px;
+}
+html.layout-deck .server-tree [data-tree-group] > .channel-item::after,
+html.layout-deck .server-tree [data-tree-group] > div > .channel-item::after,
+html.layout-deck .server-tree .voice-user-item::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 9px;
+  border-top: 1px dotted var(--border-strong);
+  pointer-events: none;
+}
+/* Threads hang from their channel's glyph, voice people from the voice channel's. */
+html.layout-deck .server-tree .channel-item.thread-item {
+  margin-left: 22px;
+  padding-left: 14px;
+  border-left: 1px dotted var(--border-strong);
+}
+html.layout-deck .server-tree .voice-users-list {
+  margin-left: 22px;
+  padding: 0;
+  border-left: 1px dotted var(--border-strong);
+}
+html.layout-deck .server-tree .voice-user-item {
+  padding-left: 14px;
+  font-size: var(--font-size-md);
+  overflow: visible;
+}
+html.layout-deck .server-tree .voice-user-item .vu-avatar {
+  width: 18px;
+  height: 18px;
+}
+html.layout-deck .server-tree .voice-user-item .vu-name.vu-self {
+  color: var(--accent-text);
+}
+/* The channel row shows LIVE, so the per-person tag is hidden; the screen icon stays. */
+html.layout-deck .server-tree .vu-live-badge {
+  display: none;
+}
+html.layout-deck .server-tree .ch-restriction {
+  padding-left: 27px;
+}
+
+/* Icons and names. */
+html.layout-deck .server-tree .channel-item .ch-icon {
+  width: 16px;
+  color: var(--channel-icon);
+  opacity: 1;
+}
+html.layout-deck .server-tree .channel-item:hover {
+  background: var(--bg-hover);
+}
+/* A joined voice channel keeps Classic's .active fill; it is never aria-current. */
+html.layout-deck .server-tree .channel-item.unread .ch-name,
+html.layout-deck .server-tree .channel-item.mentioned .ch-name {
+  color: var(--header-primary);
+  font-weight: 600;
+}
+/* Unread: a 4px dot in the tree's left gutter, in place of Classic's pill. */
+html.layout-deck .server-tree .channel-item.unread::before {
+  left: -9px;
+  width: 4px;
+  height: 4px;
+  border-radius: var(--radius-circle);
+  background: var(--header-primary);
+}
+html.layout-deck .server-tree .channel-item.thread-item.unread::before {
+  left: -31px;
+}
+html.layout-deck .server-tree .channel-item[aria-level="1"].unread::before {
+  left: 2px;
+}
+
+/* LIVE on a voice channel where someone shares a screen, before the capacity. */
+html.layout-deck .server-tree .ch-live {
+  flex: none;
+  margin-left: auto;
+  padding: 1px 4px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-fill);
+  color: var(--on-fill);
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+}
+html.layout-deck .server-tree .ch-afk + .ch-live,
+html.layout-deck .server-tree .ch-live + .ch-capacity {
+  margin-left: 6px;
+}
+
+/* opt-A1: the active row's tint and bar, on [role=treeitem][aria-current="page"] only.
+   The tint is the one declaration that may name the accent and color-mix(). */
+html.layout-deck .server-tree [role="treeitem"][aria-current="page"] {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--accent) 16%, transparent),
+    transparent 70%
+  );
+  box-shadow: inset 2px 0 0 var(--accent-text);
+}
+html.layout-deck .server-tree [role="treeitem"][aria-current="page"] .ch-icon {
+  color: var(--accent-text);
+}
+html.layout-deck .server-tree [role="treeitem"][aria-current="page"] .ch-name {
+  color: var(--header-primary);
+}
+/* Under High Contrast the tint is the theme's neutral active fill; the bar keeps --accent-text. */
+html.layout-deck.high-contrast .server-tree [role="treeitem"][aria-current="page"] {
+  background: linear-gradient(90deg, var(--bg-active), transparent 70%);
+}

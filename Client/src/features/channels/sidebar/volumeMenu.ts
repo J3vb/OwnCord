@@ -19,6 +19,7 @@ import {
 } from "@lib/voice/livekitSession";
 import { voiceStore } from "@stores/voice.store";
 import { voiceText as t } from "../../../i18n/voice";
+import { shellText } from "../../../i18n/shell";
 
 /** Moderation section wiring. Passed only when the local user may moderate
  *  voice; the menu renders the section iff this is present, so the permission
@@ -41,6 +42,16 @@ export interface VoiceModMenuOptions {
   readonly disabledReason?: string;
 }
 
+/** The Listen entry a tree adds for a member who shares music: the pill leaves
+ *  the Tab order there, and this is its keyboard route. */
+export interface VoiceListenOption {
+  /** Listening to this member now: the entry reads "Stop listening". */
+  readonly on: boolean;
+  /** The member's display name, as the pill names them. */
+  readonly name: string;
+  readonly toggle: () => void;
+}
+
 /**
  * `lifetimeSignal` should be the sidebar's own factory-lifetime signal
  * (aborted only on sidebar destroy), NOT a per-render signal that gets
@@ -55,6 +66,7 @@ export function showUserVolumeMenu(
   y: number,
   lifetimeSignal: AbortSignal,
   mod?: VoiceModMenuOptions | string,
+  listen?: VoiceListenOption,
 ): void {
   // Discord-width: a long notice (moderation unavailable) wraps instead of
   // stretching the menu. The keyboard model leaves the slider a native Tab stop.
@@ -64,7 +76,7 @@ export function showUserVolumeMenu(
     className: "user-vol-menu",
     attrs: { style: "max-width:240px" },
     signal: lifetimeSignal,
-    build: (menu, closeMenu) => buildVolumeMenu(menu, closeMenu, userId, username, mod),
+    build: (menu, closeMenu) => buildVolumeMenu(menu, closeMenu, userId, username, mod, listen),
   });
 }
 
@@ -74,6 +86,7 @@ function buildVolumeMenu(
   userId: number,
   username: string,
   mod: VoiceModMenuOptions | string | undefined,
+  listen: VoiceListenOption | undefined,
 ): void {
   const header = createElement(
     "div",
@@ -148,9 +161,30 @@ function buildVolumeMenu(
   const mute = createLocalMuteItem(userId, showFullVolume, "volume-x");
   menu.appendChild(mute.item);
 
+  if (listen !== undefined) appendListenItem(menu, listen, closeMenu);
   if (voiceStore.getState().musicSharers?.has(userId) === true) appendMusicSection(menu, userId);
 
   if (mod !== undefined) appendVoiceModeration(menu, mod, closeMenu, true);
+}
+
+/** Listen to a member's music, or stop: the pill's own action. */
+function appendListenItem(
+  menu: HTMLElement,
+  listen: VoiceListenOption,
+  closeMenu: () => void,
+): void {
+  const label = shellText(listen.on ? "channel.stopListeningTo" : "channel.listenTo", {
+    name: listen.name,
+  });
+  const item = createMenuItem(label, "context-menu-item", {
+    icon: listen.on ? "audio-lines" : "headphones",
+    testId: "ctx-voice-listen",
+  });
+  item.addEventListener("click", () => {
+    closeMenu();
+    listen.toggle();
+  });
+  menu.appendChild(item);
 }
 
 /**

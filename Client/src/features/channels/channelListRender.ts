@@ -65,17 +65,39 @@ function focusedChannelItem(container: HTMLElement): HTMLElement | null {
 }
 
 /** Hand focus on: a hidden muted row in an expanded list goes to the row that
- *  took its place; otherwise to the category's arrow. */
+ *  took its place; otherwise to the category's arrow, or in a tree to the
+ *  header, which is the tree item. */
 function refocusAfterLoss(
   container: HTMLElement,
   header: Element | null,
   collapsed: boolean,
   lostIndex: number,
+  tree: boolean,
 ): void {
   const left = container.querySelectorAll<HTMLElement>(".channel-item");
   const next =
     !collapsed && left.length > 0 ? left[Math.min(Math.max(lostIndex, 0), left.length - 1)] : null;
-  (next ?? header?.querySelector<HTMLElement>(".category-arrow"))?.focus();
+  const fallback = tree
+    ? (header as HTMLElement | null)
+    : (header?.querySelector<HTMLElement>(".category-arrow") ?? null);
+  (next ?? fallback)?.focus();
+}
+
+/** Where the empty state goes: in a tree, the sidebar root before `.server-tree`,
+ *  so the tree itself never holds a paragraph and a button. */
+function emptyStateHost(channelList: HTMLElement, tree: boolean): HTMLElement {
+  const treeEl = tree ? channelList.closest<HTMLElement>(".server-tree") : null;
+  return treeEl?.parentElement ?? channelList;
+}
+
+function placeEmptyState(channelList: HTMLElement, el: HTMLElement, tree: boolean): void {
+  const host = emptyStateHost(channelList, tree);
+  if (host === channelList) host.appendChild(el);
+  else host.insertBefore(el, channelList.closest(".server-tree"));
+}
+
+function removeEmptyState(channelList: HTMLElement, tree: boolean): void {
+  emptyStateHost(channelList, tree).querySelector(":scope > .channel-list-empty")?.remove();
 }
 
 /** The empty state: the plain message, plus the create button for a manager
@@ -181,7 +203,7 @@ export function createListRenderer(
       },
       dispose: voice.disposeOwned,
     });
-    if (losesFocus) refocusAfterLoss(container, header, collapsed, lostIndex);
+    if (losesFocus) refocusAfterLoss(container, header, collapsed, lostIndex, env.tree);
   }
 
   return (channelList, { list, voice: voiceInputs }) => {
@@ -192,12 +214,13 @@ export function createListRenderer(
         voice.disposeOwned(child);
         child.remove();
       }
+      removeEmptyState(channelList, env.tree);
       const { el, owner } = drawEmptyState(env, list);
       if (owner !== null) ownerByEl.set(el, owner);
-      channelList.appendChild(el);
+      placeEmptyState(channelList, el, env.tree);
       return;
     }
-    channelList.querySelector(".channel-list-empty")?.remove();
+    removeEmptyState(channelList, env.tree);
 
     const reconcileGroupRows = (container: HTMLElement, g: ChannelGroup): void =>
       reconcileRows(container, g, list, voiceInputs);
@@ -220,6 +243,7 @@ export function createListRenderer(
       dispose: voice.disposeOwned,
     });
 
-    setRovingTabindex(channelList, ".channel-item");
+    // The tree's own keys own the Tab stop there.
+    if (!env.tree) setRovingTabindex(channelList, ".channel-item");
   };
 }

@@ -28,6 +28,8 @@ export interface CategoryMenuTarget extends CategoryRef {
 
 /** The management callbacks the page wired; an absent one hides its entry. */
 export interface CategoryMenuActions {
+  /** Tree mode only: the header's "+" has no keyboard route there, so the menu offers it. */
+  readonly onCreateChannel?: (() => void) | undefined;
   readonly onCreateCategory?: (() => void) | undefined;
   readonly onRenameCategory?: ((category: CategoryRef) => void) | undefined;
   readonly onDeleteCategory?: ((category: CategoryRef) => void) | undefined;
@@ -43,8 +45,20 @@ function appendManageItems(
 ): void {
   const ref: CategoryRef = { id: target.id, name: target.name };
   const real = target.id > 0;
-  const { onCreateCategory, onRenameCategory, onDeleteCategory, onMoveCategory } = actions;
+  const { onCreateChannel, onCreateCategory, onRenameCategory, onDeleteCategory, onMoveCategory } =
+    actions;
   const manage: (() => void)[] = [];
+  if (onCreateChannel !== undefined) {
+    manage.push(() =>
+      addItem(
+        shellText("channel.create"),
+        "context-menu-item",
+        "ctx-category-create-channel",
+        onCreateChannel,
+        "plus",
+      ),
+    );
+  }
   if (onCreateCategory !== undefined) {
     manage.push(() =>
       addItem(

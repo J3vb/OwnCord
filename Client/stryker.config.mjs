@@ -43,6 +43,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/channels/sidebar/threadMenu.ts",
   "src/features/channels/sidebar/volumeMenu.ts",
   "src/features/channels/sidebarInputs.ts",
+  "src/features/channels/voiceChannelClick.ts",
   "src/features/channels/voiceModOptions.ts",
   "src/features/channels/voiceSidebarRows.ts",
   "src/features/connection/CertMismatchModal.ts",

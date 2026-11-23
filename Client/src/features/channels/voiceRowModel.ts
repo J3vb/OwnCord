@@ -20,12 +20,8 @@ import { resolveDisplayName } from "../../lib/ui/avatar";
 import { shellText } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import { ownIdentityTitle, verifyPresentation } from "../voice/peerVerification";
-import type {
-  VoiceAudioModel,
-  VoiceChannelChromeModel,
-  VoiceUserRowModel,
-  VoiceVerifyModel,
-} from "./voiceRow.view";
+import type { VoiceChannelChromeModel } from "./voiceRow.view";
+import type { VoiceAudioModel, VoiceUserRowModel, VoiceVerifyModel } from "./voiceUserRow.view";
 
 /** Everything the voice rows draw from, as one snapshot of several stores. */
 export interface VoiceRowInputs {
@@ -60,6 +56,8 @@ export interface VoiceUserContext {
   readonly musicMuted?: (userId: number) => boolean;
   /** The page wired voice moderation (drag to move needs it). */
   readonly moderation: boolean;
+  /** Tree mode: read by the draw calls, never by the model. Optional so a context built without it compiles. */
+  readonly tree?: boolean;
 }
 
 /** The participants of one channel in the snapshot, in the store's order. */
@@ -154,6 +152,7 @@ export function voiceUserModel(
 export function voiceChannelChrome(
   channel: Channel,
   inputs: VoiceRowInputs,
+  tree = false,
 ): VoiceChannelChromeModel {
   const joined = inputs.currentChannelId === channel.id;
   // A timeout refuses a join (TIMED_OUT) but never a leave.
@@ -189,5 +188,9 @@ export function voiceChannelChrome(
           }
         : null,
     mentionCount: channel.mentionCount,
+    // Only a tree shows LIVE on the channel row (the per-person badge is hidden there).
+    ...(tree && channelVoiceUsers(inputs, channel.id).some((u) => u.screenshare)
+      ? { live: true }
+      : {}),
   };
 }
