@@ -1,0 +1,200 @@
+/* ═══ Command Deck (preview layout) ═══ */
+/* Loaded last. Every selector starts with `html.layout-deck`, which
+   applyStoredAppearance() sets from the running screen layout, so Classic is
+   untouched. tests/unit/deck/deck-css.test.ts enforces this file's rules.
+
+   The colour rule. Deck loads after accessibility.css, so it must never
+   decide a colour itself, or High Contrast and reduced motion would stop
+   winning:
+   - A colour property (color, background, background-color, border and its
+     side and -color forms, box-shadow, fill, stroke, caret-color,
+     text-decoration-color, column-rule-color) reads only var(--bg-primary),
+     var(--bg-secondary), var(--bg-tertiary), var(--bg-input), var(--border),
+     var(--border-control), var(--text-normal), var(--text-muted),
+     var(--header-primary), var(--red), var(--green) or var(--yellow), or the
+     keywords none, transparent and currentcolor. --red, --green and --yellow
+     are fills only: background, background-color and fill.
+   - Any other var() names a layout token: --deck-*, --header-height,
+     --safe-bottom, --radius-* or --font-size-*.
+   - No literal colour, and no outline, transition or animation property. */
+
+html.layout-deck {
+  /* 6px is a recorded exception to the 4px --space-* steps; no 3px radius token exists. */
+  --deck-gap: 6px;
+  --deck-radius: 3px;
+  --deck-top-min: 36px;
+  --deck-status-min: 46px;
+}
+
+/* The frame. The top bar takes the top inset, the status bar the bottom one. */
+html.layout-deck .app {
+  padding: var(--deck-gap) calc(var(--deck-gap) + env(safe-area-inset-right)) var(--deck-gap)
+    env(safe-area-inset-left);
+}
+/* Margins, not a flex gap, so an empty .dm-profile-slot gets none. */
+html.layout-deck .app > .unified-sidebar,
+html.layout-deck
+  .app
+  > :is(.chat-area, .thread-panel-slot, .member-column, .dm-profile-slot):not(:empty) {
+  margin-left: var(--deck-gap);
+  border: 1px solid var(--border);
+  border-radius: var(--deck-radius);
+}
+html.layout-deck .dm-profile-sidebar {
+  border-left: 0;
+}
+
+/* At 800px and below the sidebar collapses to zero width; the open drawer is unchanged. */
+@media (max-width: 800px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .app > .unified-sidebar {
+    margin-left: 0;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
+/* The overlays under the chat header. The measured sizes are written on the
+   page root, so they are declared here on the overlays, never on <html>,
+   where their var()s would resolve to 0. */
+html.layout-deck :is(.member-column, .side-panel) {
+  /* top bar, frame padding, frame border */
+  --deck-above-header: calc(var(--deck-top-measured, 0px) + var(--deck-gap) + 1px);
+  --deck-below: var(--deck-status-measured, 0px);
+}
+@media (max-width: 899px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .member-column {
+    top: calc(var(--deck-above-header) + var(--header-height, 48px));
+    bottom: var(--deck-below);
+  }
+}
+html.layout-deck .side-panel {
+  --deck-overlay-max: calc(
+    100vh - var(--deck-above-header) - var(--header-height, 48px) - var(--deck-below) -
+      var(--deck-gap)
+  );
+  top: calc(var(--deck-above-header) + var(--header-height, 48px));
+  right: calc(var(--deck-gap) + 1px);
+  max-height: min(80vh, 720px, var(--deck-overlay-max));
+}
+html.layout-deck .media-gallery.side-panel {
+  height: min(80vh, 720px, var(--deck-overlay-max));
+}
+@media (max-width: 600px) {
+  html.layout-deck .side-panel {
+    right: 0;
+    bottom: var(--deck-below);
+  }
+}
+
+/* The status bar: the user bar, then (in a call) the voice widget. No
+   overflow, so focus rings at the edges are not clipped. */
+html.layout-deck .deck-status-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--deck-gap);
+  min-height: var(--deck-status-min);
+  padding: 0 var(--deck-gap) var(--safe-bottom, 0px);
+  flex: none;
+  background: var(--bg-tertiary);
+}
+html.layout-deck .deck-status-bar > .deck-slot {
+  display: contents;
+}
+html.layout-deck .deck-status-bar .user-bar {
+  height: auto;
+  min-height: var(--deck-status-min);
+  flex: 0 1 240px;
+  min-width: 0;
+  background: none;
+}
+
+/* The voice widget grows the bar upward up to 35vh, then scrolls. */
+html.layout-deck .deck-status-bar .voice-widget {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  max-height: max(var(--deck-status-min), 35vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+html.layout-deck .deck-status-bar .voice-widget.visible {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+}
+html.layout-deck .deck-status-bar .vw-header {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+}
+html.layout-deck .deck-status-bar .vw-controls {
+  flex: none;
+  padding: 0;
+}
+html.layout-deck .deck-status-bar .vw-controls button {
+  flex: none;
+  width: 32px;
+}
+/* The widget's panels sit above the call row. */
+html.layout-deck
+  .deck-status-bar
+  :is(
+    .vw-listening,
+    .vw-stats.visible,
+    .vw-grant-mic,
+    .vw-mic-notice:not(:empty),
+    .vw-stream-card
+  ) {
+  order: -1;
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+/* By width only: this is about room in the bar, and phones do not load Deck. */
+@media (max-width: 800px) {
+  html.layout-deck .deck-status-bar .vw-channel {
+    display: none;
+  }
+  /* The normal Secured chip stays readable to screen readers (the .sr-only
+     declarations); securedBadge.ts sets its display inline, so display
+     cannot hide it. "Unsecured" always shows. */
+  html.layout-deck .deck-status-bar .vw-secured:not(.vw-secured--degraded) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+}
+@media (max-width: 560px) {
+  html.layout-deck .deck-status-bar .ub-info {
+    display: none;
+  }
+}
+
+/* server-rail.css hides the Switch-server button inside .app when the rail
+   shows; under Deck the user bar is outside .app. */
+@media (min-width: 801px) {
+  html.layout-deck
+    .app.has-server-rail
+    ~ .deck-status-bar
+    .user-bar
+    [data-testid="disconnect-btn"] {
+    display: none;
+  }
+  html.layout-deck .app.has-server-rail ~ .deck-status-bar .user-bar .ub-controls {
+    gap: 6px;
+  }
+}

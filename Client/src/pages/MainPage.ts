@@ -39,7 +39,7 @@ import type { PageState, PageApi } from "./main-page/pageState";
 import { createDmProfilePanel } from "../features/direct-messages/dmProfilePanel";
 import { createPageDmCalls } from "./main-page/pageDmCalls";
 import { createPagePresence } from "./main-page/pagePresence";
-import { mountConnectionBanner, mountLayout } from "./main-page/pageMountShell";
+import { mountConnectionBanner, mountDeck, mountLayout } from "./main-page/pageMountShell";
 import { mountSettings } from "./main-page/pageMountSettings";
 import { mountCalls, mountVideo } from "./main-page/pageMountCalls";
 import type { MountScope } from "./main-page/pageState";
@@ -245,6 +245,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     st.toast.anchorTo(ms.chatAreaResult.slots.inputSlot);
     st.children.push(st.toast);
     initToast(st.toast);
+    mountDeck(st, ms);
     mountCalls(st, pg, ms);
 
     // Message loading controller

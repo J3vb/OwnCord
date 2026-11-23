@@ -67,18 +67,19 @@ orange accent block) and the midnight, gunmetal and light entries in
 `--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-input`. The values
 are the owner's Q13 direction A, Refined Neon.
 
-| Token                                                                     | Use                                                    | Qualified                                                  |
-| ------------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------- |
-| `--text-normal`, `--text-muted`, `--header-primary`, `--header-secondary` | body text, secondary text, headings                    | ≥ 4.5:1 on every surface, every theme, High Contrast       |
-| `--text-link`                                                             | links                                                  | same                                                       |
-| `--text-positive`, `--text-warning`, `--text-danger`                      | success, warning and error **text**                    | same                                                       |
-| `--accent-text`                                                           | the accent used as text (selected item, active option) | same, including every preset accent                        |
-| `--focus-ring`                                                            | every focus indicator                                  | ≥ 3:1 on every surface                                     |
-| `--on-accent`                                                             | text or icons on an accent fill                        | ≥ 4.5:1 on `--accent`, `--accent-hover`, `--accent-active` |
-| `--danger-fill`, `--danger-fill-hover`                                    | destructive button fills (white text)                  | ≥ 4.5:1 with white                                         |
-| `--border-control`                                                        | the 1px edge of an input or other control              | ≥ 3:1 on `--bg-primary` and `--bg-secondary` (1.4.11)      |
-| `--on-fill`, `--on-warning`                                               | text on a theme-independent fill or media scrim        | white on `--danger-fill`; `--on-warning` on `--yellow`     |
-| `--text-faint`, `--text-micro`                                            | incidental text only: decoration, separators, disabled | **not qualified**                                          |
+| Token                                                                     | Use                                                    | Qualified                                                              |
+| ------------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `--text-normal`, `--text-muted`, `--header-primary`, `--header-secondary` | body text, secondary text, headings                    | ≥ 4.5:1 on every surface, every theme, High Contrast                   |
+| `--text-link`                                                             | links                                                  | same                                                                   |
+| `--text-positive`, `--text-warning`, `--text-danger`                      | success, warning and error **text**                    | same                                                                   |
+| `--accent-text`                                                           | the accent used as text (selected item, active option) | same, including every preset accent                                    |
+| `--focus-ring`                                                            | every focus indicator                                  | ≥ 3:1 on every surface                                                 |
+| `--on-accent`                                                             | text or icons on an accent fill                        | ≥ 4.5:1 on `--accent`, `--accent-hover`, `--accent-active`             |
+| `--danger-fill`, `--danger-fill-hover`                                    | destructive button fills (white text)                  | ≥ 4.5:1 with white                                                     |
+| `--border`                                                                | decorative separators and panel frames                 | **not qualified**; never a control's edge (that is `--border-control`) |
+| `--border-control`                                                        | the 1px edge of an input or other control              | ≥ 3:1 on `--bg-primary` and `--bg-secondary` (1.4.11)                  |
+| `--on-fill`, `--on-warning`                                               | text on a theme-independent fill or media scrim        | white on `--danger-fill`; `--on-warning` on `--yellow`                 |
+| `--text-faint`, `--text-micro`                                            | incidental text only: decoration, separators, disabled | **not qualified**                                                      |
 
 Rules:
 
@@ -102,6 +103,8 @@ Rules:
   scale. Kept literals are deliberate: true-black video letterbox, each theme
   tile's own preview colours, and px glyph sizes in fixed boxes (avatar
   initials, icon buttons, emoji).
+  Under Command Deck only: `--deck-radius` (3 px) and `--deck-gap` (6 px),
+  outside the radius and spacing scales.
 - Do not use `--text-faint` or `--text-micro` for text a user needs to read.
   Their ~78 existing uses predate B9-2, and the feature polish milestones
   (B9-21..B9-24) review them. Qualifying these tokens at 4.5:1 would make
@@ -219,6 +222,9 @@ From `Client/tests/e2e/support/accessibility.ts`:
 | `textContrast(locator, pseudo?)`  | text (or `::placeholder`) against its composited background                                                       |
 | `tokenContrasts(page, pairs)`     | token pairs as the page resolves them                                                                             |
 | `mountSharedControls(page)`       | the shared-controls fixture, including its pending, error and success states                                      |
+
+A feature works in both layouts: Classic and Command Deck, checked in the e2e
+`screen-layout` spec or in the feature's own spec under Deck.
 
 `Client/tests/e2e/accessibility-primitives.spec.ts` shows each one in use, including
 the negative controls that prove each check fails when its behaviour is

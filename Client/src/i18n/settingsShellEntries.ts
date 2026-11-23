@@ -116,6 +116,8 @@ export const settingsShellEntries = {
     "Your own CSS, painted on top of the theme above. Links to outside files (url(), @import, fonts) are not allowed. Ctrl+Shift+Backspace turns a custom theme off.",
   "appearance.customThemes.desc.android":
     "Your own CSS, painted on top of the theme above. Links to outside files (url(), @import, fonts) are not allowed.",
+  "appearance.customThemes.deckNote":
+    "Command Deck keeps your theme's colours. It sets its own panel shapes.",
   "appearance.customThemes.empty": "No custom themes yet.",
   "appearance.customThemes.new": "New theme",
   "appearance.customThemes.import": "Import .css",
