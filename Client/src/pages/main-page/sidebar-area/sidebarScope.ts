@@ -76,46 +76,11 @@ export interface SidebarScope {
   // Server header
   // ---------------------------------------------------------------------------
   serverHeader: HTMLDivElement;
-  serverIcon: HTMLDivElement;
-  // i18n-exempt: logo monogram, not copy
-  serverInfoCol: HTMLDivElement;
-  // The server name is the menu's button (Discord's server menu). The text sits
-  // in its own span so a rename replaces only the text, never the chevron.
-  serverNameEl: HTMLButtonElement;
-  serverNameText: HTMLSpanElement;
-  serverNameChevron: SVGSVGElement;
-  onlineCount: number;
-  serverOnlineEl: HTMLSpanElement;
-  // Invite, Audit Log and Moderation: one row of quiet icon buttons.
-  headerActions: HTMLDivElement;
   headerInviteCtrl: InviteManagerController;
-  headerInviteBtn: HTMLButtonElement;
-  // ---------------------------------------------------------------------------
-  // Audit log entry point
-  // ---------------------------------------------------------------------------
-  //
-  // The audit log itself stays in the admin panel — it is a paginated,
-  // filterable table over an endpoint this client otherwise never calls, and a
-  // second implementation would be a second thing to keep correct. What belongs
-  // here is the way in, for the moderators who hold VIEW_AUDIT_LOG and would
-  // otherwise have to know the panel's URL by heart.
-  //
-  // Rendered once per mount and kept in sync with the role list: `ready` may
-  // land after this header is built, and a moderator whose role only becomes
-  // known then would never see the entry otherwise.
-  auditBtn: HTMLButtonElement;
   // The Audit Log button and the server menu's Server Settings share this.
   openAdmin: (section?: string) => void;
-  // The Moderation Center entry: beside Audit Log, only with
-  // MODERATE_MEMBERS, and only once the Moderation Center ships.
-  moderationBtn: HTMLButtonElement | null;
-  syncAuditBtn: () => void;
   // The server menu. Its rows are decided each time it opens (ServerMenu.ts).
   serverMenuOwner: Disposable;
-  // Keep server name in sync with auth store
-  unsubServerName: () => void;
-  // Keep online count in sync with members store
-  unsubOnlineCount: () => void;
   // ---------------------------------------------------------------------------
   // Switchable content slot
   // ---------------------------------------------------------------------------
