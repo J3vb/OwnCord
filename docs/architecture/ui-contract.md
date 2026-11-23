@@ -226,6 +226,16 @@ From `Client/tests/e2e/support/accessibility.ts`:
 A feature works in both layouts: Classic and Command Deck, checked in the e2e
 `screen-layout` spec or in the feature's own spec under Deck.
 
+The server header is one such feature. Classic draws the icon, the server-name
+button (the server menu's anchor), the online count and the invite, Audit Log
+and Moderation buttons. Command Deck draws a second layout from the same module
+(`features/server-header/serverHeader.ts`): a strip labelled "Server tree" with
+the server menu (≡), invite, Audit Log and Moderation buttons, over the tree's
+root row (status dot, server name, online count). The menu button is shown to
+everyone; the other three keep their permission rules and test ids. The root
+row's rules live in `styles/app/server-tree.css`, whose colours are held to the
+tree policy in `tests/unit/deck/server-tree-css.test.ts`; `deck.css` stays last.
+
 `Client/tests/e2e/accessibility-primitives.spec.ts` shows each one in use, including
 the negative controls that prove each check fails when its behaviour is
 removed.

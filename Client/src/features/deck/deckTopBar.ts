@@ -9,56 +9,8 @@ import type { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { authStore } from "@stores/auth.store";
-import { uiStore } from "@stores/ui.store";
 import { messagingText } from "../../i18n/messaging";
-import { shellText } from "../../i18n/shell";
-import {
-  connectionLabel,
-  deviceNetworkOffline,
-  type ConnectionLabel,
-} from "../connection/connectionBanner";
-
-const LABEL_TEXT: Readonly<Record<ConnectionLabel, Parameters<typeof shellText>[0]>> = {
-  elsewhere: "banner.signedInElsewhere",
-  connected: "deck.connected",
-  offline: "deck.offline",
-  reconnecting: "banner.reconnecting",
-  unreachable: "deck.unreachable",
-};
-
-/** The connection state: an LED and its words, kept true from the store and the device's network. */
-function createConnection(owner: Disposable): HTMLDivElement {
-  const led = createElement("span", { class: "deck-led", "aria-hidden": "true" });
-  const text = createElement("span", { class: "deck-connection-text" });
-  const root = createElement("div", { class: "deck-connection", "data-testid": "deck-connection" });
-  root.append(led, text);
-
-  const render = (): void => {
-    const s = uiStore.getState();
-    const label = connectionLabel({
-      sessionReplaced: s.sessionReplaced,
-      status: s.connectionStatus,
-      dialFailed: s.connectionDialFailed,
-      offline: deviceNetworkOffline(),
-    });
-    led.dataset["state"] = label;
-    text.textContent = shellText(LABEL_TEXT[label]);
-  };
-  render();
-  owner.onStoreChange(
-    uiStore,
-    (s) => ({
-      status: s.connectionStatus,
-      dialFailed: s.connectionDialFailed,
-      sessionReplaced: s.sessionReplaced,
-    }),
-    render,
-  );
-  // `Disposable.onEvent` takes element event names only, so these two go on the signal directly.
-  window.addEventListener("online", render, { signal: owner.signal });
-  window.addEventListener("offline", render, { signal: owner.signal });
-  return root;
-}
+import { createDeckConnection } from "./deckConnection";
 
 /** Search as a button styled as a field. No shortcut hint: Ctrl+K is the Quick Switcher. */
 function createSearchButton(onSearch: () => void): HTMLButtonElement {
@@ -90,6 +42,10 @@ export function createDeckTopBar(opts: {
   opts.owner.onStoreChange(authStore, (s) => s.serverName, draw);
 
   const bar = createElement("div", { class: "deck-top-bar", "data-testid": "deck-top-bar" });
-  bar.append(name, createSearchButton(opts.onSearch), createConnection(opts.owner));
+  bar.append(
+    name,
+    createSearchButton(opts.onSearch),
+    createDeckConnection(opts.owner, { text: true }),
+  );
   return bar;
 }

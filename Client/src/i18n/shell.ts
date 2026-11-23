@@ -219,6 +219,8 @@ export const shellText = defineCatalog("shell", {
   "deck.connected": "Connected",
   "deck.offline": "Offline",
   "deck.unreachable": "Server unreachable",
+  "deck.serverTree": "Server tree",
+  "deck.serverMenu": "Server menu",
 
   "banner.restarting": "Server restarting in {seconds} seconds...",
   "banner.reconnecting": "Reconnecting...",
