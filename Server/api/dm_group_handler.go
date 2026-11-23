@@ -80,6 +80,24 @@ func allowGroupMutation(w http.ResponseWriter, limiter *auth.RateLimiter, userID
 	return false
 }
 
+// groupMutationRequest runs the shared prelude of a group mutation: the signed-in user's ID, the channelId path
+// value, then the per-user limit. It writes any refusal itself, so a false third result means the response
+// is complete.
+func groupMutationRequest(w http.ResponseWriter, r *http.Request, limiter *auth.RateLimiter) (int64, int64, bool) {
+	user, ok := requireUser(w, r)
+	if !ok {
+		return 0, 0, false
+	}
+	channelID, ok := parseIDParam(w, r, "channelId")
+	if !ok {
+		return 0, 0, false
+	}
+	if !allowGroupMutation(w, limiter, user.ID) {
+		return 0, 0, false
+	}
+	return user.ID, channelID, true
+}
+
 // allowGroupCreate applies both creation limits and writes the 429 itself; a nil limiter allows. A call the
 // daily ceiling refuses gives its minute slot back.
 func allowGroupCreate(w http.ResponseWriter, limiter *auth.RateLimiter, userID int64) bool {
@@ -135,15 +153,8 @@ func fanOutGroupChange(ctx context.Context, svc *service.Services, broadcaster D
 
 func handleAddGroupMembers(svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := requireUser(w, r)
+		userID, channelID, ok := groupMutationRequest(w, r, limiter)
 		if !ok {
-			return
-		}
-		channelID, ok := parseIDParam(w, r, "channelId")
-		if !ok {
-			return
-		}
-		if !allowGroupMutation(w, limiter, user.ID) {
 			return
 		}
 		var req addGroupMembersRequest
@@ -151,14 +162,14 @@ func handleAddGroupMembers(svc *service.Services, broadcaster DMBroadcaster, lim
 			return
 		}
 
-		change, err := svc.DMs.AddGroupMembers(r.Context(), user.ID, channelID, req.UserIDs)
+		change, err := svc.DMs.AddGroupMembers(r.Context(), userID, channelID, req.UserIDs)
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
 		fanOutGroupChange(r.Context(), svc, broadcaster, channelID, change.Audience, change.Rows)
 		sendAddedVoiceRoster(r.Context(), broadcaster, channelID, change.Added)
-		writeGroupSummary(w, r, svc, user.ID, channelID)
+		writeGroupSummary(w, r, svc, userID, channelID)
 	}
 }
 
@@ -208,15 +219,8 @@ func handleRemoveGroupMember(svc *service.Services, broadcaster DMBroadcaster, l
 // dm_channel_open with the new owner_id.
 func handleTransferGroupOwner(svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := requireUser(w, r)
+		userID, channelID, ok := groupMutationRequest(w, r, limiter)
 		if !ok {
-			return
-		}
-		channelID, ok := parseIDParam(w, r, "channelId")
-		if !ok {
-			return
-		}
-		if !allowGroupMutation(w, limiter, user.ID) {
 			return
 		}
 		var req transferGroupOwnerRequest
@@ -224,13 +228,13 @@ func handleTransferGroupOwner(svc *service.Services, broadcaster DMBroadcaster, 
 			return
 		}
 
-		change, err := svc.DMs.TransferGroupOwner(r.Context(), user.ID, channelID, req.UserID)
+		change, err := svc.DMs.TransferGroupOwner(r.Context(), userID, channelID, req.UserID)
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
 		fanOutGroupChange(r.Context(), svc, broadcaster, channelID, change.Audience, nil)
-		writeGroupSummary(w, r, svc, user.ID, channelID)
+		writeGroupSummary(w, r, svc, userID, channelID)
 	}
 }
 

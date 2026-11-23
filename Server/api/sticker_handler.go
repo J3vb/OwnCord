@@ -4,8 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
-	"io"
 	"log/slog"
 	"net/http"
 	"time"
@@ -163,41 +161,13 @@ func handleCreateSticker(svc *service.Services, store FileStore, limiter *auth.R
 // readStickerUpload pulls the file from the parsed form and enforces size, sniffed MIME and dimensions. It
 // writes the refusal itself, so a false third result means the response is complete.
 func readStickerUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bool) {
-	file, _, err := r.FormFile("file")
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "missing file field")
-		return nil, "", false
-	}
-	defer file.Close() //nolint:errcheck
-
-	// Read one byte past the cap so exactly-at-limit passes and one-over is caught without buffering an
-	// unbounded body.
-	raw, err := io.ReadAll(io.LimitReader(file, maxStickerFileBytes+1))
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "failed to read uploaded file")
-		return nil, "", false
-	}
-	if int64(len(raw)) > maxStickerFileBytes {
-		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("sticker must be at most %d KB", maxStickerFileBytes>>10))
-		return nil, "", false
-	}
-
-	mimeType := http.DetectContentType(raw)
-	if !allowedStickerMIME[mimeType] {
-		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "sticker must be a PNG, GIF or WebP image")
-		return nil, "", false
-	}
-
-	width, height, err := imageDimensions(raw, mimeType)
-	if err != nil {
-		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "could not read image dimensions")
-		return nil, "", false
-	}
-	if width > maxStickerDimension || height > maxStickerDimension {
-		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("sticker must be at most %dx%d pixels (got %dx%d)", maxStickerDimension, maxStickerDimension, width, height))
-		return nil, "", false
-	}
-	return raw, mimeType, true
+	return readSmallImageUpload(w, r, smallImageLimits{
+		noun:        "sticker",
+		maxBytes:    maxStickerFileBytes,
+		maxDim:      maxStickerDimension,
+		allowed:     allowedStickerMIME,
+		mimeMessage: "sticker must be a PNG, GIF or WebP image",
+	})
 }
 
 // stickerPatch is the PATCH /api/v1/stickers/{id} body; an absent name or emoji is kept, an empty emoji

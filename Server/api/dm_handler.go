@@ -286,16 +286,8 @@ func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster, limit
 // handleRenameGroupDM sets or clears a group DM's name (any member); an unchanged name sends nothing.
 func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := requireUser(w, r)
+		userID, channelID, ok := groupMutationRequest(w, r, limiter)
 		if !ok {
-			return
-		}
-
-		channelID, ok := parseIDParam(w, r, "channelId")
-		if !ok {
-			return
-		}
-		if !allowGroupMutation(w, limiter, user.ID) {
 			return
 		}
 
@@ -304,7 +296,7 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster, limit
 			return
 		}
 
-		result, err := svc.DMs.RenameGroupDM(r.Context(), user.ID, channelID, req.Name)
+		result, err := svc.DMs.RenameGroupDM(r.Context(), userID, channelID, req.Name)
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
@@ -316,7 +308,7 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster, limit
 			fanOutGroupChange(r.Context(), svc, broadcaster, channelID, result.Audience, result.Rows)
 		}
 
-		writeGroupSummary(w, r, svc, user.ID, channelID)
+		writeGroupSummary(w, r, svc, userID, channelID)
 	}
 }
 

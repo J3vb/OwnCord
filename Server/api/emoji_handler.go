@@ -159,6 +159,28 @@ func handleCreateEmoji(svc *service.Services, store FileStore, limiter *auth.Rat
 // readEmojiUpload pulls the file from the parsed form and enforces size, sniffed MIME and dimensions. It
 // writes the refusal itself, so a false third result means the response is complete.
 func readEmojiUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bool) {
+	return readSmallImageUpload(w, r, smallImageLimits{
+		noun:        "emoji",
+		maxBytes:    maxEmojiFileBytes,
+		maxDim:      maxEmojiDimension,
+		allowed:     allowedEmojiMIME,
+		mimeMessage: "emoji must be a PNG, JPEG, GIF or WebP image",
+	})
+}
+
+// smallImageLimits parameterises readSmallImageUpload for one kind of upload.
+type smallImageLimits struct {
+	noun        string
+	maxBytes    int64
+	maxDim      int
+	allowed     map[string]bool
+	mimeMessage string
+}
+
+// readSmallImageUpload pulls the file from the parsed form and enforces size, sniffed MIME and dimensions. It
+// writes the refusal itself, so a false third result means the response is complete. imageDimensions already
+// rejects non-positive sizes, so only the upper cap is checked here.
+func readSmallImageUpload(w http.ResponseWriter, r *http.Request, lim smallImageLimits) ([]byte, string, bool) {
 	file, _, err := r.FormFile("file")
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "missing file field")
@@ -168,19 +190,19 @@ func readEmojiUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bo
 
 	// Read one byte past the cap so exactly-at-limit passes and one-over is caught without buffering an
 	// unbounded body.
-	raw, err := io.ReadAll(io.LimitReader(file, maxEmojiFileBytes+1))
+	raw, err := io.ReadAll(io.LimitReader(file, lim.maxBytes+1))
 	if err != nil {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "failed to read uploaded file")
 		return nil, "", false
 	}
-	if int64(len(raw)) > maxEmojiFileBytes {
-		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("emoji must be at most %d KB", maxEmojiFileBytes>>10))
+	if int64(len(raw)) > lim.maxBytes {
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("%s must be at most %d KB", lim.noun, lim.maxBytes>>10))
 		return nil, "", false
 	}
 
 	mimeType := http.DetectContentType(raw)
-	if !allowedEmojiMIME[mimeType] {
-		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "emoji must be a PNG, JPEG, GIF or WebP image")
+	if !lim.allowed[mimeType] {
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, lim.mimeMessage)
 		return nil, "", false
 	}
 
@@ -189,9 +211,9 @@ func readEmojiUpload(w http.ResponseWriter, r *http.Request) ([]byte, string, bo
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "could not read image dimensions")
 		return nil, "", false
 	}
-	// Re-check the sniffed dimensions rather than trust the client, so an "emoji" is not a full-size picture.
-	if width <= 0 || height <= 0 || width > maxEmojiDimension || height > maxEmojiDimension {
-		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("emoji must be at most %dx%d pixels (got %dx%d)", maxEmojiDimension, maxEmojiDimension, width, height))
+	// Re-check the sniffed dimensions rather than trust the client.
+	if width > lim.maxDim || height > lim.maxDim {
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, fmt.Sprintf("%s must be at most %dx%d pixels (got %dx%d)", lim.noun, lim.maxDim, lim.maxDim, width, height))
 		return nil, "", false
 	}
 

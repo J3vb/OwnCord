@@ -112,9 +112,8 @@ var FuzzGaps = map[string]FuzzGap{
 	"api.fetchGIFs":                     {Source: "GIF provider response"},
 	"api.(*PluginAdminHandler).install": {Source: "plugin upload (multipart)"},
 	"api.handleCreateEmoji":             {Source: "emoji upload (multipart)"},
-	"api.readEmojiUpload":               {Source: "emoji upload (multipart)"},
+	"api.readSmallImageUpload":          {Source: "emoji and sticker upload (multipart)"},
 	"api.handleCreateSticker":           {Source: "sticker upload (multipart)"},
-	"api.readStickerUpload":             {Source: "sticker upload (multipart)"},
 	"api.handleUpload":                  {Source: "attachment upload (multipart)"},
 	"api.readProfileImageForm":          {Source: "avatar, banner and group DM icon upload (multipart)"},
 	"api.storedImageSize":               {Source: "uploaded images, read back from storage"},
@@ -133,7 +132,7 @@ var FuzzGaps = map[string]FuzzGap{
 }
 
 // fuzzGapCeiling is len(FuzzGaps). It only goes down.
-const fuzzGapCeiling = 24
+const fuzzGapCeiling = 23
 
 // FuzzTrustedDecodes decode bytes this server wrote itself (its database, its
 // own frames and files) or files the operator owns. Each value says why the
