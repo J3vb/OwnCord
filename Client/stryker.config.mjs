@@ -386,8 +386,9 @@ const config = {
   },
   concurrency: 4,
   timeoutMS: 30000,
-  // A big shard's perTest-coverage first pass takes longer than Stryker's 5-minute default.
-  dryRunTimeoutMinutes: 20,
+  // The perTest-coverage first pass runs the whole suite: ~8 minutes on an
+  // average runner, close to 20 on a slow one.
+  dryRunTimeoutMinutes: 30,
   tempDirName: ".stryker-tmp",
 };
 
