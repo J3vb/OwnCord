@@ -116,9 +116,9 @@ function walk(node: unknown, found: Found): void {
   if (type === "token") tokenOf(node, found);
   if (type === "rgb" && node["alpha"] !== 0) found.literalColours.push("rgb");
   if (typeof type === "string" && COLOUR_TYPES.has(type)) found.literalColours.push(type);
-  const name = node["name"];
-  if (type === "function" && typeof name === "string" && COLOUR_FUNCTIONS.has(name)) {
-    found.literalColours.push(`${name}()`);
+  const fn = node["value"];
+  if (type === "function" && isObject(fn) && typeof fn["name"] === "string") {
+    if (COLOUR_FUNCTIONS.has(fn["name"])) found.literalColours.push(`${fn["name"]}()`);
   }
   for (const child of Object.values(node)) walk(child, found);
 }
@@ -223,4 +223,88 @@ export function keywordOf(d: DeckDeclaration | undefined): string | undefined {
   const v: unknown = d?.value.value;
   if (isObject(v) && v["type"] === "keyword" && typeof v["value"] === "string") return v["value"];
   return undefined;
+}
+
+/**
+ * One declaration a policy lets through unchecked: the named selector and property, with exactly
+ * these vars and colour functions and no bare word beyond in, srgb and transparent. It matches the
+ * tokens, not the value's shape, so the mix percentage and operand order are left to review.
+ */
+export interface ExemptDeclaration {
+  readonly selector: string;
+  readonly property: string;
+  readonly vars: readonly string[];
+  readonly literalColours: readonly string[];
+}
+
+/** What a stylesheet may do with colour, motion and outlines. */
+export interface ColourPolicy {
+  readonly colourVars: ReadonlySet<string>;
+  readonly fillOnlyVars: ReadonlySet<string>;
+  readonly fillProperties: ReadonlySet<string>;
+  /** Bare words a colour property may hold, border styles included. */
+  readonly keywords: ReadonlySet<string>;
+  readonly layoutVar: RegExp;
+  readonly allowOutlineOffset: boolean;
+  readonly exempt: readonly ExemptDeclaration[];
+}
+
+const MOTION_OR_OUTLINE = /^(outline|transition|animation)/;
+
+const sameList = (a: readonly string[], b: readonly string[]): boolean =>
+  a.length === b.length && a.every((x, i) => x === b[i]);
+
+/** The words an exempt declaration may hold besides its vars and colour function. */
+const EXEMPT_IDENTS = new Set(["in", "srgb", "transparent"]);
+
+function isExempt(rule: DeckRule, d: DeckDeclaration, policy: ColourPolicy): boolean {
+  return policy.exempt.some(
+    (e) =>
+      rule.selectors[0] === e.selector &&
+      rule.selectors.length === 1 &&
+      d.property === e.property &&
+      sameList(d.vars, e.vars) &&
+      sameList(d.literalColours, e.literalColours) &&
+      d.idents.every((i) => EXEMPT_IDENTS.has(i)),
+  );
+}
+
+function colourDeclarationBreaches(
+  where: string,
+  d: DeckDeclaration,
+  policy: ColourPolicy,
+): string[] {
+  const out: string[] = [];
+  for (const v of d.vars)
+    if (!policy.colourVars.has(v)) out.push(`${where}: ${v} is not allow-listed`);
+  if (!policy.fillProperties.has(d.property)) {
+    for (const v of d.vars)
+      if (policy.fillOnlyVars.has(v)) out.push(`${where}: ${v} is a fill only`);
+  }
+  for (const i of d.idents) {
+    if (!policy.keywords.has(i)) out.push(`${where}: keyword ${i}`);
+  }
+  return out;
+}
+
+/** Every breach of `policy` in `rules`, as readable lines. */
+export function colourPolicyBreaches(rules: readonly DeckRule[], policy: ColourPolicy): string[] {
+  const out: string[] = [];
+  for (const rule of rules) {
+    for (const d of rule.declarations) {
+      if (isExempt(rule, d, policy)) continue;
+      const where = `${rule.selectors[0]} { ${d.property} }`;
+      const isOffset = policy.allowOutlineOffset && d.property === "outline-offset";
+      if (MOTION_OR_OUTLINE.test(d.property) && !isOffset)
+        out.push(`${where}: outline, transition or animation`);
+      for (const c of d.literalColours) out.push(`${where}: literal colour ${c}`);
+      if (COLOUR_PROPERTIES.has(d.property)) {
+        out.push(...colourDeclarationBreaches(where, d, policy));
+      } else {
+        for (const v of d.vars)
+          if (!policy.layoutVar.test(v)) out.push(`${where}: ${v} is not a layout token`);
+      }
+    }
+  }
+  return out;
 }

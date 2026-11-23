@@ -3,10 +3,16 @@
  * count, and the invite, Audit Log and Moderation buttons. The page wires the
  * menu and the invite controller; this module draws the header and keeps it in
  * step with the stores it reads.
+ *
+ * Under Command Deck it draws a second layout (opt-H2) in the same module: a
+ * strip labelled "Server tree" holding the server menu button (the anchor) and
+ * the three buttons, over the tree's root row (status dot, name, online count).
  */
+import { Disposable } from "@lib/disposable";
 import { createElement, setText } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
 import { openAdminPanel } from "@lib/adminPanel";
+import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { canManageInvites, canModerateMembers, canViewAuditLog } from "@lib/permissions";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@lib/ui/toastContainer";
@@ -15,6 +21,7 @@ import { membersStore, getOnlineMembers } from "@stores/members.store";
 import { channelsStore } from "@stores/channels.store";
 import { trackCurrentView } from "../navigation/contentView";
 import type { ContentViewId, NavigationDestinations } from "../navigation/destinations";
+import { createDeckConnection } from "../deck/deckConnection";
 import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
 
@@ -29,7 +36,7 @@ export interface ServerHeaderDeps {
 export interface ServerHeader {
   /** `.unified-sidebar-header`. */
   readonly element: HTMLDivElement;
-  /** The server-name button: the server menu's anchor. */
+  /** The server menu's anchor: the server-name button, or under Deck the strip's menu button. */
   readonly menuAnchor: HTMLButtonElement;
   readonly openAdmin: (section?: string) => void;
   /** Releases every subscription the header made. */
@@ -56,9 +63,36 @@ export function headerAction(
   return btn;
 }
 
-export function createServerHeader(deps: ServerHeaderDeps): ServerHeader {
-  const unsubscribers: Array<() => void> = [];
-  const element = createElement("div", { class: "unified-sidebar-header" });
+/** The server menu's button on the Deck strip: shown to everyone, the menu decides its rows. */
+function createDeckMenuButton(): HTMLButtonElement {
+  const label = shellText("deck.serverMenu");
+  const btn = headerAction(label, label, "menu", "server-menu-btn", 14);
+  btn.setAttribute("aria-haspopup", "menu");
+  btn.setAttribute("aria-expanded", "false");
+  return btn;
+}
+
+/** The pieces of the header that differ between Classic and Deck. */
+interface Layout {
+  /** The element the header's name is written into. */
+  readonly nameText: HTMLElement;
+  readonly onlineEl: HTMLElement;
+  readonly menuAnchor: HTMLButtonElement;
+  /** Where the invite, Audit Log and Moderation buttons go, in that order. */
+  readonly actions: HTMLElement;
+  /** Appends the layout's own parts to the header, after the actions are filled. */
+  readonly finish: () => void;
+}
+
+function serverName(): string {
+  return authStore.getState().serverName ?? shellText("common.serverFallback");
+}
+
+function onlineText(): string {
+  return shellText("common.online", { count: getOnlineMembers().length });
+}
+
+function classicLayout(element: HTMLDivElement): Layout {
   const icon = createElement("div", { class: "server-icon-sm" }, "OC"); // i18n-exempt: logo monogram, not copy
   const infoCol = createElement("div", { class: "server-info" });
 
@@ -71,21 +105,13 @@ export function createServerHeader(deps: ServerHeaderDeps): ServerHeader {
     "aria-expanded": "false",
     "data-testid": "server-name",
   });
-  const nameText = createElement(
-    "span",
-    { class: "server-name-text" },
-    authStore.getState().serverName ?? shellText("common.serverFallback"),
-  );
+  const nameText = createElement("span", { class: "server-name-text" }, serverName());
   const nameChevron = createIcon("chevron-down", 14);
   nameChevron.classList.add("server-name-chevron");
   nameEl.appendChild(nameText);
   nameEl.appendChild(nameChevron);
 
-  const onlineEl = createElement(
-    "span",
-    { class: "server-online" },
-    shellText("common.online", { count: getOnlineMembers().length }),
-  );
+  const onlineEl = createElement("span", { class: "server-online" }, onlineText());
   infoCol.appendChild(nameEl);
   infoCol.appendChild(onlineEl);
   element.appendChild(icon);
@@ -93,12 +119,58 @@ export function createServerHeader(deps: ServerHeaderDeps): ServerHeader {
 
   // Invite, Audit Log and Moderation: one row of quiet icon buttons.
   const actions = createElement("div", { class: "sidebar-header-actions" });
+  return {
+    nameText,
+    onlineEl,
+    menuAnchor: nameEl,
+    actions,
+    finish: () => element.appendChild(actions),
+  };
+}
+
+function deckLayout(element: HTMLDivElement, owner: Disposable): Layout {
+  element.classList.add("deck-server-header");
+  const menuAnchor = createDeckMenuButton();
+  const actions = createElement("div", { class: "sidebar-header-actions" });
+  actions.appendChild(menuAnchor);
+  const strip = createElement("div", { class: "server-tree-strip" });
+  strip.append(
+    createElement("span", { class: "server-tree-strip-label" }, shellText("deck.serverTree")),
+    actions,
+  );
+
+  // The root row sits outside the tree, so it does not shift aria-level.
+  const nameText = createElement(
+    "h2",
+    { id: "server-tree-name", class: "server-root-name", "data-testid": "server-name" },
+    serverName(),
+  );
+  const led = createDeckConnection(owner, { text: false });
+  led.dataset["testid"] = "server-root-led";
+  const onlineEl = createElement("span", { class: "server-online" }, onlineText());
+  const root = createElement("div", { class: "server-root" });
+  root.append(led, nameText, onlineEl);
+
+  element.append(strip, root);
+  return { nameText, onlineEl, menuAnchor, actions, finish: () => undefined };
+}
+
+export function createServerHeader(deps: ServerHeaderDeps): ServerHeader {
+  const unsubscribers: Array<() => void> = [];
+  const owner = new Disposable();
+  const element = createElement("div", { class: "unified-sidebar-header" });
+  const deck = runningScreenLayout() === "deck";
+  const { nameText, onlineEl, menuAnchor, actions, finish } = deck
+    ? deckLayout(element, owner)
+    : classicLayout(element);
+  const iconSize = deck ? 14 : 16;
 
   const inviteBtn = headerAction(
     shellText("invite.invite"),
     shellText("invite.invitePeople"),
     "user-plus",
     "invite-btn",
+    iconSize,
   );
   inviteBtn.addEventListener("click", () => {
     deps.openInvite();
@@ -119,6 +191,7 @@ export function createServerHeader(deps: ServerHeaderDeps): ServerHeader {
     shellText("audit.hint"),
     "scroll-text",
     "audit-log-btn",
+    iconSize,
   );
 
   // The Audit Log button and the server menu's Server Settings share this.
@@ -143,24 +216,31 @@ export function createServerHeader(deps: ServerHeaderDeps): ServerHeader {
       navigationText("moderation.entryHint"),
       "shield",
       "moderation-btn",
+      iconSize,
     );
     btn.addEventListener("click", () => deps.onOpenView?.("moderation", btn));
     unsubscribers.push(trackCurrentView(btn, "moderation"));
     moderationBtn = btn;
   }
 
-  const syncAuditBtn = (): void => {
-    inviteBtn.style.display = canManageInvites() ? "" : "none";
-    auditBtn.style.display = canViewAuditLog() ? "" : "none";
-    if (moderationBtn !== null) {
-      moderationBtn.style.display = canModerateMembers() ? "" : "none";
+  // Under Deck a button that hides while it has focus hands the focus to the
+  // menu button, so a role change never drops it on <body>.
+  const show = (btn: HTMLButtonElement, visible: boolean): void => {
+    if (!visible && deck && btn.style.display !== "none" && document.activeElement === btn) {
+      menuAnchor.focus();
     }
+    btn.style.display = visible ? "" : "none";
+  };
+  const syncAuditBtn = (): void => {
+    show(inviteBtn, canManageInvites());
+    show(auditBtn, canViewAuditLog());
+    if (moderationBtn !== null) show(moderationBtn, canModerateMembers());
   };
   syncAuditBtn();
 
   actions.appendChild(auditBtn);
   if (moderationBtn !== null) actions.appendChild(moderationBtn);
-  element.appendChild(actions);
+  finish();
 
   // The permission is derived from the signed-in user's role plus the role
   // list, so both have to be watched.
@@ -176,25 +256,26 @@ export function createServerHeader(deps: ServerHeaderDeps): ServerHeader {
     // Keep the server name in sync with the auth store.
     authStore.subscribeSelector(
       (s) => s.serverName,
-      (name) => {
-        setText(nameText, name ?? shellText("common.serverFallback"));
+      () => {
+        setText(nameText, serverName());
       },
     ),
     // Keep the online count in sync with the members store.
     membersStore.subscribeSelector(
       (s) => s.members,
       () => {
-        setText(onlineEl, shellText("common.online", { count: getOnlineMembers().length }));
+        setText(onlineEl, onlineText());
       },
     ),
   );
 
   return {
     element,
-    menuAnchor: nameEl,
+    menuAnchor,
     openAdmin,
     destroy: () => {
       for (const unsub of unsubscribers.splice(0)) unsub();
+      owner.destroy();
     },
   };
 }
