@@ -1,0 +1,84 @@
+/* ═══ Command Deck server tree ═══ */
+/* Loaded just before deck.css, which stays last. Every selector starts with
+   `html.layout-deck` (or, from 4c, `html.layout-deck.high-contrast `), so
+   Classic is untouched. tests/unit/deck/server-tree-css.test.ts enforces this
+   file's rules.
+
+   The colour rule is deck.css's, widened for the tree:
+   - A colour property reads only var(--bg-secondary), var(--bg-hover),
+     var(--bg-active), var(--border), var(--border-strong), var(--text-normal),
+     var(--text-muted), var(--header-primary), var(--channel-icon),
+     var(--accent-text), var(--danger-fill) or var(--on-fill), or the keywords
+     none, transparent, currentcolor and inset.
+   - The active row's tint is the one declaration that may name the accent and
+     a colour function (the test names its selector); the accent never colours
+     text.
+   - Any other var() names a layout token: --deck-*, --header-height,
+     --safe-bottom, --radius-* or --font-size-*.
+   - No literal colour, and no transition or animation. outline-offset is
+     allowed; outline itself is not. */
+
+/* The panel top (opt-H2): a strip of buttons, then the server as the first
+   row. It is the Deck layout of createServerHeader; the Classic header's own
+   rules (sidebar.css) are overridden here, not edited. */
+html.layout-deck .unified-sidebar-header.deck-server-header {
+  display: block;
+  min-height: 0;
+  padding: 0;
+  border-bottom: 0;
+}
+html.layout-deck .server-tree-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 6px;
+  min-height: 24px;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--border);
+}
+html.layout-deck .server-tree-strip-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+html.layout-deck .server-tree-strip .sidebar-header-action {
+  flex: none;
+  width: 24px;
+  height: 24px;
+}
+/* The ring is drawn inside the control, so the sidebar's overflow does not clip it. */
+html.layout-deck .deck-server-header :focus-visible {
+  outline-offset: -2px;
+}
+html.layout-deck .server-root {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 26px;
+  padding: 2px 6px;
+}
+html.layout-deck .server-root .deck-led {
+  margin-inline-start: 6px;
+}
+html.layout-deck .server-root-name {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--header-primary);
+  font-size: var(--font-size-md);
+  font-weight: 700;
+}
+html.layout-deck .server-root .server-online {
+  flex: none;
+  margin-inline-start: auto;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}

@@ -134,6 +134,19 @@ for (const layout of ["classic", "deck"] as const) {
       await expect(region(page, "Message Requests")).toBeVisible();
     });
 
+    if (layout === "deck") {
+      test("the server menu button is reached from the strip and opens the menu", async ({
+        page,
+      }) => {
+        const btn = page.getByTestId("server-menu-btn");
+        await expectReached(btn);
+        await page.keyboard.press("Enter");
+        await expect(page.getByRole("menu")).toBeVisible();
+        await expect(btn).toHaveAttribute("aria-expanded", "true");
+        await expect(page.getByTestId("server-menu-notifications")).toBeVisible();
+      });
+    }
+
     test("the rail's Home, saved servers and Add are reached", async ({ page }) => {
       await expectReached(page.getByTestId("server-rail-home"));
       const servers = page.getByTestId("server-rail-server");

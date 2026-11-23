@@ -5,12 +5,14 @@
 import { describe, expect, it } from "vitest";
 import {
   COLOUR_PROPERTIES,
+  colourPolicyBreaches,
   declarationOf,
   deckRules,
   keywordOf,
   parseDeckCss,
   preludesOf,
   rulesFor,
+  type ColourPolicy,
   type DeckRule,
 } from "../../helpers/deck-css";
 
@@ -34,34 +36,20 @@ const KEYWORDS = new Set(["none", "transparent", "currentcolor"]);
 // A border shorthand's own words, which are not colours.
 const BORDER_STYLES = new Set(["solid", "dashed", "dotted", "hidden"]);
 const LAYOUT_VAR = /^--(deck-[a-z-]+|header-height|safe-bottom|radius-[a-z]+|font-size-[a-z]+)$/;
-const MOTION_OR_OUTLINE = /^(outline|transition|animation)/;
+
+const DECK_POLICY: ColourPolicy = {
+  colourVars: COLOUR_VARS,
+  fillOnlyVars: FILL_ONLY_VARS,
+  fillProperties: FILL_PROPERTIES,
+  keywords: new Set([...KEYWORDS, ...BORDER_STYLES]),
+  layoutVar: LAYOUT_VAR,
+  allowOutlineOffset: false,
+  exempt: [],
+};
 
 /** Every breach of the colour rule in `rules`, as readable lines. */
 function colourRuleBreaches(rules: readonly DeckRule[]): string[] {
-  const out: string[] = [];
-  for (const rule of rules) {
-    for (const d of rule.declarations) {
-      const where = `${rule.selectors[0]} { ${d.property} }`;
-      if (MOTION_OR_OUTLINE.test(d.property))
-        out.push(`${where}: outline, transition or animation`);
-      for (const c of d.literalColours) out.push(`${where}: literal colour ${c}`);
-      if (COLOUR_PROPERTIES.has(d.property)) {
-        for (const v of d.vars)
-          if (!COLOUR_VARS.has(v)) out.push(`${where}: ${v} is not allow-listed`);
-        if (!FILL_PROPERTIES.has(d.property)) {
-          for (const v of d.vars)
-            if (FILL_ONLY_VARS.has(v)) out.push(`${where}: ${v} is a fill only`);
-        }
-        for (const i of d.idents) {
-          if (!KEYWORDS.has(i) && !BORDER_STYLES.has(i)) out.push(`${where}: keyword ${i}`);
-        }
-      } else {
-        for (const v of d.vars)
-          if (!LAYOUT_VAR.test(v)) out.push(`${where}: ${v} is not a layout token`);
-      }
-    }
-  }
-  return out;
+  return colourPolicyBreaches(rules, DECK_POLICY);
 }
 
 const SIDEBAR = "html.layout-deck .app > .unified-sidebar";

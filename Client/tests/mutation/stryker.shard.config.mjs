@@ -543,6 +543,7 @@ export const shards = {
     "src/lib/ui/dialogOpen.ts",
   ],
   "lib-rest-23": [
+    "src/features/deck/deckConnection.ts",
     "src/features/direct-messages/groupIcon.ts",
     "src/features/profiles/avatar.ts",
     "src/features/share/shareInbox.ts",
