@@ -89,22 +89,15 @@ func discardGroupIconUpload(ctx context.Context, svc *service.Services, store Fi
 // no event.
 func handleDeleteGroupIcon(svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := requireUser(w, r)
+		userID, channelID, ok := groupMutationRequest(w, r, limiter)
 		if !ok {
 			return
 		}
-		channelID, ok := parseIDParam(w, r, "channelId")
-		if !ok {
-			return
-		}
-		if !allowGroupMutation(w, limiter, user.ID) {
-			return
-		}
-		if err := svc.DMs.AuthorizeGroupIcon(r.Context(), user.ID, channelID); err != nil {
+		if err := svc.DMs.AuthorizeGroupIcon(r.Context(), userID, channelID); err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
 		}
-		change, err := svc.DMs.SetGroupIcon(r.Context(), user.ID, channelID, nil)
+		change, err := svc.DMs.SetGroupIcon(r.Context(), userID, channelID, nil)
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
@@ -112,6 +105,6 @@ func handleDeleteGroupIcon(svc *service.Services, broadcaster DMBroadcaster, lim
 		if len(change.Rows) > 0 {
 			fanOutGroupChange(r.Context(), svc, broadcaster, channelID, change.Audience, change.Rows)
 		}
-		writeGroupSummary(w, r, svc, user.ID, channelID)
+		writeGroupSummary(w, r, svc, userID, channelID)
 	}
 }
