@@ -143,17 +143,20 @@ test.describe("Command Deck server tree", () => {
     await startDeckScene(page);
     await arrangeScene(page);
     // Draw the fullest row the views can: the app's own draw function, so the DOM is the real one.
-    await page.evaluate(async () => {
+    const drawn = await page.evaluate(async () => {
       // A computed path: the dev server serves these modules, and tsc cannot resolve them from here.
       const load = (path: string): Promise<unknown> => import(/* @vite-ignore */ path);
       // Typed by hand: importing the real types would drag the app's sources into this tsconfig.
       type Draw = (model: Record<string, unknown>, avatar: unknown, tree: boolean) => HTMLElement;
-      const view = (await load("/src/features/channels/voiceUserRow.view.ts")) as {
-        drawVoiceUserRow: Draw;
-      };
-      const avatar = (await load("/src/features/profiles/avatar.ts")) as {
-        createAvatarElement: unknown;
-      };
+      let view: { drawVoiceUserRow: Draw };
+      let avatar: { createAvatarElement: unknown };
+      try {
+        view = (await load("/src/features/channels/voiceUserRow.view.ts")) as typeof view;
+        avatar = (await load("/src/features/profiles/avatar.ts")) as typeof avatar;
+      } catch {
+        // The production build serves no source modules.
+        return false;
+      }
       const name = "Maximilian-".repeat(6).slice(0, 60);
       const row = view.drawVoiceUserRow(
         {
@@ -189,7 +192,9 @@ test.describe("Command Deck server tree", () => {
       );
       row.dataset.testid = "worst-case-row";
       document.querySelector(".voice-users-list")!.appendChild(row);
+      return true;
     });
+    test.skip(!drawn, "needs the dev server's modules");
     const row = page.getByTestId("worst-case-row");
     await row.scrollIntoViewIfNeeded();
     const fit = await row.evaluate((el) => {
