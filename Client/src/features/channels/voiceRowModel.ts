@@ -19,9 +19,15 @@ import type { SafetyState } from "../safety/store";
 import { resolveDisplayName } from "../../lib/ui/avatar";
 import { shellText } from "../../i18n/shell";
 import { formatUntil, safetyText } from "../../i18n/safety";
+import { rowActivity } from "../members/listeningLine";
 import { ownIdentityTitle, verifyPresentation } from "../voice/peerVerification";
 import type { VoiceChannelChromeModel } from "./voiceRow.view";
-import type { VoiceAudioModel, VoiceUserRowModel, VoiceVerifyModel } from "./voiceUserRow.view";
+import type {
+  VoiceActivityModel,
+  VoiceAudioModel,
+  VoiceUserRowModel,
+  VoiceVerifyModel,
+} from "./voiceUserRow.view";
 
 /** Everything the voice rows draw from, as one snapshot of several stores. */
 export interface VoiceRowInputs {
@@ -108,6 +114,13 @@ function listenModel(
   return { listen: inputs.listeningTo === userId ? "on" : "off" };
 }
 
+/** A tree row's second line, from the member's game or song; null for none. */
+function activityModel(member: Member | undefined): VoiceActivityModel | null {
+  if (member === undefined) return null;
+  const shown = rowActivity(member.activity, member.listening);
+  return shown === null ? null : { text: shown.text, icon: shown.icon };
+}
+
 /** One participant row's model, from the snapshot. */
 export function voiceUserModel(
   user: VoiceUser,
@@ -145,6 +158,8 @@ export function voiceUserModel(
       inputs.connectionStatus === "connected" &&
       inputs.movable.includes(channelId),
     self,
+    // Only a tree draws the second line; Classic's model stays as it was.
+    ...(ctx.tree === true ? { activity: activityModel(member) } : {}),
   };
 }
 

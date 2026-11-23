@@ -183,6 +183,47 @@ html.layout-deck .server-tree .voice-user-item .vu-name.vu-self {
 html.layout-deck .server-tree .vu-live-badge {
   display: none;
 }
+/* Line 2: what the person plays or listens to, under the name and indented to it. */
+html.layout-deck .server-tree .voice-user-item .vu-text {
+  display: flex;
+  flex: 1 1 0;
+  flex-direction: column;
+  min-width: 0;
+}
+html.layout-deck .server-tree .voice-user-item > :not(.vu-text, .vu-name) {
+  flex-shrink: 0;
+}
+html.layout-deck .server-tree .voice-user-item:has(> .vu-text) > :not(.vu-text, .vu-avatar) {
+  align-self: flex-start;
+  margin-top: 3px;
+}
+/* The status cluster packs a little tighter than the row's gap, so a long name with
+   every icon still fits the panel: the cluster never shrinks, the name does. */
+html.layout-deck
+  .server-tree
+  .voice-user-item
+  > :is(.vu-status, .vu-muted, .vu-verify, .vu-listen)
+  ~ :is(.vu-status, .vu-muted, .vu-verify, .vu-listen) {
+  margin-left: -2px;
+}
+html.layout-deck .server-tree .vu-activity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 400;
+}
+html.layout-deck .server-tree .vu-activity > svg {
+  flex: none;
+}
+html.layout-deck .server-tree .vu-activity-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 html.layout-deck .server-tree .ch-restriction {
   padding-left: 27px;
 }
