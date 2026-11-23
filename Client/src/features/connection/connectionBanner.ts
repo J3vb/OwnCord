@@ -30,6 +30,28 @@ export function deviceNetworkOffline(): boolean | undefined {
   return typeof navigator.onLine === "boolean" ? !navigator.onLine : undefined;
 }
 
+export type ConnectionLabel =
+  "elsewhere" | "connected" | "offline" | "reconnecting" | "unreachable";
+
+/**
+ * The one word for the connection, for the Command Deck top bar. It says what
+ * the connection banner says at the same moment: signed in elsewhere outranks
+ * the status it leaves behind, a live socket outranks the device's network
+ * fact, and a reconnect is plain "reconnecting" only until a dial has failed.
+ */
+export function connectionLabel(s: {
+  readonly sessionReplaced: boolean;
+  readonly status: "connected" | "reconnecting" | "disconnected";
+  readonly dialFailed: boolean;
+  readonly offline: boolean | undefined;
+}): ConnectionLabel {
+  if (s.sessionReplaced) return "elsewhere";
+  if (s.status === "connected") return "connected";
+  if (s.offline === true) return "offline";
+  if (s.status === "reconnecting" && !s.dialFailed) return "reconnecting";
+  return "unreachable";
+}
+
 /** Wires the banner to the connection state. Returns the teardown. */
 export function wireConnectionBanner(w: ConnectionBannerWiring): () => void {
   // "Use here" takes the connection back: this device connects again and

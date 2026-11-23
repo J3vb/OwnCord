@@ -90,6 +90,83 @@ html.layout-deck .media-gallery.side-panel {
   }
 }
 
+/* The top bar: the server's name, search as a field, the connection state. */
+html.layout-deck .deck-top-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 420px) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--deck-gap);
+  min-height: var(--deck-top-min);
+  padding: env(safe-area-inset-top) calc(var(--deck-gap) + env(safe-area-inset-right)) 0
+    calc(var(--deck-gap) + env(safe-area-inset-left));
+  flex: none;
+  background: var(--bg-tertiary);
+}
+html.layout-deck .deck-top-name {
+  justify-self: start;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-inline-start: var(--deck-gap);
+  font-weight: 600;
+  color: var(--header-primary);
+}
+/* --bg-input on purpose: the field must stand apart from the bar's --bg-tertiary. */
+html.layout-deck .deck-search {
+  justify-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-align: start;
+  cursor: pointer;
+}
+html.layout-deck .deck-connection {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+html.layout-deck .deck-connection-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.layout-deck .deck-led {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-circle);
+}
+html.layout-deck .deck-led[data-state="connected"] {
+  background: var(--green);
+}
+html.layout-deck .deck-led:is([data-state="elsewhere"], [data-state="reconnecting"]) {
+  background: var(--yellow);
+}
+html.layout-deck .deck-led:is([data-state="offline"], [data-state="unreachable"]) {
+  background: var(--red);
+}
+@media (max-width: 640px) {
+  html.layout-deck .deck-top-bar {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+  html.layout-deck .deck-search-text {
+    display: none;
+  }
+}
+
 /* The status bar: the user bar, then (in a call) the voice widget. No
    overflow, so focus rings at the edges are not clipped. */
 html.layout-deck .deck-status-bar {

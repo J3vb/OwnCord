@@ -51,6 +51,7 @@ const EAGER_SITES = [
   "pages/main-page/pageMountShell.ts",
   "features/deck/mountDeckFrame.ts",
   "features/deck/deckStatusBar.ts",
+  "features/deck/deckTopBar.ts",
   "pages/main-page/pagePresence.ts",
   "pages/main-page/pageShared.ts",
   "features/direct-messages/DmCallPanel.ts",

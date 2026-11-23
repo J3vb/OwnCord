@@ -386,6 +386,7 @@ export const shards = {
   ],
   "lib-rest-3": [
     "src/features/connection/connectionBanner.ts",
+    "src/features/deck/deckTopBar.ts",
     "src/features/direct-messages/keptCallDms.ts",
     "src/features/forums/NewPostDialog.ts",
     "src/features/messaging/spoilerAttachment.ts",

@@ -211,4 +211,26 @@ describe("deck.css", () => {
       "none",
     );
   });
+  it("the LED colours are allow-listed fills", () => {
+    const led = deckRules().filter((r) =>
+      r.selectors.some((x) => x.includes(".deck-led") && x.includes("[data-state")),
+    );
+    const fills = led.map((r) => {
+      const d = r.declarations.filter((x) => COLOUR_PROPERTIES.has(x.property));
+      // Each state rule sets one background and no other colour property.
+      expect(d.map((x) => x.property)).toEqual(["background"]);
+      return d[0]!.vars;
+    });
+    expect(fills).toEqual([["--green"], ["--yellow"], ["--red"]]);
+    for (const v of fills.flat()) {
+      expect(COLOUR_VARS.has(v), v).toBe(true);
+      expect(FILL_ONLY_VARS.has(v), v).toBe(true);
+    }
+    // The three-colour set covers all five states the label can take.
+    const states = led.flatMap((r) => r.selectors.flatMap((x) => x.match(/"([a-z]+)"/g) ?? []));
+    expect(states.sort()).toEqual(
+      ['"connected"', '"elsewhere"', '"offline"', '"reconnecting"', '"unreachable"'].sort(),
+    );
+    expect(colourRuleBreaches(led)).toEqual([]);
+  });
 });
