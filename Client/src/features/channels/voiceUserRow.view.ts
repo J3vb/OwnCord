@@ -40,6 +40,14 @@ export type VoiceVerifyModel = {
   readonly title: string;
 };
 
+/** A tree row's second line: what the person plays or listens to. `text` is
+ *  already worded ("Playing Hades II", "Listening to Spotify"). A type alias,
+ *  not an interface, so a model holding it still satisfies `RowModel`. */
+export type VoiceActivityModel = {
+  readonly text: string;
+  readonly icon: IconName;
+};
+
 export type VoiceUserRowModel = {
   /** Row key; drawn as `data-voice-uid`. */
   readonly userId: number;
@@ -74,6 +82,10 @@ export type VoiceUserRowModel = {
   readonly draggable: boolean;
   /** Not drawn: decides which handlers the sidebar binds to the row. */
   readonly self: boolean;
+  /** The second line of a tree row; set only in tree mode, null or absent
+   *  when the person has no game or song. Not a patch field: a change
+   *  rebuilds the row. */
+  readonly activity?: VoiceActivityModel | null;
 };
 
 /** The fields `patchVoiceUserRow` changes in place. */
@@ -218,7 +230,7 @@ export function drawVoiceUserRow(
   row.appendChild(avatar);
   // Your own name is the one the tree colours (no "(you)" text is added).
   const nameClass = tree && model.self ? "vu-name vu-self" : "vu-name";
-  row.appendChild(createElement("span", { class: nameClass }, model.name));
+  row.appendChild(nameWithActivity(model, nameClass));
 
   appendMusic(row, model, tree);
   appendMediaIcons(row, model);
@@ -227,6 +239,31 @@ export function drawVoiceUserRow(
 
   row.style.cursor = "pointer";
   return row;
+}
+
+/** The name and, under it, what the person is doing: `.vu-text` holds both so
+ *  the second line indents to the name and truncates before it does. */
+function nameWithActivity(model: VoiceUserRowModel, nameClass: string): HTMLElement {
+  const name = createElement("span", { class: nameClass }, model.name);
+  if (model.activity == null) return name;
+  const line = createElement("span", {
+    class: "vu-activity",
+    "data-testid": `voice-activity-${model.userId}`,
+  });
+  const icon = createIcon(model.activity.icon, 12);
+  icon.setAttribute("aria-hidden", "true");
+  line.appendChild(icon);
+  line.appendChild(
+    createElement(
+      "span",
+      { class: "vu-activity-text", title: model.activity.text },
+      model.activity.text,
+    ),
+  );
+  const text = createElement("span", { class: "vu-text" });
+  text.appendChild(name);
+  text.appendChild(line);
+  return text;
 }
 
 /** Bring a drawn participant row to `next`; only `VOICE_USER_PATCH_FIELDS` differ. */

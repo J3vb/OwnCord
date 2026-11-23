@@ -7,6 +7,7 @@
  *   4 channelListRender 5 ChannelSidebar   6 channelRowBinders  7 categoryMenu
  *   8 volumeMenu + voiceSidebarRows        9 dragMove
  *   10 Direct folder: dmFolder, sidebarDmRow, dmNavRow and the `direct` mount in ChannelSidebar
+ *   11 voiceUserRow.view + voiceRowModel: the second line   12 dragHitTest: the drop midpoint
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/channelSidebarMocks";
@@ -16,6 +17,11 @@ import { drawVoiceChannelChrome } from "../../../src/features/channels/voiceRow.
 import { voiceChannelChrome } from "../../../src/features/channels/voiceRowModel";
 import { channelsStore, setActiveChannel, setChannels } from "../../../src/stores/channels.store";
 import { membersStore } from "../../../src/stores/members.store";
+import { applyReadyActivities, setMembers } from "../../../src/stores/members.store";
+import {
+  findDropTarget,
+  type ChannelDrag,
+} from "../../../src/features/channels/sidebar/dragHitTest";
 import { uiStore } from "../../../src/stores/ui.store";
 import { voiceStore, updateVoiceState, setSpeakers } from "../../../src/stores/voice.store";
 import { publishFollowedThreads } from "../../../src/stores/followedThreads.store";
@@ -24,6 +30,7 @@ import { muteChannel, invalidateMuteCache } from "@lib/prefs/channelMutes";
 import { setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { listenToMusic } from "@lib/voice/livekitSession";
 import type { ReadyChannel } from "../../../src/lib/types";
+import type { ReadyMember } from "../../../src/lib/types";
 import {
   addVoiceUser,
   resetStores,
@@ -90,6 +97,13 @@ function mount(tree: boolean, seed: ReadyChannel[] = SEED): void {
   sidebar.mount(container);
 }
 
+const member = (id: number, username: string): ReadyMember => ({
+  id,
+  username,
+  avatar: null,
+  role: "member",
+  status: "online",
+});
 const row = (id: number): HTMLElement =>
   container.querySelector<HTMLElement>(`.channel-item[data-channel-id="${id}"]`)!;
 const header = (name: string): HTMLElement =>
@@ -304,6 +318,7 @@ describe("channel list in classic only", () => {
     expect(container.querySelector("[role=treeitem], [data-tree-kind], .server-tree")).toBeNull();
     expect(container.querySelector("[data-tree-group], [role=tree]")).toBeNull();
     expect(container.querySelector(".vu-self, .ch-live")).toBeNull();
+    expect(container.querySelector(".vu-text, .vu-activity")).toBeNull();
     expect(container.querySelector("button.category-arrow")).not.toBeNull();
     rightClick(header("Info"));
     expect(document.querySelector('[data-testid="ctx-category-create-channel"]')).toBeNull();
@@ -469,6 +484,55 @@ describe("channel list in deck only", () => {
       ["kade", true],
       ["rin", false],
     ]);
+  });
+
+  it("[2][3][11] a person with a game gets a second line under the name; one without keeps the single line", () => {
+    mount(true);
+    setMembers([member(1, "kade"), member(2, "rin")]);
+    applyReadyActivities([{ user_id: 2, name: "Hades II", started_at: 100 }]);
+    addVoiceUser(VOICE, 1, "kade");
+    addVoiceUser(VOICE, 2, "rin");
+    flush();
+    const rin = container.querySelector('.voice-user-item[data-voice-uid="2"]')!;
+    expect(rin.querySelector(":scope > .vu-text > .vu-activity")?.textContent).toBe(
+      "Playing Hades II",
+    );
+    const kade = container.querySelector('.voice-user-item[data-voice-uid="1"]')!;
+    expect(kade.querySelector(".vu-text, .vu-activity")).toBeNull();
+  });
+
+  it("[12] over the voice channel's people the drop is after it; over its own row's top half, before", () => {
+    setAdminUser();
+    setChannels(SEED);
+    sidebar = createChannelSidebar({
+      tree: true,
+      onVoiceJoin,
+      onOpenCall,
+      onReorderChannel: vi.fn(),
+      onReorderCategory: vi.fn(),
+    });
+    sidebar.mount(container);
+    addVoiceUser(VOICE, 2, "rin");
+    flush();
+    const wrapper = row(VOICE).parentElement!;
+    const rect = (top: number, height: number): DOMRect =>
+      ({ top, bottom: top + height, height, left: 0, right: 240, width: 240 }) as DOMRect;
+    row(VOICE).getBoundingClientRect = () => rect(100, 24);
+    wrapper.getBoundingClientRect = () => rect(100, 124);
+    const source = row(1);
+    const drag = {
+      kind: "channel",
+      channelId: 1,
+      sourceEl: source,
+      containerEl: source.parentElement!,
+      channels: [],
+      onReorder: () => undefined,
+      owner: new AbortController().signal,
+    } satisfies ChannelDrag;
+    const over = (clientY: number) =>
+      findDropTarget(drag, new MouseEvent("mouseup", { clientX: 20, clientY }));
+    expect(over(104)).toMatchObject({ channelId: VOICE, before: true });
+    expect(over(140)).toMatchObject({ channelId: VOICE, before: false });
   });
 
   describe("[7] the category menu's Create channel entry", () => {

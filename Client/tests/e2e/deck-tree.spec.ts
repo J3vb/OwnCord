@@ -137,6 +137,97 @@ test.describe("Command Deck server tree", () => {
     });
   });
 
+  test("worst case: a 60-character name with every status icon truncates the name and line 2, and clips no icon", async ({
+    page,
+  }) => {
+    await startDeckScene(page);
+    await arrangeScene(page);
+    // Draw the fullest row the views can: the app's own draw function, so the DOM is the real one.
+    await page.evaluate(async () => {
+      // A computed path: the dev server serves these modules, and tsc cannot resolve them from here.
+      const load = (path: string): Promise<unknown> => import(/* @vite-ignore */ path);
+      // Typed by hand: importing the real types would drag the app's sources into this tsconfig.
+      type Draw = (model: Record<string, unknown>, avatar: unknown, tree: boolean) => HTMLElement;
+      const view = (await load("/src/features/channels/voiceUserRow.view.ts")) as {
+        drawVoiceUserRow: Draw;
+      };
+      const avatar = (await load("/src/features/profiles/avatar.ts")) as {
+        createAvatarElement: unknown;
+      };
+      const name = "Maximilian-".repeat(6).slice(0, 60);
+      const row = view.drawVoiceUserRow(
+        {
+          userId: 99,
+          name,
+          avatarName: name,
+          avatarColor: "#5865f2",
+          avatarUrl: null,
+          speaking: false,
+          camera: true,
+          live: true,
+          music: true,
+          musicMuted: false,
+          listen: "off",
+          audio: { icon: "headphones-off", server: true, title: "Deafened" },
+          localMuted: true,
+          ownFingerprintTitle: null,
+          verify: {
+            cls: "changed",
+            icon: "shield",
+            color: "var(--text-muted)",
+            title: "Key changed",
+          },
+          draggable: false,
+          self: false,
+          activity: {
+            text: "Playing a game with a title that goes on and on and on",
+            icon: "gamepad-2",
+          },
+        },
+        avatar.createAvatarElement,
+        true,
+      );
+      row.dataset.testid = "worst-case-row";
+      document.querySelector(".voice-users-list")!.appendChild(row);
+    });
+    const row = page.getByTestId("worst-case-row");
+    await row.scrollIntoViewIfNeeded();
+    const fit = await row.evaluate((el) => {
+      const box = el.getBoundingClientRect();
+      const icons = Array.from(
+        el.querySelectorAll<HTMLElement>(
+          ".vu-status, .vu-muted, .vu-verify, .vu-listen, .vu-avatar",
+        ),
+      ).map((i) => {
+        const r = i.getBoundingClientRect();
+        return {
+          cls: i.className,
+          width: r.width,
+          inside: r.left >= box.left && r.right <= box.right + 0.5,
+        };
+      });
+      const truncated = (sel: string): boolean => {
+        const t = el.querySelector<HTMLElement>(sel)!;
+        return t.scrollWidth > t.clientWidth;
+      };
+      return {
+        panel: el.closest(".channel-sidebar")!.getBoundingClientRect().width,
+        overflow: el.scrollWidth - el.clientWidth,
+        icons,
+        nameTruncated: truncated(".vu-name"),
+        lineTruncated: truncated(".vu-activity-text"),
+      };
+    });
+    expect(fit.nameTruncated).toBe(true);
+    expect(fit.lineTruncated).toBe(true);
+    expect(fit.overflow).toBeLessThanOrEqual(0);
+    expect(fit.icons.length).toBeGreaterThanOrEqual(7);
+    for (const icon of fit.icons) {
+      expect(icon.inside, icon.cls).toBe(true);
+      expect(icon.width, icon.cls).toBeGreaterThanOrEqual(12);
+    }
+  });
+
   test("High Contrast with a dark custom accent: the bar is --accent-text, the tint --bg-active", async ({
     page,
   }) => {
