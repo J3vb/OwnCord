@@ -16,6 +16,8 @@ import { setRunningScreenLayout } from "../../../src/lib/prefs/screenLayout";
 import { mountDeckFrame, type DeckFrameInput } from "../../../src/features/deck/mountDeckFrame";
 import { createDeckStatusBar } from "../../../src/features/deck/deckStatusBar";
 import { shellText } from "../../../src/i18n/shell";
+import { authStore } from "../../../src/stores/auth.store";
+import { uiStore } from "../../../src/stores/ui.store";
 
 vi.mock("../../../src/features/deck/deckStatusBar", async () => {
   const actual = await vi.importActual<typeof import("../../../src/features/deck/deckStatusBar")>(
@@ -72,7 +74,7 @@ describe("mountDeckFrame", () => {
     result: ReturnType<typeof mountArea>,
     overrides: Partial<DeckFrameInput> = {},
   ): DeckFrameInput {
-    return { root, slots: result.frameSlots, notify: vi.fn(), ...overrides };
+    return { root, slots: result.frameSlots, notify: vi.fn(), onSearch: vi.fn(), ...overrides };
   }
 
   afterEach(() => {
@@ -124,7 +126,7 @@ describe("mountDeckFrame", () => {
     const teardown = mountDeckFrame(deckInput(result));
     const bar = root.lastElementChild!;
     expect(probe.constructed()).toBe(1);
-    expect(probe.observed).toEqual([bar]);
+    expect(probe.observed).toEqual([root.firstElementChild, bar]);
     const fire = probe.callbacks[0] as unknown as (entries: unknown[]) => void;
     fire([{ target: bar, borderBoxSize: [{ blockSize: 52.5, inlineSize: 900 }] }]);
     expect(root.style.getPropertyValue("--deck-status-measured")).toBe("52.5px");
@@ -140,7 +142,7 @@ describe("mountDeckFrame", () => {
     vi.stubGlobal("ResizeObserver", undefined);
     const result = mountArea(container);
     const teardown = mountDeckFrame(deckInput(result));
-    expect(root.children).toHaveLength(1);
+    expect(root.children).toHaveLength(2);
     expect(() => teardown!()).not.toThrow();
     cleanup(result);
   });
@@ -233,5 +235,71 @@ describe("mountDeckFrame", () => {
 
     expect(log).toEqual(["userBar", "voiceWidget", "observer"]);
     expect(probe.disconnect).toHaveBeenCalledTimes(1);
+  });
+  it("prepends the top bar and observes both bars", () => {
+    const probe = stubObserver();
+    const result = mountArea(container);
+    const onSearch = vi.fn();
+    const teardown = mountDeckFrame(deckInput(result, { onSearch }))!;
+    const top = root.firstElementChild as HTMLElement;
+    const bottom = root.lastElementChild as HTMLElement;
+    expect(root.children).toHaveLength(2);
+    expect(top.dataset["testid"]).toBe("deck-top-bar");
+    expect(bottom.dataset["testid"]).toBe("deck-status-bar");
+    expect(probe.constructed()).toBe(1);
+    expect(probe.observed).toEqual([top, bottom]);
+
+    const fire = probe.callbacks[0] as unknown as (entries: unknown[]) => void;
+    fire([{ target: top, borderBoxSize: [{ blockSize: 36, inlineSize: 900 }] }]);
+    expect(root.style.getPropertyValue("--deck-top-measured")).toBe("36px");
+    expect(root.style.getPropertyValue("--deck-status-measured")).toBe("");
+
+    top.querySelector<HTMLElement>("[data-testid='deck-search']")!.click();
+    expect(onSearch).toHaveBeenCalledTimes(1);
+
+    teardown();
+    expect(root.style.getPropertyValue("--deck-top-measured")).toBe("");
+    cleanup(result);
+  });
+
+  it("the top bar subscribes, then the status bar throws: its subscriptions are released and nothing is attached", async () => {
+    const probe = stubObserver();
+    const result = mountArea(container);
+    await enterVoiceAndAwaitWidget();
+    // Spy only after the real SidebarArea has made its own subscriptions.
+    const unsubscribes: Array<ReturnType<typeof vi.fn>> = [];
+    /** A spy that calls the real method and hands back its unsubscribe wrapped in vi.fn. */
+    const spyOnSubscribe = (store: { subscribeSelector: (...a: never[]) => () => void }) => {
+      const real = store.subscribeSelector.bind(store);
+      return vi.spyOn(store, "subscribeSelector").mockImplementation((...args) => {
+        const off = vi.fn(real(...args));
+        unsubscribes.push(off);
+        return off;
+      });
+    };
+    const uiSpy = spyOnSubscribe(uiStore);
+    const authSpy = spyOnSubscribe(authStore);
+    vi.mocked(createDeckStatusBar).mockImplementationOnce(() => {
+      throw new Error("x");
+    });
+    const notify = vi.fn();
+    try {
+      expect(mountDeckFrame(deckInput(result, { notify }))).toBeNull();
+      expect(uiSpy).toHaveBeenCalledTimes(1);
+      expect(authSpy).toHaveBeenCalledTimes(1);
+      expect(unsubscribes).toHaveLength(2);
+      for (const off of unsubscribes) expect(off).toHaveBeenCalledTimes(1);
+    } finally {
+      uiSpy.mockRestore();
+      authSpy.mockRestore();
+    }
+    const { userBar, voiceWidget } = result.frameSlots;
+    expect(root.children).toHaveLength(0);
+    expect(probe.constructed()).toBe(0);
+    expect(Array.from(result.sidebarWrapper.children).slice(-2)).toEqual([voiceWidget, userBar]);
+    expect(userBar.classList.contains("deck-slot")).toBe(false);
+    expect(notify).toHaveBeenCalledTimes(1);
+    expect(getMockDestroy(createVoiceWidget as MockedFn)).not.toHaveBeenCalled();
+    cleanup(result);
   });
 });

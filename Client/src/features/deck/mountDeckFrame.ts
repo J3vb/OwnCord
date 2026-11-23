@@ -12,6 +12,7 @@ import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { createLogger } from "@lib/logger";
 import { shellText } from "../../i18n/shell";
 import { createDeckStatusBar } from "./deckStatusBar";
+import { createDeckTopBar } from "./deckTopBar";
 
 const log = createLogger("deck");
 
@@ -19,6 +20,8 @@ export interface DeckFrameInput {
   readonly root: HTMLElement;
   readonly slots: { readonly userBar: HTMLElement; readonly voiceWidget: HTMLElement };
   readonly notify: (text: string) => void;
+  /** Opens the chat search, as the Ctrl+F keybind does. */
+  readonly onSearch: () => void;
 }
 
 /** Writes each bar's measured height on `root`, where the overlays read it. */
@@ -47,8 +50,12 @@ function observeBars(
 export function mountDeckFrame(input: DeckFrameInput): (() => void) | null {
   if (runningScreenLayout() !== "deck") return null;
   const owner = new Disposable();
+  let topBar: HTMLDivElement;
   let statusBar: HTMLDivElement;
   try {
+    // The top bar first: it subscribes to stores on `owner`, which a later
+    // failure releases with the destroy below.
+    topBar = createDeckTopBar({ onSearch: input.onSearch, owner });
     statusBar = createDeckStatusBar();
   } catch (err: unknown) {
     owner.destroy();
@@ -58,16 +65,27 @@ export function mountDeckFrame(input: DeckFrameInput): (() => void) | null {
   }
 
   const { root, slots } = input;
+  root.prepend(topBar);
   root.appendChild(statusBar);
   for (const slot of [slots.userBar, slots.voiceWidget]) {
     slot.classList.add("deck-slot");
     statusBar.appendChild(slot);
   }
   try {
-    observeBars(root, new Map([[statusBar, "--deck-status-measured"]]), owner);
+    observeBars(
+      root,
+      new Map([
+        [topBar, "--deck-top-measured"],
+        [statusBar, "--deck-status-measured"],
+      ]),
+      owner,
+    );
   } catch (err: unknown) {
     log.warn("Command Deck bar sizes are not observed", err);
   }
-  owner.addCleanup(() => root.style.removeProperty("--deck-status-measured"));
+  owner.addCleanup(() => {
+    root.style.removeProperty("--deck-top-measured");
+    root.style.removeProperty("--deck-status-measured");
+  });
   return () => owner.destroy();
 }

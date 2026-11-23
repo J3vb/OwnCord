@@ -216,6 +216,9 @@ export const shellText = defineCatalog("shell", {
     "Couldn't save the new security key — the participant stays blocked. Try again.",
 
   "deck.fallback": "Command Deck couldn't build its bars. Reload to try again.",
+  "deck.connected": "Connected",
+  "deck.offline": "Offline",
+  "deck.unreachable": "Server unreachable",
 
   "banner.restarting": "Server restarting in {seconds} seconds...",
   "banner.reconnecting": "Reconnecting...",

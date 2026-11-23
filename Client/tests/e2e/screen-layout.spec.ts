@@ -318,3 +318,56 @@ test.describe("Command Deck status bar", () => {
     expect((await chip.boundingBox())!.width).toBeGreaterThan(8);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Phase 3c: the top bar
+// ---------------------------------------------------------------------------
+
+const TOP_MIN = 36;
+const topBar = (page: Page) => page.locator("[data-testid='deck-top-bar']");
+
+test.describe("Command Deck top bar", () => {
+  test("at 1333x934 it shows the server name, search and the connection state", async ({
+    page,
+  }) => {
+    await startDeck(page, DESKTOP);
+    await expect(topBar(page)).toBeVisible();
+    const name = topBar(page).locator("[data-testid='deck-top-name']");
+    await expect(name).not.toHaveText("");
+    await expect(topBar(page).locator("[data-testid='deck-search']")).toHaveAccessibleName(
+      "Search messages",
+    );
+    await expect(topBar(page).locator("[data-testid='deck-connection']")).toHaveText("Connected");
+
+    // Name left, search centred, state right; the bar is the page's first row.
+    const [n, s, c] = await Promise.all([
+      boxOf(page, "deck-top-name"),
+      boxOf(page, "deck-search"),
+      boxOf(page, "deck-connection"),
+    ]);
+    expect(n.x + n.width).toBeLessThanOrEqual(s.x + 0.5);
+    expect(s.x + s.width).toBeLessThanOrEqual(c.x + 0.5);
+    expect(Math.abs(s.x + s.width / 2 - DESKTOP.width / 2)).toBeLessThanOrEqual(40);
+    const bar = await boxOf(page, "deck-top-bar");
+    expect(bar.y).toBe(0);
+    expect(bar.height).toBeGreaterThanOrEqual(TOP_MIN);
+    const app = await boxOf(page, "app-layout");
+    expect(app.y).toBeGreaterThanOrEqual(bar.y + bar.height);
+  });
+
+  test("clicking search opens the chat search", async ({ page }) => {
+    await startDeck(page, DESKTOP);
+    await expect(page.locator("[data-testid='search-overlay']")).toHaveCount(0);
+    await page.locator("[data-testid='deck-search']").click();
+    await expect(page.locator("[data-testid='search-overlay']")).toBeVisible();
+    await expect(page.locator("[data-testid='search-overlay-input']")).toBeVisible();
+  });
+
+  test("at 640x400 with Large Font the composer stays in view", async ({ page }) => {
+    await startDeck(page, ZOOMED, { largeFont: true });
+    await expect(topBar(page)).toBeVisible();
+    expect((await boxOf(page, "deck-top-bar")).height).toBeGreaterThanOrEqual(TOP_MIN);
+    await expect(page.locator("[data-testid='message-input']")).toBeInViewport();
+    await expect(page.locator("[data-testid='user-bar']")).toBeInViewport();
+  });
+});
