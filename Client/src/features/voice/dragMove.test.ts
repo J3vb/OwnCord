@@ -514,3 +514,30 @@ describe("attachVoiceUserDrag", () => {
     });
   });
 });
+
+/** Wraps the rig's list in a tree whose box is given, as Deck draws it. */
+function wrapInTree(left: number, top: number, right: number, bottom: number): void {
+  const tree = document.createElement("div");
+  tree.className = "server-tree";
+  setRect(tree, left, top, right, bottom);
+  rig.list.replaceWith(tree);
+  tree.append(rig.list);
+}
+
+describe("attachVoiceUserDrag under a server tree", () => {
+  // The tree is the visible box once the list stops clipping: it holds the list,
+  // and a drop point must be inside both. The rig's list is (0,0)-(300,300).
+  it("accepts a drop inside both the list and the tree", () => {
+    wrapInTree(0, 0, 300, 200);
+    dragTo(60, 125);
+    expect(rig.onMove).toHaveBeenCalledWith(USER, TO);
+  });
+
+  it("rejects a drop inside the list but outside the tree's rectangle", () => {
+    wrapInTree(0, 0, 300, 110);
+    dragTo(60, 125);
+    expect(rig.onMove).not.toHaveBeenCalled();
+    dragTo(60, 105);
+    expect(rig.onMove).toHaveBeenCalledWith(USER, TO);
+  });
+});

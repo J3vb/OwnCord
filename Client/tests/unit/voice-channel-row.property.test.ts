@@ -61,6 +61,8 @@ function mutateChrome(model: VoiceChannelChromeModel, field: string): VoiceChann
       return { ...model, afk: !model.afk };
     case "joined":
       return { ...model, joined: !model.joined };
+    case "live":
+      return { ...model, live: model.live !== true };
     case "frozenReason":
       return { ...model, frozenReason: model.frozenReason === null ? "down" : null };
     case "timeoutReason":
@@ -128,6 +130,7 @@ describe("voice channel row view", () => {
       "capacity",
       "frozenReason",
       "joined",
+      "live",
       "mentionCount",
       "passwordProtected",
       "timeoutReason",

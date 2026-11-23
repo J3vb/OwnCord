@@ -42,6 +42,12 @@ export interface VoiceModerationCallbacks {
 }
 
 export interface ChannelSidebarOptions {
+  /**
+   * Draw the list as a tree: the rows take tree roles, the list sits in a
+   * `.server-tree` and arrow keys walk it like a file tree. Absent is the
+   * classic list, drawn exactly as before.
+   */
+  readonly tree?: boolean;
   readonly onVoiceJoin: (channelId: number) => void;
   /** Called when the user clicks the voice channel they are already in. Leaving
    *  is the voice widget's Disconnect, never a channel click. */

@@ -18,6 +18,7 @@ import { markChannelRead } from "@lib/readState";
 import { uiStore } from "@stores/ui.store";
 import { type CategoryRef } from "@stores/channels.store";
 import { shellText } from "../../../i18n/shell";
+import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { createChannelModalScreen } from "./sidebarShared";
 import type { SidebarScope } from "./sidebarScope";
 
@@ -74,6 +75,7 @@ export function mountChannelSidebar(sc: SidebarScope): void {
   sc.buildChannelSidebar = function buildChannelSidebar(): MountableComponent {
     const sidebarVoice = createSidebarVoiceCallbacks(sc.ws);
     return createChannelSidebar({
+      tree: runningScreenLayout() === "deck",
       onVoiceJoin: sidebarVoice.onVoiceJoin,
       onOpenCall: () => sc.opts.onOpenCall?.(),
       onVoiceModerate: createVoiceModerationCallbacks(sc.ws),

@@ -7,7 +7,8 @@
 const INTERACTIVE =
   'button, a[href], input, textarea, select, [contenteditable="true"], [role="button"], ' +
   '[role="menu"], [role="menuitem"], [role="listbox"], [role="option"], [role="tab"], ' +
-  '[role="slider"], [role="radio"], [role="checkbox"], [role="switch"], [role="textbox"]';
+  '[role="slider"], [role="radio"], [role="checkbox"], [role="switch"], [role="textbox"], ' +
+  '[role="treeitem"]';
 
 /** Nothing that takes typed keys has focus. */
 export function isIdleTarget(target: EventTarget | null): boolean {
