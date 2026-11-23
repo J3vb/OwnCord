@@ -17,7 +17,7 @@ import { enableRovingNavigation } from "@lib/ui/a11y";
 import { enableTreeNavigation, type TreeNavigation } from "@lib/ui/treeKeys";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { shellText } from "../../i18n/shell";
-import type { ChannelSidebarOptions } from "./channelSidebarTypes";
+import type { ChannelSidebarOptions, TreeSection } from "./channelSidebarTypes";
 import { createListRenderer } from "./channelListRender";
 import {
   occupiedKey,
@@ -50,6 +50,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   let channelList: HTMLDivElement | null = null;
   /** Tree mode only: stamps the levels and keeps the one Tab stop. */
   let treeNav: TreeNavigation | null = null;
+  /** Tree mode only: the group under the list (the Direct folder), if the page gave one. */
+  let directSection: TreeSection | null = null;
   const tree = options.tree === true;
   let serverNameEl: HTMLSpanElement | null = null;
   /** Everything the sidebar draws, from the one `select`
@@ -141,6 +143,12 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       });
       treeEl.appendChild(channelList);
       treeNav = enableTreeNavigation(treeEl, disposable.signal);
+      // Built before the first render, so its first draw is stamped by that render's refresh().
+      directSection = options.direct?.() ?? null;
+      if (directSection !== null) {
+        treeEl.appendChild(directSection.element);
+        directSection.onRender(() => treeNav?.refresh());
+      }
       appendChildren(root, header, treeEl);
     } else {
       // One Tab stop for the whole list; ArrowUp/Down step, Enter/Space open the
@@ -160,6 +168,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // drag listeners (drag-reorder.ts tracks owners by signal).
     disposable.destroy();
     voice.dispose();
+    directSection?.destroy();
+    directSection = null;
     sidebarSel = null;
     if (root !== null) {
       root.remove();

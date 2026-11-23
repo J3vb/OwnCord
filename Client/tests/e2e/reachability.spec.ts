@@ -118,7 +118,7 @@ for (const layout of ["classic", "deck"] as const) {
     });
 
     test("People is reached through Home and opens its view", async ({ page }) => {
-      await page.getByTestId("server-rail-home").click();
+      if (layout === "classic") await page.getByTestId("server-rail-home").click();
       const people = page.getByTestId("dm-people-entry");
       await expectReached(people);
       await page.keyboard.press("Enter");
@@ -126,7 +126,7 @@ for (const layout of ["classic", "deck"] as const) {
     });
 
     test("Message requests is reached through Home and opens its view", async ({ page }) => {
-      await page.getByTestId("server-rail-home").click();
+      if (layout === "classic") await page.getByTestId("server-rail-home").click();
       const requests = page.getByTestId("dm-requests-entry");
       await expect(requests).toHaveAccessibleName("Message requests, 1 waiting");
       await expectReached(requests);

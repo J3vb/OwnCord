@@ -253,3 +253,106 @@ html.layout-deck .server-tree [role="treeitem"][aria-current="page"] .ch-name {
 html.layout-deck.high-contrast .server-tree [role="treeitem"][aria-current="page"] {
   background: linear-gradient(90deg, var(--bg-active), transparent 70%);
 }
+
+/* ── The Direct folder (opt-D1): a header like a category's, then People, Message
+   requests and every conversation, one level under it. The group wrapper
+   (data-tree-group) already hangs from the dotted guide. ── */
+html.layout-deck .server-tree-direct-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 24px;
+  padding: 2px 6px;
+  cursor: pointer;
+  user-select: none;
+}
+html.layout-deck .server-tree-direct-head:hover {
+  background: var(--bg-hover);
+}
+html.layout-deck .server-tree-direct-head .category-arrow {
+  display: inline-flex;
+  flex: none;
+  color: var(--text-muted);
+}
+html.layout-deck .server-tree-direct-head .dm-header-unread-badge {
+  margin-left: auto;
+}
+html.layout-deck .server-tree-direct-head .category-add-btn {
+  flex: none;
+  margin-left: 0;
+  color: var(--text-muted);
+}
+html.layout-deck .server-tree-direct-head .dm-header-unread-badge[hidden] + .category-add-btn {
+  margin-left: auto;
+}
+/* The "+" shows on hover or focus, as a category's does. */
+html.layout-deck .server-tree-direct-head:hover .category-add-btn,
+html.layout-deck .server-tree-direct-head:focus-within .category-add-btn {
+  opacity: 1;
+}
+
+/* People and Message requests: navigation rows, drawn as tree rows. */
+html.layout-deck .server-tree-direct .dm-nav-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: auto;
+  min-height: 24px;
+  margin: 0;
+  padding: 2px 6px 2px 14px;
+  border-radius: 0;
+  color: var(--text-normal);
+  font-size: var(--font-size-md);
+}
+html.layout-deck .server-tree-direct .dm-nav-row-icon {
+  width: 16px;
+  height: 16px;
+  color: var(--channel-icon);
+}
+html.layout-deck .server-tree-direct .dm-nav-row[aria-current="page"] .dm-nav-row-icon {
+  color: var(--accent-text);
+}
+html.layout-deck .server-tree-direct .dm-nav-row::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 9px;
+  border-top: 1px dotted var(--border-strong);
+  pointer-events: none;
+}
+
+/* A conversation: an 18px avatar that carries the one presence dot, then the name. */
+html.layout-deck .server-tree-direct .dm-avatar {
+  position: relative;
+  display: flex;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  border-radius: var(--radius-circle);
+  color: var(--on-fill);
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+}
+html.layout-deck .server-tree-direct .dm-avatar .dm-status {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  box-sizing: content-box;
+  width: 6px;
+  height: 6px;
+  border: 2px solid var(--bg-secondary);
+  border-radius: var(--radius-circle);
+}
+html.layout-deck .server-tree-direct .dm-avatar .dm-status.status-mobile {
+  width: 5px;
+  height: 8px;
+  border-radius: var(--radius-sm);
+}
+html.layout-deck .server-tree-direct .dm-member-count {
+  flex: none;
+  padding: 0;
+}

@@ -430,6 +430,7 @@ export const shards = {
     "src/lib/text/statusChoices.ts",
   ],
   "lib-rest-9": [
+    "src/features/direct-messages/dmFolder.ts",
     "src/features/direct-messages/pendingRequestNotice.ts",
     "src/features/updates/availableUpdate.ts",
     "src/features/voice/wsReady.ts",
@@ -463,6 +464,7 @@ export const shards = {
   ],
   "lib-rest-13": [
     "src/features/channels/channelRowModel.ts",
+    "src/features/direct-messages/followActiveChannel.ts",
     "src/features/messaging/pollRequests.ts",
     "src/lib/constants.ts",
     "src/lib/diagnostics/identifiers.ts",

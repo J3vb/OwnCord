@@ -321,6 +321,7 @@ export const shellText = defineCatalog("shell", {
   "members.notTimedOut": "{username} is not timed out",
 
   "dm.heading": "DIRECT MESSAGES",
+  "dm.folder": "Direct",
   "dm.new": "New DM",
   "dm.viewAll": "View all messages",
   "dm.viewAllCount": "View all messages ({count})",
