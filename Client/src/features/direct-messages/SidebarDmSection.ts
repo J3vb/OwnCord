@@ -18,15 +18,12 @@ import {
   setSidebarMode,
   toggleCategory,
 } from "@stores/ui.store";
-import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
 import { trackCurrentView } from "../navigation/contentView";
 import type { CountSource } from "../navigation/destinations";
 import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
-import { voiceStore } from "@stores/voice.store";
-import type { ModalInstance } from "@lib/ui/modalFactory";
-import { openLeaveConfirm, type DmMenuActions, type DmMenuConvo } from "./dmContextMenu";
-import { buildDmRow, dmRowSignature } from "./sidebarDmRow";
+import type { DmMenuActions } from "./dmContextMenu";
+import { buildDmRow, createLeavePrompt, dmRowSignature, watchDmListInputs } from "./sidebarDmRow";
 import { onPrefChange } from "@lib/prefs/preferences";
 
 // ---------------------------------------------------------------------------
@@ -68,7 +65,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   const listLifecycle = new Disposable();
   // Each row's menu listeners die with the row, not with the section.
   const rowOwners = new Map<Element, Disposable>();
-  let leavePrompt: { channelId: number; modal: ModalInstance } | null = null;
+  const { confirmLeave, closeIfGone } = createLeavePrompt(listLifecycle.signal);
 
   // --- Root container ---
   const dmSection = createElement("div", { class: "sidebar-dm-section" });
@@ -177,13 +174,6 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
 
   // --- Render logic ---
 
-  function confirmLeave(convo: DmMenuConvo, onClose: (channelId: number) => void): void {
-    leavePrompt = {
-      channelId: convo.channelId,
-      modal: openLeaveConfirm(convo, onClose, listLifecycle.signal),
-    };
-  }
-
   function renderDmListItems(): void {
     const dmChannels = dmStore.getState().channels;
     const displayChannels = dmChannels.slice(0, 3);
@@ -205,10 +195,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
         rowOwners.delete(el);
       },
     });
-    if (leavePrompt !== null && !dmChannels.some((c) => c.channelId === leavePrompt?.channelId)) {
-      leavePrompt.modal.close();
-      leavePrompt = null;
-    }
+    closeIfGone(dmChannels);
     // One Tab stop; arrows/Home/End step within the preview list.
     setRovingTabindex(dmList, "[data-testid='dm-entry']");
 
@@ -247,31 +234,8 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // A clock-format change relabels the preview times in place.
   onPrefChange(["timeFormat", "dateFormat"], () => renderDmListItems(), listLifecycle.signal);
 
-  // A mute toggled from a row menu (or Settings) is not in a store.
-  window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDmListItems(), {
-    signal: listLifecycle.signal,
-  });
-  // The live-call glyph follows who is in each DM's voice channel. Occupied
-  // channels only: a speaking tick replaces voiceUsers too and must not redraw.
-  unsubs.push(
-    voiceStore.subscribeSelector(
-      (s) =>
-        [...s.voiceUsers]
-          .filter(([, users]) => users.size > 0)
-          .map(([id]) => id)
-          .join(","),
-      () => renderDmListItems(),
-    ),
-  );
-
-  // --- Store subscription ---
-  const unsubDmSection = dmStore.subscribeSelector(
-    (s) => s.channels,
-    () => {
-      renderDmListItems();
-    },
-  );
-  unsubs.push(unsubDmSection);
+  // A mute, a call starting or ending, and the DM list itself redraw the preview.
+  watchDmListInputs(listLifecycle.signal, unsubs, renderDmListItems);
 
   // --- Collapse toggle ---
   function paintCollapsed(): void {

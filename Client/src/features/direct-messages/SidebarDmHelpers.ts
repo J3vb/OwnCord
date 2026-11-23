@@ -193,9 +193,9 @@ function dmActivityFields(dm: DmChannel): Pick<DmConversation, "activity" | "act
   return shown === null ? {} : { activity: shown.text, activityIcon: shown.icon };
 }
 
-export function buildDmConversations(activeChannelId: number | null): readonly DmConversation[] {
-  const dmChannels = dmStore.getState().channels;
-  return dmChannels.map((dm) => ({
+/** One DM as a list row draws it; `activeChannelId` marks the open one. */
+export function dmConversationOf(dm: DmChannel, activeChannelId: number | null): DmConversation {
+  return {
     channelId: dm.channelId,
     userId: dm.recipient.id,
     username: dmDisplayName(dm),
@@ -219,7 +219,11 @@ export function buildDmConversations(activeChannelId: number | null): readonly D
     muted: isChannelMuted(dm.channelId),
     ...timedMute(dm.channelId),
     active: dm.channelId === activeChannelId,
-  }));
+  };
+}
+
+export function buildDmConversations(activeChannelId: number | null): readonly DmConversation[] {
+  return dmStore.getState().channels.map((dm) => dmConversationOf(dm, activeChannelId));
 }
 
 /** The DM rows, each marked when someone is in that DM's call. */

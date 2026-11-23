@@ -74,6 +74,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/direct-messages/dm-call/dmCallVerify.ts",
   "src/features/direct-messages/dmAvatars.ts",
   "src/features/direct-messages/dmContextMenu.ts",
+  "src/features/direct-messages/dmEntries.ts",
   "src/features/direct-messages/dmConversation.ts",
   "src/features/direct-messages/dmRow.ts",
   "src/features/direct-messages/outgoingCallFeedback.ts",

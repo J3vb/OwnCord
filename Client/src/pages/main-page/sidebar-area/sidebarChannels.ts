@@ -5,6 +5,7 @@ import type { ChannelType } from "@lib/types";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { errorText } from "@lib/api";
 import { createChannelSidebar } from "../../../features/channels/ChannelSidebar";
+import { createDmFolder } from "../../../features/direct-messages/dmFolder";
 import { openEditChannelModal } from "../../../features/channels/editChannelModal";
 import { rollBackRejectedReorders } from "../../../features/channels/channelReorderRollback";
 import { withThreadsStore } from "@stores/threadsLoader";
@@ -74,8 +75,10 @@ export function mountChannelSidebar(sc: SidebarScope): void {
 
   sc.buildChannelSidebar = function buildChannelSidebar(): MountableComponent {
     const sidebarVoice = createSidebarVoiceCallbacks(sc.ws);
+    const tree = runningScreenLayout() === "deck";
     return createChannelSidebar({
-      tree: runningScreenLayout() === "deck",
+      tree,
+      ...(tree && { direct: () => createDmFolder(sc.dmFolderOptions()) }),
       onVoiceJoin: sidebarVoice.onVoiceJoin,
       onOpenCall: () => sc.opts.onOpenCall?.(),
       onVoiceModerate: createVoiceModerationCallbacks(sc.ws),

@@ -2,7 +2,7 @@
  * Sidebar build step: the member section and switching the sidebar between
  * channels and DMs.
  */
-import { createElement, clearChildren } from "@lib/dom";
+import { createElement, clearChildren, appendChildren } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import type { DmSidebar } from "../../../features/direct-messages/DmSidebar";
 import { createVoiceModerationCallbacks } from "../VoiceCallbacks";
@@ -21,9 +21,11 @@ import { uiStore } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
-import { createDmNavRow } from "../../../features/direct-messages/dmNavRow";
-import { navigationText } from "../../../i18n/navigation";
+import { buildDmEntries } from "../../../features/direct-messages/dmEntries";
+import { followActiveChannel } from "../../../features/direct-messages/followActiveChannel";
+import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { mountDmPhoneHead } from "../../../features/direct-messages/sidebarDmPhoneHead";
+import type { DmFolderOptions } from "../../../features/direct-messages/dmFolder";
 import type { SidebarScope } from "./sidebarScope";
 
 /** Destroy the mounted content and everything the previous mode added. */
@@ -46,44 +48,6 @@ function teardownSidebarContent(sc: SidebarScope): void {
   }
   sc.channelModeUnsubs = [];
   sc.destroyMemberSection();
-}
-
-/** The People and Message requests rows at the top of DM mode. The badge is
- *  the pending-request count, kept apart from the unread counts. */
-function buildDmEntries(sc: SidebarScope): HTMLElement {
-  const requests = sc.opts.destinations?.requests;
-  const section = createElement("div", { class: "dm-requests-section" });
-  const open = (view: "people" | "requests") => (opener: HTMLElement) =>
-    sc.opts.onOpenView?.(view, opener);
-  if (sc.opts.destinations?.people !== undefined) {
-    const people = createDmNavRow(
-      {
-        testId: "dm-people-entry",
-        icon: "users",
-        label: navigationText("people.title"),
-        view: "people",
-        onOpen: open("people"),
-      },
-      sc.channelModeUnsubs,
-    );
-    section.appendChild(people);
-  }
-  if (requests !== undefined) {
-    const entry = createDmNavRow(
-      {
-        testId: "dm-requests-entry",
-        icon: "inbox",
-        label: navigationText("requests.row"),
-        view: "requests",
-        onOpen: open("requests"),
-        count: requests.pending,
-        countLabel: (count) => navigationText("requests.rowWaiting", { count }),
-      },
-      sc.channelModeUnsubs,
-    );
-    section.appendChild(entry);
-  }
-  return section;
 }
 
 /**
@@ -141,7 +105,40 @@ function mountDmSidebarRefresh(sc: SidebarScope): void {
   sc.channelModeUnsubs.push(unsubDmActive);
 }
 
+const deck = (): boolean => runningScreenLayout() === "deck";
+
+/** The compact DM preview, above the channels in the server header's content slot. */
+function mountDmPreview(sc: SidebarScope): void {
+  const { onSelectDm, onNewDm, menu } = sc.dmFolderOptions();
+  const dmSectionResult = createSidebarDmSection({
+    pendingRequests: sc.opts.destinations?.requests?.pending,
+    onOpenRequests: (opener) => sc.opts.onOpenView?.("requests", opener),
+    onSelectDm,
+    onNewDm,
+    menu,
+  });
+  sc.channelModeUnsubs.push(() => {
+    dmSectionResult.destroy();
+  });
+  sc.contentSlot.appendChild(dmSectionResult.element);
+}
+
 export function mountMembersAndMode(sc: SidebarScope): void {
+  /** The DM rows' actions, shared by the preview above the channels and the Direct folder. */
+  sc.dmFolderOptions = function dmFolderOptions(): DmFolderOptions {
+    return {
+      onSelectDm: (dm) => {
+        selectDmConversation(dm, sc.dmDeps);
+      },
+      onNewDm: () => {
+        sc.showMemberPicker();
+      },
+      menu: sc.dmMenuActions(),
+      destinations: sc.opts.destinations,
+      onOpenView: sc.opts.onOpenView,
+    };
+  };
+
   /** Call a user: open the DM first, then start the call in it. An
    *  existing DM is selected at once; a new one starts the call in
    *  `handleCreateDm`'s onReady, once it is the active channel `startCall`
@@ -173,7 +170,9 @@ export function mountMembersAndMode(sc: SidebarScope): void {
    *  stored layout. It appends to `contentSlot`, so the channel list above it
    *  keeps its DOM. */
   sc.syncMemberSection = function syncMemberSection(): void {
-    const wanted = uiStore.getState().sidebarMode === "channels" && loadMemberLayout() === "left";
+    // Under Deck the tree never swaps out, so the left member section outlasts DM mode.
+    const inMode = deck() || uiStore.getState().sidebarMode === "channels";
+    const wanted = inMode && loadMemberLayout() === "left";
     if (wanted && sc.memberSection === null) {
       // The panel comes from the one factory every host shares, so the
       // callback wiring exists once.
@@ -209,25 +208,8 @@ export function mountMembersAndMode(sc: SidebarScope): void {
     const innerSlot = createElement("div", { class: "sidebar-content-inner" });
 
     if (mode === "channels") {
-      // --- DM section (above channels, below server header) ---
-      // --- DM section (above channels, below server header) ---
-      const dmSectionResult = createSidebarDmSection({
-        pendingRequests: sc.opts.destinations?.requests?.pending,
-        onOpenRequests: (opener) => sc.opts.onOpenView?.("requests", opener),
-        onSelectDm: (dm) => {
-          selectDmConversation(dm, sc.dmDeps);
-        },
-        onNewDm: () => {
-          sc.showMemberPicker();
-        },
-        menu: sc.dmMenuActions(),
-      });
-      sc.channelModeUnsubs.push(() => {
-        dmSectionResult.destroy();
-      });
-
-      // DM section goes first (above channels)
-      sc.contentSlot.appendChild(dmSectionResult.element);
+      // The compact preview above the channels is Classic's; Deck has the Direct folder.
+      if (!deck()) mountDmPreview(sc);
 
       const channelSidebar = sc.buildChannelSidebar();
       channelSidebar.mount(innerSlot);
@@ -241,8 +223,15 @@ export function mountMembersAndMode(sc: SidebarScope): void {
     } else {
       // People and Message requests at the top of DM mode.
       mountDmPhoneHead(sc, sc.channelModeUnsubs);
-      const section = buildDmEntries(sc);
-      if (section.childElementCount > 0) sc.contentSlot.appendChild(section);
+      const entries = buildDmEntries(
+        { destinations: sc.opts.destinations, onOpenView: sc.opts.onOpenView },
+        sc.channelModeUnsubs,
+      );
+      if (entries.length > 0) {
+        const section = createElement("div", { class: "dm-requests-section" });
+        appendChildren(section, ...entries);
+        sc.contentSlot.appendChild(section);
+      }
 
       const dmSidebar = sc.buildDmSidebar();
       dmSidebar.mount(innerSlot);
@@ -259,15 +248,23 @@ export function mountMembersAndMode(sc: SidebarScope): void {
   // Initial mount based on current store state
   sc.initialMode = uiStore.getState().sidebarMode;
 
-  sc.mountSidebarContent(sc.initialMode);
+  sc.mountSidebarContent(deck() ? "channels" : sc.initialMode);
 
-  // Subscribe to sidebar mode changes
-  sc.unsubSidebarMode = uiStore.subscribeSelector(
-    (s) => s.sidebarMode,
-    (mode) => {
-      sc.mountSidebarContent(mode);
-    },
-  );
-
-  sc.unsubscribers.push(sc.unsubSidebarMode);
+  if (deck()) {
+    // The tree never swaps out: DM mode only lights the rail's Home, and leaves when a channel opens.
+    const follower = new Disposable();
+    followActiveChannel(follower, () => {
+      sc.channelBeforeDm = null;
+    });
+    sc.unsubscribers.push(() => follower.destroy());
+  } else {
+    // Subscribe to sidebar mode changes
+    sc.unsubSidebarMode = uiStore.subscribeSelector(
+      (s) => s.sidebarMode,
+      (mode) => {
+        sc.mountSidebarContent(mode);
+      },
+    );
+    sc.unsubscribers.push(sc.unsubSidebarMode);
+  }
 }

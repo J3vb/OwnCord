@@ -65,7 +65,7 @@ function buildBody(convo: DmConversation): HTMLDivElement {
 
 /** Participant count, groups only: the label may be a name that says nothing
  *  about size, and "who else is in here" is the first thing you want to know. */
-function buildMemberCount(convo: DmConversation): HTMLElement {
+export function buildMemberCount(convo: DmConversation): HTMLElement {
   const count = (convo.participants ?? []).length + 1;
   const countEl = createElement(
     "span",

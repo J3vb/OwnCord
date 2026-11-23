@@ -4,6 +4,7 @@ import type { Disposable } from "@lib/disposable";
 import type { ChannelType } from "@lib/types";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { DmSidebar } from "../../../features/direct-messages/DmSidebar";
+import type { DmFolderOptions } from "../../../features/direct-messages/dmFolder";
 import type { DmMenuActions } from "../../../features/direct-messages/dmContextMenu";
 import type { VoiceWidgetOptions } from "../../../features/voice/VoiceWidget";
 import type { SidebarMemberSectionResult } from "../SidebarMemberSection";
@@ -149,6 +150,8 @@ export interface SidebarScope {
   /** The DM row menu's actions, shared by the full list and the compact preview. */
   dmMenuActions: () => DmMenuActions;
   buildDmSidebar: () => DmSidebar;
+  /** The DM rows' actions and destinations: the preview's, and the Direct folder's. */
+  dmFolderOptions: () => DmFolderOptions;
   /** Call a user: open the DM first, then start the call in it. An
    *  existing DM is selected at once; a new one starts the call in
    *  `handleCreateDm`'s onReady, once it is the active channel `startCall`

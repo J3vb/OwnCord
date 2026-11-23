@@ -6,10 +6,12 @@
  *   1 channelRow.view   2 voiceRow.view (+ voiceUserRow.view)   3 voiceRowModel
  *   4 channelListRender 5 ChannelSidebar   6 channelRowBinders  7 categoryMenu
  *   8 volumeMenu + voiceSidebarRows        9 dragMove
+ *   10 Direct folder: dmFolder, sidebarDmRow, dmNavRow and the `direct` mount in ChannelSidebar
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/channelSidebarMocks";
 import { createChannelSidebar } from "../../../src/features/channels/ChannelSidebar";
+import type { TreeSection } from "../../../src/features/channels/channelSidebarTypes";
 import { drawVoiceChannelChrome } from "../../../src/features/channels/voiceRow.view";
 import { voiceChannelChrome } from "../../../src/features/channels/voiceRowModel";
 import { channelsStore, setActiveChannel, setChannels } from "../../../src/stores/channels.store";
@@ -584,5 +586,66 @@ describe("channel list in deck only", () => {
       new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }),
     );
     expect(mocks.mockOpenUserProfilePopup).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("[10] the Direct folder mount", () => {
+  function fakeFolder(): {
+    section: TreeSection;
+    destroy: ReturnType<typeof vi.fn>;
+    onRender: ReturnType<typeof vi.fn>;
+  } {
+    const element = document.createElement("div");
+    element.className = "fake-folder";
+    element.innerHTML = '<div role="treeitem" data-tree-kind="head" tabindex="-1">Direct</div>';
+    const destroy = vi.fn();
+    const onRender = vi.fn();
+    return { section: { element, destroy, onRender }, destroy, onRender };
+  }
+
+  function mountWith(tree: boolean, direct: () => TreeSection): void {
+    sidebar?.destroy?.();
+    setChannels(SEED);
+    sidebar = createChannelSidebar({ tree, direct, onVoiceJoin, onOpenCall });
+    sidebar.mount(container);
+  }
+
+  it("deck mounts the folder inside the tree after the list, and the first render stamps it", () => {
+    const folder = fakeFolder();
+    mountWith(true, () => folder.section);
+    const tree = container.querySelector(".server-tree")!;
+    expect(tree.lastElementChild).toBe(folder.section.element);
+    expect(tree.querySelector(".channel-list")!.nextElementSibling).toBe(folder.section.element);
+    expect(
+      folder.section.element.querySelector("[role=treeitem]")!.getAttribute("aria-level"),
+    ).toBe("1");
+    // Registered before the first render, which is what stamped it.
+    expect(folder.onRender).toHaveBeenCalledTimes(1);
+  });
+
+  it("a redraw the folder reports restamps the tree", () => {
+    const folder = fakeFolder();
+    mountWith(true, () => folder.section);
+    const redraw = folder.onRender.mock.calls[0]![0] as () => void;
+    const extra = document.createElement("div");
+    extra.setAttribute("role", "treeitem");
+    extra.dataset["treeKind"] = "head";
+    folder.section.element.appendChild(extra);
+    redraw();
+    expect(extra.getAttribute("aria-level")).toBe("1");
+  });
+
+  it("destroying the sidebar destroys the folder once", () => {
+    const folder = fakeFolder();
+    mountWith(true, () => folder.section);
+    sidebar!.destroy?.();
+    expect(folder.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("classic never builds the folder", () => {
+    const build = vi.fn(() => fakeFolder().section);
+    mountWith(false, build);
+    expect(build).not.toHaveBeenCalled();
+    expect(container.querySelector(".fake-folder")).toBeNull();
   });
 });

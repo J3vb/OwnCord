@@ -207,3 +207,28 @@ describe("the tree policy", () => {
     ).toContain("literal colour rgb");
   });
 });
+
+describe("the Direct folder rules", () => {
+  it("styles the header, the navigation rows and the avatar with its presence dot", () => {
+    const selectors = treeRules().flatMap((r) => r.selectors);
+    for (const wanted of [
+      "html.layout-deck .server-tree-direct-head",
+      "html.layout-deck .server-tree-direct .dm-nav-row",
+      "html.layout-deck .server-tree-direct .dm-avatar",
+      "html.layout-deck .server-tree-direct .dm-avatar .dm-status",
+    ]) {
+      expect(selectors).toContain(wanted);
+    }
+  });
+
+  it("keeps the dot's ring and the avatar text on allowed tokens", () => {
+    const dot = treeRules().find((r) =>
+      r.selectors.includes("html.layout-deck .server-tree-direct .dm-avatar .dm-status"),
+    )!;
+    const ring = dot.declarations.find((d) => d.property === "border")!;
+    expect(ring.vars).toEqual(["--bg-secondary"]);
+    expect(breaches("html.layout-deck .x { border: 2px solid var(--status-ring); }")).not.toEqual(
+      [],
+    );
+  });
+});
