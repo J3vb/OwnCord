@@ -13,9 +13,8 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import { Disposable } from "@lib/disposable";
 import { membersStore } from "@stores/members.store";
 import { channelsStore } from "@stores/channels.store";
-import type { MemberItemModel } from "./memberRow.view";
-import { classicMemberRows } from "./memberRowRenderer";
-import { listenForFlyingScroll } from "./scrollReport";
+import { classicMemberRows, classicView, type MemberRowModelBase } from "./memberRowRenderer";
+import { createScrollWatch } from "./memberListScroll";
 import {
   buildModel,
   flattenModel,
@@ -29,6 +28,7 @@ import {
   VIRTUAL_ABOVE,
   measureKindHeights,
   createMemberSearchInput,
+  firstRowInView,
   memberModelFor,
   ownPopupClosers,
   navigationTarget,
@@ -44,8 +44,12 @@ export interface MemberListComponent extends MountableComponent {
   focusMember(id: number): HTMLElement | null;
 }
 
+/** No group is folded unless the owner passes a collapsed set. */
+const NONE_COLLAPSED: ReadonlySet<string> = new Set();
+
 export function createMemberList(opts: MemberListOptions): MemberListComponent {
-  const rowRenderer = opts.rows ?? classicMemberRows;
+  const view = opts.view ?? classicView(opts.rows ?? classicMemberRows);
+  const flatten = opts.flatten ?? flattenModel;
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
   let searchWrap: HTMLDivElement | null = null;
@@ -79,14 +83,10 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
   let offsets = buildOffsets([]);
   let offsetsDirty = true;
   let revealKey: string | null = null;
-  const heights = [...rowRenderer.estimatedHeights];
+  const heights = view.use((rows) => [...rows.estimatedHeights]);
   const kindByEl = new WeakMap<Element, number>();
   const topByKey = new Map<string, number>();
-  const samples: (Element | null)[] = [null, null, null, null];
-  const sampleSizes = new WeakMap<Element, string>();
-  let scroller: HTMLElement | null = null;
-  let observer: ResizeObserver | null = null;
-  let scrollBinding: Disposable | null = null;
+  const watch = createScrollWatch(schedule);
 
   function rowEl(id: number): HTMLElement | null {
     return root?.querySelector<HTMLElement>(`[data-testid="member-${id}"]`) ?? null;
@@ -108,32 +108,12 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     revealKey = null;
   }
 
-  /** The row to focus when the member is gone: in virtual mode the first drawn
-   *  row inside the scroller's view, so focus never drags the list to a pinned
-   *  or overscan row. */
-  function fallbackRow(): HTMLElement | null {
-    const first = root?.querySelector<HTMLElement>(".member-item") ?? null;
-    if (!virtual || scroller === null || root === null) return first;
-    const view = scroller.getBoundingClientRect();
-    // The scroll padding is the strip under the sticky search box, which
-    // scrollIntoView keeps clear, so a row there would still scroll.
-    const css = getComputedStyle(scroller);
-    const top = view.top + scroller.clientTop + (parseFloat(css.scrollPaddingTop) || 0);
-    const bottom =
-      view.top +
-      scroller.clientTop +
-      scroller.clientHeight -
-      (parseFloat(css.scrollPaddingBottom) || 0);
-    for (const row of root.querySelectorAll<HTMLElement>(".member-item")) {
-      const box = row.getBoundingClientRect();
-      if (box.top >= top && box.bottom <= bottom) return row;
-    }
-    return first;
-  }
-
   function focusMember(id: number): HTMLElement | null {
     reveal(id);
-    const el = rowEl(id) ?? fallbackRow();
+    // In virtual mode the fallback is the first drawn row inside the
+    // scroller's view, so focus never drags the list to a pinned or overscan row.
+    const el =
+      rowEl(id) ?? (root === null ? null : firstRowInView(root, virtual ? watch.scroller() : null));
     if (el === null) {
       // No rows left (a search nobody matches): the search box keeps focus in the list.
       const search = searchWrap?.querySelector<HTMLElement>(".member-search") ?? null;
@@ -173,6 +153,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
 
   function reconcileRows(list: readonly ListItem[]): void {
     if (root === null) return;
+    const host = root;
     // A row that holds focus and is filtered away or removed drops focus to
     // the page; it goes to the same member if still shown, else the first row.
     const focused = document.activeElement;
@@ -180,34 +161,37 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
       focused instanceof HTMLElement && focused.parentElement === root
         ? idByEl.get(focused)
         : undefined;
-    reconcileModels<ListItem, MemberItemModel>(root, list, {
-      key: (item) => item.key,
-      model: rowRenderer.model,
-      // Status is a patch field: it changes the dot in place without a rebuild.
-      // A row rebuilt while its context menu is open drops focus to the page
-      // when the menu closes (accepted; only its own name, avatar, custom
-      // status or role colour changing does this).
-      patch: rowRenderer.patch,
-      create: (drawn, atEvent) => {
-        const el = rowRenderer.draw(drawn);
-        if (drawn.kind === "row") {
-          const owner = new Disposable();
-          createMemberItem(el, atEvent, opts, hooks, owner.signal);
-          ownerByEl.set(el, owner);
-          idByEl.set(el, drawn.id);
-        }
-        kindByEl.set(el, rowRenderer.modelKind(drawn));
-        return el;
-      },
-      dispose: (el) => {
-        ownerByEl.get(el)?.destroy();
-        ownerByEl.delete(el);
-        idByEl.delete(el);
-      },
-    });
+    view.use((rows, ctx) =>
+      reconcileModels(host, list, {
+        key: (item) => item.key,
+        model: (item) => rows.model(item, ctx),
+        // Status is a patch field: it changes the dot in place without a rebuild.
+        // A row rebuilt while its context menu is open drops focus to the page
+        // when the menu closes (accepted; only its own name, avatar, custom
+        // status or role colour changing does this).
+        patch: rows.patch,
+        create: (drawn, atEvent) => {
+          const el = rows.draw(drawn);
+          const base: MemberRowModelBase = drawn;
+          if (base.kind === "row") {
+            const owner = new Disposable();
+            createMemberItem(el, atEvent, opts, hooks, owner.signal);
+            ownerByEl.set(el, owner);
+            idByEl.set(el, base.id);
+          }
+          kindByEl.set(el, rows.modelKind(drawn));
+          return el;
+        },
+        dispose: (el) => {
+          ownerByEl.get(el)?.destroy();
+          ownerByEl.delete(el);
+          idByEl.delete(el);
+        },
+      }),
+    );
     // The container holds exactly one child per item, in order.
     list.forEach((item, i) => {
-      const el = root?.children[i];
+      const el = host.children[i];
       if (el !== undefined) place(el, item.key);
     });
     if (
@@ -225,7 +209,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     const members = membersStore.getState().members;
     const roles = channelsStore.getState().roles;
     model = model === null ? buildModel(members, roles) : updateModel(model, members, roles);
-    items = flattenModel(model, query);
+    items = flatten(model, query, NONE_COLLAPSED);
     reconcileRows(items);
   }
 
@@ -255,44 +239,6 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
   function schedule(): void {
     if (!virtual || frameId !== null || root === null) return;
     frameId = requestAnimationFrame(runFrame);
-  }
-
-  function findScroller(): HTMLElement | null {
-    for (let el = root?.parentElement ?? null; el !== null; el = el.parentElement) {
-      const overflow = getComputedStyle(el).overflowY;
-      if (overflow === "auto" || overflow === "scroll") return el;
-    }
-    return null;
-  }
-
-  function bindScroller(next: HTMLElement | null): void {
-    if (next === scroller) return;
-    scrollBinding?.destroy();
-    scrollBinding = null;
-    if (scroller !== null) observer?.unobserve(scroller);
-    scroller = next;
-    if (next === null) return;
-    if (root !== null) observer?.unobserve(root);
-    const binding = new Disposable();
-    scrollBinding = binding;
-    listenForFlyingScroll(next, binding.signal, schedule);
-    observer?.observe(next);
-  }
-
-  // A scroller or a sampled row that changed size (collapse and expand, drag
-  // resize, a font-size change) needs a frame. A sample's first report is only
-  // its starting size, so a new sample never schedules one.
-  function onResize(entries: readonly ResizeObserverEntry[]): void {
-    let changed = false;
-    for (const { target, contentRect } of entries) {
-      const size = `${contentRect.width}x${contentRect.height}`;
-      const before = sampleSizes.get(target);
-      sampleSizes.set(target, size);
-      if (before !== size && (before !== undefined || target === scroller || target === root)) {
-        changed = true;
-      }
-    }
-    if (changed) schedule();
   }
 
   /** Re-measure each kind from the rows in the DOM; true when a height changed. */
@@ -332,6 +278,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     const padTop = parseFloat(css.paddingTop) || 0;
     const padBottom = parseFloat(css.paddingBottom) || 0;
     const borderBox = css.boxSizing === "border-box";
+    const scroller = watch.scroller();
     if (scroller !== null) {
       const viewTop =
         scroller.getBoundingClientRect().top +
@@ -359,33 +306,18 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     root.style.height = `${total}px`;
   }
 
-  function ensureObserver(): void {
-    if (observer === null && typeof ResizeObserver !== "undefined") {
-      observer = new ResizeObserver(onResize);
-      disposable.addCleanup(() => observer?.disconnect());
-    }
-  }
-
-  function ensureScroller(rootEl: HTMLElement): void {
-    // Until a scroller is found (the panel is built before its host appends
-    // it) the root itself is watched, so connecting it schedules a frame.
-    if (scroller === null || !scroller.contains(rootEl)) {
-      bindScroller(findScroller());
-      if (scroller === null) observer?.observe(rootEl);
-    }
-  }
-
   function syncItems(): void {
     model = memberModelFor(membersStore.getState().members, channelsStore.getState().roles);
     if (model !== flatModel || query !== flatQuery) {
       flatModel = model;
       flatQuery = query;
-      items = flattenModel(model, query);
+      items = flatten(model, query, NONE_COLLAPSED);
       itemIndex = new Map(items.map((item, at) => [item.key, at]));
       offsetsDirty = true;
     }
     if (queryChanged) {
       queryChanged = false;
+      const scroller = watch.scroller();
       if (scroller !== null && scroller.scrollTop > 0) scroller.scrollTop = 0;
     }
   }
@@ -393,7 +325,9 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
   function paintPasses(): void {
     for (let pass = 0; pass < 2; pass++) {
       if (offsetsDirty) {
-        offsets = buildOffsets(items.map((item) => heights[rowRenderer.itemKind(item)]!));
+        offsets = view.use((rows) =>
+          buildOffsets(items.map((item) => heights[rows.itemKind(item)]!)),
+        );
         offsetsDirty = false;
       }
       paint();
@@ -409,33 +343,14 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     if (root === null || !virtual || inFrame) return;
     inFrame = true;
     try {
-      ensureObserver();
-      ensureScroller(root);
+      watch.bind(root);
       syncItems();
       measure();
       paintPasses();
-      sampleRows();
+      watch.sample(root, kindByEl);
     } finally {
       inFrame = false;
     }
-  }
-
-  /** Watch one row of each kind, so a height change that moves nothing else
-   *  still reaches `onResize`. */
-  function sampleRows(): void {
-    if (root === null) return;
-    const first: (Element | null)[] = [null, null, null, null];
-    for (const child of root.children) {
-      const kind = kindByEl.get(child);
-      if (kind !== undefined && first[kind] === null) first[kind] = child;
-    }
-    first.forEach((el, kind) => {
-      const old = samples[kind];
-      if (el === old) return;
-      if (old !== null && old !== undefined) observer?.unobserve(old);
-      if (el !== null) observer?.observe(el);
-      samples[kind] = el;
-    });
   }
 
   function mount(container: Element): void {
@@ -465,7 +380,10 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
       },
     );
 
-    disposable.addCleanup(() => scrollBinding?.destroy());
+    // The row context (the renderer's state that is not on the member) patches
+    // the drawn rows when it changes.
+    view.subscribe(disposable.signal, render);
+    disposable.addCleanup(() => watch.destroy());
     container.append(searchWrap, root);
   }
 

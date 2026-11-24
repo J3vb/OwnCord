@@ -1,6 +1,7 @@
 /**
  * MemberList helpers that touch no DOM: the virtual-list sizing constants,
  * row height kinds, the model memo and the plain-data model a row draws.
+ * `firstRowInView` and `scrollParentOf` read layout, and change nothing.
  */
 
 import { isImeCommit } from "@lib/text/ime";
@@ -162,6 +163,40 @@ export function measureKindHeights(
     changed = true;
   }
   return changed;
+}
+
+/** The first row fully inside `scroller`'s view, below its scroll padding,
+ *  else the first row. The scroll padding is the strip under the sticky search
+ *  box, which scrollIntoView keeps clear, so a row there would still scroll.
+ *  With no scroller (full mode) it is the first row. */
+export function firstRowInView(
+  root: HTMLElement,
+  scroller: HTMLElement | null,
+): HTMLElement | null {
+  const first = root.querySelector<HTMLElement>(".member-item");
+  if (scroller === null) return first;
+  const view = scroller.getBoundingClientRect();
+  const css = getComputedStyle(scroller);
+  const top = view.top + scroller.clientTop + (parseFloat(css.scrollPaddingTop) || 0);
+  const bottom =
+    view.top +
+    scroller.clientTop +
+    scroller.clientHeight -
+    (parseFloat(css.scrollPaddingBottom) || 0);
+  for (const row of root.querySelectorAll<HTMLElement>(".member-item")) {
+    const box = row.getBoundingClientRect();
+    if (box.top >= top && box.bottom <= bottom) return row;
+  }
+  return first;
+}
+
+/** The nearest ancestor of `el` that scrolls vertically, or null. */
+export function scrollParentOf(el: HTMLElement): HTMLElement | null {
+  for (let up = el.parentElement; up !== null; up = up.parentElement) {
+    const overflow = getComputedStyle(up).overflowY;
+    if (overflow === "auto" || overflow === "scroll") return up;
+  }
+  return null;
 }
 
 /** The search box above the list. `onQuery` gets the text after each edit and
