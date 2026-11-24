@@ -2,6 +2,7 @@
 
 import { createElement } from "@lib/dom";
 import { createLogger } from "@lib/logger";
+import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { switcherOptions, type ServerSwitcherDeps } from "./switcherOptions";
 
 const log = createLogger("main-page");
@@ -9,9 +10,11 @@ const log = createLogger("main-page");
 /**
  * Classic's rail: appends its slot to `app`, marks `app` and loads the rail on
  * demand. The slot holds the rail's width while the rail's code loads, keeping
- * it out of the eager MainPage chunk.
+ * it out of the eager MainPage chunk. Command Deck draws its server tabs
+ * instead, so there it returns null and leaves `app` as it is.
  */
 export function mountServerRail(app: HTMLElement, deps: ServerSwitcherDeps): HTMLDivElement | null {
+  if (runningScreenLayout() === "deck") return null;
   const slot = createElement("div", { class: "server-rail-slot" });
   app.classList.add("has-server-rail");
   app.appendChild(slot);

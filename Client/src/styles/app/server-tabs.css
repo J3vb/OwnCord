@@ -1,12 +1,14 @@
 /* ═══ Command Deck top bar additions ═══ */
-/* Styles what the Deck mounts add to the top bar: the Direct button. Loaded
+/* Styles what the Deck mounts add to the top bar: the Direct button, the row
+   of server tabs under its first row, their menus and the Servers button that
+   takes the row's place in a short or narrow window (the fold). Loaded
    just before server-tree.css; deck.css stays last. Every selector is
    `html.layout-deck`, starts with `html.layout-deck `, or starts with
    `html.layout-deck.high-contrast `, so Classic is untouched.
    tests/unit/deck/server-tabs-css.test.ts enforces this file's rules.
 
    The bar's grid changes only through the classes the mounts add to it
-   (`has-deck-direct`); those selectors outrank deck.css's `.deck-top-bar`
+   (`has-deck-direct`, `has-tabs-row`, `has-server-tabs`); those selectors outrank deck.css's `.deck-top-bar`
    rules by specificity, so deck.css is never edited for them.
 
    The colour rule:
@@ -77,8 +79,287 @@ html.layout-deck .deck-direct-badge[hidden] {
   display: none;
 }
 
+/* ─── The server tabs: row 2 of the bar, outside the fold ─── */
+/* The fold is one query, (max-width: 640px), (max-height: 499px). These are
+   base rules with no query; the fold's block below holds only overrides, each
+   with the selector of the rule it overrides. */
+
+/* Row 2 is reserved before the tabs load, so nothing below the bar moves. */
+html.layout-deck .deck-top-bar.has-tabs-row {
+  grid-template-rows: minmax(var(--deck-top-min), auto) minmax(var(--deck-tabs-min), auto);
+  row-gap: 0;
+}
+/* Row 1 goes back to deck.css's three columns: the Direct button is in row 2. */
+html.layout-deck .deck-top-bar.has-server-tabs.has-deck-direct {
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 420px) minmax(0, 1fr);
+}
+html.layout-deck .deck-top-bar.has-server-tabs.has-deck-direct > .deck-direct {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  justify-self: end;
+  align-self: center;
+}
+html.layout-deck .deck-top-bar.has-server-tabs > .deck-servers-btn {
+  display: none;
+}
+html.layout-deck .deck-top-bar.has-server-tabs > .server-tabs {
+  grid-row: 2;
+  grid-column: 1 / -1;
+  align-self: end;
+  display: flex;
+  align-items: end;
+  gap: var(--deck-row-gap);
+  box-sizing: border-box;
+  min-width: 0;
+  min-height: var(--deck-tabs-min);
+  border-top: 1px solid var(--border);
+}
+/* The Direct button's place at the row's right end stays clear. */
+html.layout-deck .deck-top-bar.has-server-tabs.has-deck-direct > .server-tabs {
+  padding-inline-end: calc(var(--deck-direct-size) + var(--deck-row-gap));
+}
+/* The tabs replace the rail, so the user bar drops Switch server while they show. */
+html.layout-deck
+  .deck-top-bar.has-server-tabs
+  ~ .deck-status-bar
+  .user-bar
+  [data-testid="disconnect-btn"] {
+  display: none;
+}
+html.layout-deck .deck-top-bar.has-server-tabs ~ .deck-status-bar .user-bar .ub-controls {
+  gap: 6px;
+}
+
+/* The track never grows past the nav, so "+" sits right after the last tab. */
+html.layout-deck .server-tabs-track {
+  display: flex;
+  align-items: end;
+  gap: var(--deck-tab-gap);
+  flex: 0 1 auto;
+  min-width: 0;
+}
+html.layout-deck .server-tab {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-height: 30px;
+  max-width: 168px;
+  padding: 0 10px;
+  border: 0;
+  border-radius: 4px 4px 0 0;
+  background: var(--bg-tertiary);
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+}
+/* An author display rule would otherwise beat [hidden]. */
+html.layout-deck .server-tab[hidden] {
+  display: none;
+}
+html.layout-deck .server-tab:hover,
+html.layout-deck .server-tab[aria-expanded="true"] {
+  background: var(--bg-hover);
+}
+html.layout-deck .server-tab:focus-visible {
+  outline-offset: -2px;
+}
+/* The current tab joins the frame below, with the Ember line on top. */
+html.layout-deck .server-tab[aria-current="page"],
+html.layout-deck .server-tab-folder.active {
+  background: var(--bg-secondary);
+  color: var(--header-primary);
+  font-weight: 600;
+  box-shadow:
+    inset 0 2px 0 var(--accent-text),
+    inset 1px 0 0 var(--border),
+    inset -1px 0 0 var(--border);
+}
+html.layout-deck .server-tab-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.layout-deck .server-tab .server-rail-avatar {
+  flex: none;
+  width: 16px;
+  height: 16px;
+  font-size: 8px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+html.layout-deck .server-tab-glyph {
+  display: inline-flex;
+  flex: none;
+}
+html.layout-deck .server-tab-glyph svg {
+  width: 14px;
+  height: 14px;
+  fill: var(--folder-color);
+  stroke: none;
+}
+html.layout-deck .server-tab-count {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+html.layout-deck .server-tab-chevron {
+  flex: none;
+  color: var(--text-muted);
+}
+html.layout-deck .server-tabs-add {
+  flex: none;
+  align-self: center;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--deck-direct-size);
+  height: var(--deck-direct-size);
+  padding: 0;
+  border: 1px dashed var(--border-control);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+html.layout-deck .server-tabs-add svg {
+  width: 16px;
+  height: 16px;
+}
+html.layout-deck .server-tabs-add:hover,
+html.layout-deck .server-tabs-add[aria-expanded="true"],
+html.layout-deck .deck-servers-btn:hover,
+html.layout-deck .deck-servers-btn[aria-expanded="true"] {
+  background: var(--bg-hover);
+}
+html.layout-deck .server-tabs-add:focus-visible,
+html.layout-deck .deck-servers-btn:focus-visible {
+  outline-offset: -2px;
+}
+/* Shown only inside the fold; its display is set there. */
+html.layout-deck .deck-servers-btn {
+  align-items: center;
+  justify-self: start;
+  gap: 6px;
+  box-sizing: border-box;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  cursor: pointer;
+}
+html.layout-deck .deck-servers-btn > svg:first-child {
+  width: 14px;
+  height: 14px;
+}
+
+/* The menus from the tabs reuse .context-menu; these add the server rows'
+   icons, the dropdown's heading and the folder headings in "+N" and Servers. */
+html.layout-deck .server-tabs-menu .server-rail-avatar {
+  flex: none;
+  width: 18px;
+  height: 18px;
+  font-size: 9px;
+  border-radius: 4px;
+  overflow: hidden;
+}
+html.layout-deck .server-tabs-menu-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.layout-deck .server-tabs-menu-heading {
+  padding: 4px 10px;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 600;
+}
+html.layout-deck .server-tabs-menu-folder {
+  font-weight: 600;
+}
+html.layout-deck .server-tabs-menu [role="group"] > [role^="menuitem"] {
+  padding-inline-start: 28px;
+}
+
+/* High Contrast: the current tab also has a bottom line, so it is told apart without colour. */
+html.layout-deck.high-contrast .server-tab[aria-current="page"] {
+  box-shadow:
+    inset 0 2px 0 var(--accent-text),
+    inset 1px 0 0 var(--border),
+    inset -1px 0 0 var(--border),
+    inset 0 -1px 0 var(--header-primary);
+}
+
+/* ─── The fold: the row folds into the Servers button in row 1 ─── */
+@media (max-width: 640px), (max-height: 499px) {
+  html.layout-deck .deck-top-bar.has-tabs-row {
+    grid-template-rows: none;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs {
+    grid-template-columns: auto minmax(0, 1fr) minmax(160px, 420px) minmax(0, 1fr) auto;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs.has-deck-direct {
+    grid-template-columns: auto minmax(0, 1fr) minmax(160px, 420px) minmax(0, 1fr) auto;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs > .deck-servers-btn {
+    display: inline-flex;
+    grid-row: 1;
+    grid-column: 1;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs > .deck-top-name {
+    grid-row: 1;
+    grid-column: 2;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs > .deck-search {
+    grid-row: 1;
+    grid-column: 3;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs > .deck-connection {
+    grid-row: 1;
+    grid-column: 4;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs > .server-tabs {
+    display: none;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs.has-deck-direct > .deck-direct {
+    grid-row: 1;
+    grid-column: 5;
+  }
+  html.layout-deck
+    .deck-top-bar.has-server-tabs
+    ~ .deck-status-bar
+    .user-bar
+    [data-testid="disconnect-btn"] {
+    display: flex;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs ~ .deck-status-bar .user-bar .ub-controls {
+    gap: 2px;
+  }
+}
+
 @media (max-width: 640px) {
   html.layout-deck .deck-top-bar.has-deck-direct {
     grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs {
+    grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs.has-deck-direct {
+    grid-template-columns: auto minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  }
+  /* The Servers button keeps its name in aria-label, as search does. */
+  html.layout-deck .deck-servers-btn {
+    justify-content: center;
+    width: 28px;
+    padding: 0;
+  }
+  html.layout-deck .deck-servers-text,
+  html.layout-deck .deck-servers-btn .server-tab-chevron {
+    display: none;
   }
 }

@@ -1,6 +1,6 @@
 /**
  * Command Deck's Direct folder: it sits at the bottom of the server tree with
- * the rail showing, opening a DM keeps the channel list, and a click on a
+ * the server tabs showing, opening a DM keeps the channel list, and a click on a
  * channel that is not a DM ends DM mode, so the member column comes back and
  * the joined call opens.
  */
@@ -15,11 +15,11 @@ const dm = (page: Page, id: number) =>
 const memberList = (page: Page) => page.getByTestId("member-list");
 
 test.describe("Command Deck Direct folder", () => {
-  test("the folder header is visible at 1280 px with the rail, and the preview section is gone", async ({
+  test("the folder header is visible at 1280 px with the tabs, and the preview section is gone", async ({
     page,
   }) => {
     await startDirectScene(page, { viewport: { width: 1280, height: 800 } });
-    await expect(page.getByTestId("server-rail-home")).toBeVisible();
+    await expect(page.getByTestId("server-tabs")).toBeVisible();
     await expect(head(page)).toBeVisible();
     await expect(head(page)).toHaveAttribute("aria-expanded", "true");
     await expect(page.locator(".sidebar-dm-section")).toHaveCount(0);

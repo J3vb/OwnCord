@@ -249,7 +249,7 @@ export function focusDialog(
       previous.closest("[inert]") === null
     ) {
       previous.focus();
-      return;
+      if (document.activeElement === previous) return;
     }
     const target = fallback?.();
     if (target?.isConnected === true) target.focus();

@@ -12,7 +12,8 @@ import { applyDrop, type RailMutations } from "./serverRailMenus";
 export interface RailDrag {
   readonly source: (el: HTMLElement, ref: ItemRef) => void;
   readonly target: (el: HTMLElement, ref: ItemRef, opts: { readonly inFolder: boolean }) => void;
-  /** The one element whose drops that miss every target are caught, and under which markers are cleared. */
+  /** The one element whose drops that miss every target are caught, and under which markers are
+   *  cleared. Call it once per switcher: each call adds the root's listeners again. */
   readonly root: (el: HTMLElement) => void;
 }
 

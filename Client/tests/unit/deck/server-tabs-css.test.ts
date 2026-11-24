@@ -4,6 +4,7 @@
 // Ember top line, the count badge and the folder glyph.
 import { describe, expect, it } from "vitest";
 import { colourPolicyBreaches, parseDeckCss, type ColourPolicy } from "../../helpers/deck-css";
+import { preludesOf, type DeckDeclaration, type DeckRule } from "../../helpers/deck-css";
 import { appCssLines, sheetRules, unscopedSelectors as stray } from "../../helpers/deckSheet";
 
 const POLICY: ColourPolicy = {
@@ -124,5 +125,149 @@ describe("the server-tabs policy", () => {
     ["a non-layout var in a layout property", "html.layout-deck .a { padding: var(--space-2); }"],
   ])("fails on %s", (_name, css) => {
     expect(breaches(css).length).toBeGreaterThan(0);
+  });
+});
+
+const FOLD = "(max-width: 640px), (max-height: 499px)";
+const NARROW = "(max-width: 640px)";
+const TABS_DIRECT = "html.layout-deck .deck-top-bar.has-server-tabs.has-deck-direct";
+
+/** The rules whose selector list is exactly `selector`, under `media` (null: top level). */
+function exactRules(selector: string, media: string | null, rules = tabsRules()): DeckRule[] {
+  return rules.filter(
+    (r) => r.media === media && r.selectors.length === 1 && r.selectors[0] === selector,
+  );
+}
+
+/** The one declaration of `property` in the rule exactly `selector` under `media`. */
+function exactDeclaration(
+  selector: string,
+  property: string,
+  media: string | null,
+  rules = tabsRules(),
+): DeckDeclaration {
+  const found = exactRules(selector, media, rules)
+    .flatMap((r) => r.declarations)
+    .filter((d) => d.property === property);
+  expect(found, `${selector} { ${property} } under ${String(media)}`).toHaveLength(1);
+  return found[0]!;
+}
+
+/** The parse of `property: value` in a one-rule fixture, to compare with a parsed declaration. */
+function parsedValue(property: string, value: string): string {
+  const rule = parseDeckCss(`html.layout-deck .x { ${property}: ${value}; }`)[0]!;
+  return JSON.stringify(rule.declarations[0]!.value);
+}
+
+const valueOf = (d: DeckDeclaration): string => JSON.stringify(d.value);
+
+describe("server-tabs.css: the tab row and the fold", () => {
+  it("uses exactly two top-level media queries, the fold then (max-width: 640px), and no nested one", () => {
+    expect(preludesOf("app/server-tabs.css")).toEqual([FOLD, NARROW]);
+    expect([...new Set(tabsRules().map((r) => r.media))]).toEqual([null, FOLD, NARROW]);
+  });
+
+  it("at 640px names each grid rule by its exact selector and value", () => {
+    expect(valueOf(exactDeclaration(DIRECT_GRID, "grid-template-columns", NARROW))).toBe(
+      parsedValue("grid-template-columns", "minmax(0, 1fr) auto minmax(0, 1fr) auto"),
+    );
+    expect(valueOf(exactDeclaration(TABS_DIRECT, "grid-template-columns", NARROW))).toBe(
+      parsedValue("grid-template-columns", "auto minmax(0, 1fr) auto minmax(0, 1fr) auto"),
+    );
+  });
+
+  it("the row, the Servers button and Switch server are base rules with fold overrides on the same selector", () => {
+    const pairs: Array<[string, string, string, string]> = [
+      ["html.layout-deck .deck-top-bar.has-server-tabs > .server-tabs", "display", "flex", "none"],
+      [
+        "html.layout-deck .deck-top-bar.has-server-tabs > .deck-servers-btn",
+        "display",
+        "none",
+        "inline-flex",
+      ],
+      [
+        'html.layout-deck .deck-top-bar.has-server-tabs ~ .deck-status-bar .user-bar [data-testid="disconnect-btn"]',
+        "display",
+        "none",
+        "flex",
+      ],
+      [
+        "html.layout-deck .deck-top-bar.has-server-tabs ~ .deck-status-bar .user-bar .ub-controls",
+        "gap",
+        "6px",
+        "2px",
+      ],
+      [TABS_DIRECT + " > .deck-direct", "grid-row", "2", "1"],
+      [
+        TABS_DIRECT,
+        "grid-template-columns",
+        "minmax(0, 1fr) minmax(160px, 420px) minmax(0, 1fr)",
+        "auto minmax(0, 1fr) minmax(160px, 420px) minmax(0, 1fr) auto",
+      ],
+    ];
+    for (const [selector, property, base, folded] of pairs) {
+      expect(valueOf(exactDeclaration(selector, property, null)), selector).toBe(
+        parsedValue(property, base),
+      );
+      expect(valueOf(exactDeclaration(selector, property, FOLD)), selector).toBe(
+        parsedValue(property, folded),
+      );
+    }
+    expect(
+      exactRules(
+        "html.layout-deck .deck-top-bar.has-server-tabs > .server-tabs",
+        null,
+      )[0]!.declarations.map((d) => d.property),
+    ).toEqual(expect.arrayContaining(["grid-row", "grid-column", "align-self", "border-top"]));
+  });
+
+  it("has-tabs-row reserves row 2 and the fold removes it", () => {
+    const row = "html.layout-deck .deck-top-bar.has-tabs-row";
+    expect(valueOf(exactDeclaration(row, "grid-template-rows", null))).toBe(
+      parsedValue(
+        "grid-template-rows",
+        "minmax(var(--deck-top-min), auto) minmax(var(--deck-tabs-min), auto)",
+      ),
+    );
+    expect(valueOf(exactDeclaration(row, "row-gap", null))).toBe(parsedValue("row-gap", "0"));
+    expect(valueOf(exactDeclaration(row, "grid-template-rows", FOLD))).toBe(
+      parsedValue("grid-template-rows", "none"),
+    );
+  });
+
+  it("the Switch server overrides restore user-bar.css's own values", () => {
+    const userBar = sheetRules("app/user-bar.css");
+    const display = exactDeclaration(".user-bar .ub-controls button", "display", null, userBar);
+    const gap = exactDeclaration(".user-bar .ub-controls", "gap", null, userBar);
+    const prefix = "html.layout-deck .deck-top-bar.has-server-tabs ~ .deck-status-bar .user-bar";
+    expect(
+      valueOf(exactDeclaration(`${prefix} [data-testid="disconnect-btn"]`, "display", FOLD)),
+    ).toBe(valueOf(display));
+    expect(valueOf(exactDeclaration(`${prefix} .ub-controls`, "gap", FOLD))).toBe(valueOf(gap));
+  });
+
+  it("a hidden tab is display none, a tab never shrinks, and the folder colour is a fill only", () => {
+    expect(valueOf(exactDeclaration("html.layout-deck .server-tab[hidden]", "display", null))).toBe(
+      parsedValue("display", "none"),
+    );
+    expect(valueOf(exactDeclaration("html.layout-deck .server-tab", "flex", null))).toBe(
+      parsedValue("flex", "none"),
+    );
+    const folderColour = tabsRules().flatMap((r) =>
+      r.declarations.filter((d) => d.vars.includes("--folder-color")).map((d) => d.property),
+    );
+    expect(folderColour.length).toBeGreaterThan(0);
+    expect(folderColour.every((p) => POLICY.fillProperties.has(p))).toBe(true);
+  });
+
+  it("High Contrast keeps the current tab's top line and adds a bottom inset", () => {
+    const hc = exactDeclaration(
+      'html.layout-deck.high-contrast .server-tab[aria-current="page"]',
+      "box-shadow",
+      null,
+    );
+    expect(hc.vars).toEqual(
+      expect.arrayContaining(["--accent-text", "--border", "--header-primary"]),
+    );
   });
 });

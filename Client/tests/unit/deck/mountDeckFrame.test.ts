@@ -23,6 +23,8 @@ import { createDirectButton } from "../../../src/features/direct-messages/direct
 import { DIRECT_HEAD_CLASS } from "../../../src/features/direct-messages/dmFolder";
 import { dmStore, setDmChannels } from "../../../src/stores/dm.store";
 import { makeDm } from "../../helpers/dmHarness";
+import { mountServerTabs } from "../../../src/features/server-rail/mountServerTabs";
+import { Disposable } from "../../../src/lib/disposable";
 
 vi.mock("../../../src/features/deck/deckStatusBar", async () => {
   const actual = await vi.importActual<typeof import("../../../src/features/deck/deckStatusBar")>(
@@ -36,6 +38,13 @@ vi.mock("../../../src/features/direct-messages/directButton", async () => {
     typeof import("../../../src/features/direct-messages/directButton")
   >("../../../src/features/direct-messages/directButton");
   return { ...actual, createDirectButton: vi.fn(actual.createDirectButton) };
+});
+
+vi.mock("../../../src/features/server-rail/mountServerTabs", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../../src/features/server-rail/mountServerTabs")
+  >("../../../src/features/server-rail/mountServerTabs");
+  return { ...actual, mountServerTabs: vi.fn(actual.mountServerTabs) };
 });
 
 interface ObserverProbe {
@@ -388,6 +397,48 @@ describe("mountDeckFrame", () => {
     expect(badge.textContent).toBe("2");
     setDmChannels([]);
     dmStore.flush();
+    cleanup(result);
+  });
+
+  it("with serverTabs, calls mountServerTabs with the top bar and its owner, and the teardown removes the tabs", async () => {
+    vi.mocked(mountServerTabs).mockClear();
+    const result = mountArea(container);
+    const serverTabs = {
+      host: "h.example",
+      isTornDown: () => false,
+      onOpenDm: vi.fn(),
+      onShowServer: vi.fn(),
+      own: vi.fn(),
+    };
+    const teardown = mountDeckFrame(deckInput(result, { serverTabs }))!;
+    const top = root.firstElementChild as HTMLElement;
+    expect(mountServerTabs).toHaveBeenCalledTimes(1);
+    const [deps, bar, owner] = vi.mocked(mountServerTabs).mock.calls[0]!;
+    expect(deps).toBe(serverTabs);
+    expect(bar).toBe(top);
+    expect(owner).toBeInstanceOf(Disposable);
+    expect(top.classList.contains("has-tabs-row")).toBe(true);
+    await vi.dynamicImportSettled();
+    for (let i = 0; i < 4; i++) await Promise.resolve();
+    const nav = top.querySelector("[data-testid='server-tabs']");
+    expect(nav?.nextElementSibling?.getAttribute("data-testid")).toBe("deck-direct");
+    expect(top.firstElementChild?.getAttribute("data-testid")).toBe("deck-servers-btn");
+    expect(top.classList.contains("has-server-tabs")).toBe(true);
+    teardown();
+    expect(top.querySelector("[data-testid='server-tabs']")).toBeNull();
+    expect(top.querySelector("[data-testid='deck-servers-btn']")).toBeNull();
+    expect(top.classList.contains("has-server-tabs")).toBe(false);
+    expect(top.classList.contains("has-tabs-row")).toBe(false);
+    cleanup(result);
+  });
+
+  it("without serverTabs (the web portal) mounts no tabs", () => {
+    vi.mocked(mountServerTabs).mockClear();
+    const result = mountArea(container);
+    const teardown = mountDeckFrame(deckInput(result, { serverTabs: null }))!;
+    expect(mountServerTabs).not.toHaveBeenCalled();
+    expect((root.firstElementChild as HTMLElement).classList.contains("has-tabs-row")).toBe(false);
+    teardown();
     cleanup(result);
   });
 });

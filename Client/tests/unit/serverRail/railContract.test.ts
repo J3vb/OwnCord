@@ -5,6 +5,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServerRail } from "../../../src/features/server-rail/ServerRail";
 import type { RailControllerOptions } from "../../../src/features/server-rail/railController";
+import {
+  createRailController,
+  type RailController,
+} from "../../../src/features/server-rail/railController";
+import {
+  createServerTabs,
+  type ServerTabs,
+} from "../../../src/features/server-rail/serverTabsRenderer";
 import { serverRailText } from "../../../src/i18n/serverRail";
 import { RAIL_LAYOUT_KEY } from "@lib/prefs/serverRailLayout";
 import type { ServerProfile } from "@lib/presence/profiles";
@@ -71,7 +79,95 @@ function classicDriver(): SwitcherDriver {
   };
 }
 
-const drivers: ReadonlyArray<() => SwitcherDriver> = [classicDriver];
+/** Command Deck's tabs: a folder member is reached through its folder tab's dropdown. */
+function tabsDriver(): SwitcherDriver {
+  let ctl: RailController | null = null;
+  let tabs: ServerTabs | null = null;
+  const suffix = serverRailText("currentSuffix", { name: "" });
+  const strip = (label: string): string =>
+    label.endsWith(suffix) ? label.slice(0, -suffix.length) : label;
+  const nameOf = (el: Element): string => strip(el.getAttribute("aria-label") ?? "");
+  const find = (selector: string): HTMLElement => {
+    const el = document.querySelector<HTMLElement>(selector);
+    if (el === null) throw new Error(`nothing matches ${selector}`);
+    return el;
+  };
+  const folderTab = (id: string): HTMLElement =>
+    find(`[data-testid="server-tab-folder"][data-folder-id="${id}"]`);
+  /** The element a user acts on for `host`: its tab, or its row in its folder's open dropdown. */
+  const reach = (host: string): HTMLElement => {
+    const folder = ctl
+      ?.layout()
+      .find((item) => item.kind === "folder" && item.hosts.includes(host));
+    if (folder === undefined || folder.kind !== "folder") {
+      return find(`[data-testid="server-tab"][data-host="${host}"]`);
+    }
+    folderTab(folder.id).click();
+    return find(`.server-tabs-menu [data-testid="server-tab-folder-item"][data-host="${host}"]`);
+  };
+  const closeMenu = (): void => {
+    find(".server-tabs-menu").dispatchEvent(
+      new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
+    );
+  };
+  return {
+    name: "Deck tabs",
+    async mount(options) {
+      ctl = createRailController(options);
+      tabs = createServerTabs(ctl);
+      ctl.start(tabs.render, tabs.focusFallback);
+      document.body.append(tabs.servers, tabs.nav);
+      await settle();
+    },
+    clickServer: (host) => reach(host).click(),
+    clickMenuItem(host, testId) {
+      reach(host).dispatchEvent(
+        new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: 5, clientY: 5 }),
+      );
+      const item = byTestId(testId);
+      if (item === null) throw new Error(`no menu row ${testId}`);
+      item.click();
+    },
+    openAdd() {
+      byTestId("server-tabs-add")?.click();
+      byTestId("server-tabs-add-server")?.click();
+    },
+    openJoin() {
+      byTestId("server-tabs-add")?.click();
+      byTestId("server-tabs-join")?.click();
+    },
+    drawnNames() {
+      const names: string[] = [];
+      const cells = document.querySelectorAll<HTMLElement>(
+        ".server-tabs-track > .server-tab:not(.server-tabs-more)",
+      );
+      for (const cell of cells) {
+        if (cell.dataset["testid"] === "server-tab") {
+          names.push(nameOf(cell));
+          continue;
+        }
+        // The track is not rebuilt while a dropdown is open, so `cell` stays live.
+        cell.click();
+        const rows = document.querySelectorAll(
+          '.server-tabs-menu [data-testid="server-tab-folder-item"]',
+        );
+        names.push(...Array.from(rows, nameOf));
+        closeMenu();
+      }
+      return names;
+    },
+    destroy() {
+      tabs?.destroy();
+      ctl?.destroy();
+      tabs?.nav.remove();
+      tabs?.servers.remove();
+      tabs = null;
+      ctl = null;
+    },
+  };
+}
+
+const drivers: ReadonlyArray<() => SwitcherDriver> = [classicDriver, tabsDriver];
 
 function profile(name: string, host: string): ServerProfile {
   return {

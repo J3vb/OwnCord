@@ -246,6 +246,12 @@ opening the sidebar drawer first at 800px and below. Its rules live in
 `styles/app/server-tabs.css`, held to its own colour policy in
 `tests/unit/deck/server-tabs-css.test.ts`.
 
+The server switcher is a third. Classic draws the server rail; Command Deck draws
+a row of server tabs under the top bar's first row, folded into a Servers button
+at most 640 px wide or 499 px tall. Both are drawn from one controller
+(`features/server-rail/railController.ts`), share the saved order and folders,
+and run the same cases in `tests/unit/serverRail/railContract.test.ts`.
+
 `Client/tests/e2e/accessibility-primitives.spec.ts` shows each one in use, including
 the negative controls that prove each check fails when its behaviour is
 removed.
