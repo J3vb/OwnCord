@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "../../helpers/sidebarAreaMockSetup";
+import { deckLog } from "../../helpers/deckLoggerSpy";
 import { createVoiceWidget } from "../../../src/features/voice/VoiceWidget";
 import { createUserBar } from "../../../src/features/voice/UserBar";
 import { leaveVoiceChannel } from "../../../src/stores/voice.store";
@@ -18,12 +19,23 @@ import { createDeckStatusBar } from "../../../src/features/deck/deckStatusBar";
 import { shellText } from "../../../src/i18n/shell";
 import { authStore } from "../../../src/stores/auth.store";
 import { uiStore } from "../../../src/stores/ui.store";
+import { createDirectButton } from "../../../src/features/direct-messages/directButton";
+import { DIRECT_HEAD_CLASS } from "../../../src/features/direct-messages/dmFolder";
+import { dmStore, setDmChannels } from "../../../src/stores/dm.store";
+import { makeDm } from "../../helpers/dmHarness";
 
 vi.mock("../../../src/features/deck/deckStatusBar", async () => {
   const actual = await vi.importActual<typeof import("../../../src/features/deck/deckStatusBar")>(
     "../../../src/features/deck/deckStatusBar",
   );
   return { ...actual, createDeckStatusBar: vi.fn(actual.createDeckStatusBar) };
+});
+
+vi.mock("../../../src/features/direct-messages/directButton", async () => {
+  const actual = await vi.importActual<
+    typeof import("../../../src/features/direct-messages/directButton")
+  >("../../../src/features/direct-messages/directButton");
+  return { ...actual, createDirectButton: vi.fn(actual.createDirectButton) };
 });
 
 interface ObserverProbe {
@@ -300,6 +312,82 @@ describe("mountDeckFrame", () => {
     expect(userBar.classList.contains("deck-slot")).toBe(false);
     expect(notify).toHaveBeenCalledTimes(1);
     expect(getMockDestroy(createVoiceWidget as MockedFn)).not.toHaveBeenCalled();
+    cleanup(result);
+  });
+
+  it("appends the Direct button as the top bar's last child and marks the bar", () => {
+    const result = mountArea(container);
+    const teardown = mountDeckFrame(deckInput(result))!;
+    const top = root.firstElementChild as HTMLElement;
+    const button = top.lastElementChild as HTMLElement;
+    expect(button.dataset["testid"]).toBe("deck-direct");
+    expect(top.querySelectorAll(":scope > .deck-direct")).toHaveLength(1);
+    expect(top.classList.contains("has-deck-direct")).toBe(true);
+    expect(createDirectButton).toHaveBeenCalledTimes(1);
+    teardown();
+    cleanup(result);
+  });
+
+  it("a Direct button that fails to build leaves the frame and logs one warning", () => {
+    deckLog.warn.mockClear();
+    deckLog.error.mockClear();
+    vi.mocked(createDirectButton).mockImplementationOnce(() => {
+      throw new Error("x");
+    });
+    const result = mountArea(container);
+    const notify = vi.fn();
+    const teardown = mountDeckFrame(deckInput(result, { notify }));
+    expect(teardown).not.toBeNull();
+    const top = root.firstElementChild as HTMLElement;
+    expect(top.dataset["testid"]).toBe("deck-top-bar");
+    expect(top.querySelector(".deck-direct")).toBeNull();
+    expect(top.classList.contains("has-deck-direct")).toBe(false);
+    expect(root.children).toHaveLength(2);
+    expect(deckLog.warn).toHaveBeenCalledTimes(1);
+    expect(deckLog.error).not.toHaveBeenCalled();
+    expect(notify).not.toHaveBeenCalled();
+    expect(() => teardown!()).not.toThrow();
+    cleanup(result);
+  });
+
+  it("passes revealSidebar to the Direct button, which opens the drawer for an inert header", () => {
+    const result = mountArea(container);
+    const sidebar = document.createElement("div");
+    sidebar.setAttribute("inert", "");
+    const head = document.createElement("div");
+    head.className = DIRECT_HEAD_CLASS;
+    head.tabIndex = -1;
+    sidebar.appendChild(head);
+    root.appendChild(sidebar);
+    const revealSidebar = vi.fn(() => sidebar.removeAttribute("inert"));
+    const teardown = mountDeckFrame(deckInput(result, { revealSidebar }))!;
+    expect(vi.mocked(createDirectButton).mock.lastCall?.[0].revealSidebar).toBe(revealSidebar);
+    root.querySelector<HTMLElement>("[data-testid='deck-direct']")!.click();
+    expect(revealSidebar).toHaveBeenCalledTimes(1);
+    expect(document.activeElement).toBe(head);
+    teardown();
+    sidebar.remove();
+    cleanup(result);
+  });
+
+  it("teardown unsubscribes the Direct button", () => {
+    const result = mountArea(container);
+    const teardown = mountDeckFrame(deckInput(result))!;
+    const badge = root.querySelector<HTMLElement>(".deck-direct-badge")!;
+    const user = { id: 7, username: "u7", avatar: "", status: "online" as const };
+    setDmChannels([
+      makeDm({ channelId: 7, recipient: user, participants: [user], unreadCount: 2 }),
+    ]);
+    dmStore.flush();
+    expect(badge.textContent).toBe("2");
+    teardown();
+    setDmChannels([
+      makeDm({ channelId: 7, recipient: user, participants: [user], unreadCount: 5 }),
+    ]);
+    dmStore.flush();
+    expect(badge.textContent).toBe("2");
+    setDmChannels([]);
+    dmStore.flush();
     cleanup(result);
   });
 });

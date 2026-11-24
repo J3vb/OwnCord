@@ -145,6 +145,14 @@ for (const layout of ["classic", "deck"] as const) {
         await expect(btn).toHaveAttribute("aria-expanded", "true");
         await expect(page.getByTestId("server-menu-notifications")).toBeVisible();
       });
+
+      test("the Direct button is reached and Enter moves focus to the Direct folder header", async ({
+        page,
+      }) => {
+        await expectReached(page.getByTestId("deck-direct"));
+        await page.keyboard.press("Enter");
+        await expect(page.locator(".server-tree-direct-head")).toBeFocused();
+      });
     }
 
     test("the rail's Home, saved servers and Add are reached", async ({ page }) => {

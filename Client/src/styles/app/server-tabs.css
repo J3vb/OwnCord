@@ -1,0 +1,84 @@
+/* ═══ Command Deck top bar additions ═══ */
+/* Styles what the Deck mounts add to the top bar: the Direct button. Loaded
+   just before server-tree.css; deck.css stays last. Every selector is
+   `html.layout-deck`, starts with `html.layout-deck `, or starts with
+   `html.layout-deck.high-contrast `, so Classic is untouched.
+   tests/unit/deck/server-tabs-css.test.ts enforces this file's rules.
+
+   The bar's grid changes only through the classes the mounts add to it
+   (`has-deck-direct`); those selectors outrank deck.css's `.deck-top-bar`
+   rules by specificity, so deck.css is never edited for them.
+
+   The colour rule:
+   - A colour property reads only var(--bg-secondary), var(--bg-tertiary),
+     var(--bg-hover), var(--border), var(--border-control), var(--text-muted),
+     var(--header-primary), var(--accent-text), var(--danger-fill),
+     var(--on-fill) or var(--folder-color) (fill properties only), or the
+     keywords none, transparent, currentcolor, inset, solid and dashed.
+   - Any other var() names a layout token: --deck-*, --header-height,
+     --safe-bottom, --radius-* or --font-size-*.
+   - No literal colour, and no transition or animation. outline-offset is
+     allowed; outline itself is not. */
+
+html.layout-deck {
+  --deck-tabs-min: 32px;
+  --deck-tab-gap: 2px;
+  --deck-row-gap: 4px;
+  --deck-direct-size: 26px;
+}
+
+/* The Direct button takes a fourth column at the bar's right end. */
+html.layout-deck .deck-top-bar.has-deck-direct {
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 420px) minmax(0, 1fr) auto;
+}
+
+html.layout-deck .deck-direct {
+  position: relative;
+  justify-self: end;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--deck-direct-size);
+  height: var(--deck-direct-size);
+  padding: 0;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+html.layout-deck .deck-direct:hover {
+  background: var(--bg-hover);
+}
+html.layout-deck .deck-direct:focus-visible {
+  outline-offset: -2px;
+}
+/* One count: unread DMs plus waiting message requests. */
+html.layout-deck .deck-direct-badge {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  box-sizing: border-box;
+  min-width: 16px;
+  min-height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--danger-fill);
+  color: var(--on-fill);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  line-height: 1;
+  pointer-events: none;
+}
+html.layout-deck .deck-direct-badge[hidden] {
+  display: none;
+}
+
+@media (max-width: 640px) {
+  html.layout-deck .deck-top-bar.has-deck-direct {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto;
+  }
+}

@@ -394,14 +394,14 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
   );
 }
 
-/** The Command Deck bars (a preview layout; a no-op in Classic). Runs after the toast
- *  system is up, so a bar that fails to build can say so. */
+/** The Command Deck bars (a no-op in Classic), after the toasts so a failed bar can say so. */
 export function mountDeck(st: PageState, ms: MountScope): void {
   const teardown = mountDeckFrame({
     root: st.root!,
     slots: ms.sidebar.frameSlots,
     notify: (text) => showToast(text, "error"),
     onSearch: () => ms.chatAreaResult.searchCtrl.open(),
+    revealSidebar: () => st.sidebarDrawer?.open(),
   });
   if (teardown !== null) st.unsubscribers.push(teardown);
 }
