@@ -183,19 +183,74 @@ function isStoredImage(value: unknown): value is StoredImage {
  *  is only approximately least recently read. */
 const IDB_TOUCH_AFTER_MS = 24 * 60 * 60 * 1000;
 
-/** Refresh an entry's read time, unless it went away since it was read. */
-function idbTouch(db: IDBDatabase, key: string): void {
+/**
+ * A copy of a stored Blob that holds its own bytes, or null when the stored
+ * one can no longer be read. A Blob read from IndexedDB may stay backed by
+ * the record's file: WebKitGTK fails every later read of it once that record
+ * is rewritten or deleted, so a blob: URL made from it shows a broken image.
+ */
+async function detachBlob(stored: Blob): Promise<Blob | null> {
+  try {
+    return new Blob([await stored.arrayBuffer()], { type: stored.type });
+  } catch {
+    return null;
+  }
+}
+
+/** Run `change` on the store when `key` still holds the entry that was read
+ *  at `readUsed`: one a write replaced or removed meanwhile is left alone. */
+function ifUnchanged(
+  db: IDBDatabase,
+  key: string,
+  readUsed: number,
+  change: (store: IDBObjectStore, entry: StoredImage) => void,
+): void {
   const store = db.transaction(IDB_STORE, "readwrite").objectStore(IDB_STORE);
   const req = store.get(key);
   // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
   req.onsuccess = () => {
     const entry: unknown = req.result;
-    if (isStoredImage(entry)) store.put({ ...entry, used: Date.now() }, key);
+    if (isStoredImage(entry) && entry.used === readUsed) change(store, entry);
   };
 }
 
+/** Refresh an entry's read time. The record is rewritten with `blob`, the
+ *  detached copy: writing the stored Blob back over its own record loses it
+ *  on WebKitGTK. */
+function idbTouch(db: IDBDatabase, key: string, readUsed: number, blob: Blob): void {
+  ifUnchanged(db, key, readUsed, (store, entry) => {
+    store.put({ blob, bytes: entry.bytes, used: Date.now() }, key);
+  });
+}
+
+/** Drop an entry whose Blob cannot be read; the next write counts the store again. */
+function idbDrop(db: IDBDatabase, key: string, readUsed: number): void {
+  ifUnchanged(db, key, readUsed, (store) => {
+    store.delete(key);
+    if (cacheDbHandle === db) cacheSeed = null;
+  });
+}
+
+/** Hand a stored entry to its reader as a detached copy, refreshing a stale
+ *  read time; an entry that cannot be read is dropped and reads as a miss. */
+async function readStoredImage(
+  db: IDBDatabase,
+  key: string,
+  entry: StoredImage,
+): Promise<Blob | null> {
+  const blob = await detachBlob(entry.blob);
+  try {
+    if (blob === null) idbDrop(db, key, entry.used);
+    else if (Date.now() - entry.used >= IDB_TOUCH_AFTER_MS) idbTouch(db, key, entry.used, blob);
+  } catch {
+    // The database closed first: the entry stays as it is
+  }
+  return blob;
+}
+
 /** Read a cached image from IndexedDB by its scoped key, marking it read
- *  when its read time is stale. */
+ *  when its read time is stale. The Blob returned holds its own bytes, so a
+ *  later rewrite or eviction of the entry cannot break it. */
 export async function idbGet(key: string): Promise<Blob | null> {
   const db = await openCacheDb();
   if (db === null) return null;
@@ -210,14 +265,7 @@ export async function idbGet(key: string): Promise<Blob | null> {
           resolve(null);
           return;
         }
-        if (Date.now() - entry.used >= IDB_TOUCH_AFTER_MS) {
-          try {
-            idbTouch(db, key);
-          } catch {
-            // The database closed first — the read time stays stale
-          }
-        }
-        resolve(entry.blob);
+        void readStoredImage(db, key, entry).then(resolve);
       };
       // oxlint-disable-next-line prefer-add-event-listener -- IDBRequest does not support addEventListener
       req.onerror = () => resolve(null);
