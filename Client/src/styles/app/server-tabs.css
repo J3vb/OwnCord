@@ -295,6 +295,34 @@ html.layout-deck.high-contrast .server-tab[aria-current="page"] {
     inset 0 -1px 0 var(--header-primary);
 }
 
+/* Drag and drop. Before and after are a line centred in the gap between two
+   tabs, so a marker beside the current tab is not read as part of it; with
+   the 2px gap the line fills it. Into is an inset ring. */
+html.layout-deck .server-tab.drop-before,
+html.layout-deck .server-tab.drop-after {
+  position: relative;
+}
+html.layout-deck .server-tab.drop-before::after,
+html.layout-deck .server-tab.drop-after::after {
+  content: "";
+  position: absolute;
+  top: 6px;
+  bottom: 6px;
+  width: 2px;
+  background: var(--accent-text);
+  pointer-events: none;
+}
+html.layout-deck .server-tab.drop-before::after {
+  inset-inline-start: calc(var(--deck-tab-gap) / -2 - 1px);
+}
+html.layout-deck .server-tab.drop-after::after {
+  inset-inline-end: calc(var(--deck-tab-gap) / -2 - 1px);
+}
+html.layout-deck .server-tab.drop-into,
+html.layout-deck.high-contrast .server-tab.drop-into {
+  box-shadow: inset 0 0 0 2px var(--accent-text);
+}
+
 /* ─── The fold: the row folds into the Servers button in row 1 ─── */
 @media (max-width: 640px), (max-height: 499px) {
   html.layout-deck .deck-top-bar.has-tabs-row {

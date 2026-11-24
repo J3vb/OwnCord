@@ -5,10 +5,11 @@
  * window. It draws from the shared controller and hands it DOM events; it owns
  * no observer and no window listener (the mount does).
  *
- * One menu from the tabs is open at a time, in one slot. While it is open the
- * row is not rebuilt or refitted: `render` and `fit` only mark themselves
- * pending, and run once after the menu closes, so its opener stays the same,
- * visible element.
+ * One menu from the tabs is open at a time, in one slot. While it is open, or
+ * while a tab is being dragged, the row is not rebuilt or refitted: `render`
+ * and `fit` only mark themselves pending, and run once after the menu closes
+ * or the drag ends, so the opener or the drop target stays the same, visible
+ * element.
  */
 import { Disposable } from "@lib/disposable";
 import { clearChildren, createElement, setText } from "@lib/dom";
@@ -17,6 +18,7 @@ import { openMenuOnKeyboard, type OpenMenu } from "@lib/ui/contextMenu";
 import type { FolderItem, ItemRef, RailItem } from "@lib/prefs/serverRailLayout";
 import { serverRailText } from "../../i18n/serverRail";
 import type { RailController } from "./railController";
+import { createRailDrag } from "./railDrag";
 import { railIcon, serverAvatar } from "./serverRailParts";
 import {
   belowStart,
@@ -30,6 +32,7 @@ import {
   serverLabel,
   type TabMenuContext,
 } from "./serverTabMenus";
+import { wireMoreDrop, wireTabDrag } from "./tabDrag";
 import { fitTabs } from "./tabFit";
 
 export interface ServerTabs {
@@ -105,6 +108,7 @@ export function createServerTabs(ctl: RailController): ServerTabs {
   const own = new Disposable();
   let renderOwner = new Disposable();
   let slot: Slot | null = null;
+  let dragging = false;
   let pending: "none" | "fit" | "render" = "none";
   let destroyed = false;
   let lastOpenerKey: string | null = null;
@@ -132,8 +136,11 @@ export function createServerTabs(ctl: RailController): ServerTabs {
   let more = createMore();
   nav.append(track, add);
 
-  // A menu from the tabs is open.
-  const busy = (): boolean => slot !== null;
+  const drag = createRailDrag(ctl.mutations);
+  drag.root(nav);
+
+  // A menu from the tabs is open, or a tab is being dragged.
+  const busy = (): boolean => slot !== null || dragging;
 
   // --- Focus ----------------------------------------------------------------
 
@@ -258,7 +265,9 @@ export function createServerTabs(ctl: RailController): ServerTabs {
       lastOpenerKey = key;
       ctl.activate(host);
     });
-    bindItemMenu(tab, { kind: "server", host }, key);
+    const ref: ItemRef = { kind: "server", host };
+    bindItemMenu(tab, ref, key);
+    wireTabDrag(drag, tab, ref);
     return tab;
   }
 
@@ -280,7 +289,9 @@ export function createServerTabs(ctl: RailController): ServerTabs {
     const openDropdown = (): void => openFolderDropdown(folder, tab, ctx);
     tab.addEventListener("click", openDropdown);
     onArrowDown(tab, openDropdown);
-    bindItemMenu(tab, { kind: "folder", id: folder.id }, `folder:${folder.id}`);
+    const ref: ItemRef = { kind: "folder", id: folder.id };
+    bindItemMenu(tab, ref, `folder:${folder.id}`);
+    wireTabDrag(drag, tab, ref);
     return tab;
   }
 
@@ -387,16 +398,20 @@ export function createServerTabs(ctl: RailController): ServerTabs {
       pending = "render";
       return;
     }
+    // This render does the pending work, so a later flush does not repeat it.
+    pending = "none";
     const hadFocus = focusInTabs();
     const focusedKey = keyOf(document.activeElement);
     renderOwner.destroy();
     renderOwner = new Disposable();
     clearChildren(track);
-    cells = ctl.layout().map((item) => ({
+    const layout = ctl.layout();
+    cells = layout.map((item) => ({
       item,
       el: item.kind === "server" ? serverTab(item.host) : folderTab(item),
     }));
     more = createMore();
+    wireMoreDrop(drag, more, layout);
     track.append(...cells.map((c) => c.el), more);
     fitNow();
     setRovingTabindex(track, CELL);
@@ -416,6 +431,19 @@ export function createServerTabs(ctl: RailController): ServerTabs {
   add.addEventListener("click", openAdd, { signal: own.signal });
   onArrowDown(add, openAdd, own.signal);
   enableRovingNavigation(track, CELL, own.signal);
+
+  // --- Drag -----------------------------------------------------------------
+  // A drop's own handler on a tab measures that tab, so nothing may rebuild the
+  // track before it runs. The capture-phase drop therefore queues nothing: a
+  // microtask would run between this listener and the tab's. A drop that
+  // commits renders at once, as the row is no longer busy; one that commits
+  // nothing, a drop outside the window and Escape all end with `dragend`.
+  own.onEvent(track, "dragstart", () => (dragging = true));
+  own.onEvent(track, "drop", () => (dragging = false), { capture: true });
+  own.onEvent(track, "dragend", () => {
+    dragging = false;
+    queueMicrotask(flush);
+  });
 
   function closeMenu(): void {
     if (destroyed) return;

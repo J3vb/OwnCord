@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServerRail } from "../../../src/features/server-rail/ServerRail";
 import type { RailControllerOptions } from "../../../src/features/server-rail/railController";
+import type { DropZone } from "../../../src/features/server-rail/serverRailParts";
 import {
   createRailController,
   type RailController,
@@ -29,6 +30,8 @@ interface SwitcherDriver {
   openJoin(): void;
   /** Every server name as drawn text. */
   drawnNames(): string[];
+  /** Drags `from`'s server onto `to`'s and drops it in `zone`, with the target's rect stubbed. */
+  dropOn?(from: string, to: string, zone: DropZone): void;
   destroy(): void;
 }
 
@@ -37,6 +40,20 @@ const byTestId = (testId: string): HTMLElement | null =>
 
 async function settle(): Promise<void> {
   for (let i = 0; i < 3; i++) await Promise.resolve();
+}
+
+/** Where in a stubbed 100 px box each zone is, along the target's axis. */
+const ZONE_AT: Readonly<Record<DropZone, number>> = { before: 10, into: 50, after: 90 };
+
+/** Drags `source` onto `target` and drops it at `at`, as the browser's drag events do. */
+function dragDrop(source: HTMLElement, target: HTMLElement, at: MouseEventInit): void {
+  vi.spyOn(target, "getBoundingClientRect").mockReturnValue(new DOMRect(0, 0, 100, 100));
+  const fire = (el: HTMLElement, type: string): boolean =>
+    el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, ...at }));
+  fire(source, "dragstart");
+  fire(target, "dragover");
+  fire(target, "drop");
+  if (source.isConnected) fire(source, "dragend");
 }
 
 function classicDriver(): SwitcherDriver {
@@ -72,6 +89,11 @@ function classicDriver(): SwitcherDriver {
         document.querySelectorAll<HTMLElement>('[data-testid="server-rail-server"]'),
         (b) => (b.title.endsWith(suffix) ? b.title.slice(0, -suffix.length) : b.title),
       ),
+    dropOn(from, to, zone) {
+      const target = serverBtn(to).closest<HTMLElement>(".server-rail-item");
+      if (target === null) throw new Error(`${to} has no drop target`);
+      dragDrop(serverBtn(from), target, { clientY: ZONE_AT[zone] });
+    },
     destroy() {
       rail?.destroy?.();
       rail = null;
@@ -155,6 +177,11 @@ function tabsDriver(): SwitcherDriver {
         closeMenu();
       }
       return names;
+    },
+    dropOn(from, to, zone) {
+      const tab = (host: string): HTMLElement =>
+        find(`[data-testid="server-tab"][data-host="${host}"]`);
+      dragDrop(tab(from), tab(to), { clientX: ZONE_AT[zone] });
     },
     destroy() {
       tabs?.destroy();
@@ -305,6 +332,18 @@ describe.each(drivers.map((make) => ({ make, name: make().name })))("$name", ({ 
       expect.objectContaining({ kind: "folder", hosts: ["b.example"] }),
       { kind: "server", host: "a.example" },
     ]);
+  });
+
+  it("a drop that makes a folder", async () => {
+    await driver.mount(options().opts);
+    const { dropOn } = driver;
+    if (dropOn === undefined) throw new Error(`${driver.name} cannot drop`);
+    dropOn("c.example", "b.example", "into");
+    expect(stored()).toEqual([
+      { kind: "server", host: "a.example" },
+      expect.objectContaining({ kind: "folder", id: "fid", hosts: ["b.example", "c.example"] }),
+    ]);
+    expect(driver.drawnNames()).toEqual(["Alpha", "Beta", "Gamma"]);
   });
 
   it("the join dialog closes when the switcher is destroyed", async () => {

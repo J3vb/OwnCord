@@ -821,3 +821,127 @@ describe("the Tab stop", () => {
     expect(more().hidden).toBe(false);
   });
 });
+
+describe("drag", () => {
+  // jsdom has no DragEvent: a MouseEvent with a clientX stands in. Every tab's
+  // rect is (10, 40, 100, 30), so x 15 is "before", 60 "into" and 95 "after".
+  function dragAt(el: Element, type: string, clientX = 60): void {
+    el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX }));
+  }
+
+  const track = (): HTMLElement => q(".server-tabs-track") ?? fail("no track");
+  const storedLayout = (): unknown => JSON.parse(localStorage.getItem(RAIL_LAYOUT_KEY) ?? "null");
+  const order = (): Array<string | undefined> =>
+    all(".server-tabs-track > .server-tab:not(.server-tabs-more)").map(
+      (el) => el.dataset["host"] ?? el.dataset["folderId"],
+    );
+
+  it('a render asked for during a drag, then a "before" drop, commits before and makes no folder', async () => {
+    await mount();
+    dragAt(tab(S), "dragstart");
+    ctl.redraw();
+    dragAt(tab(N), "dragover", 15);
+    expect(tab(N).classList.contains("drop-before")).toBe(true);
+    dragAt(tab(N), "drop", 15);
+    expect(order()).toEqual([H, S, N, "f1"]);
+    expect(storedLayout()).toEqual([
+      { kind: "server", host: H },
+      { kind: "server", host: S },
+      { kind: "server", host: N },
+      { ...WORK, hosts: [P, R] },
+    ]);
+    expect(all('[data-testid="server-tab-folder"]')).toHaveLength(1);
+    expect(all(".drop-before, .drop-after, .drop-into")).toHaveLength(0);
+  });
+
+  it("a drop that commits nothing, with a render pending, renders nothing until dragend and then once", async () => {
+    await mount();
+    const layout = vi.spyOn(ctl, "layout");
+    const before = trackCells();
+    dragAt(tab(N), "dragstart");
+    ctl.redraw();
+    dragAt(tab(N), "dragover", 60);
+    dragAt(tab(N), "drop", 60);
+    await settle();
+    expect(layout).not.toHaveBeenCalled();
+    expect(trackCells()).toEqual(before);
+    trackCells().forEach((el, i) => expect(el).toBe(before[i]));
+
+    dragAt(tab(N), "dragend");
+    await settle();
+    expect(layout).toHaveBeenCalledTimes(1);
+    expect(trackCells()[0]).not.toBe(before[0]);
+    await settle();
+    expect(layout).toHaveBeenCalledTimes(1);
+  });
+
+  it("a capture-phase drop queues no flush: after the drop and its microtasks the track is the same elements", async () => {
+    await mount();
+    const before = trackCells();
+    dragAt(tab(N), "dragstart");
+    ctl.redraw();
+    // In the gap between two tabs: the track gets the drop, the nav catches it.
+    dragAt(track(), "dragover");
+    dragAt(track(), "drop");
+    await settle();
+    trackCells().forEach((el, i) => expect(el).toBe(before[i]));
+    expect(trackCells()).toHaveLength(before.length);
+  });
+
+  it("a committed drop renders at once and a later flush does not render again", async () => {
+    await mount();
+    dragAt(tab(S), "dragstart");
+    ctl.redraw();
+    const layout = vi.spyOn(ctl, "layout");
+    dragAt(tab(N), "drop", 95);
+    expect(order()).toEqual([H, N, S, "f1"]);
+    const calls = layout.mock.calls.length;
+    expect(calls).toBeGreaterThan(0);
+    const after = trackCells();
+    // A stray dragend (the source tab was replaced, so none arrives) still flushes.
+    dragAt(track(), "dragend");
+    await settle();
+    expect(layout).toHaveBeenCalledTimes(calls);
+    trackCells().forEach((el, i) => expect(el).toBe(after[i]));
+  });
+});
+
+describe("drag markers and +N", () => {
+  function fireDrag(el: Element, type: string, clientX = 60): void {
+    el.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, clientX }));
+  }
+  const markers = (): number => all(".drop-before, .drop-after, .drop-into").length;
+
+  it("a drag that ends in the gap or with dragend leaves no drop marker", async () => {
+    await mount();
+    const track = q(".server-tabs-track") ?? fail("no track");
+    fireDrag(tab(S), "dragstart");
+    fireDrag(tab(N), "dragover", 15);
+    expect(markers()).toBe(1);
+    fireDrag(track, "dragover");
+    fireDrag(track, "drop");
+    expect(markers()).toBe(0);
+    fireDrag(tab(S), "dragend");
+
+    fireDrag(tab(S), "dragstart");
+    fireDrag(tab(N), "dragover", 95);
+    expect(markers()).toBe(1);
+    fireDrag(tab(S), "dragend");
+    expect(markers()).toBe(0);
+  });
+
+  it("a drop on +N after two renders commits once and moves the item last", async () => {
+    await mount(LAYOUT, widthFor(2));
+    ctl.redraw();
+    ctl.redraw();
+    await settle();
+    const commit = vi.spyOn(ctl.mutations, "commit");
+    fireDrag(tab(N), "dragstart");
+    fireDrag(more(), "dragover", 30);
+    expect(more().classList.contains("drop-after")).toBe(true);
+    fireDrag(more(), "drop", 30);
+    expect(commit).toHaveBeenCalledTimes(1);
+    const stored = JSON.parse(localStorage.getItem(RAIL_LAYOUT_KEY) ?? "[]") as unknown[];
+    expect(stored.at(-1)).toEqual({ kind: "server", host: N });
+  });
+});
