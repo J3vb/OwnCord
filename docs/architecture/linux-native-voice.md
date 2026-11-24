@@ -106,6 +106,19 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   waits (publishes, the microphone steps, share audio) through the same slot,
   so it gets `inner` at once.
 
+## No realtime scheduling for the app's own threads
+
+libwebrtc requests `SCHED_FIFO` for every thread it starts and gets it where
+the session's `RLIMIT_RTPRIO` allows. A portal screen share loads PipeWire's
+realtime module into the process, which on some hosts caps `RLIMIT_RTTIME` at
+RTKit's 200 ms for the whole process; the kernel then ends the process once a
+realtime thread, such as a busy software encoder, runs that long without
+sleeping. `realtime_limits.rs` lowers the soft `RLIMIT_RTPRIO` to 0 at launch
+(`prepare_linux_launch`), so those threads stay on the normal scheduler.
+PipeWire's own data thread still becomes realtime through RTKit or the portal.
+The `[startup] session:` log line ends with the limits found
+(`rtprio=soft/hard`, `rttime_us=soft/hard`).
+
 ## Share music
 
 The Linux room shares one app's sound as a second audio track named `music`

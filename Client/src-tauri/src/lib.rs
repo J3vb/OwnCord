@@ -81,6 +81,8 @@ mod portal_shortcuts;
 pub mod native_voice;
 mod proxy_common;
 mod ptt;
+#[cfg(target_os = "linux")]
+mod realtime_limits;
 mod region;
 mod secret_store;
 #[cfg(any(target_os = "android", test))]
@@ -189,10 +191,12 @@ fn should_restore_on_second_launch(installer_launching: bool) -> bool {
 
 /// Process setup that must come before GTK, GLib or GStreamer start, so
 /// `main` calls it first, with one thread: stderr goes to its file for the
-/// next start's report, and an AppImage's GStreamer gets its own registry.
+/// next start's report, an AppImage's GStreamer gets its own registry, and
+/// the process's threads stay off realtime scheduling.
 #[cfg(target_os = "linux")]
 pub fn prepare_linux_launch() {
     stderr_capture::start_at_launch();
+    realtime_limits::drop_realtime_priority();
     launch_env::use_private_gstreamer_registry();
 }
 
