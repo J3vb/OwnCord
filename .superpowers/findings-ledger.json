@@ -1,5 +1,5 @@
 {
-  "nextId": 628,
+  "nextId": 629,
   "findings": [
     {
       "id": "OC-0001",
@@ -14509,6 +14509,29 @@
       "hunt": "bug-hunt-2026-11-22-windows",
       "finder": "claude",
       "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0628",
+      "title": "Server order and folders were not kept when changed before the saved server list loaded",
+      "file": "Client/src/features/server-rail/ServerRail.ts",
+      "line": 109,
+      "severity": "medium",
+      "why": "Until the saved servers were read, layout actions (menus, drops, the folder toggle) worked on a layout reduced to the current server; the result was saved once the read succeeded, so the other servers and their folders left the stored order in both layouts. Every action now keeps the hosts the stored layout names until the read succeeds, the saved servers after it, and the current server when it is not empty, and is saved at once.",
+      "repro": "With the saved server list not yet read (or the read failing), collapse a folder or move a server in the server rail; once the list loads, the other servers have left their folders.",
+      "evidence": "The rail reconciled against the current host alone before the read and held the pruned result until the read landed.",
+      "suggestedFix": "Reconcile every action against the stored layout hosts before the read (the saved hosts after), plus a non-empty current host, and save it at once.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/server-rail.test.ts (an action before the read keeps every stored folder and host once the read lands), Client/tests/unit/serverRail/railContract.test.ts (with the read failing and then succeeding, an action before the read leaves every stored folder and host in place)",
+        "revertProof": "fail (2 of 2 cases)"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-24",
+      "hunt": "client-review-2026-11-24",
+      "finder": "claude",
+      "fixedDate": "2026-11-24"
     }
   ]
 }

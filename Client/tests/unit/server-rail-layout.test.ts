@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  actionHosts,
   FOLDER_COLORS,
   RAIL_LAYOUT_KEY,
   folderOf,
@@ -250,5 +251,32 @@ describe("isIpAddressName", () => {
     ]) {
       expect(isIpAddressName(name), name).toBe(false);
     }
+  });
+});
+
+describe("actionHosts", () => {
+  it("before the read: every host the layout names, then the current one", () => {
+    const stored: RailLayout = [folder("f", ["a", "b"]), s("c")];
+    expect(actionHosts(stored, null, "d")).toEqual(["a", "b", "c", "d"]);
+    expect(actionHosts(stored, null, "b")).toEqual(["a", "b", "c"]);
+  });
+
+  it("an empty current host is never added", () => {
+    expect(actionHosts([s("a")], null, "")).toEqual(["a"]);
+    expect(actionHosts([s("a")], ["a", "b"], "")).toEqual(["a", "b"]);
+    expect(actionHosts([], null, "")).toEqual([]);
+  });
+
+  it("after the read: the saved hosts, then the current one if missing; stored hosts not saved are left out", () => {
+    const stored: RailLayout = [folder("f", ["a", "gone"]), s("c")];
+    expect(actionHosts(stored, ["c", "a"], "x")).toEqual(["c", "a", "x"]);
+    expect(actionHosts(stored, ["c", "a"], "a")).toEqual(["c", "a"]);
+    expect(actionHosts(stored, [], "x")).toEqual(["x"]);
+  });
+
+  it("no host twice", () => {
+    const stored: RailLayout = [s("a"), folder("f", ["b", "a"]), s("b")];
+    expect(actionHosts(stored, null, "a")).toEqual(["a", "b"]);
+    expect(actionHosts(stored, ["b", "b", "a"], "b")).toEqual(["b", "a"]);
   });
 });

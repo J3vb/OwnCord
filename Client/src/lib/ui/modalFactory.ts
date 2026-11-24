@@ -236,6 +236,8 @@ export interface PromptModalOptions {
   readonly onSubmit: (value: string) => void | Promise<string | null>;
   readonly onClose?: () => void;
   readonly testId?: string;
+  /** Focus target on close when the opener is no longer in the document. */
+  readonly fallbackFocus?: () => HTMLElement | null;
 }
 
 /**
@@ -311,6 +313,7 @@ export function createPromptModal(
       },
       className: "modal-prompt",
       ariaLabel: options.title,
+      ...(options.fallbackFocus === undefined ? {} : { fallbackFocus: options.fallbackFocus }),
     },
     container,
   );

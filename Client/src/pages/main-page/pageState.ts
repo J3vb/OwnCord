@@ -3,6 +3,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import type { VideoGridComponent } from "../../features/voice/videoGrid/VideoGrid";
 import type { ServerBannerControl } from "../../features/server-rail/ServerBanner";
+import type { ServerSwitcherDeps } from "../../features/server-rail/switcherOptions";
 import type { ToastContainer } from "@lib/ui/toastContainer";
 import type { AutoIdleController } from "@lib/presence/autoIdle";
 import type { GameActivityLoop } from "@lib/presence/gameActivity";
@@ -171,9 +172,8 @@ export interface MountScope {
   // The member column: always present, hidden until MemberColumn shows it.
   memberColumnEl: HTMLElement;
   memberColumnBody: HTMLDivElement;
-  // The server rail sits left of the sidebar. The web portal serves exactly
-  // one server, so it has none there. The slot holds the rail's width while
-  // the rail loads on demand, keeping it out of the eager MainPage chunk.
+  // The server switcher's inputs (null in the web portal) and Classic's rail slot.
+  switcher: ServerSwitcherDeps | null;
   railSlot: HTMLDivElement | null;
   layoutOwner: Disposable;
   // --- Moderation notices: persistent, above the app row ---

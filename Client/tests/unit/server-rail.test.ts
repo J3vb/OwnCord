@@ -484,7 +484,45 @@ describe("ServerRail", () => {
 
       document.querySelector<HTMLElement>('[data-testid="server-rail-folder-toggle"]')!.click();
 
-      expect(JSON.parse(localStorage.getItem(RAIL_LAYOUT_KEY) ?? "null")).toEqual(saved);
+      const stored: unknown = JSON.parse(localStorage.getItem(RAIL_LAYOUT_KEY) ?? "null");
+      expect(stored).toMatchObject([
+        { id: "f1", collapsed: true, hosts: ["a.example", "b.example"] },
+        { kind: "server", host: "c.example" },
+      ]);
+      expect(stored).toHaveLength(2);
+    });
+
+    it("an action before the read keeps every stored folder and host once the read lands", async () => {
+      const fixture = [
+        {
+          kind: "folder",
+          id: "f2",
+          name: "Work",
+          color: "#3ba55d",
+          collapsed: false,
+          hosts: ["a.example", "b.example"],
+        },
+        { kind: "server", host: "c.example" },
+      ];
+      localStorage.setItem(RAIL_LAYOUT_KEY, JSON.stringify(fixture));
+      const loadServers = vi
+        .fn<() => Promise<ReturnType<typeof profile>[]>>()
+        .mockRejectedValueOnce(new Error("store down"))
+        .mockResolvedValue([
+          profile("Alpha", "a.example"),
+          profile("Beta", "b.example"),
+          profile("Gamma", "c.example"),
+        ]);
+      await mountRail({ currentHost: "a.example", loadServers });
+
+      document.querySelector<HTMLElement>('[data-testid="server-rail-folder-toggle"]')!.click();
+      for (let i = 0; i < 3; i++) await Promise.resolve();
+
+      expect(loadServers).toHaveBeenCalledTimes(2);
+      expect(JSON.parse(localStorage.getItem(RAIL_LAYOUT_KEY) ?? "null")).toEqual([
+        { ...fixture[0], collapsed: true },
+        fixture[1],
+      ]);
     });
 
     it("reads the servers again on the next layout action and then applies it", async () => {
