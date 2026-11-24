@@ -618,6 +618,7 @@ export const shards = {
     "src/features/direct-messages/directButton.ts",
     "src/features/forums/newPostParts.ts",
     "src/features/server-rail/mountServerTabs.ts",
+    "src/features/server-rail/tabDrag.ts",
     "src/features/server-rail/tabFit.ts",
     "src/lib/text/timeFormat.ts",
     "src/lib/ui/toast.ts",

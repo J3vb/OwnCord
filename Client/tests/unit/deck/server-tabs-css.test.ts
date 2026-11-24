@@ -271,3 +271,59 @@ describe("server-tabs.css: the tab row and the fold", () => {
     );
   });
 });
+
+describe("server-tabs.css: the drag markers", () => {
+  const BEFORE = "html.layout-deck .server-tab.drop-before::after";
+  const AFTER = "html.layout-deck .server-tab.drop-after::after";
+
+  it("before and after are a 2px Ember line that takes no pointer, centred in the gap", () => {
+    const line = tabsRules().find(
+      (r) => r.media === null && r.selectors.includes(BEFORE) && r.selectors.includes(AFTER),
+    );
+    expect(line).toBeDefined();
+    const decl = (property: string): DeckDeclaration => {
+      const found = line!.declarations.filter((d) => d.property === property);
+      expect(found, property).toHaveLength(1);
+      return found[0]!;
+    };
+    expect(valueOf(decl("width"))).toBe(parsedValue("width", "2px"));
+    expect(valueOf(decl("pointer-events"))).toBe(parsedValue("pointer-events", "none"));
+    expect(valueOf(decl("position"))).toBe(parsedValue("position", "absolute"));
+    expect(decl("background").vars).toEqual(["--accent-text"]);
+
+    const offset = "calc(var(--deck-tab-gap) / -2 - 1px)";
+    const start = exactDeclaration(BEFORE, "inset-inline-start", null);
+    const end = exactDeclaration(AFTER, "inset-inline-end", null);
+    expect(valueOf(start)).toBe(parsedValue("inset-inline-start", offset));
+    expect(valueOf(end)).toBe(parsedValue("inset-inline-end", offset));
+    expect(start.vars).toEqual(["--deck-tab-gap"]);
+  });
+
+  it("a tab with a before or after marker is the line's containing block, and into is an Ember ring", () => {
+    const holder = tabsRules().find(
+      (r) =>
+        r.media === null &&
+        r.selectors.includes("html.layout-deck .server-tab.drop-before") &&
+        r.selectors.includes("html.layout-deck .server-tab.drop-after"),
+    );
+    expect(holder?.declarations.map((d) => [d.property, JSON.stringify(d.value)])).toEqual([
+      ["position", parsedValue("position", "relative")],
+    ]);
+    const into = tabsRules().find(
+      (r) => r.media === null && r.selectors.includes("html.layout-deck .server-tab.drop-into"),
+    );
+    const ring = into?.declarations.find((d) => d.property === "box-shadow");
+    expect(ring?.vars).toEqual(["--accent-text"]);
+  });
+});
+
+describe("server-tabs.css: the drop ring in High Contrast", () => {
+  it("High Contrast keeps the into ring, drawn with --accent-text only", () => {
+    const hc = "html.layout-deck.high-contrast .server-tab.drop-into";
+    const rule = tabsRules().find((r) => r.media === null && r.selectors.includes(hc));
+    expect(rule, hc).toBeDefined();
+    const shadow = rule!.declarations.filter((d) => d.property === "box-shadow");
+    expect(shadow).toHaveLength(1);
+    expect(shadow[0]!.vars).toEqual(["--accent-text"]);
+  });
+});

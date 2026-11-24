@@ -354,6 +354,102 @@ test.describe("Command Deck server tabs: folders and +N", () => {
   });
 });
 
+// --- Drag ---------------------------------------------------------------------
+
+/** Every top-level item's key in the row's DOM order, hidden ones included. */
+const rowOrder = (page: Page): Promise<string[]> =>
+  cells(page).evaluateAll((els) =>
+    els.map(
+      (n) => (n as HTMLElement).dataset["host"] ?? (n as HTMLElement).dataset["folderId"] ?? "",
+    ),
+  );
+
+/** The stored layout's top-level keys. */
+const storedOrder = (page: Page): Promise<string[]> =>
+  page.evaluate((key) => {
+    const items = JSON.parse(localStorage.getItem(key) ?? "[]") as Array<{
+      kind: string;
+      host?: string;
+      id?: string;
+    }>;
+    return items.map((i) => (i.kind === "server" ? (i.host ?? "") : (i.id ?? "")));
+  }, RAIL_LAYOUT_KEY);
+
+/**
+ * Drags `from` with the mouse and drops it at `fx` of `to`'s width. Chromium
+ * runs its own HTML drag session from these moves, as the user's mouse would.
+ */
+async function dragTo(page: Page, from: Locator, to: Locator, fx: number): Promise<void> {
+  const a = await boxOfLocator(from);
+  const b = await boxOfLocator(to);
+  const y0 = a.y + a.height / 2;
+  const y1 = b.y + b.height / 2;
+  await page.mouse.move(a.x + a.width / 2, y0);
+  await page.mouse.down();
+  await page.mouse.move(a.x + a.width / 2 + 5, y0, { steps: 2 });
+  await page.mouse.move(b.x + b.width * fx, y1, { steps: 12 });
+  await page.mouse.move(b.x + b.width * fx + 0.5, y1);
+  await page.mouse.up();
+}
+
+const NIGHT = "night.example:8443";
+const PIXEL = "pixel.example:8443";
+const RETRO = "retro.example:8443";
+
+test.describe("Command Deck server tabs: drag", () => {
+  test("a tab dropped on the left part of another tab moves before it", async ({ page }) => {
+    await boot(page, FEW, DESKTOP);
+    await dragTo(page, serverTab(page, RETRO), serverTab(page, NIGHT), 0.1);
+    await expect.poll(() => rowOrder(page)).toEqual([CURRENT, RETRO, NIGHT, PIXEL]);
+    expect(await storedOrder(page)).toEqual([CURRENT, RETRO, NIGHT, PIXEL]);
+    await expect(folderTab(page)).toHaveCount(0);
+  });
+
+  test("a tab dropped on the right part of another tab moves after it", async ({ page }) => {
+    await boot(page, FEW, DESKTOP);
+    await dragTo(page, serverTab(page, NIGHT), serverTab(page, PIXEL), 0.9);
+    await expect.poll(() => rowOrder(page)).toEqual([CURRENT, PIXEL, NIGHT, RETRO]);
+    expect(await storedOrder(page)).toEqual([CURRENT, PIXEL, NIGHT, RETRO]);
+    await expect(folderTab(page)).toHaveCount(0);
+  });
+
+  test("a tab dropped on the middle of a server tab makes a folder of the two", async ({
+    page,
+  }) => {
+    await boot(page, FEW, DESKTOP);
+    await dragTo(page, serverTab(page, NIGHT), serverTab(page, PIXEL), 0.5);
+    await expect(folderTab(page)).toHaveCount(1);
+    await expect(folderTab(page).locator(".server-tab-count")).toHaveText("2");
+    await expect(serverTab(page, NIGHT)).toHaveCount(0);
+    await expect(serverTab(page, PIXEL)).toHaveCount(0);
+    await folderTab(page).click();
+    const members = await openMenu(page)
+      .getByTestId("server-tab-folder-item")
+      .evaluateAll((rows) => rows.map((r) => (r as HTMLElement).dataset["host"]));
+    expect(members).toEqual([PIXEL, NIGHT]);
+  });
+
+  test("a tab dropped on a folder tab joins the folder", async ({ page }) => {
+    await boot(page, MANY, DESKTOP);
+    await expect(folderTab(page)).toBeVisible();
+    await dragTo(page, serverTab(page, hostOf(2)), folderTab(page), 0.5);
+    await expect(folderTab(page).locator(".server-tab-count")).toHaveText("4");
+    await expect(serverTab(page, hostOf(2))).toHaveCount(0);
+    expect(await storedOrder(page)).toHaveLength(MANY_ITEMS - 1);
+  });
+
+  test("a tab dropped on +N moves to the end of the row", async ({ page }) => {
+    await boot(page, MANY, MIN_WINDOW);
+    await expect(more(page)).toBeVisible();
+    await expect(serverTab(page, hostOf(2))).toBeVisible();
+    await dragTo(page, serverTab(page, hostOf(2)), more(page), 0.5);
+    await expect.poll(async () => (await rowOrder(page)).at(-1)).toBe(hostOf(2));
+    expect((await storedOrder(page)).at(-1)).toBe(hostOf(2));
+    await expect(serverTab(page, hostOf(2))).toBeHidden();
+    await expectRowAccountsForAll(page);
+  });
+});
+
 // --- The fold -------------------------------------------------------------------
 
 test.describe("Command Deck server tabs: the fold", () => {
