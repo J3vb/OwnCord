@@ -11,6 +11,7 @@ import { Disposable } from "@lib/disposable";
 import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { createLogger } from "@lib/logger";
 import { shellText } from "../../i18n/shell";
+import { createDirectButton } from "../direct-messages/directButton";
 import { createDeckStatusBar } from "./deckStatusBar";
 import { createDeckTopBar } from "./deckTopBar";
 
@@ -22,6 +23,8 @@ export interface DeckFrameInput {
   readonly notify: (text: string) => void;
   /** Opens the chat search, as the Ctrl+F keybind does. */
   readonly onSearch: () => void;
+  /** Opens the sidebar drawer, where the tree sits in a narrow window. */
+  readonly revealSidebar?: () => void;
 }
 
 /** Writes each bar's measured height on `root`, where the overlays read it. */
@@ -42,6 +45,25 @@ function observeBars(
   });
   for (const bar of bars.keys()) observer.observe(bar);
   owner.addCleanup(() => observer.disconnect());
+}
+
+/** Appends the Direct button to the top bar. A button that fails to build releases what it
+ *  subscribed, is logged, and leaves the bar as it was. */
+function mountDirectButton(topBar: HTMLElement, input: DeckFrameInput, owner: Disposable): void {
+  const child = new Disposable();
+  owner.addCleanup(() => child.destroy());
+  try {
+    const button = createDirectButton({
+      root: input.root,
+      revealSidebar: input.revealSidebar,
+      owner: child,
+    });
+    topBar.appendChild(button);
+    topBar.classList.add("has-deck-direct");
+  } catch (err: unknown) {
+    child.destroy();
+    log.warn("Command Deck Direct button failed to build", err);
+  }
 }
 
 /** Mounts the Deck bars when runningScreenLayout() is "deck" and returns their teardown.
@@ -83,6 +105,7 @@ export function mountDeckFrame(input: DeckFrameInput): (() => void) | null {
   } catch (err: unknown) {
     log.warn("Command Deck bar sizes are not observed", err);
   }
+  mountDirectButton(topBar, input, owner);
   owner.addCleanup(() => {
     root.style.removeProperty("--deck-top-measured");
     root.style.removeProperty("--deck-status-measured");

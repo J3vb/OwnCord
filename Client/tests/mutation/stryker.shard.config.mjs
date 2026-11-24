@@ -613,6 +613,7 @@ export const shards = {
   "lib-rest-30": [
     "src/features/custom-themes/themeBackgroundEditor.ts",
     "src/features/deck/deckTopBar.ts",
+    "src/features/direct-messages/directButton.ts",
     "src/features/forums/newPostParts.ts",
     "src/lib/text/timeFormat.ts",
     "src/lib/ui/toast.ts",

@@ -50,6 +50,8 @@ export interface DmFolderOptions {
 }
 
 const LABEL_ID = "server-tree-direct-label";
+/** The Direct folder header's class, which the Deck's Direct button looks up. */
+export const DIRECT_HEAD_CLASS = "server-tree-direct-head";
 
 /** The header: a collapsible tree item with a decorative chevron, the label, the unread total and "+". */
 function buildHeader(onNewDm: () => void): {
@@ -58,7 +60,7 @@ function buildHeader(onNewDm: () => void): {
   readonly badge: HTMLElement;
 } {
   const head = createElement("div", {
-    class: "server-tree-direct-head",
+    class: DIRECT_HEAD_CLASS,
     role: "treeitem",
     "data-tree-kind": "head",
     tabindex: "-1",

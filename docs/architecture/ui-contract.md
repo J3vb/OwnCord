@@ -237,6 +237,15 @@ everyone; the other three keep their permission rules and test ids. The root
 row's rules live in `styles/app/server-tree.css`, whose colours are held to the
 tree policy in `tests/unit/deck/server-tree-css.test.ts`; `deck.css` stays last.
 
+The Direct button is another. Classic counts unread DMs and waiting message
+requests on the server rail's Home button; Command Deck shows the same count on
+an envelope button at the right end of its top bar
+(`features/direct-messages/directButton.ts`, `data-testid="deck-direct"`),
+hidden at zero. A click moves focus to the Direct folder's header in the tree,
+opening the sidebar drawer first at 800px and below. Its rules live in
+`styles/app/server-tabs.css`, held to its own colour policy in
+`tests/unit/deck/server-tabs-css.test.ts`.
+
 `Client/tests/e2e/accessibility-primitives.spec.ts` shows each one in use, including
 the negative controls that prove each check fails when its behaviour is
 removed.

@@ -28,6 +28,18 @@ export const serverRailText = defineCatalog("serverRail", {
     other: "In a call with {name}, {count} unread messages",
   },
   homeDirect: "Direct messages",
+  directUnread: {
+    one: "Direct messages, {count} unread",
+    other: "Direct messages, {count} unread",
+  },
+  directRequests: {
+    one: "Direct messages, {count} message request waiting",
+    other: "Direct messages, {count} message requests waiting",
+  },
+  directUnreadRequests: {
+    one: "Direct messages, {unread} unread, {count} message request waiting",
+    other: "Direct messages, {unread} unread, {count} message requests waiting",
+  },
   add: "Add a server",
   join: "Join with an invite link",
   folder: "Folder",

@@ -83,4 +83,36 @@ test.describe("Command Deck Direct folder", () => {
     await expect(page.getByTestId("video-grid")).toBeVisible();
     await expect(dm(page, MIRA)).not.toHaveAttribute("aria-current", "page");
   });
+
+  test("the Direct button counts unread DMs plus the request, and a click focuses the folder header", async ({
+    page,
+  }) => {
+    await startDirectScene(page, { viewport: { width: 1280, height: 800 } });
+    const button = page.getByTestId("deck-direct");
+    await expect(button).toBeVisible();
+    // The scene's unread DMs (3 in the group, 2 from Tess) plus its one request.
+    await expect(button.locator(".deck-direct-badge")).toHaveText("6");
+    await expect(button).toHaveAccessibleName(
+      "Direct messages, 5 unread, 1 message request waiting",
+    );
+    await button.click();
+    await expect(head(page)).toBeFocused();
+  });
+
+  test("at 780 px the Direct button opens the drawer, focuses the header, and Escape returns", async ({
+    page,
+  }) => {
+    await startDirectScene(page, { viewport: { width: 780, height: 600 } });
+    const sidebar = page.locator("#unified-sidebar");
+    // The drawer's controller loads a moment after the page: wait until it has
+    // made the closed sidebar inert.
+    await expect(sidebar).toHaveAttribute("inert", "");
+    const button = page.getByTestId("deck-direct");
+    await button.click();
+    await expect(sidebar).toHaveClass(/drawer-open/);
+    await expect(head(page)).toBeFocused();
+    await page.keyboard.press("Escape");
+    await expect(sidebar).not.toHaveClass(/drawer-open/);
+    await expect(button).toBeFocused();
+  });
 });
