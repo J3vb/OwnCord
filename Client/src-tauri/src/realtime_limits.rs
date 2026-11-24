@@ -33,6 +33,7 @@ enum Outcome {
     Failed(Option<i32>),
 }
 
+// `__rlimit_resource_t` is glibc's type; the client builds for linux-gnu only.
 fn limit(resource: libc::__rlimit_resource_t) -> Result<libc::rlimit, Option<i32>> {
     let mut now = libc::rlimit {
         rlim_cur: 0,
@@ -145,12 +146,11 @@ mod tests {
             }
         );
         assert_eq!(rtprio().rlim_max, before.rlim_max);
+        a_child_process_can_raise_the_limit_again(before);
     }
 
-    #[test]
-    fn a_child_process_can_raise_the_limit_again() {
-        let before = rtprio();
-        lower();
+    /// Part of the test above: the limit is process-wide, so one test owns it.
+    fn a_child_process_can_raise_the_limit_again(before: libc::rlimit) {
         let raised = libc::rlimit {
             rlim_cur: before.rlim_max,
             rlim_max: before.rlim_max,
