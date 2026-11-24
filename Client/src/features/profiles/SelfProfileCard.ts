@@ -25,7 +25,7 @@ import { buildHeader, ownIdentity, type HeaderPart, type OwnIdentity } from "./s
 import { buildStatusList, type StatusListPart } from "./selfProfileStatusList";
 import type { CardSession, SelfProfileCard, SelfProfileCardOptions } from "./selfProfileTypes";
 
-export type { SelfProfileCard, SelfProfileCardOptions } from "./selfProfileTypes";
+export type { SelfProfileCard } from "./selfProfileTypes";
 
 /** Only one card may be open at a time, across every owner. */
 let closeActive: (() => void) | null = null;

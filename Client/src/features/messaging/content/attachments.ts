@@ -93,7 +93,6 @@ export {
   smallThumbnailUrl,
   shownImageUrl,
   isTrustedServerUrl,
-  openCacheDb,
   fetchImageAsObjectUrl,
   hasCachedImage,
   cachedImageBytes,
@@ -111,7 +110,6 @@ export {
   loadExternalImage,
   renderFailureStatus,
 } from "./attachmentCache";
-export type { ImageLoadOptions } from "./attachmentCache";
 
 /** Cached value of the animateGifs preference. Invalidated on pref change
  *  (same pattern as roleColors in formatting.ts). */
