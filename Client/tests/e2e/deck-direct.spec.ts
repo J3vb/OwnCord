@@ -7,7 +7,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { joinVoiceChannelByName } from "./helpers";
-import { CREW, MIRA, startDirectScene } from "./support/deckDirectScene";
+import { CREW, MIRA, TESS, startDirectScene } from "./support/deckDirectScene";
 
 const head = (page: Page) => page.locator(".server-tree-direct-head");
 const dm = (page: Page, id: number) =>
@@ -50,7 +50,7 @@ test.describe("Command Deck Direct folder", () => {
     await expect(dm(page, MIRA)).not.toHaveAttribute("aria-current", "page");
   });
 
-  test("a group DM keeps DM mode, and collapsing keeps the open chat, People and requests", async ({
+  test("a group DM keeps DM mode, and collapsing keeps the open chat, unread DMs, People and requests", async ({
     page,
   }) => {
     await startDirectScene(page);
@@ -58,7 +58,8 @@ test.describe("Command Deck Direct folder", () => {
     await expect(dm(page, CREW)).toHaveAttribute("aria-current", "page");
     await head(page).click();
     await expect(head(page)).toHaveAttribute("aria-expanded", "false");
-    await expect(page.locator("[data-testid=dm-entry]")).toHaveCount(1);
+    await expect(page.locator("[data-testid=dm-entry]")).toHaveCount(2);
+    await expect(dm(page, TESS)).toBeVisible();
     await expect(dm(page, CREW)).toBeVisible();
     await expect(page.getByTestId("dm-people-entry")).toBeVisible();
     await expect(page.getByTestId("dm-requests-entry")).toBeVisible();
@@ -97,6 +98,25 @@ test.describe("Command Deck Direct folder", () => {
     );
     await button.click();
     await expect(head(page)).toBeFocused();
+  });
+
+  test("collapsed with no DM open, the Direct button focuses the header and the unread DMs are listed under Message requests", async ({
+    page,
+  }) => {
+    await startDirectScene(page, { viewport: { width: 1280, height: 800 } });
+    await head(page).click();
+    await expect(head(page)).toHaveAttribute("aria-expanded", "false");
+    await page.getByTestId("deck-direct").click();
+    await expect(head(page)).toBeFocused();
+    await expect(page.locator("[data-testid=dm-entry]")).toHaveCount(2);
+    await expect(dm(page, CREW)).toBeVisible();
+    await expect(dm(page, TESS)).toBeVisible();
+    const requests = await page.getByTestId("dm-requests-entry").boundingBox();
+    const crew = await dm(page, CREW).boundingBox();
+    const tess = await dm(page, TESS).boundingBox();
+    expect(requests).not.toBeNull();
+    expect(crew!.y).toBeGreaterThan(requests!.y);
+    expect(tess!.y).toBeGreaterThan(crew!.y);
   });
 
   test("at 780 px the Direct button opens the drawer, focuses the header, and Escape returns", async ({
