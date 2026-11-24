@@ -1697,8 +1697,10 @@ jobs:
     # the old 15-minute cap: a normal-length run was SIGKILLed at exactly 15m
     # and reported `cancelled` rather than a verdict, which parks every PR until
     # the job is rerun by hand. This bound is a real ceiling, not a retry — a
-    # genuinely hung run still dies here.
-    timeout-minutes: 20
+    # genuinely hung run still dies here. 30, not 20, since the suite passed
+    # 1 180 tests: the test step alone reached 18.5 minutes and a run with no
+    # failure was cancelled mid-suite at 20.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: Client/
