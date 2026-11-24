@@ -168,6 +168,7 @@ release changes the database, and anything an operator must do first.)
 - AppImage: the app no longer rewrites your system's shared GStreamer plugin cache each time it starts, so your other media apps no longer rescan their plugins after OwnCord ran.
 - Turning your camera on right after opening Voice & Video settings no longer fails with "camera capture failed to start".
 - Your own camera and screen-share preview is now sent at tile size and at most 30 times a second, so a large or fast screen share puts much less load on the app. What others see is unchanged.
+- A picture the app had kept for more than a day (most often an animated GIF avatar in a profile card) showed as a broken image until you restarted the app; it now shows.
 
 **Desktop app**
 
