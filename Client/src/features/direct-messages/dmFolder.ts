@@ -10,8 +10,9 @@
  * People and requests rows. The tree's keys and Tab stop belong to
  * `lib/ui/treeKeys.ts`; this module never roves.
  *
- * Collapsing hides only the other conversations: People, Message requests and
- * the open chat stay, so a waiting request is never hidden.
+ * Collapsing hides only the conversations with nothing waiting: People,
+ * Message requests, the open chat, every DM with something unread and the DM
+ * whose call is joined stay, so a waiting request or message is never hidden.
  */
 import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement, setText } from "@lib/dom";
@@ -19,9 +20,10 @@ import { createIcon } from "@lib/icons";
 import { reconcileModels } from "@lib/net/reconcile";
 import { formatBadgeCount } from "@lib/text/formatting";
 import { showContextMenu } from "@lib/ui/contextMenu";
-import { totalDmUnread } from "@lib/dmUnread";
+import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
 import { dmStore, type DmChannel } from "@stores/dm.store";
 import { channelsStore } from "@stores/channels.store";
+import { voiceStore } from "@stores/voice.store";
 import {
   DM_SECTION_COLLAPSED_KEY,
   isCategoryCollapsed,
@@ -141,8 +143,14 @@ export function createDmFolder(opts: DmFolderOptions): TreeSection {
     const activeId = channelsStore.getState().activeChannelId;
     const collapsed = isCategoryCollapsed(DM_SECTION_COLLAPSED_KEY);
     paintHeader(channels, collapsed);
-    // Collapsed, only the open conversation is passed: the reconciler removes the rest.
-    const shown = collapsed ? channels.filter((dm) => dm.channelId === activeId) : channels;
+    // Collapsed, only the open conversation, the unread ones (by the badge's own
+    // measure) and the joined call are passed: the reconciler removes the rest.
+    const callId = voiceStore.getState().currentChannelId;
+    const shown = collapsed
+      ? channels.filter(
+          (dm) => dm.channelId === activeId || dm.channelId === callId || dmUnreadCount(dm) > 0,
+        )
+      : channels;
     const hadFocus = list.contains(document.activeElement);
     reconcileModels<DmChannel, DmFolderRowModel>(list, shown, {
       key: (dm) => String(dm.channelId),
@@ -197,9 +205,11 @@ export function createDmFolder(opts: DmFolderOptions): TreeSection {
   render();
 
   // The mute event, a call starting or ending and the DM list redraw it; so do
-  // the open conversation (the highlight) and the folder's collapsed flag.
+  // the open conversation (the highlight), the joined call (kept while
+  // collapsed) and the folder's collapsed flag.
   watchDmListInputs(owner.signal, unsubs, render);
   owner.onStoreChange(channelsStore, (s) => s.activeChannelId, render);
+  owner.onStoreChange(voiceStore, (s) => s.currentChannelId, render);
   owner.onStoreChange(uiStore, (s) => s.collapsedCategories.has(DM_SECTION_COLLAPSED_KEY), render);
   // Home puts DM mode on; bring the folder's header into view, nothing more.
   owner.onStoreChange(

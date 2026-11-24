@@ -261,6 +261,103 @@ describe("collapse", () => {
   });
 });
 
+describe("collapsed, the DMs with something waiting stay", () => {
+  /** Set the joined call alone, as a local join or leave does, without touching who is in which channel. */
+  const setCall = (id: number | null): void => {
+    voiceStore.setState((p) => ({ ...p, currentChannelId: id }));
+    flush();
+  };
+  const ids = (): Array<string | undefined> => rowEls().map((e) => e.dataset["channelId"]);
+
+  afterEach(() => {
+    voiceStore.setState((p) => ({ ...p, currentChannelId: null }));
+    voiceStore.flush();
+  });
+
+  it("collapsed, it also keeps DMs with something unread and the DM whose call is joined, in the list's order", () => {
+    seed(
+      dm(100),
+      dm(101, { unreadCount: 2 }),
+      dm(102),
+      dm(103),
+      dm(104, { unreadCount: 1, mentionCount: 1 }),
+    );
+    setActiveChannel(103);
+    setCall(102);
+    mountTree();
+    const kept = [row(101), row(102), row(103), row(104)];
+
+    collapse();
+
+    expect(ids()).toEqual(["101", "102", "103", "104"]);
+    expect(rowEls()).toEqual(kept);
+    expect(people()).not.toBeNull();
+    expect(requests()).not.toBeNull();
+
+    collapse();
+    expect(ids()).toEqual(["100", "101", "102", "103", "104"]);
+  });
+
+  it("a muted DM with unread messages but no mention is not kept", () => {
+    seed(dm(100, { unreadCount: 4 }), dm(101, { unreadCount: 2, mentionCount: 1 }));
+    muteChannel(100);
+    muteChannel(101);
+    flush();
+    mountTree();
+
+    collapse();
+
+    expect(ids()).toEqual(["101"]);
+    // The badge counts what the collapsed list keeps: the muted DM's mention only.
+    expect(badge().textContent).toBe("1");
+  });
+
+  it("a kept DM leaves the collapsed list once it is read, and focus on it moves to the header", () => {
+    seed(dm(100, { unreadCount: 2 }), dm(101));
+    mountTree();
+    collapse();
+    expect(ids()).toEqual(["100"]);
+    row(100)!.focus();
+
+    patch(100, (d) => ({ ...d, unreadCount: 0 }));
+
+    expect(rowEls()).toEqual([]);
+    expect(document.activeElement).toBe(head());
+  });
+
+  it("leaving the call drops the call DM unless it is the open chat", () => {
+    seed(dm(100), dm(101));
+    setActiveChannel(101);
+    setCall(100);
+    mountTree();
+    collapse();
+    expect(ids()).toEqual(["100", "101"]);
+    row(100)!.focus();
+
+    setCall(null);
+    expect(ids()).toEqual(["101"]);
+    expect(document.activeElement).toBe(head());
+
+    const open = row(101);
+    setCall(101);
+    setCall(null);
+    expect(rowEls()).toEqual([open]);
+  });
+
+  it("a change of the joined call alone redraws the collapsed list", () => {
+    seed(dm(100), dm(101));
+    mountTree();
+    collapse();
+    expect(rowEls()).toEqual([]);
+
+    setCall(101);
+    expect(ids()).toEqual(["101"]);
+
+    setCall(100);
+    expect(ids()).toEqual(["100"]);
+  });
+});
+
 describe("a conversation row", () => {
   it("draws one presence dot, the name and no preview line for a 1:1 DM", () => {
     seed(dm(100, { lastMessage: "see you", lastMessageAt: "2026-01-01T00:00:00Z" }));
