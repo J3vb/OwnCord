@@ -31,6 +31,9 @@ import {
   type RoleMembershipDeps,
 } from "../moderation/roleAssignment";
 import { TIMEOUT_PRESETS } from "../moderation/timeoutPresets";
+import { runningScreenLayout } from "@lib/prefs/screenLayout";
+import { buddiesListOptions } from "./buddies/buddiesSetup";
+import { createBuddiesTitle } from "./buddies/buddiesTitle";
 
 /** The two UI-layer functions the panel needs. Injected rather than imported:
  *  `features/` is a lower layer and may not statically import `pages/`.
@@ -215,7 +218,10 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
     signal: owner.signal,
     fallbackFocus: () => memberList.focusMember(userId),
   });
+  // Command Deck draws the list as Buddies; Classic keeps its role groups.
+  const deck = runningScreenLayout() === "deck";
   const memberList = ui.createMemberList({
+    ...(deck ? buddiesListOptions() : {}),
     currentUserRole: authStore.getState().user?.role ?? "member",
     ...(onMessageUser !== undefined ? { onMessageUser } : {}),
     ...(onCallUser !== undefined ? { onCallUser } : {}),
@@ -367,6 +373,7 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
       }
     },
   });
+  if (deck) element.appendChild(createBuddiesTitle(owner.signal));
   memberList.mount(element);
   // Appended after MemberList's own root: its re-renders replace only the
   // inside of that root, so this sibling survives every roster change.

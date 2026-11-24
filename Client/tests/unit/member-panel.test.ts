@@ -33,6 +33,8 @@ import { createMemberList } from "../../src/features/members/MemberList";
 import { Permission } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
 import { signInAsAdmin } from "../helpers/storeSeeds";
+import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
+import { activityItems } from "../../src/features/members/buddies/activityGroups";
 
 function resetStores(): void {
   signInAsAdmin("testuser", { token: null });
@@ -238,5 +240,31 @@ describe("memberPanel", () => {
       .map((row) => row.querySelector(".banned-name")?.textContent);
     expect(withButton).toEqual(["low"]);
     panel.destroy();
+  });
+
+  describe("under Command Deck", () => {
+    afterEach(() => setRunningScreenLayout("classic"));
+
+    it("builds the Buddies title before the list and passes the Deck options", () => {
+      setRunningScreenLayout("deck");
+      const panel = createMemberPanel(opts());
+      const children = Array.from(panel.element.children);
+      expect(children[0]?.getAttribute("data-testid")).toBe("buddies-title");
+      expect(children[1]?.getAttribute("data-testid")).toBe("member-list");
+      const listOpts = vi.mocked(createMemberList).mock.calls[0]![0];
+      expect(listOpts.flatten).toBe(activityItems);
+      expect(listOpts.view).toBeDefined();
+      panel.destroy();
+    });
+
+    it("Classic builds neither the title nor the Deck options", () => {
+      setRunningScreenLayout("classic");
+      const panel = createMemberPanel(opts());
+      expect(panel.element.querySelector('[data-testid="buddies-title"]')).toBeNull();
+      const listOpts = vi.mocked(createMemberList).mock.calls[0]![0];
+      expect(listOpts.flatten).toBeUndefined();
+      expect(listOpts.view).toBeUndefined();
+      panel.destroy();
+    });
   });
 });
