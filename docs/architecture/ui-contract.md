@@ -179,6 +179,15 @@ beside it) everywhere else. The `@font-face` is in `base.css`; font-src is
 | Combobox over a listbox                                  | as the quick switcher: `aria-controls`, `aria-activedescendant`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
 | Tree (Command Deck's channel list, `lib/ui/treeKeys.ts`) | one Tab stop; Up/Down step the items in order; Right opens a closed header, else enters the first child; Left closes an open header, else goes to the parent; Home/End; Enter or Space activates (a header folds); a typed character jumps to the next name that starts with it; Alt, Ctrl and Meta are left to the app. Every row is a `treeitem` and `aria-level`, `aria-setsize` and `aria-posinset` are stamped from DOM order. The category "+" and the Listen pill leave the Tab order: the category menu's Create channel and the voice user menu's Listen reach them |
 
+Command Deck's Buddies group headers are focusable buttons (`role="button"`,
+`aria-expanded`) that fold or open their group with a click, Enter or Space;
+the folded set is kept on the device. Arrows, Home and End skip them and walk
+the member rows only; pressed on a header they are not handled, so the browser
+scrolls the list, as for any focused element that is not a row. During a
+search the headers are plain text, and every group shows its matches. They
+carry no `aria-controls`, because their rows are list siblings, not a
+container. The Deck tree differs: there a category folds with Right and Left.
+
 ## Announcements
 
 | Situation                                                                                  | Pattern                                                                                                                                                                                                                                                                                       | Politeness          |

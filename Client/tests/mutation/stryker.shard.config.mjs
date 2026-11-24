@@ -683,8 +683,10 @@ export const shards = {
     "src/lib/ui/contextMenuKeyboard.ts",
   ],
   "lib-rest-37": [
+    "src/features/members/buddies/collapsedGroups.ts",
     "src/features/members/buddies/joinInputs.ts",
     "src/features/members/buddies/joinTarget.ts",
+    "src/features/members/memberGroupHeader.ts",
   ],
   "stores-1": [
     "src/features/forums/ForumSettingsSection.ts",

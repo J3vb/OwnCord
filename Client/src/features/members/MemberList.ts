@@ -15,6 +15,7 @@ import { membersStore } from "@stores/members.store";
 import { channelsStore } from "@stores/channels.store";
 import { classicMemberRows, classicView, type MemberRowModelBase } from "./memberRowRenderer";
 import { createScrollWatch } from "./memberListScroll";
+import { bindGroupHeader } from "./memberGroupHeader";
 import {
   buildModel,
   flattenModel,
@@ -50,6 +51,8 @@ const NONE_COLLAPSED: ReadonlySet<string> = new Set();
 export function createMemberList(opts: MemberListOptions): MemberListComponent {
   const view = opts.view ?? classicView(opts.rows ?? classicMemberRows);
   const flatten = opts.flatten ?? flattenModel;
+  const collapse = opts.collapse;
+  const collapsedNow = (): ReadonlySet<string> => collapse?.read() ?? NONE_COLLAPSED;
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
   let searchWrap: HTMLDivElement | null = null;
@@ -68,6 +71,8 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
   // row element.
   const ownerByEl = new WeakMap<Element, Disposable>();
   const idByEl = new WeakMap<Element, number>();
+  // Foldable headers, bound after reconcile (its `create` sees no item key).
+  const headerKeyByEl = new WeakMap<Element, string>();
 
   // Virtual mode (more than VIRTUAL_ABOVE members): rows are absolutely
   // positioned inside `root`, whose height is the whole list, and only the
@@ -79,6 +84,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
   let queryChanged = false;
   let flatModel: MemberModel | null = null;
   let flatQuery = "";
+  let flatCollapsed = NONE_COLLAPSED;
   let itemIndex = new Map<string, number>();
   let offsets = buildOffsets([]);
   let offsetsDirty = true;
@@ -110,10 +116,15 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
 
   function focusMember(id: number): HTMLElement | null {
     reveal(id);
+    return focusRow(rowEl(id));
+  }
+
+  /** Focus `found`, else the first row in view, else the search box. */
+  function focusRow(found: HTMLElement | null): HTMLElement | null {
     // In virtual mode the fallback is the first drawn row inside the
     // scroller's view, so focus never drags the list to a pinned or overscan row.
     const el =
-      rowEl(id) ?? (root === null ? null : firstRowInView(root, virtual ? watch.scroller() : null));
+      found ?? (root === null ? null : firstRowInView(root, virtual ? watch.scroller() : null));
     if (el === null) {
       // No rows left (a search nobody matches): the search box keeps focus in the list.
       const search = searchWrap?.querySelector<HTMLElement>(".member-search") ?? null;
@@ -157,10 +168,9 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     // A row that holds focus and is filtered away or removed drops focus to
     // the page; it goes to the same member if still shown, else the first row.
     const focused = document.activeElement;
-    const focusedId =
-      focused instanceof HTMLElement && focused.parentElement === root
-        ? idByEl.get(focused)
-        : undefined;
+    const ours = focused instanceof HTMLElement && focused.parentElement === root;
+    const focusedId = ours ? idByEl.get(focused) : undefined;
+    const focusedHeader = ours ? headerKeyByEl.get(focused) : undefined;
     view.use((rows, ctx) =>
       reconcileModels(host, list, {
         key: (item) => item.key,
@@ -186,30 +196,46 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
           ownerByEl.get(el)?.destroy();
           ownerByEl.delete(el);
           idByEl.delete(el);
+          headerKeyByEl.delete(el);
         },
       }),
     );
     // The container holds exactly one child per item, in order.
     list.forEach((item, i) => {
       const el = host.children[i];
-      if (el !== undefined) place(el, item.key);
+      if (!(el instanceof HTMLElement)) return;
+      place(el, item.key);
+      if (item.kind !== "header" || item.collapsible !== true || collapse === undefined) return;
+      if (ownerByEl.has(el)) return;
+      const owner = new Disposable();
+      bindGroupHeader(el, item.key, collapse.toggle, owner.signal);
+      ownerByEl.set(el, owner);
+      headerKeyByEl.set(el, item.key);
     });
-    if (
-      focusedId !== undefined &&
-      !(
-        document.activeElement instanceof HTMLElement &&
-        document.activeElement.parentElement === root
-      )
-    ) {
-      focusMember(focusedId);
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active.parentElement === root) return;
+    if (focusedId === undefined) {
+      // A focused header whose group emptied: as for a removed row.
+      if (focusedHeader !== undefined) focusRow(null);
+      return;
     }
+    // A member whose row is left out (their group is folded) is shown by
+    // their group's header, focused without scrolling the list.
+    const group = items.some((item) => item.key === `u:${focusedId}`)
+      ? null
+      : (collapse?.groupOf(focusedId) ?? null);
+    const header = host.children[list.findIndex((item) => item.key === group)];
+    // During a search a header is plain text and cannot take focus.
+    if (header instanceof HTMLElement && header.tabIndex >= 0) {
+      header.focus({ preventScroll: true });
+    } else focusMember(focusedId);
   }
 
   function renderFull(): void {
     const members = membersStore.getState().members;
     const roles = channelsStore.getState().roles;
     model = model === null ? buildModel(members, roles) : updateModel(model, members, roles);
-    items = flatten(model, query, NONE_COLLAPSED);
+    items = flatten(model, query, collapsedNow());
     reconcileRows(items);
   }
 
@@ -251,13 +277,18 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
 
   function pinnedIndices(): number[] {
     const active = document.activeElement;
-    const focusedId =
-      active instanceof HTMLElement && active.parentElement === root
-        ? idByEl.get(active)
-        : undefined;
+    const ours = active instanceof HTMLElement && active.parentElement === root;
+    const focusedId = ours ? idByEl.get(active) : undefined;
+    const rowKey = focusedId === undefined ? null : `u:${focusedId}`;
+    // A focused header stays drawn, and so does the header of the group a
+    // focused member moved into while it is folded: the focus repair needs it.
+    const moved = focusedId !== undefined && rowKey !== null && !itemIndex.has(rowKey);
+    const groupKey = moved ? (collapse?.groupOf(focusedId) ?? null) : null;
     const out: number[] = [];
     for (const key of [
-      focusedId === undefined ? null : `u:${focusedId}`,
+      rowKey,
+      ours ? (headerKeyByEl.get(active) ?? null) : null,
+      groupKey,
       getMenuRowKey(),
       revealKey,
     ]) {
@@ -308,10 +339,12 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
 
   function syncItems(): void {
     model = memberModelFor(membersStore.getState().members, channelsStore.getState().roles);
-    if (model !== flatModel || query !== flatQuery) {
+    const collapsed = collapsedNow();
+    if (model !== flatModel || query !== flatQuery || collapsed !== flatCollapsed) {
       flatModel = model;
       flatQuery = query;
-      items = flatten(model, query, NONE_COLLAPSED);
+      flatCollapsed = collapsed;
+      items = flatten(model, query, collapsed);
       itemIndex = new Map(items.map((item, at) => [item.key, at]));
       offsetsDirty = true;
     }
@@ -383,6 +416,7 @@ export function createMemberList(opts: MemberListOptions): MemberListComponent {
     // The row context (the renderer's state that is not on the member) patches
     // the drawn rows when it changes.
     view.subscribe(disposable.signal, render);
+    collapse?.subscribe(disposable.signal, render);
     disposable.addCleanup(() => watch.destroy());
     container.append(searchWrap, root);
   }

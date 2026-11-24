@@ -60,7 +60,7 @@ describe("buddies.css: policy", () => {
     expect(breaches).toEqual([rowTransition]);
     expect(valueOf(`${P} .buddy-row`, "transition")).toBe(parsed("transition", "none"));
     const motion = rules().flatMap((r) =>
-      r.declarations.filter((d) => /^(transition|animation|outline)/.test(d.property)),
+      r.declarations.filter((d) => /^(transition|animation|outline(?!-offset))/.test(d.property)),
     );
     expect(motion).toHaveLength(1);
   });
@@ -144,5 +144,35 @@ describe("buddies.css: sizes", () => {
     expect(valueOf(`${P} .buddies-group-text`, "text-overflow")).toBe(
       parsed("text-overflow", "ellipsis"),
     );
+  });
+});
+
+describe("buddies.css: foldable headers", () => {
+  it("points the cursor only at a foldable header", () => {
+    expect(valueOf(`${P} .buddies-group[role="button"]`, "cursor")).toBe(
+      parsed("cursor", "pointer"),
+    );
+    expect(declarations(`${P} .buddies-group`, "cursor")).toEqual([]);
+  });
+
+  it("turns the chevron -90deg when the group is folded, and keeps it whole", () => {
+    expect(valueOf(`${P} .buddies-group-chevron.collapsed`, "transform")).toBe(
+      parsed("transform", "rotate(-90deg)"),
+    );
+    expect(declarations(`${P} .buddies-group-chevron`, "transform")).toEqual([]);
+    expect(valueOf(`${P} .buddies-group-chevron`, "flex")).toBe(parsed("flex", "none"));
+    expect(valueOf(`${P} .buddies-group-chevron`, "margin-right")).toBe(
+      parsed("margin-right", "var(--space-1)"),
+    );
+  });
+
+  it("draws the shared focus ring inside the header, with no outline of its own", () => {
+    expect(valueOf(`${P} .buddies-group:focus-visible`, "outline-offset")).toBe(
+      parsed("outline-offset", "-2px"),
+    );
+    const outlines = rules().flatMap((r) =>
+      r.declarations.filter((d) => d.property.startsWith("outline")),
+    );
+    expect(outlines.map((d) => d.property)).toEqual(["outline-offset"]);
   });
 });

@@ -46,8 +46,9 @@ type BuddyHeaderModel = {
   readonly group: string;
   /** Patch field: the count changes without a rebuild. */
   readonly text: string;
+  /** A rebuild field: a foldable header is a button, a plain one text. */
   readonly collapsible: boolean;
-  /** Patch field. */
+  /** Patch field: a fold keeps the header element and its focus. */
   readonly collapsed: boolean;
 };
 
@@ -200,11 +201,28 @@ function drawRow(model: BuddyRowModel): HTMLElement {
   return row;
 }
 
+/** A foldable header's state: `aria-expanded` and the chevron's turn. */
+function applyFold(header: Element, collapsed: boolean): void {
+  header.setAttribute("aria-expanded", String(!collapsed));
+  header.querySelector(".buddies-group-chevron")?.classList.toggle("collapsed", collapsed);
+}
+
+/** A foldable header is a button with a chevron; the list binds its keys.
+ *  During a search it is plain text. */
 function drawHeader(model: BuddyHeaderModel): HTMLElement {
   const header = createElement("div", {
     class: "buddies-group",
     "data-testid": `buddies-group-${model.group.replace(/^a:/, "")}`,
   });
+  if (model.collapsible) {
+    header.setAttribute("role", "button");
+    header.tabIndex = 0;
+    const chevron = createIcon("chevron-down", 12);
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.classList.add("buddies-group-chevron");
+    header.appendChild(chevron);
+    applyFold(header, model.collapsed);
+  }
   header.appendChild(createElement("span", { class: "buddies-group-text" }, model.text));
   return header;
 }
@@ -221,6 +239,7 @@ function patch(el: Element, next: BuddyItemModel): void {
     const selector = next.kind === "header" ? ".buddies-group-text" : ".member-list-empty-text";
     const text = el.querySelector(selector);
     if (text !== null && text.textContent !== next.text) setText(text, next.text);
+    if (next.kind === "header" && next.collapsible) applyFold(el, next.collapsed);
     return;
   }
   if (!(el instanceof HTMLElement)) return;

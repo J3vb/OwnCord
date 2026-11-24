@@ -211,6 +211,17 @@ describe("buildSupportBundle", () => {
     expect(settings.settings).toEqual({ softSpeech: false });
   });
 
+  it("keeps the folded Buddies groups", () => {
+    const folded = JSON.stringify(["a:offline"]);
+    const entries = readZip(
+      buildSupportBundle(
+        sources({ storage: storageWith({ "owncord:settings:buddiesCollapsed": folded }) }),
+      ),
+    );
+    const settings = JSON.parse(text(entries.find((e) => e.name === "settings.json")!.data));
+    expect(settings.settings).toEqual({ buddiesCollapsed: ["a:offline"] });
+  });
+
   it("records OS and webview in app.json, and no server version", () => {
     const entries = readZip(buildSupportBundle(sources()));
     const app = JSON.parse(text(entries.find((e) => e.name === "app.json")!.data));

@@ -222,3 +222,54 @@ describe("buddies rows: the patch", () => {
     );
   });
 });
+
+describe("buddies rows: foldable headers", () => {
+  const foldable: ListItem = { ...header, collapsible: true };
+
+  it("draws a foldable header as a focusable button with a hidden chevron first", () => {
+    const el = drawItem(foldable);
+    expect(el.getAttribute("role")).toBe("button");
+    expect(el.getAttribute("tabindex")).toBe("0");
+    expect(el.getAttribute("aria-expanded")).toBe("true");
+    expect(el.getAttribute("aria-controls")).toBeNull();
+    const chevron = el.firstElementChild;
+    expect(chevron?.classList.contains("buddies-group-chevron")).toBe(true);
+    expect(chevron?.getAttribute("aria-hidden")).toBe("true");
+    expect(chevron?.classList.contains("collapsed")).toBe(false);
+    expect(el.textContent).toBe("IN GAME — 2");
+  });
+
+  it("draws a folded header collapsed", () => {
+    const el = drawItem({ ...foldable, collapsed: true });
+    expect(el.getAttribute("aria-expanded")).toBe("false");
+    expect(el.querySelector(".buddies-group-chevron")?.classList.contains("collapsed")).toBe(true);
+  });
+
+  it("draws a header during a search as plain text", () => {
+    const el = drawItem(header);
+    for (const name of ["role", "tabindex", "aria-expanded"]) {
+      expect(el.hasAttribute(name), name).toBe(false);
+    }
+    expect(el.querySelector(".buddies-group-chevron")).toBeNull();
+  });
+
+  it("a fold is patched in place: aria-expanded and the chevron's turn", () => {
+    const el = drawItem(foldable);
+    buddiesRows.patch.apply(el, modelOf({ ...foldable, collapsed: true, text: "IN GAME — 3" }));
+    expect(el.getAttribute("aria-expanded")).toBe("false");
+    expect(el.querySelector(".buddies-group-chevron")?.classList.contains("collapsed")).toBe(true);
+    expect(el.textContent).toBe("IN GAME — 3");
+    buddiesRows.patch.apply(el, modelOf(foldable));
+    expect(el.getAttribute("aria-expanded")).toBe("true");
+    expect(el.querySelector(".buddies-group-chevron")?.classList.contains("collapsed")).toBe(false);
+  });
+
+  it("models the fold fields from the item", () => {
+    expect(modelOf({ ...foldable, collapsed: true })).toMatchObject({
+      kind: "header",
+      group: "a:game",
+      collapsible: true,
+      collapsed: true,
+    });
+  });
+});
