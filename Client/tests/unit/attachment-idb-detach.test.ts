@@ -133,4 +133,37 @@ describe("durable image cache reads", () => {
 
     expect(records.has(KEY)).toBe(false);
   });
+
+  it("leaves an entry a newer write replaced while it was being read", async () => {
+    const stored = storedGif();
+    const newer = { blob: storedGif(), bytes: 6, used: Date.now() };
+    records.set(KEY, { blob: stored, bytes: stored.size, used: Date.now() - DAY_MS - 1 });
+    const realArrayBuffer = stored.arrayBuffer.bind(stored);
+    vi.spyOn(stored, "arrayBuffer").mockImplementation(() => {
+      records.set(KEY, newer);
+      return realArrayBuffer();
+    });
+    const idbGet = await loadIdbGet();
+
+    await idbGet(KEY);
+    await Promise.resolve();
+
+    expect(records.get(KEY)).toBe(newer);
+  });
+
+  it("keeps a newer write when the entry it replaced could not be read", async () => {
+    const stored = storedGif();
+    const newer = { blob: storedGif(), bytes: 6, used: Date.now() };
+    records.set(KEY, { blob: stored, bytes: stored.size, used: Date.now() - DAY_MS - 1 });
+    vi.spyOn(stored, "arrayBuffer").mockImplementation(() => {
+      records.set(KEY, newer);
+      return Promise.reject(new DOMException("gone", "NotFoundError"));
+    });
+    const idbGet = await loadIdbGet();
+
+    expect(await idbGet(KEY)).toBeNull();
+    await Promise.resolve();
+
+    expect(records.get(KEY)).toBe(newer);
+  });
 });
