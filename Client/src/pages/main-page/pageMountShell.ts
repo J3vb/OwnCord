@@ -265,25 +265,19 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
 
   ms.memberColumnEl.appendChild(ms.memberColumnBody);
 
-  // The server rail sits left of the sidebar. The web portal serves exactly
-  // one server, so it has none there. The slot holds the rail's width while
-  // the rail loads on demand, keeping it out of the eager MainPage chunk.
+  // The web portal serves exactly one server, so it has no server switcher.
+  ms.switcher = null;
   ms.railSlot = null;
-
   if (!__OWNCORD_WEB__) {
-    ms.railSlot = createElement("div", { class: "server-rail-slot" });
-    ms.app.classList.add("has-server-rail");
-    mountServerRail({
+    ms.switcher = {
       host: st.api.getConfig().host ?? "",
-      slot: ms.railSlot,
       isTornDown: () => st.tornDown,
       onOpenDm: (dm) => ms.sidebar.openDm(dm),
       onShowServer: () => ms.sidebar.returnToChannel(),
       own: (destroy) => st.unsubscribers.push(destroy),
-    });
+    };
+    ms.railSlot = mountServerRail(ms.app, ms.switcher);
   }
-
-  if (ms.railSlot !== null) ms.app.appendChild(ms.railSlot);
 
   appendChildren(
     ms.app,

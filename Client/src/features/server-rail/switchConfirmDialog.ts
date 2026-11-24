@@ -16,6 +16,8 @@ export interface ServerSwitchConfirmOptions {
   readonly onClose?: () => void;
   /** The owner's lifetime: an abort closes the dialog without switching. */
   readonly signal?: AbortSignal;
+  /** Focus target on close when the element that opened the question is gone. */
+  readonly fallbackFocus?: () => HTMLElement | null;
 }
 
 export function openServerSwitchConfirm(options: ServerSwitchConfirmOptions): ConfirmModalInstance {
@@ -48,5 +50,6 @@ export function openServerSwitchConfirm(options: ServerSwitchConfirmOptions): Co
     },
     ...(options.onClose === undefined ? {} : { onClose: options.onClose }),
     ...(options.signal === undefined ? {} : { signal: options.signal }),
+    ...(options.fallbackFocus === undefined ? {} : { fallbackFocus: options.fallbackFocus }),
   });
 }
