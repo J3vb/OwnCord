@@ -129,6 +129,7 @@ release changes the database, and anything an operator must do first.)
 - In a popped-out call on a monitor with a different display scale, video tiles asked for the wrong picture size (blurry on a high-DPI screen); they now use that window's scale and ask again when it moves to another monitor.
 - On Windows, sharing a Store app's window with its sound (Media Player, the Netflix app) sent silence; the app's own sound is shared now, and you are told when it cannot be found.
 - On Windows, sharing a window with its sound (often Chrome) could be refused without a word after Windows reused an old process number; that window's sound is shared now.
+- On Linux systems that let apps use realtime priority (audio-tuned setups such as CachyOS), the app could close a few seconds after you started a screen share with your camera on; it now stays open.
 
 **Settings**
 
