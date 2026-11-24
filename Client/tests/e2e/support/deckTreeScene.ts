@@ -82,6 +82,26 @@ export interface SceneOptions {
   readonly fillers?: number;
   /** The roster in `ready`, in place of the scene's three members. */
   readonly members?: unknown[];
+  /** Lounge's `voice_max_users` in place of 8; 2 makes it full (Rin and Marco). */
+  readonly loungeLimit?: number;
+  /** Lounge's `can_moderate_voice`; absent leaves the field out, as an older server does. */
+  readonly loungeCanModerate?: boolean;
+}
+
+/** The scene's channels: `SCENE_CHANNELS` itself, or a copy whose Lounge
+ *  carries the case's limit and moderation flag. */
+function sceneChannels(options: SceneOptions): readonly unknown[] {
+  const { loungeLimit, loungeCanModerate } = options;
+  if (loungeLimit === undefined && loungeCanModerate === undefined) return SCENE_CHANNELS;
+  return SCENE_CHANNELS.map((channel) =>
+    channel.id !== 6
+      ? channel
+      : {
+          ...channel,
+          ...(loungeLimit === undefined ? {} : { voice_max_users: loungeLimit }),
+          ...(loungeCanModerate === undefined ? {} : { can_moderate_voice: loungeCanModerate }),
+        },
+  );
 }
 
 const BACKLOG: [string, number] = ["Backlog", 5];
@@ -110,7 +130,7 @@ export async function startDeckScene(page: Page, options: SceneOptions = {}): Pr
       simulateWsFlow: true,
       wsHandlers: voiceWsHandlers(),
       readyOverrides: {
-        channels: [...SCENE_CHANNELS, ...fillerChannels(options.fillers ?? 0)],
+        channels: [...sceneChannels(options), ...fillerChannels(options.fillers ?? 0)],
         members: options.members ?? MEMBERS,
         voice_states: [
           { user_id: 2, channel_id: 6, muted: true, deafened: false, screenshare: true },

@@ -55,6 +55,9 @@ export interface MemberPanelOptions {
   /** Senders for the voice moderation rows (Server Mute, Deafen, Disconnect);
    *  without them the member menu offers none. */
   readonly onVoiceModerate?: VoiceModerationCallbacks;
+  /** Join a voice room, as a click on the room does. Under Command Deck the
+   *  row menu offers "Join {room}" through it; Classic does not use it. */
+  readonly onJoinVoice?: (channelId: number) => void;
 }
 
 export interface MemberPanel {
@@ -221,7 +224,7 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
   // Command Deck draws the list as Buddies; Classic keeps its role groups.
   const deck = runningScreenLayout() === "deck";
   const memberList = ui.createMemberList({
-    ...(deck ? buddiesListOptions() : {}),
+    ...(deck ? buddiesListOptions(opts.onJoinVoice) : {}),
     currentUserRole: authStore.getState().user?.role ?? "member",
     ...(onMessageUser !== undefined ? { onMessageUser } : {}),
     ...(onCallUser !== undefined ? { onCallUser } : {}),

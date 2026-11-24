@@ -81,7 +81,7 @@ function appendClosingRow(
   );
 }
 
-/** Profile / Mention / Message / Call: each appears only when wired. */
+/** Profile / Mention / Message / Call / Join: each appears only when wired. */
 function appendTopRows(
   top: Node,
   options: MemberContextMenuOptions,
@@ -128,6 +128,17 @@ function appendTopRows(
       signal,
       "member-menu-call",
       "phone",
+    );
+  }
+  if (!isSelf && options.onJoinRoom !== undefined && options.joinRoomLabel !== undefined) {
+    appendClosingRow(
+      top,
+      options.joinRoomLabel,
+      options.onJoinRoom,
+      closeMenu,
+      signal,
+      "member-menu-join",
+      "volume-2",
     );
   }
 }
