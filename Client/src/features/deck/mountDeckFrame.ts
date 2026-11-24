@@ -12,6 +12,8 @@ import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { createLogger } from "@lib/logger";
 import { shellText } from "../../i18n/shell";
 import { createDirectButton } from "../direct-messages/directButton";
+import { mountServerTabs } from "../server-rail/mountServerTabs";
+import type { ServerSwitcherDeps } from "../server-rail/switcherOptions";
 import { createDeckStatusBar } from "./deckStatusBar";
 import { createDeckTopBar } from "./deckTopBar";
 
@@ -25,6 +27,8 @@ export interface DeckFrameInput {
   readonly onSearch: () => void;
   /** Opens the sidebar drawer, where the tree sits in a narrow window. */
   readonly revealSidebar?: () => void;
+  /** The server switcher's inputs; the tabs are drawn when given (null in the web portal). */
+  readonly serverTabs?: ServerSwitcherDeps | null;
 }
 
 /** Writes each bar's measured height on `root`, where the overlays read it. */
@@ -106,6 +110,9 @@ export function mountDeckFrame(input: DeckFrameInput): (() => void) | null {
     log.warn("Command Deck bar sizes are not observed", err);
   }
   mountDirectButton(topBar, input, owner);
+  if (input.serverTabs !== undefined && input.serverTabs !== null) {
+    mountServerTabs(input.serverTabs, topBar, owner);
+  }
   owner.addCleanup(() => {
     root.style.removeProperty("--deck-top-measured");
     root.style.removeProperty("--deck-status-measured");

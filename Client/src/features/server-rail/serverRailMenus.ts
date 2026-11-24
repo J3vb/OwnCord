@@ -28,25 +28,50 @@ export interface RailMutations {
   readonly promptRename: (folder: Extract<RailItem, { kind: "folder" }>) => void;
 }
 
+/** How a renderer draws the shared menus; Classic passes none. */
+export interface MenuOptions {
+  /** "x": Move left / Move right, test ids rail-move-left / rail-move-right; "y" (default): Move up / Move down, as today. */
+  readonly axis?: "x" | "y";
+  /** False drops Expand/Collapse from a folder's menu (default true). */
+  readonly collapsible?: boolean;
+}
+
+/** The two move rows of an item, along the axis it is drawn on. */
+function moveItems(
+  commit: RailMutations["commit"],
+  current: RailLayout,
+  ref: ItemRef,
+  opts: MenuOptions,
+  withIds: boolean,
+): ContextMenuItem[] {
+  const x = opts.axis === "x";
+  const back: ContextMenuItem = {
+    label: serverRailText(x ? "moveLeft" : "moveUp"),
+    icon: x ? "arrow-left" : "arrow-up",
+    onClick: () => commit(shiftItem(current, ref, -1)),
+  };
+  const forward: ContextMenuItem = {
+    label: serverRailText(x ? "moveRight" : "moveDown"),
+    icon: x ? "arrow-right" : "arrow-down",
+    onClick: () => commit(shiftItem(current, ref, 1)),
+  };
+  if (!withIds && !x) return [back, forward];
+  return [
+    { ...back, testId: x ? "rail-move-left" : "rail-move-up" },
+    { ...forward, testId: x ? "rail-move-right" : "rail-move-down" },
+  ];
+}
+
 /** The context menu of one server icon. */
-export function serverMenu(host: string, deps: RailMutations): ContextMenuItem[] {
+export function serverMenu(
+  host: string,
+  deps: RailMutations,
+  opts: MenuOptions = {},
+): ContextMenuItem[] {
   const { reconciled, commit, newFolderId } = deps;
   const current = reconciled();
   const ref: ItemRef = { kind: "server", host };
-  const items: ContextMenuItem[] = [
-    {
-      label: serverRailText("moveUp"),
-      testId: "rail-move-up",
-      icon: "arrow-up",
-      onClick: () => commit(shiftItem(current, ref, -1)),
-    },
-    {
-      label: serverRailText("moveDown"),
-      testId: "rail-move-down",
-      icon: "arrow-down",
-      onClick: () => commit(shiftItem(current, ref, 1)),
-    },
-  ];
+  const items: ContextMenuItem[] = moveItems(commit, current, ref, opts, true);
   if (folderOf(current, host) !== null) {
     items.push({
       label: serverRailText("removeFromFolder"),
@@ -73,16 +98,23 @@ export function serverMenu(host: string, deps: RailMutations): ContextMenuItem[]
 export function folderMenu(
   folder: Extract<RailItem, { kind: "folder" }>,
   deps: RailMutations,
+  opts: MenuOptions = {},
 ): ContextMenuItem[] {
   const { reconciled, commit, promptRename } = deps;
   const current = reconciled();
   const ref: ItemRef = { kind: "folder", id: folder.id };
+  const toggle: ContextMenuItem[] =
+    opts.collapsible === false
+      ? []
+      : [
+          {
+            label: folder.collapsed ? serverRailText("expand") : serverRailText("collapse"),
+            icon: folder.collapsed ? "chevron-down" : "chevron-up",
+            onClick: () => commit(toggleCollapsed(current, folder.id)),
+          },
+        ];
   return [
-    {
-      label: folder.collapsed ? serverRailText("expand") : serverRailText("collapse"),
-      icon: folder.collapsed ? "chevron-down" : "chevron-up",
-      onClick: () => commit(toggleCollapsed(current, folder.id)),
-    },
+    ...toggle,
     {
       label: serverRailText("renameFolder"),
       testId: "rail-rename-folder",
@@ -102,16 +134,7 @@ export function folderMenu(
         onClick: () => commit(setFolderColor(current, folder.id, color)),
       })),
     },
-    {
-      label: serverRailText("moveUp"),
-      icon: "arrow-up",
-      onClick: () => commit(shiftItem(current, ref, -1)),
-    },
-    {
-      label: serverRailText("moveDown"),
-      icon: "arrow-down",
-      onClick: () => commit(shiftItem(current, ref, 1)),
-    },
+    ...moveItems(commit, current, ref, opts, false),
     {
       label: serverRailText("ungroup"),
       testId: "rail-ungroup",

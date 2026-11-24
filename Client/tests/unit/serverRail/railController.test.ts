@@ -4,6 +4,13 @@ import { createRailController } from "../../../src/features/server-rail/railCont
 import { openServerSwitchConfirm } from "../../../src/features/server-rail/switchConfirmDialog";
 import { createPromptModal } from "@lib/ui/modalFactory";
 import type { FolderItem } from "@lib/prefs/serverRailLayout";
+import {
+  layoutHosts,
+  loadLayout,
+  RAIL_LAYOUT_KEY,
+  shiftItem,
+  type RailLayout,
+} from "@lib/prefs/serverRailLayout";
 
 vi.mock(import("../../../src/features/server-rail/switchConfirmDialog"), async (importOriginal) => {
   const actual = await importOriginal();
@@ -85,5 +92,40 @@ describe("createRailController", () => {
       "fallbackFocus",
     );
     expect(vi.mocked(createPromptModal).mock.calls[0]?.[0]).not.toHaveProperty("fallbackFocus");
+  });
+
+  it("with an empty current host, a failed read and a layout action, no empty host is stored", async () => {
+    const stored = [
+      {
+        kind: "folder",
+        id: "f1",
+        name: "Work",
+        color: "#3ba55d",
+        collapsed: false,
+        hosts: ["b.example", "c.example"],
+      },
+      { kind: "server", host: "d.example" },
+    ];
+    localStorage.setItem(RAIL_LAYOUT_KEY, JSON.stringify(stored));
+    ctl = createRailController({
+      currentHost: "",
+      loadServers: () => Promise.reject(new Error("store down")),
+      switchServer: vi.fn(),
+      addServer: vi.fn(),
+      joinInvite: () => false,
+    });
+    ctl.start(() => {});
+    await Promise.resolve();
+    await Promise.resolve();
+    const { mutations } = ctl;
+    mutations.commit(shiftItem(mutations.reconciled(), { kind: "server", host: "b.example" }, 1));
+    const saved = JSON.parse(localStorage.getItem(RAIL_LAYOUT_KEY) ?? "null") as unknown;
+    expect(layoutHosts(saved as RailLayout)).not.toContain("");
+    expect(saved).toEqual([
+      { ...stored[0], hosts: ["c.example", "b.example"] },
+      { kind: "server", host: "d.example" },
+    ]);
+    // It loads again as stored, not as the empty fallback.
+    expect(loadLayout()).toEqual(saved);
   });
 });

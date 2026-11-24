@@ -75,6 +75,7 @@ export type IconName =
   | "link"
   | "loader"
   | "arrow-right"
+  | "arrow-left"
   | "hash"
   | "triangle-alert"
   | "user"
@@ -274,6 +275,9 @@ const ICON_PATHS: Record<IconName, string> = {
 
   // Right arrow
   "arrow-right": `<path d="M5 12h14"/><path d="m12 5 7 7-7 7"/>`,
+
+  // Left arrow
+  "arrow-left": `<path d="m12 19-7-7 7-7"/><path d="M19 12H5"/>`,
 
   // Hash / pound symbol
   hash: `<line x1="4" x2="20" y1="9" y2="9"/><line x1="4" x2="20" y1="15" y2="15"/><line x1="10" x2="8" y1="3" y2="21"/><line x1="16" x2="14" y1="3" y2="21"/>`,

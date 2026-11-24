@@ -261,6 +261,50 @@ describe("showContextMenu", () => {
     expect(menu).not.toBeNull();
   });
 
+  it("showContextMenu returns the open menu, and destroy closes it and runs onClosed", () => {
+    const onClosed = vi.fn();
+    const open = showContextMenu({
+      x: 0,
+      y: 0,
+      items: [{ label: "Returned", onClick: vi.fn() }],
+      signal: ac.signal,
+      onClosed,
+    });
+    expect(open.element).toBe(document.querySelector(".context-menu"));
+    expect(open.element.isConnected).toBe(true);
+    open.destroy();
+    expect(open.element.isConnected).toBe(false);
+    expect(onClosed).toHaveBeenCalledTimes(1);
+    open.destroy();
+    expect(onClosed).toHaveBeenCalledTimes(1);
+  });
+
+  it("showContextMenu passes fit scroll through: a menu taller than the window gets a capped height and scrolls", () => {
+    const tall = window.innerHeight + 200;
+    const scrolled = withMeasuredSize(120, tall, () =>
+      showContextMenu({
+        x: 10,
+        y: 50,
+        items: [{ label: "Tall", onClick: vi.fn() }],
+        signal: ac.signal,
+        fit: "scroll",
+      }),
+    );
+    expect(scrolled.element.style.maxHeight).toBe(`${window.innerHeight - 16}px`);
+    expect(scrolled.element.style.overflowY).toBe("auto");
+    scrolled.destroy();
+    const flipped = withMeasuredSize(120, tall, () =>
+      showContextMenu({
+        x: 10,
+        y: 50,
+        items: [{ label: "Tall", onClick: vi.fn() }],
+        signal: ac.signal,
+      }),
+    );
+    expect(flipped.element.style.maxHeight).toBe("");
+    flipped.destroy();
+  });
+
   describe("abort-listener teardown on the caller signal", () => {
     it("does not re-invoke menu cleanup off the caller signal after the menu was already dismissed", () => {
       openMenu([{ label: "Action", onClick: vi.fn() }], { className: "oc0057-menu-a" });

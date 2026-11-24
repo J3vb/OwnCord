@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { mountServerRail } from "../../../src/features/server-rail/mountServerRail";
 import type { ServerSwitcherDeps } from "../../../src/features/server-rail/switcherOptions";
+import { setRunningScreenLayout } from "@lib/prefs/screenLayout";
 
 const loader = vi.hoisted(() => {
   let release: () => void = () => {};
@@ -82,5 +83,21 @@ describe("mountServerRail", () => {
     expect(own).toHaveBeenCalledTimes(1);
     own.mock.calls[0]?.[0]();
     expect(rail.destroy).toHaveBeenCalledTimes(1);
+  });
+
+  it("under Command Deck returns null and adds no slot, no class and no rail", async () => {
+    setRunningScreenLayout("deck");
+    try {
+      const own = vi.fn();
+      const app = document.createElement("div");
+      expect(mountServerRail(app, deps({ own }))).toBeNull();
+      expect(app.children).toHaveLength(0);
+      expect(app.classList.contains("has-server-rail")).toBe(false);
+      await settle();
+      expect(createServerRail).not.toHaveBeenCalled();
+      expect(own).not.toHaveBeenCalled();
+    } finally {
+      setRunningScreenLayout("classic");
+    }
   });
 });

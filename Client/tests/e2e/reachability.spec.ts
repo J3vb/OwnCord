@@ -156,6 +156,7 @@ for (const layout of ["classic", "deck"] as const) {
     }
 
     test("the rail's Home, saved servers and Add are reached", async ({ page }) => {
+      test.skip(layout === "deck", "Command Deck has no rail");
       await expectReached(page.getByTestId("server-rail-home"));
       const servers = page.getByTestId("server-rail-server");
       expect(await servers.count()).toBeGreaterThanOrEqual(2);
@@ -165,5 +166,41 @@ for (const layout of ["classic", "deck"] as const) {
       for (const server of await servers.all()) await expectReached(server);
       await expectReached(page.getByTestId("server-rail-add"));
     });
+
+    if (layout === "deck") {
+      test("every server tab is reached by roving from the toolbar's stop, + opens both actions, and at 640x400 the Servers button opens its menu", async ({
+        page,
+      }) => {
+        const tabs = page.locator(".server-tabs-track > .server-tab").filter({ visible: true });
+        expect(await tabs.count()).toBeGreaterThanOrEqual(2);
+        await expect(
+          page.locator(`[data-testid='server-tab'][data-host='${OTHER_HOST}']`),
+        ).toBeVisible();
+        const stop = page.locator(".server-tabs-track > .server-tab[tabindex='0']");
+        await expect(stop).toHaveCount(1);
+        await expectReached(stop);
+        await page.keyboard.press("Home");
+        const count = await tabs.count();
+        for (let i = 0; i < count; i++) {
+          await expect(tabs.nth(i)).toBeFocused();
+          await expectReachable(tabs.nth(i));
+          await page.keyboard.press("ArrowRight");
+        }
+
+        const add = page.getByTestId("server-tabs-add");
+        await expectReached(add);
+        await page.keyboard.press("Enter");
+        await expect(page.getByTestId("server-tabs-add-server")).toBeVisible();
+        await expect(page.getByTestId("server-tabs-join")).toBeVisible();
+        await page.keyboard.press("Escape");
+
+        await page.setViewportSize({ width: 640, height: 400 });
+        const servers = page.getByTestId("deck-servers-btn");
+        await expectReached(servers);
+        await page.keyboard.press("Enter");
+        await expect(page.getByTestId("deck-servers-menu")).toBeVisible();
+        await expect(servers).toHaveAttribute("aria-expanded", "true");
+      });
+    }
   });
 }

@@ -254,8 +254,8 @@ test.describe("Command Deck status bar", () => {
       const widget = await boxOf(page, "voice-widget");
       expect(user.x).toBeLessThan(widget.x);
       expect(user.width).toBeLessThanOrEqual(240);
-      // With the rail showing the user bar drops Switch server; at 640 px the
-      // rail is hidden and the button stays.
+      // With the server tabs showing the user bar drops Switch server; at 640 px
+      // the row is folded and the button stays.
       const switchServer = statusBar(page).locator("[data-testid='disconnect-btn']");
       if (size === DESKTOP) await expect(switchServer).toBeHidden();
       else await expect(switchServer).toBeVisible();

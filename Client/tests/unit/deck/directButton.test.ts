@@ -199,10 +199,18 @@ describe("createDirectButton", () => {
     expect(() => button.click()).not.toThrow();
     expect(reveal).not.toHaveBeenCalled();
     expect(document.activeElement).toBe(button);
+    // A second click leaves focus on the button too.
+    button.click();
+    expect(document.activeElement).toBe(button);
     // An inert header with no drawer to open: nothing throws.
     addHeader(true);
     const bare = build(undefined);
+    // jsdom does not honour inert, so the call is checked, not where focus lands.
+    const inertHead = root.querySelector<HTMLElement>(`.${DIRECT_HEAD_CLASS}`)!;
+    const focusSpy = vi.spyOn(inertHead, "focus");
     expect(() => bare.click()).not.toThrow();
+    expect(focusSpy).toHaveBeenCalledTimes(1);
+    expect(reveal).not.toHaveBeenCalled();
   });
 
   it("owner.destroy removes all three subscriptions", () => {
