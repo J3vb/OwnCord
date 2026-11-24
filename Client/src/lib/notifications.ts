@@ -30,7 +30,7 @@ import {
   currentHost,
 } from "./notificationDelivery";
 
-export { openMessageTarget, openNotificationTarget } from "./notificationDelivery";
+export { openMessageTarget } from "./notificationDelivery";
 
 /** Check if the app window is currently focused. */
 function isWindowFocused(): boolean {

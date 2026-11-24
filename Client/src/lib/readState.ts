@@ -16,7 +16,7 @@ import { announceMarkUnreadFailure, type MarkUnreadNotice } from "./readStateNot
 import { cancelPendingMarkAll, queueMarkRead } from "./readStateBulk";
 
 export { isChannelAway, isChannelCovered } from "./readStateAway";
-export { onMarkUnreadFailed, setMarkUnreadNotice, type MarkUnreadNotice } from "./readStateNotices";
+export { onMarkUnreadFailed, setMarkUnreadNotice } from "./readStateNotices";
 
 /**
  * Record whether the mounted list for a channel shows its live tail. The list

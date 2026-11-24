@@ -44,7 +44,7 @@ import { FILTERS, errorText, type AppealsOptions, type AppealsView } from "./app
 import { createQueueCore } from "./queueCore";
 import { buildQueueDom, buildRowItem, closeOnEscape, createQueueListView } from "./queueParts";
 
-export type { AppealsOptions, AppealsView } from "./appealModel";
+export type { AppealsView } from "./appealModel";
 
 const me = (): number => authStore.getState().user?.id ?? -1;
 const NO_DRAFT = (): AppealDraft & { id: string } => ({ id: "", note: "", outcome: null });

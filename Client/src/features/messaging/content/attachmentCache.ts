@@ -12,7 +12,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { assignCacheScope, getCacheScope, idbPrune } from "./attachmentIdb";
 import { clearAttachmentCaches } from "./attachmentCacheState";
 
-export { IMAGE_DB_MAX_BYTES, openCacheDb } from "./attachmentIdb";
+export { IMAGE_DB_MAX_BYTES } from "./attachmentIdb";
 export {
   IMAGE_CACHE_MAX_BYTES,
   imageCache,
@@ -50,7 +50,6 @@ export {
   fetchExternalImage,
   loadExternalImage,
 } from "./attachmentExternal";
-export type { ImageLoadOptions } from "./attachmentExternal";
 
 /**
  * Point the server-content caches at the signed-in account. A change drops
