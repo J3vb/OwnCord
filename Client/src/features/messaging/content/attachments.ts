@@ -89,6 +89,7 @@ export {
   setAttachmentCacheScope,
   pruneAttachmentCacheScope,
   clearAttachmentCaches,
+  attachmentCacheGeneration,
   thumbnailUrl,
   smallThumbnailUrl,
   shownImageUrl,

@@ -7,6 +7,7 @@ import { formatByteSize } from "@lib/voice/connectionStats";
 import { authStore } from "@stores/auth.store";
 import { bracketBareIPv6Host } from "@lib/ws";
 import type { Attachment } from "@lib/types";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { setExternalConsentScope } from "../../content-consent/external";
 
 export const log = createLogger("attachments");
@@ -42,6 +43,16 @@ export function setServerHost(host: string): void {
   serverHost = bracketBareIPv6Host(withoutPort).toLowerCase();
   setExternalConsentScope(serverHost);
 }
+
+/** Forget the server host: until the next main page sets one, no URL is the
+ *  server's own, so no request carries a sign-in. */
+export function clearServerHost(): void {
+  serverHost = null;
+  setExternalConsentScope("");
+}
+
+// A session that ends (sign-out, server switch) takes its server host with it.
+void registerSessionReset("attachments:server-host", clearServerHost, { phase: "session" }); // app-lifetime
 
 /** Resolve a potentially relative URL to a full URL using the server host. */
 export function resolveServerUrl(url: string): string {

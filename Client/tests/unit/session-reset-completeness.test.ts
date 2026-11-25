@@ -47,6 +47,7 @@ import { stickersStore, setStickers } from "../../src/stores/stickers.store";
 import {
   externalPartition,
   fetchMediaAsObjectUrl,
+  isTrustedServerUrl,
   setServerHost,
 } from "../../src/features/messaging/content/attachments";
 import { renderGenericLinkPreview } from "../../src/features/messaging/content/embeds";
@@ -323,6 +324,15 @@ const PROBES: readonly Probe[] = [
       stickersStore.getState().rev > stickerRevBefore,
   },
   {
+    // Before the cache probe, whose check sets the host again.
+    name: "attachments:server-host",
+    mutate: () => {
+      setServerHost("chat.example");
+      expect(isTrustedServerUrl(FILE_URL)).toBe(true);
+    },
+    isInitial: () => !isTrustedServerUrl(FILE_URL),
+  },
+  {
     name: "attachments:caches",
     mutate: async () => {
       setServerHost("chat.example");
@@ -338,6 +348,8 @@ const PROBES: readonly Probe[] = [
       expect(fetchMock).toHaveBeenCalledTimes(1); // cached: the probe can fail
     },
     isInitial: async () => {
+      // The reset also forgot the host; the next main page sets it again.
+      setServerHost("chat.example");
       await fetchMediaAsObjectUrl(FILE_URL);
       return fetchMock.mock.calls.length === 2; // refetched, so the cache was dropped
     },

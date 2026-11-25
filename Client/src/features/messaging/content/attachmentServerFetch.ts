@@ -131,6 +131,44 @@ function isTokenBearingServerPath(pathname: string): boolean {
   return TOKEN_BEARING_ROUTES.some((route) => pathname.startsWith(route));
 }
 
+/** The server a request goes to and the sign-in it may carry, read together
+ *  from the live session before any await. */
+export interface ServerRequestSession {
+  readonly host: string;
+  readonly token: string | null;
+}
+
+/** The current session's server and token, or null when no server is set. */
+export function serverRequestSession(): ServerRequestSession | null {
+  if (serverHost === null) return null;
+  return { host: serverHost, token: getToken() };
+}
+
+/** `url` parsed when it is on `session`'s server, else null. Both hosts are in
+ *  the normalised form: `setServerHost` normalises the session's, and the URL
+ *  parser drops a default port and lowercases. */
+export function urlOnSessionServer(url: string, session: ServerRequestSession | null): URL | null {
+  if (session === null) return null;
+  try {
+    const parsed = new URL(url);
+    return parsed.host === session.host ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Whether `session` is still the live one: same server, same sign-in. */
+export function isCurrentServerSession(session: ServerRequestSession): boolean {
+  return serverHost === session.host && getToken() === session.token;
+}
+
+/** Reject when the session a request was started in has been replaced. */
+function assertCurrentServerSession(session: ServerRequestSession): void {
+  if (isCurrentServerSession(session)) return;
+  // i18n-exempt: AbortError cancellation signal, never rendered
+  throw new DOMException("The session this request belonged to has ended", "AbortError");
+}
+
 /**
  * Fetch a file from the OwnCord server through the Rust HTTP TOFU proxy's
  * loopback origin (cert-pinned) with the session bearer token attached —
@@ -146,15 +184,20 @@ export async function fetchServerFile(
   url: string,
   extraHeaders: Readonly<Record<string, string>> = {},
 ): Promise<Response> {
-  // i18n-exempt: internal guard, logged by the caller, never rendered
-  if (!isServerUrl(url)) throw new Error("external URLs are fetched only through the broker");
-  const parsed = new URL(url);
+  // Host and token come from one read of the session, before any await.
+  const session = serverRequestSession();
+  const parsed = urlOnSessionServer(url, session);
+  if (session === null || parsed === null) {
+    // i18n-exempt: internal guard, logged by the caller, never rendered
+    throw new Error("external URLs are fetched only through the broker");
+  }
   const origin = await ensureHttpProxy(parsed.host);
+  // A session that ended while the tunnel opened sends nothing at all.
+  assertCurrentServerSession(session);
   const headers: Record<string, string> = { ...extraHeaders };
-  const token = getToken();
-  if (token !== null && isTokenBearingServerPath(parsed.pathname)) {
+  if (session.token !== null && isTokenBearingServerPath(parsed.pathname)) {
     // i18n-exempt: HTTP wire header value, never rendered
-    headers["Authorization"] = `Bearer ${token}`;
+    headers["Authorization"] = `Bearer ${session.token}`;
   }
   return desktop.http.fetch(`${origin}${parsed.pathname}${parsed.search}`, { headers });
 }

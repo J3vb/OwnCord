@@ -488,7 +488,10 @@ describe("fetchImageAsObjectUrl — network fetch failure", () => {
     // preserved) and carries no danger option — the proxy pins the cert. The
     // bearer token rides along when a session exists (none in this test).
     await fetchImageAsObjectUrl("https://myserver.local:8443/img.png");
-    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9999/img.png", { headers: {} });
+    expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:9999/img.png", {
+      headers: {},
+      maxRedirections: 0,
+    });
 
     fetchMock.mockReset();
     clearAttachmentCaches();

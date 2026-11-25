@@ -57,6 +57,7 @@ describe("attachment fetch authentication", () => {
     expect(ensureHttpProxyMock).toHaveBeenCalledWith("chat.example.com");
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/api/v1/files/abc-123", {
       headers: { Authorization: "Bearer session-token" },
+      maxRedirections: 0,
     });
   });
 
@@ -67,6 +68,7 @@ describe("attachment fetch authentication", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/api/v1/files/abc-456", {
       headers: {},
+      maxRedirections: 0,
     });
   });
 
@@ -81,6 +83,7 @@ describe("attachment fetch authentication", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/admin/api/stats", {
       headers: {},
+      maxRedirections: 0,
     });
   });
 
@@ -91,6 +94,7 @@ describe("attachment fetch authentication", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/api/v1/emoji/1/image", {
       headers: { Authorization: "Bearer session-token" },
+      maxRedirections: 0,
     });
   });
 
@@ -104,6 +108,7 @@ describe("attachment fetch authentication", () => {
     expect(result).not.toBeNull();
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/api/v1/stickers/7/image", {
       headers: { Authorization: "Bearer session-token" },
+      maxRedirections: 0,
     });
   });
 
@@ -135,6 +140,7 @@ describe("attachment fetch authentication", () => {
     expect(ensureHttpProxyMock).toHaveBeenCalledWith("chat.example.com");
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/api/v1/files/abc-789", {
       headers: { Authorization: "Bearer session-token" },
+      maxRedirections: 0,
     });
   });
 

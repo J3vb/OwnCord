@@ -130,6 +130,8 @@ release changes the database, and anything an operator must do first.)
 - On Windows, sharing a Store app's window with its sound (Media Player, the Netflix app) sent silence; the app's own sound is shared now, and you are told when it cannot be found.
 - On Windows, sharing a window with its sound (often Chrome) could be refused without a word after Windows reused an old process number; that window's sound is shared now.
 - On Linux systems that let apps use realtime priority (audio-tuned setups such as CachyOS), the app could close a few seconds after you started a screen share with your camera on; it now stays open.
+- When a moderator lifted their mute on you, a mute you had set yourself was lifted too; your own mute now stays on.
+- A move to another voice channel is followed only by the device that is in the call.
 
 **Settings**
 

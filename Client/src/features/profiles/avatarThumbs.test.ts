@@ -6,6 +6,7 @@ const animatedThumbs = vi.hoisted(() => new Set<string>());
 // Own-server file URLs have a preview, as the real smallThumbnailUrl decides it; anything else
 // does not.
 vi.mock("../messaging/content/attachments", () => ({
+  attachmentCacheGeneration: () => 0,
   fetchImageAsObjectUrl,
   hasCachedImage: () => false,
   cachedImageBytes: () => null,
