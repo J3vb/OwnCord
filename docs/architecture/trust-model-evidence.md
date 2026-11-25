@@ -638,8 +638,9 @@ telemetry to the project, licence checks, a phone-home of any kind. The only
 `none`. The Docker image is distroless with no shell or `curl`
 (`Server/Dockerfile:30`), and no tracked script the **server runs** fetches
 an external host. One build-time exception, outside the server: the release
-workflow's AppImage step downloads `appimagetool` from GitHub
-(`Client/scripts/strip-appimage-bundled-libs.sh:25-26`, invoked by
+workflow's AppImage step downloads `appimagetool` and the AppImage runtime
+from GitHub, each a fixed release checked against a pinned SHA-256
+(`Client/scripts/strip-appimage-bundled-libs.sh:45-50`, invoked by
 `.github/workflows/release.yml`). That runs on the CI runner when a release
 is cut, never on an operator's machine.
 

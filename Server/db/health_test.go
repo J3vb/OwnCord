@@ -46,7 +46,7 @@ func TestHealthStats_HonoursDeadline(t *testing.T) {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), time.Nanosecond)
 	defer cancel()
-	time.Sleep(time.Millisecond)
+	<-ctx.Done()
 	if _, err := d.HealthStats(ctx); err == nil {
 		t.Error("HealthStats with an expired deadline returned no error")
 	}
