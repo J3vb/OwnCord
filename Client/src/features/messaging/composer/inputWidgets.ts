@@ -7,7 +7,7 @@ import { createIcon } from "@lib/icons";
 import { authStore } from "@stores/auth.store";
 import { pollsEnabled, stickersEnabled } from "@lib/net/serverCapabilities";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
-import { isAndroidApp } from "../../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { composerButtonShown } from "../composerButtons";
 import { createAttachPickers } from "../attachSheet";
 import { voiceMessagesText } from "../../../i18n/voiceMessages";

@@ -27,7 +27,7 @@ import { listeningDetailsText } from "../../i18n/listeningDetails";
 import { settingsText } from "../../i18n/settings";
 import { voiceText } from "../../i18n/voice";
 import { whatsNewText } from "../../i18n/whatsNew";
-import { isAndroidApp, isLinuxDesktop, isWindowsDesktop } from "../voice/native/platform";
+import { isAndroidApp, isLinuxDesktop, isWindowsDesktop } from "@lib/hostOs";
 import { desktop } from "../../platform/desktop";
 import { platformText } from "./helpers";
 import { layoutSearchEntries, layoutSearchKey } from "./screenLayoutRow";

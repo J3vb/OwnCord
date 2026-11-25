@@ -3,7 +3,7 @@
  */
 
 import { createElement } from "@lib/dom";
-import { isAndroidApp, isLinuxDesktop } from "../voice/native/platform";
+import { isAndroidApp, isLinuxDesktop } from "@lib/hostOs";
 import { settingsText as t } from "../../i18n/settings";
 import { inputMode } from "@lib/ui/inputMode";
 import { buildSettingsSection } from "./settingsSection";

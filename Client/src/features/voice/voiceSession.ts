@@ -36,7 +36,7 @@ import { MediaControl } from "./mediaControl";
 import { restoreLocalVoiceState } from "./localVoiceRestore";
 import { dismissMediaLostNotice } from "./mediaLostNotice";
 import { noteVoiceLeave } from "./leaveOwed";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { nativeCounters } from "./native/counters";
 import { speechDetectionOf } from "./sileroDetection";
 import { createRingAnnouncer } from "./ringAnnouncer";

@@ -12,7 +12,7 @@ import {
   mirrorSelfCamera,
 } from "@lib/prefs/appearance";
 import { setOutputVolume } from "@lib/voice/livekitSession";
-import { isLinuxDesktop } from "../../voice/native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { SCREEN_SHARE_BACKUP_LAYER_PREF, getScreenShareBackupLayer } from "@lib/voice/videoPresets";
 import {
   getVideoCodecPref,

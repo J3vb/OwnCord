@@ -10,7 +10,7 @@ import { createLogger } from "../../lib/logger";
 import { setOwnedTimeout } from "../../lib/dom";
 import { Disposable } from "../../lib/disposable";
 import { desktop } from "../../platform/desktop";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { SlotKeyProvider } from "./slotKeyProvider";
 
 const log = createLogger("e2eeWorker");

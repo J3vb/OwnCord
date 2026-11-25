@@ -87,9 +87,11 @@ const ws = createWsClient();
 // Diagnostics back the lazily loaded Settings > Diagnostics & logs panel, so their engine and
 // text stay out of the startup chunk. The import resolves long before
 // the panel can be opened, and the panel's own module imports the same chunk.
-void import("@lib/net/connectionDiagnostics").then(({ configureConnectionDiagnostics }) => {
-  configureConnectionDiagnostics(api, ws);
-});
+void import("./features/connection/connectionDiagnostics").then(
+  ({ configureConnectionDiagnostics }) => {
+    configureConnectionDiagnostics(api, ws);
+  },
+);
 // App-lifetime hook: main.ts runs once per window. The other per-server resets
 // register themselves from their own modules.
 void registerSessionReset(

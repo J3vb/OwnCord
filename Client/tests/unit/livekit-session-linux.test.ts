@@ -33,8 +33,8 @@ const mockVoiceState = vi.hoisted(() => ({
   voiceUsers: { get: () => ({ has: () => true, keys: () => [].values() }) },
 }));
 
-vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/voice/native/platform")>()),
+vi.mock("../../src/lib/hostOs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/hostOs")>()),
   isLinuxDesktop: () => true,
 }));
 

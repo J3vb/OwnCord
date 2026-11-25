@@ -132,7 +132,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   unverified peer as verified.
 - **Linux voice/video runs in the Rust backend** (`src-tauri/src/native_voice/`,
   LiveKit's Rust SDK; WebKitGTK has no WebRTC) behind the `livekitSession`
-  facade. `isLinuxDesktop()` (`features/voice/native/platform.ts`) is the only
+  facade. `isLinuxDesktop()` (`lib/hostOs.ts`) is the only
   switch; keep `joinOrchestration`/`mediaControl` platform-blind and choose by
   capability (`inPlaceSourceChange`, `globalShortcuts.status().backend`), never
   a new `isLinuxDesktop()` branch. Building it needs clang >= 21 (root

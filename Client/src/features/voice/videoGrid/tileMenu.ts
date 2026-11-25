@@ -30,7 +30,7 @@ import {
   type VoiceModMenuOptions,
 } from "../../channels/sidebar/volumeMenu";
 import { voiceText as t } from "../../../i18n/voice";
-import { isAndroidApp } from "../native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { appendArrangeRows, type TileMenuArrange } from "./tileArrange";
 
 export interface TileMenuOptions {

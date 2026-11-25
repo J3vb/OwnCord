@@ -4,7 +4,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { STORAGE_PREFIX, loadPref, savePref, readMigratedStringPref } from "@lib/prefs/preferences";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 
 // Preference persistence lives in `@lib/prefs/preferences` so `lib/` and `features/`
 // modules can use it without importing the component layer.

@@ -36,7 +36,9 @@ vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
 vi.mock("@lib/prefs/appearance", () => mainMocks.prefsAppearanceMock());
-vi.mock("@lib/net/connectionDiagnostics", () => mainMocks.netConnectionDiagnosticsMock());
+vi.mock("/src/features/connection/connectionDiagnostics", () =>
+  mainMocks.netConnectionDiagnosticsMock(),
+);
 vi.mock("../../src/features/messaging/pendingMessages", () => mainMocks.pendingMessagesMock());
 vi.mock("../../src/platform/desktop/pushToTalk", () => mainMocks.desktopPushToTalkMock());
 vi.mock("@lib/logPersistence", () => mainMocks.logPersistenceMock());

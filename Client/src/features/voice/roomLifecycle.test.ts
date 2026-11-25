@@ -301,7 +301,7 @@ describe("leaveVoice", () => {
 describe("RoomLifecycle on the Linux native backend", () => {
   it("builds a NativeRoom with the same event wiring and no E2EE web worker", async () => {
     vi.resetModules();
-    vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
+    vi.doMock("../../lib/hostOs", () => ({ isLinuxDesktop: () => true }));
     const nativeRoom = {
       on: vi.fn(),
       disconnect: vi.fn(async () => {}),
@@ -351,7 +351,7 @@ describe("RoomLifecycle on the Linux native backend", () => {
     // here, so count the registrations rather than name them).
     expect(nativeRoom.on).toHaveBeenCalledTimes(15);
     expect(attach).toHaveBeenCalledWith(nativeRoom);
-    vi.doUnmock("./native/platform");
+    vi.doUnmock("../../lib/hostOs");
     vi.doUnmock("./native/nativeRoom");
   });
 });

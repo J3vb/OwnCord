@@ -7,7 +7,7 @@
 // returns null and the caller keeps its own web enumeration unchanged.
 import { desktop } from "../../../platform/desktop";
 import type { NativeVoiceCameraSupport } from "../../../platform/contracts/nativeVoice";
-import { isLinuxDesktop } from "./platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { voiceText as t } from "../../../i18n/voice";
 
 export type AudioDeviceKind = "audioinput" | "audiooutput";

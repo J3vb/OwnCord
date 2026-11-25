@@ -10,7 +10,7 @@
  */
 
 import { readStored } from "@lib/prefs/preferences";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { nativeVideoCodecs } from "./native/videoCodecs";
 
 export type VideoCodecName = "vp8" | "h264" | "vp9" | "h265" | "av1";

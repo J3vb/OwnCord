@@ -10,7 +10,7 @@ import {
 import { getShareDiagnosticsEnabled, getShareMotionPolicy } from "@lib/voice/shareFlags";
 import { Disposable } from "@lib/disposable";
 import { isMusicPublication } from "@lib/voice/musicTrack";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { SessionRemote } from "./sessionRemote";
 import { withServerLimit } from "./videoCapFollow";
 import type { ScreenTrackState } from "./screenShare";

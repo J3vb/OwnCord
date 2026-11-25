@@ -32,12 +32,12 @@ describeLiveKitProxiesSuite(async () => {
 // only inside the compose network — goes through the /livekit tunnel.
 describe("nativeProxies on the Linux desktop (native voice)", () => {
   afterEach(() => {
-    vi.doUnmock("../../../src/features/voice/native/platform");
+    vi.doUnmock("../../../src/lib/hostOs");
   });
 
   async function resolveOnLinux(directUrl: string): Promise<string> {
     vi.resetModules();
-    vi.doMock("../../../src/features/voice/native/platform", () => ({
+    vi.doMock("../../../src/lib/hostOs", () => ({
       isLinuxDesktop: () => true,
     }));
     invoke.mockReset().mockResolvedValue({ port: 40123, token: "tun" });

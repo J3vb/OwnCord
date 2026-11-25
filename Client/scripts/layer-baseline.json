@@ -13,11 +13,6 @@
     }
   },
   "debt": {
-    "lib/net/connectionDiagnostics.ts": {
-      "features/voice/native/devices.ts": 1,
-      "features/voice/native/micProbe.ts": 1,
-      "features/voice/native/platform.ts": 1
-    },
     "lib/voice/livekitDiagnostics.ts": {
       "features/voice/releaseRoom.ts": 1,
       "features/voice/sessionState.ts": 1
@@ -26,9 +21,6 @@
       "features/voice/sessionState.ts": 1,
       "features/voice/voiceSession.ts": 2,
       "stores/voice.store.ts": 2
-    },
-    "lib/media/notificationSound.ts": {
-      "features/voice/native/platform.ts": 1
     },
     "platform/desktop/pushToTalkService.ts": {
       "stores/voice.store.ts": 1
