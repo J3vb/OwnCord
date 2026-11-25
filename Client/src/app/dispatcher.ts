@@ -8,16 +8,16 @@
 // order of the two cross-domain handlers, `ready` and `error`. The handler
 // bodies live in features/*/wsHandlers.ts as plain functions.
 
-import type { ConnectionState, WsClient } from "./ws";
-import { toConnectionStatus, setActiveChannelProvider } from "./ws";
-import { getActivePresenceSender } from "./presence/presence";
-import { handleActivityRefusal } from "./presence/gameActivityBridge";
+import type { ConnectionState, WsClient } from "@lib/ws";
+import { toConnectionStatus, setActiveChannelProvider } from "@lib/ws";
+import { getActivePresenceSender } from "@lib/presence/presence";
+import { handleActivityRefusal } from "@lib/presence/gameActivityBridge";
 import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";
-import { serverErrorText } from "./api";
-import { showToast } from "./ui/toast";
+import { serverErrorText } from "@lib/api";
+import { showToast } from "@lib/ui/toast";
 import { connectText } from "../i18n/connect";
-import { ServerMessageType as S } from "./protocolTypes";
+import { ServerMessageType as S } from "@lib/protocolTypes";
 import {
   applyReadyPush,
   handleAuthOk,
@@ -75,8 +75,8 @@ import type {
   Subscribe,
   WsRoute,
 } from "../features/connection/dispatchContext";
-import { failMarkUnread, forgetPendingMarkUnread, resetReadPointerState } from "./readState";
-import { resetServerCapabilities } from "./net/serverCapabilities";
+import { failMarkUnread, forgetPendingMarkUnread, resetReadPointerState } from "@lib/readState";
+import { resetServerCapabilities } from "@lib/net/serverCapabilities";
 import {
   applyReadySafety,
   handleTimedOutRefusal,

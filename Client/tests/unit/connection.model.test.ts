@@ -10,7 +10,7 @@
  *
  * System under test — the REAL modules, wired together the way main.ts wires
  * them: `createWsClient()` (src/lib/ws.ts) driving `wireDispatcher()`
- * (src/lib/dispatcher.ts) into the real stores. Only the boundaries are
+ * (src/app/dispatcher.ts) into the real stores. Only the boundaries are
  * mocked:
  *   - the Tauri IPC surface (`invoke`/`listen`), via the shared ws-mocks
  *     helper the ws-*.test.ts files already use — this is the wire, and
@@ -72,7 +72,7 @@ vi.mock("@lib/voice/livekitSession", async () => {
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient, type WsClient } from "../../src/lib/ws";
-import { wireDispatcher, type DispatcherCleanup } from "../../src/lib/dispatcher";
+import { wireDispatcher, type DispatcherCleanup } from "../../src/app/dispatcher";
 import { clearAuth } from "../../src/stores/auth.store";
 import { getChannelMessages } from "../../src/stores/messages.store";
 import { voiceStore, setPeerVerification, joinVoiceChannel } from "../../src/stores/voice.store";

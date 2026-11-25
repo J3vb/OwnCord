@@ -29,7 +29,7 @@ vi.mock("@lib/presence/profiles", () => ({
 }));
 vi.mock("@pages/MainPage", () => mocks.pagesMainPageMock());
 vi.mock("@pages/mainPagePrefetch", () => mocks.pagesMainPagePrefetchMock());
-vi.mock("@lib/dispatcher", () => ({ wireConnectionStatus: vi.fn(() => () => {}) }));
+vi.mock("../../src/app/dispatcher", () => ({ wireConnectionStatus: vi.fn(() => () => {}) }));
 
 type PendingInvite = { code: string; host?: string } | null;
 

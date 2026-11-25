@@ -227,9 +227,13 @@ function compat(tag, tree, work) {
     );
   }
 
+  // The dispatcher lives in app/ now and in lib/ in releases before the move.
+  const dispatcher = ["Client/src/app/dispatcher.ts", "Client/src/lib/dispatcher.ts"].find((f) =>
+    existsSync(path.join(tree, f)),
+  );
   for (const required of [
     STRICT_TEST,
-    "Client/src/lib/dispatcher.ts",
+    dispatcher ?? "Client/src/app/dispatcher.ts",
     "Client/tests/helpers/mock-ws.ts",
   ]) {
     const p = path.join(

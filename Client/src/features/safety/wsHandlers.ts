@@ -1,4 +1,4 @@
-// Safety handler bodies, called only from lib/dispatcher.ts.
+// Safety handler bodies, called only from app/dispatcher.ts.
 import { showToast } from "../../lib/ui/toast";
 import { formatUntil, safetyText } from "../../i18n/safety";
 import type { DispatchApi, Payload, WsRoute } from "../connection/dispatchContext";

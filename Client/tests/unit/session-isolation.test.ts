@@ -171,7 +171,7 @@ vi.mock("@pages/MainPage", () => mainMocks.pagesMainPageMock());
 // stay faithful to: the real dispatcher's auth_ok handler calls setAuth() on
 // the REAL authStore (imported below, not mocked) — so main.ts's own race
 // against that write is exercised unmodified, not sidestepped.
-vi.mock("@lib/dispatcher", async () => {
+vi.mock("../../src/app/dispatcher", async () => {
   const { authStore, setAuth } = await import("@stores/auth.store");
   const { setMembers } = await import("@stores/members.store");
   const { setDmChannels } = await import("@stores/dm.store");

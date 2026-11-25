@@ -6,7 +6,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { resetMessagesState } from "../helpers/storeResets";
-import { wireDispatcher } from "@lib/dispatcher";
+import { wireDispatcher } from "../../src/app/dispatcher";
 
 // ── Stores ──────────────────────────────────────────────────────────
 import { channelsStore, setActiveChannel } from "@stores/channels.store";

@@ -305,5 +305,5 @@ and `IsEitherBlocked` is bidirectional). **Target UX:**
 `src/features/direct-messages/DmSidebar.ts`, `src/features/direct-messages/DmProfileSidebar.ts`,
 `src/pages/main-page/SidebarArea.ts`, `SidebarMemberSection.ts`,
 `src/features/direct-messages/SidebarDmSection.ts`, `SidebarDmHelpers.ts`, `src/stores/channels.store.ts`,
-`members.store.ts`, `dm.store.ts`, `src/lib/dispatcher.ts` (+ `src/features/{channels,direct-messages}/wsHandlers.ts`);
+`members.store.ts`, `dm.store.ts`, `src/app/dispatcher.ts` (+ `src/features/{channels,direct-messages}/wsHandlers.ts`);
 server `Server/service/channel.go`, `dm.go`, `block.go`.

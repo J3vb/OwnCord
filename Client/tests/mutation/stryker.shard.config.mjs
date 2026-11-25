@@ -364,7 +364,7 @@ export const shards = {
     "src/features/message-requests/sync.ts",
     "src/features/messaging/sendErrors.ts",
     "src/features/voice/callChatResize.ts",
-    "src/lib/dispatcher.ts",
+    "src/app/dispatcher.ts",
     "src/lib/net/ws/wsInbound.ts",
     "src/lib/prefs/gameActivityPrefs.ts",
     "src/lib/wsConfig.ts",

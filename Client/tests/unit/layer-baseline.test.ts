@@ -30,20 +30,11 @@ const baseline = JSON.parse(
 
 /** Upward value-import sites that may remain. Lower this in every change that
  *  removes one; it never rises. */
-const DEBT_SITE_CAP = 38;
+const DEBT_SITE_CAP = 36;
 
-/** The upward imports a written rule requires (Client/CLAUDE.md: the
- *  dispatcher door, and messages.store over its reducer modules). */
+/** The upward imports a written rule requires (Client/CLAUDE.md:
+ *  messages.store over its reducer modules). */
 const SANCTIONED_PAIRS = [
-  "lib/dispatcher.ts -> features/channels/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/connection/dispatchContext.ts",
-  "lib/dispatcher.ts -> features/connection/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/direct-messages/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/message-requests/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/messaging/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/moderation/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/safety/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/voice/wsHandlers.ts",
   "stores/messages.store.ts -> features/messaging/historyWindows.ts",
   "stores/messages.store.ts -> features/messaging/liveMessages.ts",
   "stores/messages.store.ts -> features/messaging/messageEdits.ts",

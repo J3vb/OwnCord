@@ -128,7 +128,7 @@ export default tseslint.config(
   {
     // dispatcher.ts IS the allowed entry point, so it is exempt from its own rule.
     files: ["src/**/*.ts"],
-    ignores: ["src/lib/dispatcher.ts"],
+    ignores: ["src/app/dispatcher.ts"],
     plugins: { local: localRules },
     rules: {
       "local/no-store-write-in-ws-on": "error",

@@ -72,7 +72,7 @@ vi.mock("../../src/features/connection/ConnectedOverlay", () => ({
 }));
 
 let dispatcherSeq = 0;
-vi.mock("@lib/dispatcher", () => ({
+vi.mock("../../src/app/dispatcher", () => ({
   wireDispatcher: vi.fn(() => {
     const id = ++dispatcherSeq;
     return () => events.push(`dispatcher-${id}-unsub`);

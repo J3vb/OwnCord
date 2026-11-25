@@ -1,5 +1,5 @@
 // Auth, server-restart and connection-level error handlers — extracted from
-// lib/dispatcher.ts, which keeps every socket subscription and calls these
+// app/dispatcher.ts, which keeps every socket subscription and calls these
 // plain functions.
 import { authStore, setAuth, clearAuth, setUploadFileTypes } from "../../stores/auth.store";
 import {

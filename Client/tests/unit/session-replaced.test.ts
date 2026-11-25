@@ -26,7 +26,7 @@ vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async ()
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient } from "../../src/lib/ws";
-import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
+import { wireDispatcher, wireConnectionStatus } from "../../src/app/dispatcher";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore, setConnectionStatus, setSessionReplaced } from "../../src/stores/ui.store";
 import { expectConsole } from "../helpers/console";

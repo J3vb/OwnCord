@@ -1,5 +1,5 @@
 // Dispatch context — what the features/*/wsHandlers.ts modules receive from
-// lib/dispatcher.ts. The dispatcher keeps every ws.on(...) registration (it is
+// app/dispatcher.ts. The dispatcher keeps every ws.on(...) registration (it is
 // the only door server events enter the stores through); the handler modules
 // export plain functions it calls with this context. Built once per
 // wireDispatcher call, so a fresh login always starts with a fresh clock.

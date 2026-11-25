@@ -122,7 +122,7 @@ vi.mock("@pages/ConnectPage", () => ({
   }),
 }));
 vi.mock("@pages/MainPage", () => ({ createMainPage: vi.fn() }));
-vi.mock("@lib/dispatcher", () => ({
+vi.mock("../../src/app/dispatcher", () => ({
   wireDispatcher: vi.fn(() => () => {}),
   wireConnectionStatus: vi.fn(() => () => {}),
 }));

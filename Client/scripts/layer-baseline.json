@@ -1,16 +1,5 @@
 {
   "sanctioned": {
-    "lib/dispatcher.ts": {
-      "features/channels/wsHandlers.ts": 1,
-      "features/connection/dispatchContext.ts": 1,
-      "features/connection/wsHandlers.ts": 1,
-      "features/direct-messages/wsHandlers.ts": 1,
-      "features/message-requests/wsHandlers.ts": 1,
-      "features/messaging/wsHandlers.ts": 1,
-      "features/moderation/wsHandlers.ts": 1,
-      "features/safety/wsHandlers.ts": 1,
-      "features/voice/wsHandlers.ts": 1
-    },
     "stores/messages.store.ts": {
       "features/messaging/historyWindows.ts": 1,
       "features/messaging/liveMessages.ts": 1,
@@ -39,10 +28,6 @@
     },
     "lib/net/credentials.ts": {
       "stores/auth.store.ts": 1
-    },
-    "lib/dispatcher.ts": {
-      "stores/channels.store.ts": 1,
-      "stores/ui.store.ts": 1
     },
     "lib/text/formatting.ts": {
       "stores/channels.store.ts": 1,

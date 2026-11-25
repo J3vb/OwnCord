@@ -499,7 +499,7 @@ the same signal in future.
 `src/features/messaging/MessageList.ts` (+ `message-list/`), `src/features/messaging/MessageInput.ts` (+ `composer/`, `src/features/messaging/attachSheet.ts`),
 `src/pages/main-page/ChannelController.ts`,
 `src/features/messaging/MessageController.ts`, `src/features/messaging/ReactionController.ts`,
-`src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/lib/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,
+`src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/app/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,
 `src/features/navigation/SearchOverlay.ts`, `src/features/messaging/PinnedMessages.ts`,
 `src/features/messaging/composer/MentionAutocomplete.ts`, `src/lib/text/mentions.ts`,
 `src/features/messaging/content/contentParser.ts` (+ `syntax-highlight.ts`),

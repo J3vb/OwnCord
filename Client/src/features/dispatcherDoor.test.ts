@@ -1,6 +1,6 @@
 // The dispatcher is the only door server events enter the stores through.
 // `local/no-store-write-in-ws-on` enforces it lexically: a store mutator
-// called inside a ws.on(...) callback anywhere but lib/dispatcher.ts fails
+// called inside a ws.on(...) callback anywhere but app/dispatcher.ts fails
 // lint. The handler bodies live in features/*/wsHandlers.ts as plain
 // functions, which the lexical rule cannot follow — so this test pins the
 // other half: only dispatcher.ts may call them, they never subscribe to the
@@ -91,9 +91,9 @@ describe("the dispatcher door", () => {
     for (const file of wsNamed) expect(parts.has(file), rel(file)).toBe(true);
   });
 
-  it("every wsHandlers module is imported by lib/dispatcher.ts and by nothing else", () => {
+  it("every wsHandlers module is imported by app/dispatcher.ts and by nothing else", () => {
     for (const handler of handlerFiles) {
-      expect((importers.get(handler) ?? []).map(rel)).toEqual(["lib/dispatcher.ts"]);
+      expect((importers.get(handler) ?? []).map(rel)).toEqual(["app/dispatcher.ts"]);
     }
   });
 
@@ -106,13 +106,13 @@ describe("the dispatcher door", () => {
     }
   });
 
-  it("local/no-store-write-in-ws-on still exempts only lib/dispatcher.ts", async () => {
+  it("local/no-store-write-in-ws-on still exempts only app/dispatcher.ts", async () => {
     const eslint = new ESLint({ cwd: clientRoot });
     const severity = async (file: string) =>
       (await eslint.calculateConfigForFile(file))?.rules?.["local/no-store-write-in-ws-on"];
 
-    expect(await severity(path.join(srcDir, "lib/dispatcher.ts"))).toBeUndefined();
-    const others = sourceFiles.filter((f) => !f.endsWith(`lib${path.sep}dispatcher.ts`));
+    expect(await severity(path.join(srcDir, "app/dispatcher.ts"))).toBeUndefined();
+    const others = sourceFiles.filter((f) => !f.endsWith(`app${path.sep}dispatcher.ts`));
     const severities = await Promise.all(others.map(severity));
     others.forEach((file, i) => {
       expect(severities[i], path.relative(srcDir, file)).toEqual([2]);

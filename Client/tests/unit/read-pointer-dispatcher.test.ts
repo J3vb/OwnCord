@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vite
 import * as dispatcherMocks from "../helpers/dispatcherMocks";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { wireDispatcher } from "../../src/app/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import {
   channelsStore,

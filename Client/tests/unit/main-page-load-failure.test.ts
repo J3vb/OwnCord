@@ -25,7 +25,7 @@ vi.mock("@lib/presence/profiles", (importOriginal) => mocks.presenceProfilesMock
 vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());
 vi.mock("@lib/api", (importOriginal) => mocks.apiMock(importOriginal));
 vi.mock("@pages/ConnectPage", () => mocks.pagesConnectPageMock());
-vi.mock("@lib/dispatcher", () => mocks.dispatcherMock());
+vi.mock("../../src/app/dispatcher", () => mocks.dispatcherMock());
 
 const { mockLogin, capturedConnectCallbacks } = mocks;
 

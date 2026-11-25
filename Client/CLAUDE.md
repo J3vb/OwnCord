@@ -10,7 +10,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   extracted from `lib/voice/livekitSession.ts` and `features/voice/livekitE2EE.ts` (the
   facades; the `e2ee*.ts` files are `E2EEManager`'s), with colocated
   `*.test.ts`; `src/features/{connection,direct-messages,message-requests,channels,messaging,voice,safety,moderation}/wsHandlers.ts`
-  hold the WebSocket handler bodies extracted from `lib/dispatcher.ts`;
+  hold the WebSocket handler bodies extracted from `app/dispatcher.ts`;
   `src/features/messaging/` also holds `stores/messages.store.ts`'s pure
   reducers and message model — the store stays the facade, so import its
   mutators from `@stores/messages.store`, never from the reducer modules; new
@@ -74,7 +74,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   list in `vitest.config.ts`, which runs as the `desktop-node` project on
   `forks`. Each test has a 2 s budget (`testTimeout`): wait on fake timers,
   never on the real clock.
-- `src/lib/dispatcher.ts` is the single WS-event entry point **into the
+- `src/app/dispatcher.ts` is the single WS-event entry point **into the
   stores**: server events reach domain stores only through a `ws.on(...)`
   subscription registered there. The handler bodies live in
   `src/features/*/wsHandlers.ts` as plain functions that only `dispatcher.ts`

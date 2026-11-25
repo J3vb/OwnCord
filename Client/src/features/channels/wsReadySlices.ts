@@ -1,6 +1,6 @@
 // The `ready` slices of the channel handlers: the channel snapshot, the active
 // channel, the read pointer capabilities, and the emoji and sticker loads.
-// Plain functions; wsHandlers.ts re-exports them for lib/dispatcher.ts.
+// Plain functions; wsHandlers.ts re-exports them for app/dispatcher.ts.
 import {
   channelsStore,
   setChannels,

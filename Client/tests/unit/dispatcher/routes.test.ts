@@ -5,7 +5,7 @@
 import { describe, expect, it, vi } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
 import { createMockWs } from "../../helpers/dispatcherHarness";
-import { featureRoutes, wireDispatcher } from "../../../src/lib/dispatcher";
+import { featureRoutes, wireDispatcher } from "../../../src/app/dispatcher";
 
 vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());

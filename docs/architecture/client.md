@@ -240,6 +240,6 @@ source): 411 Vitest files and 132 Playwright specs.
 - **Rust**: the `cargo test --lib` suite lives beside the code in 33 of the 39
   source files. It blocks CI together with `cargo clippy -D warnings`.
 
-**Source of truth:** `src/main.ts`, `src/lib/dispatcher.ts` (+ `src/features/*/wsHandlers.ts`), `src/lib/ws.ts`,
+**Source of truth:** `src/main.ts`, `src/app/dispatcher.ts` (+ `src/features/*/wsHandlers.ts`), `src/lib/ws.ts`,
 `src/lib/api.ts`, `src/lib/store.ts`, `src/stores/*.store.ts` (+ the `messages.store.ts` reducers in `src/features/messaging/`),
 `src-tauri/src/lib.rs`, `src-tauri/tauri.conf.json`.

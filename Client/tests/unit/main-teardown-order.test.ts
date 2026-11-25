@@ -116,11 +116,11 @@ vi.mock("@lib/ws", async (importOriginal) => {
 
 // Dispatcher stand-in with the two behaviours the order depends on: it
 // subscribes an onStateChange listener (as the real one does at
-// lib/dispatcher.ts:281,338,348) that records the transitions it observes,
+// app/dispatcher.ts:281,338,348) that records the transitions it observes,
 // and its returned unsubscribe records and removes it. Its auth_ok handler
 // writes authStore like the real one, so the overlay flow is unchanged.
 let dispatcherSeq = 0;
-vi.mock("@lib/dispatcher", async () => {
+vi.mock("../../src/app/dispatcher", async () => {
   const { authStore, setAuth } = await import("@stores/auth.store");
   return {
     wireDispatcher: (ws: {

@@ -365,6 +365,7 @@ const config = {
     "src/stores/**/*.ts",
     "src/features/**/*.ts",
     "src/features/members/memberRow.view.ts",
+    "src/app/dispatcher.ts", // the WS event door, mutated since it lived in lib/
     "!src/lib/types.ts",
     "!src/lib/wire*.ts", // split out of types.ts, excluded with it
     "!src/lib/net/wireShapes.ts", // generated data, no logic to mutate

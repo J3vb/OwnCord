@@ -184,7 +184,7 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/subscription-result-kept",
     shape: "ws.on",
-    filePath: "src/lib/dispatcher.ts",
+    filePath: "src/app/dispatcher.ts",
     code: `this.ws.on("x", () => {});`,
     messageId: "discarded",
   },

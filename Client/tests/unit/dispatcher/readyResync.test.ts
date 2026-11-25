@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, onTestFinished } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
-import { wireDispatcher } from "../../../src/lib/dispatcher";
+import { wireDispatcher } from "../../../src/app/dispatcher";
 import { expectConsole } from "../../helpers/console";
 import { channelsStore } from "../../../src/stores/channels.store";
 import {

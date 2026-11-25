@@ -1,5 +1,5 @@
 // Chat message, reaction, typing and optimistic-send WebSocket handlers —
-// extracted from lib/dispatcher.ts, which keeps every socket subscription and
+// extracted from app/dispatcher.ts, which keeps every socket subscription and
 // calls these plain functions.
 import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";

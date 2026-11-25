@@ -1,5 +1,5 @@
 // Channel, role, member, presence and emoji WebSocket handlers — extracted
-// from lib/dispatcher.ts, which keeps every socket subscription and calls
+// from app/dispatcher.ts, which keeps every socket subscription and calls
 // these plain functions.
 import { authStore, setAuth } from "../../stores/auth.store";
 import {
