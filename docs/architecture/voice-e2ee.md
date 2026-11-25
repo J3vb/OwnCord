@@ -151,7 +151,7 @@ Supporting pieces:
   (`joinOrchestration.ts` joins with a monotonic `joinGeneration` to discard
   superseded ones; `roomLifecycle.ts` Room + E2EE worker creation and
   teardown; `mediaControl.ts` mute/deafen/devices; `remoteTracks.ts`;
-  `sessionState.ts` state types), `src/lib/voice/livekitE2EE.ts` (`E2EEManager`
+  `sessionState.ts` state types), `src/features/voice/livekitE2EE.ts` (`E2EEManager`
   facade: key-holder election, join/reconnect key exchange, announce handling,
   rotation-on-leave), its `src/features/voice/e2ee*.ts` modules
   (`e2eeIdentity.ts` identity signing and the ephemeral keypair;
@@ -166,7 +166,7 @@ Supporting pieces:
   Linux native publishes VP8 or, by choice when its encoder has it, H.264; Auto is VP8), `src/features/voice/codecSwitch.ts`
   (republishes a live VP9 or H.265 camera or share on a codec every viewer decodes when
   a peer that cannot decode it joins, and back once they leave),
-  `src/lib/voice/audioElements.ts` (per-user
+  `src/features/voice/audioElements.ts` (per-user
   volume up to 200% and a local Mute per user), `src-tauri/src/livekit_proxy.rs`
   (tunnel), `src-tauri/src/ptt.rs` (push-to-talk key polling).
 
@@ -198,7 +198,7 @@ otherwise. An older client sends no key and its announces carry none.
 
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
 `Client/src/lib/voice/livekitSession.ts`, `Client/src/features/voice/`,
-`Client/src/lib/voice/livekitE2EE.ts`, `Client/src/lib/net/e2eeCrypto.ts`,
+`Client/src/features/voice/livekitE2EE.ts`, `Client/src/lib/net/e2eeCrypto.ts`,
 `Client/src-tauri/src/livekit_proxy.rs`.
 
 ## Linux: native LiveKit in the Rust backend
@@ -269,7 +269,7 @@ adapter maps them onto `RoomEvent`s (`Disconnected`, `ActiveSpeakersChanged`,
 `EncryptionError` for a non-`Ok` frame-cryptor state — at once for the local
 identity; the backend reports each transition once, so a remote peer's failure
 is re-raised every second until its `Ok`, as the web worker does, and the
-shared 3 s decrypt grace in `lib/voice/roomEventHandlers.ts` decides when it degrades
+shared 3 s decrypt grace in `features/voice/roomEventHandlers.ts` decides when it degrades
 the call; the grace restarts only when a room key was installed since the
 peer's last failure, which `E2EEWorker` reports on both paths — participant
 join/leave).

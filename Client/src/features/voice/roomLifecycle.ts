@@ -14,9 +14,9 @@ import {
   micProcessingOptions,
   type AudioPipeline,
 } from "../../lib/voice/audioPipeline";
-import type { AudioElements } from "../../lib/voice/audioElements";
-import { type DeviceManager, isMicPolicyGated } from "../../lib/voice/deviceManager";
-import type { E2EEManager } from "../../lib/voice/livekitE2EE";
+import type { AudioElements } from "../../features/voice/audioElements";
+import { type DeviceManager, isMicPolicyGated } from "../../features/voice/deviceManager";
+import type { E2EEManager } from "../../features/voice/livekitE2EE";
 import type { VoiceTokenManager } from "../../lib/voice/voiceTokenManager";
 import {
   type CameraTrackState,
@@ -35,7 +35,7 @@ import {
 import { attachDiagnosticListeners } from "../../lib/voice/livekitDiagnostics";
 import { recordVoiceLeft } from "../../lib/voice/voiceEventLog";
 import { detachRoom, onRoom } from "./releaseRoom";
-import type { RoomEventHandlers } from "../../lib/voice/roomEventHandlers";
+import type { RoomEventHandlers } from "../../features/voice/roomEventHandlers";
 import { parseUserId, type SessionState } from "./sessionState";
 import { isLinuxDesktop } from "./native/platform";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";

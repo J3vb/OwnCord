@@ -1,6 +1,6 @@
 import { beforeEach, vi } from "vitest";
 import { mockSelf } from "./livekitE2eeMocks";
-import { E2EEManager } from "../../src/lib/voice/livekitE2EE";
+import { E2EEManager } from "../../src/features/voice/livekitE2EE";
 import { importPublicKey, exportPublicKey, wrapRoomKey } from "@lib/net/e2eeCrypto";
 import { getIdentityPin } from "@lib/net/identity";
 

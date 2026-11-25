@@ -1,5 +1,5 @@
 // Tests for the ring a participant reports for itself (voice_speaking): the
-// listening side in src/lib/voice/roomEventHandlers.ts and
+// listening side in src/features/voice/roomEventHandlers.ts and
 // src/lib/voice/roomSpeakers.ts.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";

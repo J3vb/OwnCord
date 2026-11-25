@@ -12,9 +12,9 @@ import {
 } from "livekit-client";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
-import { parseUserId } from "../../features/voice/sessionState";
-import { isUnencryptedPublication } from "../../features/voice/mediaEncryption";
-import { onRoom } from "../../features/voice/releaseRoom";
+import { parseUserId } from "./sessionState";
+import { isUnencryptedPublication } from "./mediaEncryption";
+import { onRoom } from "./releaseRoom";
 import { voiceStore } from "@stores/voice.store";
 import {
   announceLocalMute,
@@ -24,20 +24,20 @@ import {
   MAX_GAIN,
   userLocalMuteKey,
   userVolumeKey,
-} from "./audioVolumePrefs";
+} from "@lib/voice/audioVolumePrefs";
 import {
   applySavedOutput,
   attachMicAudioElement,
   attachScreenshareAudio,
   detachScreenshareAudio,
-} from "./audioTrackElements";
-import { MusicAudioState } from "./audioMusicState";
-import { isMusicPublication } from "./musicTrack";
-import { resendStreamAudioDelivery, syncScreenshareDelivery } from "./screenshareDelivery";
-import { hasNativePlayout, type MicGraph, type SinkableContext } from "./audioGraphTypes";
+} from "@lib/voice/audioTrackElements";
+import { MusicAudioState } from "@lib/voice/audioMusicState";
+import { isMusicPublication } from "@lib/voice/musicTrack";
+import { resendStreamAudioDelivery, syncScreenshareDelivery } from "@lib/voice/screenshareDelivery";
+import { hasNativePlayout, type MicGraph, type SinkableContext } from "@lib/voice/audioGraphTypes";
 import type { VoiceRemoteParticipant, VoiceRoom } from "@lib/voice/voiceRoom";
 
-export { setAudioVolumeHost } from "./audioVolumePrefs";
+export { setAudioVolumeHost } from "@lib/voice/audioVolumePrefs";
 
 const log = createLogger("audioElements");
 

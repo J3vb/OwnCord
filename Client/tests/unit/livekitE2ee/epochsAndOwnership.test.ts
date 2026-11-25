@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import * as mocks from "../../helpers/livekitE2eeMocks";
-import { E2EEManager } from "../../../src/lib/voice/livekitE2EE";
+import { E2EEManager } from "../../../src/features/voice/livekitE2EE";
 import {
   setPeerVerification,
   setLocalSessionFingerprint,

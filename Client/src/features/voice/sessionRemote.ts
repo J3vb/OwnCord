@@ -6,7 +6,7 @@ import { RemoteTracks } from "./remoteTracks";
 import { voiceStore } from "@stores/voice.store";
 import { setListeningTo } from "@stores/voiceListening";
 import { noteWatchSent } from "@lib/voice/watchRequest";
-import type { AudioElements } from "@lib/voice/audioElements";
+import type { AudioElements } from "./audioElements";
 import type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
 import { SessionCore } from "./sessionCore";
 

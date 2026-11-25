@@ -9,10 +9,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { Track } from "livekit-client";
 import type { RemoteParticipant, RemoteTrack, RemoteTrackPublication, Room } from "livekit-client";
 
-import { createRoomEventHandlers, type RoomEventDeps } from "@lib/voice/roomEventHandlers";
+import {
+  createRoomEventHandlers,
+  type RoomEventDeps,
+} from "../../src/features/voice/roomEventHandlers";
 import { savePref } from "@lib/prefs/preferences";
 import { voiceStore } from "@stores/voice.store";
-import type { AudioElements } from "@lib/voice/audioElements";
+import type { AudioElements } from "../../src/features/voice/audioElements";
 import { RemoteTracks } from "../../src/features/voice/remoteTracks";
 import { AUTO_PLAY_CAMERAS_PREF } from "../../src/features/voice/autoPlayCameras";
 
