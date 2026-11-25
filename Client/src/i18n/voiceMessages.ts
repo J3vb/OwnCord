@@ -5,7 +5,7 @@ export const voiceMessagesText = defineCatalog("voiceMessages", {
   "mic.label": "Record voice message",
 
   "bar.label": "Voice message",
-  "bar.recording": "Recording",
+  "bar.recording": "Recording — not sent yet",
   "bar.ready": "Ready to send",
   "bar.uploading": "Sending…",
   "bar.limit": "Reached the 5 minute limit — send it or discard it",

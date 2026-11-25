@@ -14,7 +14,7 @@ export const musicText = defineCatalog("music", {
   "reason.noSoundServer": "Sharing music needs a running PulseAudio or PipeWire sound server",
   "picker.title": "Share music",
   "picker.hint":
-    "Pick the app whose sound you want to share. Only that app's sound goes out, not your microphone or other apps.",
+    "Pick the app whose sound you want to share. People in the call can listen to that app's sound only, not your microphone or other apps.",
   "picker.listLabel": "Apps with sound",
   "picker.appLabel": "Share {name}",
   "picker.playing": "Playing",

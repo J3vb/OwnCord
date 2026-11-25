@@ -46,7 +46,7 @@ export const shellText = defineCatalog("shell", {
   "member.changeRole": "Change Role",
   "member.changeNickname": "Change Nickname",
   "member.forceLogout": "Force Logout",
-  "member.forceLogoutConfirm": "Log them out?",
+  "member.forceLogoutConfirm": "Log them out of every device? They can sign in again.",
   "member.loggingOut": "Logging out...",
   "member.ban": "Ban",
 
@@ -129,7 +129,7 @@ export const shellText = defineCatalog("shell", {
   "channel.emptyHint": "Ask a moderator to create a channel",
   "channel.markAllRead": "Mark Server as Read",
   "channel.deleteWarning":
-    "Are you sure you want to delete {channel}? This action cannot be undone and all messages in this channel will be lost.",
+    "Delete {channel} for everyone? This can't be undone and all its messages are deleted. To keep them, archive the channel in the admin panel instead.",
   "channel.createFailed": "Failed to create channel",
   "channel.updateFailed": "Failed to update channel",
   "channel.deleteFailed": "Failed to delete channel",
@@ -338,7 +338,7 @@ export const shellText = defineCatalog("shell", {
   "audit.openFailed": "Could not open the admin panel",
 
   "purge.trigger": "Purge Messages…",
-  "purge.hint": "Deletes the newest {min}–{max} messages.",
+  "purge.hint": "Deletes the newest {min}–{max} messages for everyone. This can't be undone.",
   "purge.confirm": "Confirm Purge",
   "purge.running": "Purging…",
   "purge.none": "No messages to purge in #{channel}",
