@@ -688,6 +688,7 @@ export const shards = {
     "src/features/members/buddies/joinTarget.ts",
     "src/features/members/memberGroupHeader.ts",
   ],
+  "lib-rest-38": ["src/features/members/memberColumn.ts"],
   "stores-1": [
     "src/features/forums/ForumSettingsSection.ts",
     "src/features/messaging/messageModel.ts",

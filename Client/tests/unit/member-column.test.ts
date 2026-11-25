@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createMemberColumn, type MemberColumn } from "../../src/pages/main-page/MemberColumn";
+import { createMemberColumn, type MemberColumn } from "../../src/features/members/memberColumn";
 import type { MemberPanel } from "../../src/features/members/memberPanel";
 import { channelsStore, type Channel } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";

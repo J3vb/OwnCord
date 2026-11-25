@@ -20,7 +20,7 @@ import type { IncomingCallBannerComponent } from "../../features/direct-messages
 import type { RingController, OutgoingCall } from "@lib/voice/callRing";
 import type { DmCallPanelComponent } from "../../features/direct-messages/DmCallPanel";
 import type { SidebarDrawer } from "./SidebarDrawer";
-import type { MemberColumn } from "./MemberColumn";
+import type { MemberColumn } from "../../features/members/memberColumn";
 import type { ContentNavigator } from "../../features/navigation/contentView";
 import type { MainPageOptions } from "../MainPage";
 
