@@ -1,7 +1,7 @@
 // The session's end-to-end encryption surface: delegates to E2EEManager (which
 // owns the keypair, room key and TOFU identity pinning) and the test-visible
 // proxies for its state.
-import type { E2EEManager } from "@lib/voice/livekitE2EE";
+import type { E2EEManager } from "./livekitE2EE";
 import type { ForgetIdentityPinResult } from "@lib/net/identity";
 import { SessionMedia } from "./sessionMedia";
 

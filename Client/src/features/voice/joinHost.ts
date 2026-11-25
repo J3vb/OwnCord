@@ -1,9 +1,9 @@
 // The collaborator surface JoinOrchestration reads from LiveKitSession. Split
 // from joinOrchestration.ts so the join helper modules can share the type.
 import type { AudioPipeline } from "../../lib/voice/audioPipeline";
-import type { AudioElements } from "../../lib/voice/audioElements";
-import type { DeviceManager } from "../../lib/voice/deviceManager";
-import type { E2EEManager } from "../../lib/voice/livekitE2EE";
+import type { AudioElements } from "../../features/voice/audioElements";
+import type { DeviceManager } from "../../features/voice/deviceManager";
+import type { E2EEManager } from "../../features/voice/livekitE2EE";
 import type { SessionState } from "./sessionState";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";
 

@@ -20,18 +20,18 @@ import {
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { recordEvent } from "@lib/diagnostics/eventSink";
-import { parseUserId } from "../../features/voice/sessionState";
-import { isUnencryptedPublication } from "../../features/voice/mediaEncryption";
-import { detachRoom } from "../../features/voice/releaseRoom";
+import { parseUserId } from "./sessionState";
+import { isUnencryptedPublication } from "./mediaEncryption";
+import { detachRoom } from "./releaseRoom";
 import {
   markFirstRemoteTrackSubscribed,
   markLocalTrackPublished,
   recordDecryptError,
 } from "@lib/voice/voiceJoinTrace";
 import { voiceText } from "../../i18n/voice";
-import { createSpeakerTracker } from "./roomSpeakers";
-import { isMusicPublication } from "./musicTrack";
-import type { RoomEventDeps, RoomEventHandlers } from "./roomEventTypes";
+import { createSpeakerTracker } from "@lib/voice/roomSpeakers";
+import { isMusicPublication } from "@lib/voice/musicTrack";
+import type { RoomEventDeps, RoomEventHandlers } from "@lib/voice/roomEventTypes";
 import type {
   VoiceRemoteParticipant,
   VoiceRemotePublication,
@@ -74,7 +74,7 @@ export function setJoinedVoiceStatus(room: VoiceRoom): void {
   );
 }
 
-export type { RoomEventDeps, RoomEventHandlers } from "./roomEventTypes";
+export type { RoomEventDeps, RoomEventHandlers } from "@lib/voice/roomEventTypes";
 
 export function createRoomEventHandlers(deps: RoomEventDeps): RoomEventHandlers {
   let autoplayUnlockHandler: (() => void) | null = null;

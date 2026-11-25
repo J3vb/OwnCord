@@ -4,7 +4,7 @@
 import { leaveVoiceChannel, voiceStore } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
 import { logIceConnectionInfo } from "../../lib/voice/livekitDiagnostics";
-import { setJoinedVoiceStatus } from "../../lib/voice/roomEventHandlers";
+import { setJoinedVoiceStatus } from "../../features/voice/roomEventHandlers";
 import { voiceText } from "../../i18n/voice";
 import { releaseRoom } from "./releaseRoom";
 import { advanceJoinStage, failJoinAttempt, redactTunnelUrl } from "../../lib/voice/voiceJoinTrace";

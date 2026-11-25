@@ -55,7 +55,7 @@ interface Canary {
 const CANARIES: readonly Canary[] = [
   {
     rule: "local/no-leave-voice-when-superseded",
-    filePath: "src/lib/voice/livekitReconnect.ts",
+    filePath: "src/features/voice/livekitReconnect.ts",
     code: `async function attemptAutoReconnect(deps, signal, channelId, owner) {
       const superseded = () => reconnectSuperseded(signal, channelId, owner, deps.getState());
       if (superseded()) {

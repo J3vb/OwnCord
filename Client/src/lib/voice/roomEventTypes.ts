@@ -10,7 +10,7 @@ import type {
   TrackPublication,
   DisconnectReason,
 } from "livekit-client";
-import type { AudioElements } from "@lib/voice/audioElements";
+import type { AudioElements } from "../../features/voice/audioElements";
 import type {
   VoiceRemoteParticipant,
   VoiceRemotePublication,

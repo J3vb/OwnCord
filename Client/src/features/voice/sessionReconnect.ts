@@ -11,8 +11,8 @@ import {
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { authStore } from "@stores/auth.store";
-import { attemptAutoReconnect } from "@lib/voice/livekitReconnect";
-import { type RoomEventHandlers, createRoomEventHandlers } from "@lib/voice/roomEventHandlers";
+import { attemptAutoReconnect } from "./livekitReconnect";
+import { type RoomEventHandlers, createRoomEventHandlers } from "./roomEventHandlers";
 import {
   type CameraTrackState,
   bumpGeneration,

@@ -74,7 +74,7 @@ vi.mock("../../lib/logger", () => ({
     return log;
   },
 }));
-vi.mock("../../lib/voice/deviceManager", () => ({ isMicPolicyGated: () => gate.gated }));
+vi.mock("../../features/voice/deviceManager", () => ({ isMicPolicyGated: () => gate.gated }));
 // The live codec switch has its own tests (codecSwitch.test.ts).
 vi.mock("./codecSwitch", () => ({
   CodecSwitchController: class {

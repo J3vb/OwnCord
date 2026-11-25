@@ -7,11 +7,11 @@ import type {
   RemoteTrackPublication,
   Room,
 } from "livekit-client";
-import { createRoomEventHandlers } from "@lib/voice/roomEventHandlers";
-import type { RoomEventDeps } from "@lib/voice/roomEventHandlers";
+import { createRoomEventHandlers } from "../../src/features/voice/roomEventHandlers";
+import type { RoomEventDeps } from "../../src/features/voice/roomEventHandlers";
 import { voiceStore } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
-import type { AudioElements } from "@lib/voice/audioElements";
+import type { AudioElements } from "../../src/features/voice/audioElements";
 
 // ── fakes ──────────────────────────────────────────────────────────────────
 

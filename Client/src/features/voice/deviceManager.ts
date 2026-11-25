@@ -12,7 +12,7 @@ import { voiceStore } from "@stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
 import { micCaptureOptions, type AudioPipeline } from "@lib/voice/audioPipeline";
-import { nativeAudioDevices, onNativeDevicesChanged } from "../../features/voice/native/devices";
+import { nativeAudioDevices, onNativeDevicesChanged } from "./native/devices";
 import { voiceText } from "../../i18n/voice";
 
 const log = createLogger("deviceManager");

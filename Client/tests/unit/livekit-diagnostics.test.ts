@@ -24,7 +24,7 @@ import {
 } from "@lib/voice/livekitDiagnostics";
 import type { SessionDebugDeps } from "@lib/voice/livekitDiagnostics";
 import type { AudioPipeline } from "@lib/voice/audioPipeline";
-import type { AudioElements } from "@lib/voice/audioElements";
+import type { AudioElements } from "../../src/features/voice/audioElements";
 import { expectConsole } from "../helpers/console";
 import { captureLogs } from "../helpers/log-capture";
 

@@ -15,13 +15,13 @@ import {
   setLocalSafetyNumber,
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
-import { E2EEIdentity } from "../../features/voice/e2eeIdentity";
-import { E2EEEpoch } from "../../features/voice/e2eeEpoch";
-import { E2EEPeerState, type PendingAnnounce } from "../../features/voice/e2eePeerState";
-import { E2EEWorker } from "../../features/voice/e2eeWorker";
-import { E2EEOffer } from "../../features/voice/e2eeOffer";
-import { createE2EEFlows } from "../../features/voice/e2eeFlows";
-import type { E2EEHost } from "../../features/voice/e2eeHost";
+import { E2EEIdentity } from "./e2eeIdentity";
+import { E2EEEpoch } from "./e2eeEpoch";
+import { E2EEPeerState, type PendingAnnounce } from "./e2eePeerState";
+import { E2EEWorker } from "./e2eeWorker";
+import { E2EEOffer } from "./e2eeOffer";
+import { createE2EEFlows } from "./e2eeFlows";
+import type { E2EEHost } from "./e2eeHost";
 
 const log = createLogger("livekitE2EE");
 

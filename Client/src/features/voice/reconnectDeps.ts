@@ -1,4 +1,4 @@
-// What the auto-reconnect loop (lib/voice/livekitReconnect.ts) needs from the
+// What the auto-reconnect loop (features/voice/livekitReconnect.ts) needs from the
 // voice session. Types only.
 import type { SessionState } from "./sessionState";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";

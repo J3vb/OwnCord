@@ -3,7 +3,7 @@
 // each delegating to MediaControl or AudioPipeline.
 import type { MediaControl } from "./mediaControl";
 import type { AudioPipeline } from "@lib/voice/audioPipeline";
-import { isMicPolicyGated } from "@lib/voice/deviceManager";
+import { isMicPolicyGated } from "./deviceManager";
 import { createLogger } from "@lib/logger";
 import type { StreamQuality } from "./screenShare";
 import { voiceStore, setPttGated as setPttGatedState } from "@stores/voice.store";

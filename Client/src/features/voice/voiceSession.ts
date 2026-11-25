@@ -23,12 +23,12 @@ import {
 import { createLogger } from "@lib/logger";
 import { voiceSpeakingEnabled } from "@lib/net/serverCapabilities";
 import { AudioPipeline } from "@lib/voice/audioPipeline";
-import { AudioElements } from "@lib/voice/audioElements";
-import { E2EEManager } from "@lib/voice/livekitE2EE";
-import { DeviceManager } from "@lib/voice/deviceManager";
+import { AudioElements } from "./audioElements";
+import { E2EEManager } from "./livekitE2EE";
+import { DeviceManager } from "./deviceManager";
 import { type CameraTrackState, type ScreenTrackState } from "./screenShare";
 import { buildSessionDebugInfo } from "@lib/voice/livekitDiagnostics";
-import type { RoomEventHandlers } from "@lib/voice/roomEventHandlers";
+import type { RoomEventHandlers } from "./roomEventHandlers";
 import { getShareMotionPolicy } from "@lib/voice/shareFlags";
 import { JoinOrchestration } from "./joinOrchestration";
 import { RoomLifecycle } from "./roomLifecycle";

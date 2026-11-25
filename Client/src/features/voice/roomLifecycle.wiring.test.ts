@@ -62,7 +62,7 @@ vi.mock("../../lib/prefs/preferences", () => ({
   loadPref: (key: string, fallback: unknown) =>
     env.prefs.has(key) ? env.prefs.get(key) : fallback,
 }));
-vi.mock("../../lib/voice/deviceManager", () => ({ isMicPolicyGated: () => env.gated }));
+vi.mock("../../features/voice/deviceManager", () => ({ isMicPolicyGated: () => env.gated }));
 vi.mock("../../lib/voice/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
 vi.mock("./mediaControl", () => ({ syncShareGrant: vi.fn() }));
 vi.mock("./native/platform", () => ({ isLinuxDesktop: () => env.linux }));

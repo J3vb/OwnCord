@@ -26,7 +26,7 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-import { AudioElements } from "../../src/lib/voice/audioElements";
+import { AudioElements } from "../../src/features/voice/audioElements";
 
 function track(sid: string) {
   const el = document.createElement("audio");

@@ -11,7 +11,7 @@ import {
 import {
   createRoomEventHandlers,
   type RoomEventDeps,
-} from "../../../../lib/voice/roomEventHandlers";
+} from "../../../../features/voice/roomEventHandlers";
 import {
   audio,
   emit,

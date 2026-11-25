@@ -90,7 +90,7 @@ export default tseslint.config(
     // the rule must cover every file or those paths go unguarded.
     files: [
       "src/lib/voice/livekitSession.ts",
-      "src/lib/voice/livekitReconnect.ts",
+      "src/features/voice/livekitReconnect.ts",
       "src/features/voice/joinOrchestration.ts",
     ],
     plugins: { local: localRules },
@@ -104,7 +104,7 @@ export default tseslint.config(
     // identity-scope invariants travelled with that code, so every one of
     // those files is listed or the moved guards go unchecked.
     files: [
-      "src/lib/voice/livekitE2EE.ts",
+      "src/features/voice/livekitE2EE.ts",
       "src/features/voice/e2eeIdentity.ts",
       "src/features/voice/e2eeEpoch.ts",
       "src/features/voice/e2eePeerState.ts",
