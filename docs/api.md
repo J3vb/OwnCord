@@ -5706,7 +5706,8 @@ audited as `setting_change`.
 
 A flat map of key → string value. Allowed keys: `server_name`,
 `motd`, `appeal_contact`, `require_2fa`,
-`registration_mode`, `backup_schedule`, `backup_retention`, `retention_days`,
+`registration_mode`, `backup_schedule`, `backup_retention`, `backup_scope`,
+`backup_disk_ack`, `retention_days`,
 `upload_blocked_extensions`, `upload_allowed_extensions`, `afk_timeout_seconds`,
 `voice_owner_movable`, `game_activity_enabled`, `welcome_channel_id`,
 `voice_max_video_kbps`, `server_upload_mbps`.
@@ -5726,6 +5727,14 @@ pair of settings a PATCH may not change without the **Owner** role: a request
 carrying either key from a non-owner principal is refused with `403 FORBIDDEN`
 even though the rest of this route only needs `MANAGE_SERVER`. `ADMINISTRATOR`
 does not bypass it.
+
+`backup_scope` (`database` or `everything`) says what automatic backups keep:
+with `everything` the server also stores a full archive next to each database
+copy. A server that existed before this key reads `unset` until the owner
+chooses, and `unset` backs up like `database`; a PATCH cannot write `unset`.
+`backup_disk_ack` is the backup folder the owner confirmed is on another disk
+(blank clears it); it counts only while `backup.dir` is still that folder. Both
+are owner-only, like the two above.
 
 `upload_blocked_extensions` and `upload_allowed_extensions` are the upload
 file-type policy (see [`POST /api/v1/uploads`](#post-apiv1uploads)): extensions
@@ -6062,14 +6071,27 @@ starts nothing.
 
 ### GET /admin/api/backups
 
-List backups, newest first. This is every `.db` file in the backup directory, including the `pre_restore_` safety copies a restore writes.
+List backups, newest first. This is every `.db` file in the backup directory, including the `pre_restore_` safety copies a restore writes, and the full archives (`scheduled_<time>.zip`) that automatic backups keep when `backup_scope` is `everything`. `kind` is `database` for a `.db` copy and `full` for an archive.
 
 **Auth:** Owner role, `MANAGE_BACKUPS` or `RESTORE_BACKUPS`
 
 #### Response 200 OK
 
 ```json
-[{ "name": "chatserver_20260804_120000.db", "size": 1048576, "date": "2026-08-04T12:00:00Z" }]
+[
+  {
+    "name": "scheduled_20260804_120000.zip",
+    "size": 52428800,
+    "date": "2026-08-04T12:01:00Z",
+    "kind": "full"
+  },
+  {
+    "name": "chatserver_20260804_120000.db",
+    "size": 1048576,
+    "date": "2026-08-04T12:00:00Z",
+    "kind": "database"
+  }
+]
 ```
 
 ---
@@ -6141,6 +6163,8 @@ opens, checks it, and keeps the previous database if the check fails.
 A `500 INTERNAL_ERROR` ("could not stage the backup — database untouched")
 means the copy could not be written, for example because the database volume
 is full; nothing restarts. `409 DATABASE_BUSY` is no longer returned.
+A `.zip` name is refused with `400 BAD_REQUEST`: a full archive is restored by
+hand ([steps](hosting/backups.md#restore-from-a-full-archive)).
 
 ---
 
@@ -6173,6 +6197,10 @@ Issue a short-lived, single-use link to the full archive, for the panel to
 open as a plain browser download.
 
 **Auth:** Owner role or `RESTORE_BACKUPS`
+
+An optional body `{"name": "scheduled_<time>.zip"}` gives a link to that stored
+full archive instead of building a new one (`404 NOT_FOUND` for any other
+name). The bit is checked again when the link is opened.
 
 #### Response 200 OK
 

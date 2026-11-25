@@ -27,6 +27,7 @@ type GoEntry struct {
 // database closes.
 var GoAllow = map[string]GoEntry{
 	"admin/handlers_backup.go":           {1, "restart hand-off: requestRestart only cancels a context, and joining it is circular because it starts the Close that would join it"},
+	"admin/backup_archive_scheduled.go":  {1, "scheduled archive job, a lifecycle worker: it runs under the maintenance context and the maintenance stop step joins it (WaitScheduledArchives) before the database closes"},
 	"admin/handlers_config_overrides.go": {1, "restart hand-off, as in handlers_backup.go"},
 	"admin/setup_handler.go":             {1, "restart hand-off, as in handlers_backup.go"},
 	"api/livekit_proxy.go":               {2, "proxy copy pair, joined inside the handler"},

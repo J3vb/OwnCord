@@ -158,6 +158,31 @@ func TestRestoreCLI_RejectsUnreadableFile(t *testing.T) {
 	}
 }
 
+// A full archive is not a database copy: restore refuses it by name, with --force too, and points at the
+// manual steps. Nothing is touched and no safety copy is taken.
+func TestRestoreCLI_RefusesAFullArchive(t *testing.T) {
+	cfgPath, dbPath, backupDir := restoreCLIFixture(t)
+	archive := filepath.Join(t.TempDir(), "scheduled_20260101_000000.zip")
+	if err := os.WriteFile(archive, []byte("PK not really"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	err := checkRestoreSource(archive, dbPath)
+	if err == nil || !strings.Contains(err.Error(), "full archive") || !strings.Contains(err.Error(), "docs/hosting/backups.md") {
+		t.Fatalf("checkRestoreSource(.zip) = %v, want a refusal that names the manual steps", err)
+	}
+	for _, args := range [][]string{{archive}, {"--force", archive}} {
+		if code := runRestoreCLI(cfgPath, args); code == 0 {
+			t.Errorf("restore %v exited 0, want a refusal", args)
+		}
+	}
+	if !userExists(t, dbPath, "existing-owner") {
+		t.Error("the live database changed")
+	}
+	if entries, _ := os.ReadDir(backupDir); len(entries) != 0 {
+		t.Errorf("a refused archive left files in the backup dir: %v", entries)
+	}
+}
+
 // TestRestoreCLI_RefusesWhileServerRunning: the single-process lock means the
 // server holds this database. The CLI takes the same lock, so it refuses
 // rather than corrupting a running server's files out from under it.

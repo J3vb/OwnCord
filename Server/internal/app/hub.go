@@ -203,6 +203,12 @@ func newAttention(cfg *config.Config, hub *ws.Hub, database *db.DB, settings *se
 		LastBackup: func() (time.Time, error) {
 			return admin.NewestBackup(admin.ResolveBackupDir(cfg.Backup.Dir), cfg.Database.Path)
 		},
+		BackupArchive: func(ctx context.Context) (service.BackupArchiveReading, error) {
+			return backupArchiveReading(ctx, cfg, settings)
+		},
+		BackupDisk: func(ctx context.Context) (service.BackupDiskReading, error) {
+			return backupDiskReading(ctx, cfg, settings, sameVolume)
+		},
 		Certificate: admin.ServedCertificate,
 		People:      service.PeopleSource(database),
 		VoiceHealth: func(ctx context.Context) service.VoiceHealth {

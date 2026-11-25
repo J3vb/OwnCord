@@ -138,8 +138,9 @@ const fuzzGapCeiling = 23
 // own frames and files) or files the operator owns. Each value says why the
 // input is not outside data.
 var FuzzTrustedDecodes = map[string]string{
-	"admin.readLogFile":   "the server's own log file",
-	"admin.supportDetail": "attributes of the server's own log records, read back from its database",
+	"admin.readLogFile":        "the server's own log file",
+	"admin.checkStoredArchive": "the full archive this server has just written",
+	"admin.supportDetail":      "attributes of the server's own log records, read back from its database",
 
 	"config.ReadOverrides":                       "the operator's override file",
 	"internal/app.readBootMarker":                "a marker file the server wrote",

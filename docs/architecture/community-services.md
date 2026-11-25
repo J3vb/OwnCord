@@ -528,6 +528,8 @@ no inventory — nothing machine-checks them, which is C-09's whole point.
 
 **Amended 2026-11-13 (server-side previews):** migration `094_link_previews.sql` adds two server-side classes, S2-g and S2-h, which supersede decision 3's "previews stay client-fetched" now that the unfurl worker has landed. The worker fetches a link from the server once after a message is sent, through the same fetch policies as other server-side fetches; the cards reach readers in message history and in a `message_link_previews` event.
 
+**Amended 2026-11-25 (backup scope):** migration `095_backup_scope.sql` adds one settings row, `backup_scope`, which says whether automatic backups also keep a full archive. It is server configuration, not community content, so it adds no class here. A full archive copies every class above that lives in the data folder, so each keeps the lifecycle it has in the live server and the archive ages out by the backup retention.
+
 **No new persistent _server-side_ data class at B5-1 and B5-5.** B5-1 and B5-5 harden paths;
 they store nothing, which is why decision 3 matters — a server-side unfurl
 cache would have created one. **S2-f is the counter-example on the other side

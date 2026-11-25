@@ -88,24 +88,40 @@ func (s *archiveLinks) redeem(token string) (archiveLink, bool) {
 
 // handleArchiveLink issues POST /admin/api/archive/link: a single-use token the panel opens as a plain
 // browser link so the archive streams to disk. Owner or RESTORE_BACKUPS holder (the archive holds password
-// hashes and key files); audited as archive_link.
-func handleArchiveLink(database *db.DB) http.HandlerFunc {
+// hashes and key files); audited as archive_link. A body naming a stored full archive ({"name": "..."}) gives
+// a link to that file instead of a new build, on the same terms: the credential is re-checked at redemption.
+func handleArchiveLink(database *db.DB, paths backupPaths) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hash, ok := linkCredentialHash(w, r)
 		if !ok {
 			return
 		}
-		// Refused here too so the panel can show why, not a bare failed download.
-		if archiveBusy.Load() {
+		var body struct {
+			Name string `json:"name"`
+		}
+		if !decodeOptionalJSON(w, r, &body) {
+			return
+		}
+		stored := body.Name != ""
+		if stored && !storedArchiveExists(paths.dir, body.Name) {
+			writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "backup not found")
+			return
+		}
+		// Refused here too so the panel can show why, not a bare failed download. A stored file is not built, so
+		// a running build does not matter to it.
+		if !stored && archiveBusy.Load() {
 			writeArchiveBusy(w)
 			return
 		}
 		actor := actorFromContext(r)
-		token, expires := linkStore.issue(actor, hash, "")
+		token, expires := linkStore.issue(actor, hash, body.Name)
 		// The token is never logged — only that one was issued and for whom.
 		slog.Info("archive download link issued", "actor_id", actor, "expires_at", expires.UTC())
-		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "archive_link", "server", 0,
-			"issued a download link for the full archive")
+		detail := "issued a download link for the full archive"
+		if stored {
+			detail = "issued a download link for stored full archive " + body.Name
+		}
+		db.WriteAudit(context.WithoutCancel(r.Context()), database, actor, "archive_link", "server", 0, detail)
 		writeJSON(w, http.StatusOK, map[string]string{
 			"path": "/admin/api/archive/download?token=" + token,
 		})
@@ -123,8 +139,63 @@ func handleArchiveDownload(database *db.DB, opts SetupOptions, paths backupPaths
 			writeLinkInvalid(w)
 			return
 		}
+		if link.target != "" {
+			serveStoredArchive(w, r, database, paths, link)
+			return
+		}
 		serveArchive(w, r, database, opts, paths, link.actorID)
 	})
+}
+
+// storedArchiveExists reports whether name is a scheduled full archive present in backupDir. The name is
+// matched against the directory's own entries, so nothing a caller sends can name a path outside it.
+func storedArchiveExists(backupDir, name string) bool {
+	if !isScheduledArchiveName(name) {
+		return false
+	}
+	f, err := openBackupEntry(backupDir, name)
+	if err != nil {
+		return false
+	}
+	_ = f.Close()
+	return true
+}
+
+// serveStoredArchive streams a stored full archive from disk for a redeemed link, never reading it into
+// memory. The credential was re-checked by the caller.
+func serveStoredArchive(w http.ResponseWriter, r *http.Request, database *db.DB, paths backupPaths, link archiveLink) {
+	if !isScheduledArchiveName(link.target) {
+		writeLinkInvalid(w)
+		return
+	}
+	f, err := openBackupEntry(paths.dir, link.target)
+	if err != nil {
+		writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "backup not found")
+		return
+	}
+	defer f.Close() //nolint:errcheck
+	info, err := f.Stat()
+	if err != nil || !info.Mode().IsRegular() {
+		writeErr(w, http.StatusNotFound, httperr.CodeNotFound, "backup not found")
+		return
+	}
+	deadline := startArchive(w, r, func() {}, archiveProgressTimeout, archiveMaxLifetime)
+	defer deadline.release()
+	deadline.touch()
+
+	w.Header().Set("Content-Type", "application/zip")
+	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": link.target}))
+	w.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+
+	slog.Warn("backup archive downloaded", "actor_id", link.actorID, "bytes", info.Size(), "name", link.target)
+	db.WriteAudit(context.WithoutCancel(r.Context()), database, link.actorID, "backup_archive", "server", 0,
+		fmt.Sprintf("downloaded stored full archive %s (%d bytes)", link.target, info.Size()))
+
+	if _, err := io.Copy(deadline, f); err != nil {
+		slog.Warn("backup archive download interrupted", "err", err)
+	}
 }
 
 // linkCredentialHash reads the hash of the bearer credential the auth middleware resolved, the one a link

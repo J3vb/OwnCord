@@ -54,6 +54,8 @@ var allowedSettingKeys = map[string]struct{}{
 	"registration_mode":        {},
 	"backup_schedule":          {},
 	"backup_retention":         {},
+	BackupScopeKey:             {},
+	BackupDiskAckKey:           {},
 	db.RetentionDaysKey:        {},
 	UploadBlockedExtensionsKey: {},
 	UploadAllowedExtensionsKey: {},
@@ -129,6 +131,8 @@ var dedicatedSettingKeys = map[string]string{
 var ownerOnlySettingKeys = map[string]struct{}{
 	"backup_schedule":          {},
 	"backup_retention":         {},
+	BackupScopeKey:             {},
+	BackupDiskAckKey:           {},
 	UploadBlockedExtensionsKey: {},
 	UploadAllowedExtensionsKey: {},
 	VoiceOwnerMovableKey:       {},
@@ -316,6 +320,12 @@ func normalizeSettingUpdates(updates map[string]string) (map[string]string, erro
 				return nil, err
 			}
 			normalized[key] = secs
+		case BackupScopeKey, BackupDiskAckKey:
+			v, err := normalizeBackupSetting(key, value)
+			if err != nil {
+				return nil, err
+			}
+			normalized[key] = v
 		case "backup_schedule":
 			schedule := strings.ToLower(strings.TrimSpace(value))
 			switch schedule {

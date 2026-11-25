@@ -28,7 +28,11 @@ import (
 //
 // The returned error feeds the loop's circuit breaker; absent settings (fresh DB mid-migration) are not an
 // error.
-func MaintainBackups(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir, dbFile string) error {
+func MaintainBackups(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir, dbFile string, options ...BackupOption) error {
+	var bo backupOptions
+	for _, opt := range options {
+		opt(&bo)
+	}
 	schedule, err := settings.Setting(ctx, "backup_schedule")
 	if err != nil {
 		if errors.Is(err, db.ErrNotFound) {
@@ -52,8 +56,46 @@ func MaintainBackups(ctx context.Context, database *db.DB, settings *service.Set
 			firstErr = err
 		}
 	}
+	// Archives that earlier runs stored age out even when the scope has since gone back to the database only.
+	pruneArchivesFor(ctx, database, settings, backupDir)
+	// A failed or refused archive is kept for the attention panel and retried later: it is not this tick's
+	// error, so the loop's circuit breaker is left alone.
+	if interval > 0 && bo.archive != nil {
+		if err := startArchiveIfWanted(ctx, database, settings, backupDir, dbFile, *bo.archive, interval); err != nil {
+			slog.Warn("scheduled archive could not start", "error", err)
+			if firstErr == nil {
+				firstErr = err
+			}
+		}
+	}
 	pruneStaleBackupTemps(backupDir)
 	return firstErr
+}
+
+// BackupOption adjusts MaintainBackups.
+type BackupOption func(*backupOptions)
+
+type backupOptions struct {
+	archive *SetupOptions
+}
+
+// WithScheduledArchive lets the run also keep full archives when backup_scope is "everything". opts carries
+// the running configuration and config path the archive is built from; without it only the database is
+// backed up.
+func WithScheduledArchive(opts SetupOptions) BackupOption {
+	return func(bo *backupOptions) { bo.archive = &opts }
+}
+
+// startArchiveIfWanted starts the scheduled archive when backup_scope is "everything".
+func startArchiveIfWanted(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir, dbFile string, opts SetupOptions, interval time.Duration) error {
+	scope, err := settings.SettingOr(ctx, service.BackupScopeKey, "")
+	if err != nil {
+		return fmt.Errorf("reading backup_scope: %w", err)
+	}
+	if service.BackupScope(scope) != service.BackupScopeEverything {
+		return nil
+	}
+	return startScheduledArchive(ctx, database, settings, backupPaths{dir: backupDir, dbFile: dbFile}, opts, interval)
 }
 
 // staleBackupTempAge is how long a ".tmp" must sit untouched before the sweep treats it as a killed run's
@@ -95,7 +137,13 @@ func pruneStaleBackupTemps(backupDir string) {
 // freeBackupPath returns a path for a backup named base (plus ".db"), with a "_N" suffix when taken: VACUUM
 // INTO refuses an existing destination and timestamps have second resolution.
 func freeBackupPath(backupDir, base string) (string, error) {
-	path := filepath.Join(backupDir, base+".db")
+	return freeBackupPathExt(backupDir, base, ".db")
+}
+
+// freeBackupPathExt is freeBackupPath for any extension: a full archive is renamed into place, which would
+// replace a file of the same name, so it takes a free one.
+func freeBackupPathExt(backupDir, base, ext string) (string, error) {
+	path := filepath.Join(backupDir, base+ext)
 	for i := 2; ; i++ {
 		if _, err := os.Stat(path); err != nil {
 			// ENOENT is the free slot. Any OTHER stat error (EACCES, unreadable mount) is not fixed by more suffixes:
@@ -105,7 +153,7 @@ func freeBackupPath(backupDir, base string) (string, error) {
 		if i > 100 {
 			return "", fmt.Errorf("backup: no free filename after %s (tried 100 suffixes)", base)
 		}
-		path = filepath.Join(backupDir, fmt.Sprintf("%s_%d.db", base, i))
+		path = filepath.Join(backupDir, fmt.Sprintf("%s_%d%s", base, i, ext))
 	}
 }
 
@@ -271,19 +319,9 @@ func safetyCopiesNewestFirst(entries []os.DirEntry, prefix string) []string {
 // pruneExpiredBackups deletes *.db backups older than the backup_retention window (days), always keeping the
 // newest and never touching safety copies (scanBackups leaves them out).
 func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir, dbFile string) error {
-	retStr, err := settings.Setting(ctx, "backup_retention")
-	if err != nil {
-		if errors.Is(err, db.ErrNotFound) {
-			return nil
-		}
-		return fmt.Errorf("reading backup_retention: %w", err)
-	}
-	// Malformed values parse to 0; zero-or-below or above db.RetentionMaxDays means retention off. The write
-	// path validates, but a hand-edited settings row must disable pruning rather than overflow the cutoff into
-	// the future and unlink every backup but the newest.
-	days, _ := strconv.Atoi(strings.TrimSpace(retStr))
-	if days <= 0 || days > db.RetentionMaxDays {
-		return nil
+	days, err := retentionDays(ctx, settings)
+	if err != nil || days == 0 {
+		return err
 	}
 
 	newest, entries, err := scanBackups(backupDir, dbFile)
@@ -307,6 +345,25 @@ func pruneExpiredBackups(ctx context.Context, database *db.DB, settings *service
 			fmt.Sprintf("retention pruned %d backup(s) older than %d days", pruned, days))
 	}
 	return nil
+}
+
+// retentionDays reads backup_retention as whole days, 0 when retention is off. A missing row is off. Malformed
+// values parse to 0; zero-or-below or above db.RetentionMaxDays means retention off. The write path validates,
+// but a hand-edited settings row must disable pruning rather than overflow the cutoff into the future and
+// unlink every backup but the newest.
+func retentionDays(ctx context.Context, settings *service.SettingsService) (int, error) {
+	retStr, err := settings.Setting(ctx, "backup_retention")
+	if err != nil {
+		if errors.Is(err, db.ErrNotFound) {
+			return 0, nil
+		}
+		return 0, fmt.Errorf("reading backup_retention: %w", err)
+	}
+	days, _ := strconv.Atoi(strings.TrimSpace(retStr))
+	if days <= 0 || days > db.RetentionMaxDays {
+		return 0, nil
+	}
+	return days, nil
 }
 
 // NewestBackup returns the newest scheduled or manual backup's mtime (a failed backup leaves no file), or the
