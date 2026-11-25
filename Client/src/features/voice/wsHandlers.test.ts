@@ -75,37 +75,16 @@ import { rollbackPendingVideo } from "./screenShare";
 import { expectConsole } from "../../../tests/helpers/console";
 import { captureLogs } from "../../../tests/helpers/log-capture";
 import { showToast } from "../../lib/ui/toast";
+import {
+  clockStub,
+  inCall,
+  readyWith,
+  resetVoiceHandlerTest,
+  socketStub,
+  voiceState,
+} from "../../../tests/helpers/voiceHandlerFixtures";
 
-function voiceState(overrides: Partial<Payload<"voice_state">>): Payload<"voice_state"> {
-  return {
-    channel_id: 4,
-    user_id: 9,
-    username: "me",
-    muted: false,
-    deafened: false,
-    speaking: false,
-    ...overrides,
-  } as Payload<"voice_state">;
-}
-
-/** This device holds a call in channel 3. */
-const inCall = (): void => {
-  joinVoiceChannel(3);
-  setVoiceStatus("connected");
-};
-const clockStub = (): ReconnectClock => ({ voiceRejoinChannelId: null }) as ReconnectClock;
-const socketStub = () => ({ send: vi.fn(), disconnect: vi.fn() });
-const readyWith = (voiceStates: Payload<"voice_state">[]) =>
-  ({ voice_states: voiceStates }) as unknown as Payload<"ready">;
-
-beforeEach(() => {
-  resetVoiceStore();
-  authStore.setState((prev) => ({
-    ...prev,
-    user: { id: 9, username: "me", avatar: null, role: "member" },
-  }));
-  vi.clearAllMocks();
-});
+beforeEach(resetVoiceHandlerTest);
 
 describe("snapshotReadyVoice", () => {
   it("leaves another device's call alone: no voice_leave, the roster keeps the user", () => {

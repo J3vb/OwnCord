@@ -8,13 +8,7 @@ import {
   handleVoiceState,
   snapshotReadyVoice,
 } from "./wsHandlers";
-import {
-  voiceStore,
-  resetVoiceStore,
-  joinVoiceChannel,
-  setVoiceStatus,
-} from "../../stores/voice.store";
-import { authStore } from "../../stores/auth.store";
+import { voiceStore, joinVoiceChannel, setVoiceStatus } from "../../stores/voice.store";
 import { channelsStore } from "../../stores/channels.store";
 import { membersStore } from "../../stores/members.store";
 import {
@@ -41,38 +35,19 @@ vi.mock("../../lib/voice/livekitSession", () => ({
 vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 import { leaveVoice } from "../../lib/voice/livekitSession";
 import { showToast } from "../../lib/ui/toast";
+import {
+  clockStub,
+  inCall,
+  readyWith,
+  resetVoiceHandlerTest,
+  socketStub,
+  voiceState,
+} from "../../../tests/helpers/voiceHandlerFixtures";
 
-const voiceState = (overrides: Partial<Payload<"voice_state">>): Payload<"voice_state"> =>
-  ({
-    channel_id: 4,
-    user_id: 9,
-    username: "me",
-    muted: false,
-    deafened: false,
-    speaking: false,
-    ...overrides,
-  }) as Payload<"voice_state">;
-
-/** This device holds a call in channel 3. */
-const inCall = (): void => {
-  joinVoiceChannel(3);
-  setVoiceStatus("connected");
-};
-const clockStub = (): ReconnectClock => ({ voiceRejoinChannelId: null }) as ReconnectClock;
-const socketStub = () => ({ send: vi.fn(), disconnect: vi.fn() });
-const readyWith = (voiceStates: Payload<"voice_state">[]) =>
-  ({ voice_states: voiceStates }) as unknown as Payload<"ready">;
 const ack = (channelId: number): void =>
   handleVoiceState(socketStub(), voiceState({ channel_id: channelId, user_id: 9 }));
 
-beforeEach(() => {
-  resetVoiceStore();
-  authStore.setState((prev) => ({
-    ...prev,
-    user: { id: 9, username: "me", avatar: null, role: "member" },
-  }));
-  vi.clearAllMocks();
-});
+beforeEach(resetVoiceHandlerTest);
 
 /** The server's voice_leave of `channelId` for this user. */
 const leaveOf = (channelId: number) =>
