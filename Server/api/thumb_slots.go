@@ -35,12 +35,14 @@ type thumbSlots struct {
 	sem  *semaphore.Weighted
 	size int64
 	wait time.Duration
+	// heavy admits one multi-slot conversion at a time (see acquireHeavy).
+	heavy *semaphore.Weighted
 	// flights collapses concurrent requests for one thumbnail into one generation.
 	flights singleflight.Group
 }
 
 func makeThumbSlots(n int, wait time.Duration) *thumbSlots {
-	return &thumbSlots{sem: semaphore.NewWeighted(int64(n)), size: int64(n), wait: wait}
+	return &thumbSlots{sem: semaphore.NewWeighted(int64(n)), size: int64(n), wait: wait, heavy: semaphore.NewWeighted(1)}
 }
 
 // newThumbSlots builds the slots a thumbnail handler uses. It is a var only
@@ -60,6 +62,31 @@ func (s *thumbSlots) acquire(ctx context.Context, weight int64) (release func(),
 		return nil, false
 	}
 	return func() { s.sem.Release(weight) }, true
+}
+
+// acquireHeavy takes the slots for a conversion worth weight ordinary decodes (a HEIC). Only one runs at a
+// time, and with two or more slots it leaves at least one free, so ordinary thumbnails keep going while a
+// slow conversion runs: its decoder takes no context and cannot be stopped once started. Memory stays
+// within thumbMaxSlots × thumbMaxDecodeBytes: one conversion (convertedHEICPeakBytes) plus at most
+// size-weight ordinary decodes. The whole wait, for both, is at most s.wait and never past ctx.
+func (s *thumbSlots) acquireHeavy(ctx context.Context, weight int64) (release func(), ok bool) {
+	if s.size > 1 {
+		weight = min(weight, s.size-1)
+	}
+	weight = min(weight, s.size)
+	ctx, cancel := context.WithTimeout(ctx, s.wait)
+	defer cancel()
+	if err := s.heavy.Acquire(ctx, 1); err != nil {
+		return nil, false
+	}
+	if err := s.sem.Acquire(ctx, weight); err != nil {
+		s.heavy.Release(1)
+		return nil, false
+	}
+	return func() {
+		s.sem.Release(weight)
+		s.heavy.Release(1)
+	}, true
 }
 
 var (

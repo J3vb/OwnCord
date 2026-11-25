@@ -52,9 +52,9 @@ type Storage struct {
 	maxSizeMB int
 }
 
-// New creates a Storage that stores files in dir, creating it if needed.
+// New creates a Storage that stores files in dir, creating it owner-only if needed.
 func New(dir string, maxSizeMB int) (*Storage, error) {
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("creating storage dir %s: %w", dir, err)
 	}
 	return &Storage{dir: dir, maxSizeMB: maxSizeMB}, nil
@@ -123,7 +123,7 @@ func (s *Storage) Save(uuid string, r io.Reader) (int64, error) {
 		return 0, err
 	}
 
-	f, err := os.Create(dst)
+	f, err := os.OpenFile(dst, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0o600) //nolint:gosec // G304: dst is joined from the storage dir and a sanitized name
 	if err != nil {
 		return 0, fmt.Errorf("creating file %s: %w: %w", dst, ErrIO, err)
 	}
@@ -278,7 +278,7 @@ func (s *Storage) SaveThumbSize(uuid string, size int, data []byte) error {
 // writeThumbFile writes p atomically; a thumbnail never outlives its original (fs.ErrNotExist).
 func writeThumbFile(p, original string, data []byte, what string) error {
 	dir := filepath.Dir(p)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("creating thumbnail dir: %w: %w", ErrIO, err)
 	}
 	tmp, err := os.CreateTemp(dir, ".tmp-*")

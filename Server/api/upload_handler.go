@@ -286,7 +286,8 @@ func handleUpload(uploads *service.UploadService, store FileStore, limiter *auth
 			return
 		}
 
-		slog.Info("file uploaded", "id", stored.id, "filename", safeFilename, "size", stored.size, "mime", stored.mime)
+		// The file name is user content and stays out of the log; the id finds the file.
+		slog.Info("file uploaded", "id", stored.id, "size", stored.size, "mime", stored.mime)
 
 		writeJSON(w, http.StatusCreated, uploadResponse{
 			ID:         stored.id,

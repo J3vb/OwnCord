@@ -251,14 +251,7 @@ func guardBackupDir(w http.ResponseWriter, g guardContext) bool {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "backup.dir must be an existing writable directory")
 		return false
 	}
-	dbFile := g.opts.RunningCfg.Database.Path
-	if g.has("database.path") {
-		dbFile = g.next.Database.Path
-	}
-	if dbFile == "" {
-		dbFile = defaultDatabaseFile()
-	}
-	if sameDirectory(dir, filepath.Dir(dbFile)) {
+	if sameDirectory(dir, filepath.Dir(nextDatabaseFile(g))) {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "backup.dir must not be the folder that holds the database; choose a separate folder")
 		return false
 	}
@@ -281,10 +274,49 @@ func guardStorageDir(w http.ResponseWriter, g guardContext) bool {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "upload.storage_dir must be an existing writable directory")
 		return false
 	}
+	if !storageDirApartFromServerFiles(w, g, dir) {
+		return false
+	}
 	if dirEmpty(dir) && !dirEmpty(g.opts.RunningCfg.Upload.StorageDir) {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest,
 			"upload.storage_dir is empty while the current directory holds files; copy the files first or every attachment returns 404")
 		return false
+	}
+	return true
+}
+
+// nextDatabaseFile is the database file the next boot opens: the PATCHed path, else the running one, else
+// the default.
+func nextDatabaseFile(g guardContext) string {
+	dbFile := g.opts.RunningCfg.Database.Path
+	if g.has("database.path") {
+		dbFile = g.next.Database.Path
+	}
+	if dbFile == "" {
+		dbFile = defaultDatabaseFile()
+	}
+	return dbFile
+}
+
+// storageDirApartFromServerFiles refuses an upload directory that is, or sits above, a folder holding the
+// server's own files: the data directory (keys, saved settings), the database's folder and the backup folder.
+// The storage page's leftover clean-up deletes unreferenced regular files directly in the upload directory,
+// so it must never be one of those folders.
+func storageDirApartFromServerFiles(w http.ResponseWriter, g guardContext, dir string) bool {
+	holders := []struct{ path, name string }{
+		{g.next.Server.DataDir, "server.data_dir"},
+		{filepath.Dir(nextDatabaseFile(g)), "the folder that holds the database"},
+		{ResolveBackupDir(g.next.Backup.Dir), "backup.dir"},
+	}
+	for _, h := range holders {
+		if h.path == "" {
+			continue
+		}
+		if sameDirectory(dir, h.path) || pathWithin(h.path, dir) {
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest,
+				"upload.storage_dir must not be "+h.name+" or a folder above it; choose a separate folder, such as uploads inside the data directory")
+			return false
+		}
 	}
 	return true
 }

@@ -192,7 +192,8 @@ documents. Any disagreement is a bug in this page.
 - **Logs.** Values that carry secrets redact themselves when logged (see
   [Logging and redaction](#logging-and-redaction)). User IDs, usernames,
   session IDs, devices and IP addresses are logged on purpose. No `slog` call
-  in server code logs message content.
+  in server code logs message content or the name of an uploaded file; an
+  upload is logged by its id, size and type.
 - **Desktop credentials** go in the OS keyring (Windows Credential Manager,
   macOS Keychain or Secret Service). This covers the login token or password,
   the voice-E2EE identity private key and unsent message drafts.

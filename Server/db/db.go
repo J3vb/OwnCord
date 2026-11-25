@@ -196,6 +196,7 @@ func openFile(path string, maxReaders int, takeLock bool) (*DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	createOwnerOnlyIfMissing(path)
 
 	base := path
 	if !strings.HasPrefix(base, "file:") {
