@@ -505,8 +505,9 @@ func FuzzValidateHEIC(f *testing.F) {
 	f.Add(testHEIC(t, 16, 16))
 	f.Add(sequenceOnlyHEIC(t, 2))
 	f.Add([]byte("\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic"))
-	for _, l := range alphaLayouts(t) {
-		f.Add(l.build())
+	layouts := alphaLayouts(t)
+	for name := range layouts {
+		f.Add(layouts[name].build())
 	}
 	for _, build := range alphaRefusals(t) {
 		f.Add(build())
