@@ -30,13 +30,15 @@
 //! at full size would push about 750 MB/s through this socket and WebKit on
 //! top of its encode. The published track keeps the capture's size and rate.
 use std::collections::HashMap;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
+use std::task::{Context, Poll};
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt};
 use livekit::prelude::*;
-use livekit::webrtc::prelude::{I420Buffer, VideoBuffer};
+use livekit::webrtc::prelude::{BoxVideoFrame, I420Buffer, VideoBuffer};
 use livekit::webrtc::video_stream::native::NativeVideoStream;
 use ring::rand::{SecureRandom, SystemRandom};
 use tokio::net::TcpListener;
@@ -288,19 +290,61 @@ async fn send_remote(ws: Ws, track: RemoteVideoTrack) {
     let mut frames = NativeVideoStream::new(track.rtc_track());
     // A frame past the ceiling (`remote_frame_fits`) is dropped before it is
     // converted and copied for the page; the first one is logged.
-    let mut logged = false;
-    let mut drawn = Box::pin((&mut frames).filter(move |frame| {
-        let (w, h) = (frame.buffer.width(), frame.buffer.height());
-        let fits = owncord_parse::voice::remote_frame_fits(w, h);
-        if !fits && !logged {
-            logged = true;
-            log::warn!("[native_voice] dropping received video frames of {w}x{h}");
-        }
-        std::future::ready(fits)
-    }));
+    let mut drawn = Fitting {
+        inner: &mut frames,
+        logged: false,
+    };
     send_acked(ws, &mut drawn, |frame| pack_i420(&frame.buffer.to_i420())).await;
-    drop(drawn);
     frames.close();
+}
+
+/// The width and height of a received frame, read before it is converted.
+trait FrameSize {
+    fn frame_size(&self) -> (u32, u32);
+}
+
+impl FrameSize for BoxVideoFrame {
+    fn frame_size(&self) -> (u32, u32) {
+        (self.buffer.width(), self.buffer.height())
+    }
+}
+
+/// Passes on the items whose size fits the received-frame ceiling
+/// (`remote_frame_fits`) and drops the rest, logging the first one dropped.
+///
+/// A named adapter rather than `StreamExt::filter`: a closure (or fn
+/// pointer) over `&BoxVideoFrame` held in the connection task fails the
+/// task's `Send` check, since the frame's `dyn VideoBuffer` lifetime is not
+/// general enough there. A trait bound on the item does not.
+struct Fitting<S> {
+    inner: S,
+    logged: bool,
+}
+
+impl<S> futures_util::Stream for Fitting<S>
+where
+    S: futures_util::Stream + Unpin,
+    S::Item: FrameSize,
+{
+    type Item = S::Item;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<S::Item>> {
+        let this = self.get_mut();
+        loop {
+            let item = match Pin::new(&mut this.inner).poll_next(cx) {
+                Poll::Ready(Some(item)) => item,
+                other => return other,
+            };
+            let (w, h) = item.frame_size();
+            if owncord_parse::voice::remote_frame_fits(w, h) {
+                return Poll::Ready(Some(item));
+            }
+            if !this.logged {
+                this.logged = true;
+                log::warn!("[native_voice] dropping received video frames of {w}x{h}");
+            }
+        }
+    }
 }
 
 /// The largest preview frame sent: a local preview is drawn in a tile, never
@@ -580,6 +624,55 @@ mod tests {
             .unwrap();
         assert_eq!(recv(&mut client).await, Some(vec![3]));
         server.abort();
+    }
+
+    impl FrameSize for (u32, u32) {
+        fn frame_size(&self) -> (u32, u32) {
+            *self
+        }
+    }
+
+    #[tokio::test]
+    async fn received_frames_past_the_ceiling_are_skipped_in_order() {
+        let (push, mut queue) = tokio::sync::mpsc::unbounded_channel::<(u32, u32)>();
+        let source = futures_util::stream::poll_fn(move |cx| queue.poll_recv(cx));
+        let mut fitting = Fitting {
+            inner: source,
+            logged: false,
+        };
+        let max = owncord_parse::voice::REMOTE_FRAME_MAX_SIDE;
+        for item in [
+            (1280, 720),
+            (max + 1, 2),
+            (0, 720),
+            (1920, 1080),
+            (8192, 8192),
+            (640, 360),
+        ] {
+            push.send(item).unwrap();
+        }
+        drop(push);
+
+        let mut passed = Vec::new();
+        while let Some(item) = fitting.next().await {
+            passed.push(item);
+        }
+        assert_eq!(passed, vec![(1280, 720), (1920, 1080), (640, 360)]);
+        assert!(fitting.logged, "the first skipped frame is logged");
+    }
+
+    #[tokio::test]
+    async fn the_fitting_stream_ends_when_its_source_ends_after_a_skipped_frame() {
+        let (push, mut queue) = tokio::sync::mpsc::unbounded_channel::<(u32, u32)>();
+        let source = futures_util::stream::poll_fn(move |cx| queue.poll_recv(cx));
+        let mut fitting = Fitting {
+            inner: source,
+            logged: false,
+        };
+        push.send((100_000, 2)).unwrap();
+        drop(push);
+        let next = tokio::time::timeout(std::time::Duration::from_secs(1), fitting.next()).await;
+        assert_eq!(next, Ok(None), "the stream ends instead of waiting");
     }
 
     #[test]
