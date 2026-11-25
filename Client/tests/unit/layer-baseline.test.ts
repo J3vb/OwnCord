@@ -30,11 +30,14 @@ const baseline = JSON.parse(
 
 /** Upward value-import sites that may remain. Lower this in every change that
  *  removes one; it never rises. */
-const DEBT_SITE_CAP = 14;
+const DEBT_SITE_CAP = 12;
 
 /** The upward imports a written rule requires (Client/CLAUDE.md:
- *  messages.store over its reducer modules). */
+ *  messages.store over its reducer modules; the REST client enforcing the
+ *  NSFW consent gate on every channel-content call, so no caller can skip it). */
 const SANCTIONED_PAIRS = [
+  "lib/api.ts -> features/content-consent/nsfw.ts",
+  "lib/api.ts -> stores/channels.store.ts",
   "stores/messages.store.ts -> features/messaging/historyWindows.ts",
   "stores/messages.store.ts -> features/messaging/liveMessages.ts",
   "stores/messages.store.ts -> features/messaging/messageEdits.ts",

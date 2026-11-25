@@ -1,5 +1,9 @@
 {
   "sanctioned": {
+    "lib/api.ts": {
+      "features/content-consent/nsfw.ts": 1,
+      "stores/channels.store.ts": 1
+    },
     "stores/messages.store.ts": {
       "features/messaging/historyWindows.ts": 1,
       "features/messaging/liveMessages.ts": 1,
@@ -9,10 +13,6 @@
     }
   },
   "debt": {
-    "lib/api.ts": {
-      "features/content-consent/nsfw.ts": 1,
-      "stores/channels.store.ts": 1
-    },
     "lib/net/connectionDiagnostics.ts": {
       "features/voice/native/devices.ts": 1,
       "features/voice/native/micProbe.ts": 1,
