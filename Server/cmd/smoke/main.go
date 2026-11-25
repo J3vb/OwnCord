@@ -49,14 +49,15 @@ const (
 
 func main() {
 	upgrade := flag.Bool("upgrade", false, "rehearse an upgrade from -from to the positional target, then roll back out of it")
-	drills := flag.Bool("drills", false, "run the failure and recovery drills (phases R, C, D, S) instead of the boot smoke")
+	drills := flag.Bool("drills", false, "run the failure and recovery drills (phases R, B, C, D, S) instead of the boot smoke")
 	from := flag.String("from", "", "the version to upgrade FROM: a server binary, or an image reference with -docker")
 	useDocker := flag.Bool("docker", false, "rehearse containers on a named volume instead of processes in a temporary directory")
-	phases := flag.String("phases", "", "which drill phases to run — any of R, C, D, S (default: all of them)")
+	phases := flag.String("phases", "", "which drill phases to run — any of R, B, C, D, S (default: all of them)")
 	dataFS := flag.String("data-fs", "", "the size-limited filesystem phase D fills; without it phase D is skipped")
 	fillerImage := flag.String("filler-image", drillFillerImage, "the image the container leg of phase D fills its tmpfs volume with (the workflow pulls it first)")
 	findings := flag.String("known-findings", "", "comma-separated OPEN OC-* ledger ids a release-path run may downgrade to ::warning::; the ids are validated against the ledger, but no drill failure carries a ledger id yet, so the flag is inert until one does")
 	browserClient := flag.Bool("browser-client", false, "after the restart, boot with the browser client enabled and check the binary serves its bundle (plain standalone mode only)")
+	archiveSource := flag.String("archive-source", archiveFromDownload, "where phase B takes its full archive from: \"download\" (default) uses the owner's download route at once, \"scheduled\" waits about 16 minutes for the archive the server stores itself")
 	flag.Usage = usage
 	flag.Parse()
 
@@ -68,7 +69,7 @@ func main() {
 		drills:     *drills,
 		docker:     *useDocker,
 		from:       *from,
-		drillFlags: *phases != "" || *dataFS != "" || *findings != "" || *fillerImage != drillFillerImage,
+		drillFlags: *phases != "" || *dataFS != "" || *findings != "" || *fillerImage != drillFillerImage || *archiveSource != archiveFromDownload,
 
 		browserClient: *browserClient,
 	}).validate(); err != nil {
@@ -98,11 +99,16 @@ func main() {
 			// directory, no port to restart through, no addressable child.
 			usageError("-docker runs phase D only, got -phases %s", phaseLetters(selected))
 		}
+		if *archiveSource != archiveFromDownload && *archiveSource != archiveFromSchedule {
+			usageError("-archive-source wants %q or %q, got %q", archiveFromDownload, archiveFromSchedule, *archiveSource)
+		}
 		k, err := knownFindings(*findings)
 		if err != nil {
 			usageError("%v", err)
 		}
-		action = func() error { return runDrills(args[0], *useDocker, selected, *dataFS, *fillerImage, k) }
+		action = func() error {
+			return runDrills(args[0], *useDocker, selected, *dataFS, *fillerImage, *archiveSource, k)
+		}
 		// runDrills prints the summary itself: only it knows which phases
 		// skipped, and a skip must not be reported as a pass.
 		summary = ""
@@ -124,7 +130,7 @@ type invocation struct {
 	drills     bool
 	docker     bool
 	from       string
-	drillFlags bool // -phases, -data-fs or -known-findings was set
+	drillFlags bool // a drill-only flag (-phases, -data-fs, -known-findings, -filler-image, -archive-source) was set
 
 	browserClient bool // -browser-client
 }
@@ -142,7 +148,7 @@ func (in invocation) validate() error {
 	case !in.upgrade && !in.drills && in.docker:
 		return fmt.Errorf("-docker is only meaningful together with -upgrade or -drills")
 	case !in.drills && in.drillFlags:
-		return fmt.Errorf("-phases, -data-fs and -known-findings are only meaningful together with -drills")
+		return fmt.Errorf("-phases, -data-fs, -known-findings, -filler-image and -archive-source are only meaningful together with -drills")
 	case in.browserClient && (in.upgrade || in.drills || in.docker):
 		return fmt.Errorf("-browser-client is only meaningful in the plain standalone smoke, not with -upgrade, -drills or -docker")
 	}
@@ -153,7 +159,7 @@ func usage() {
 	fmt.Fprintln(os.Stderr, "usage: smoke [-browser-client] <path-to-server-binary>")
 	fmt.Fprintln(os.Stderr, "       smoke -upgrade -from <old-binary> <new-binary>")
 	fmt.Fprintln(os.Stderr, "       smoke -upgrade -docker -from <old-image> <new-image>")
-	fmt.Fprintln(os.Stderr, `       smoke -drills [-phases RCDS] [-data-fs <dir>] [-known-findings <ids>] <path-to-server-binary>`)
+	fmt.Fprintln(os.Stderr, `       smoke -drills [-phases RBCDS] [-data-fs <dir>] [-archive-source download|scheduled] [-known-findings <ids>] <path-to-server-binary>`)
 	fmt.Fprintln(os.Stderr, "       smoke -drills -docker -phases D <image>")
 	flag.PrintDefaults()
 }

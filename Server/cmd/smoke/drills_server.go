@@ -33,6 +33,9 @@ type drill struct {
 	// skipWhy is the reason a skipped phase gives, printed in the table and the summary; a skipped phase with
 	// none says no measurement was made.
 	skipWhy map[byte]string
+	// archiveSource is where phase B takes its full archive from: the schedule (the nightly) or the download
+	// route (a local run that will not wait for the tick).
+	archiveSource string
 	// fillerImage is the pinned busybox the container leg fills its volume with.
 	fillerImage string
 	// partial are steps within a phase that never ran, keyed by phase; the phase names them instead of choosing
