@@ -126,7 +126,9 @@ function onChannelTypeChange(){
 
 async function createChannel(){
   const category=pickedCategory('chCat');
-  const body={name:document.getElementById('chName').value.trim(),type:document.getElementById('chType').value,category,topic:document.getElementById('chTopic').value.trim(),position:nextChannelPosition(category)};
+  const nameEl=document.getElementById('chName'),typeEl=document.getElementById('chType'),topicEl=document.getElementById('chTopic');
+  if(!(nameEl instanceof HTMLInputElement&&typeEl instanceof HTMLSelectElement&&topicEl instanceof HTMLInputElement))return;
+  const body={name:nameEl.value.trim(),type:typeEl.value,category,topic:topicEl.value.trim(),position:nextChannelPosition(category)};
   if(!body.name){showToast('Name is required','error');return}
   if(fsInput(document,'#chCat').value===NEW_CATEGORY&&!category){showToast('Name the new category','error');return}
   try{await api('POST','/channels',body);closeModal();showToast('Channel created');renderContent()}catch(e){showToast(e.message,'error')}
@@ -204,12 +206,14 @@ async function moveChannel(id,delta){
 }
 
 async function saveChannelEdit(id){
-  const name=document.getElementById('chEditName').value.trim();
+  const nameEl=document.getElementById('chEditName'),topicEl=document.getElementById('chEditTopic'),slowEl=document.getElementById('chEditSlow');
+  if(!(nameEl instanceof HTMLInputElement&&topicEl instanceof HTMLInputElement&&slowEl instanceof HTMLInputElement))return;
+  const name=nameEl.value.trim();
   if(!name){showToast('Name is required','error');return}
   const body={
     name,
-    topic:document.getElementById('chEditTopic').value.trim(),
-    slow_mode:parseInt(document.getElementById('chEditSlow').value,10)||0,
+    topic:topicEl.value.trim(),
+    slow_mode:parseInt(slowEl.value,10)||0,
     archived:document.getElementById('chEditArchived').classList.contains('on'),
     nsfw:document.getElementById('chEditNsfw').classList.contains('on'),
   };
@@ -225,8 +229,8 @@ async function saveChannelEdit(id){
      starts from the stored values for every field the body leaves out. */
   const maxUsersEl=document.getElementById('chEditMaxUsers');
   const maxVideoEl=document.getElementById('chEditMaxVideo');
-  if(maxUsersEl){body.voice_max_users=parseInt(maxUsersEl.value,10)||0}
-  if(maxVideoEl){body.voice_max_video=parseInt(maxVideoEl.value,10)||0}
+  if(maxUsersEl instanceof HTMLInputElement){body.voice_max_users=parseInt(maxUsersEl.value,10)||0}
+  if(maxVideoEl instanceof HTMLInputElement){body.voice_max_video=parseInt(maxVideoEl.value,10)||0}
   try{await api('PATCH','/channels/'+id,body);closeModal();showToast('Channel updated');renderContent()}catch(e){showToast(e.message,'error')}
 }
 
@@ -352,10 +356,10 @@ function typedConfirmField(name){
   return '<div class="form-group rc-confirm"><label class="form-label" for="typedConfirm">Type <strong>'+esc(name)+'</strong> to confirm</label>'
     +'<input class="form-input" id="typedConfirm" autocomplete="off" autocapitalize="off" spellcheck="false" data-input-action="syncTypedConfirm" data-args="'+actArgs(name)+'"></div>';
 }
-function typedConfirmed(name){return (document.getElementById('typedConfirm')?.value||'').trim()===name}
+function typedConfirmed(name){const el=document.getElementById('typedConfirm');return (el instanceof HTMLInputElement?el.value:'').trim()===name}
 function syncTypedConfirm(name){
   const b=document.getElementById('typedConfirmBtn');
-  if(b)b.disabled=!typedConfirmed(name);
+  if(b instanceof HTMLButtonElement)b.disabled=!typedConfirmed(name);
 }
 
 function openDeleteChannel(id,name){
@@ -508,7 +512,7 @@ function selectChannelTab(id){
   document.querySelectorAll('#modalInner [role="tab"][data-tab]').forEach(t=>{
     const on=t.getAttribute('data-tab')===id;
     t.setAttribute('aria-selected',on?'true':'false');
-    t.tabIndex=on?0:-1;
+    if(t instanceof HTMLElement)t.tabIndex=on?0:-1;
     const p=document.getElementById(t.getAttribute('aria-controls'));
     if(p)p.hidden=!on;
   });
@@ -527,7 +531,7 @@ document.addEventListener('keydown',e=>{
   else return;
   e.preventDefault();
   selectChannelTab(tabs[i].getAttribute('data-tab'));
-  tabs[i].focus();
+  const next=tabs[i];if(next instanceof HTMLElement)next.focus();
 });
 
 /* Reads the current masks for the selected target and paints one tri-state row
@@ -537,7 +541,7 @@ function renderPermMatrix(){
   const box=document.getElementById('permMatrix');if(!box)return;
   const pv=document.getElementById('permPreview');if(pv)pv.innerHTML='';
   const sel=document.getElementById('permTarget');
-  const val=sel?sel.value:'';
+  const val=sel instanceof HTMLSelectElement?sel.value:'';
   /* The radios read from the snapshot, so remember which target they belong
      to; onPermTargetChange compares the live radios against that target's
      snapshot to tell whether a switch would discard edits. */
@@ -570,6 +574,7 @@ function collectOverrideMasks(){
   let allow=0,deny=0;
   document.querySelectorAll('#permMatrix input[data-ovrbit]:checked').forEach(el=>{
     const bit=parseInt(el.getAttribute('data-ovrbit'),10);
+    if(!(el instanceof HTMLInputElement))return;
     if(el.value==='allow')allow|=bit;
     else if(el.value==='deny')deny|=bit;
   });
@@ -579,7 +584,7 @@ function collectOverrideMasks(){
 function permTargetPath(){
   const pc=state.permChannel;
   const sel=document.getElementById('permTarget');
-  const val=sel?sel.value:'';
+  const val=sel instanceof HTMLSelectElement?sel.value:'';
   if(!pc||!val)return null;
   const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
   /* A category edits its template; the same rows are then written to every
@@ -719,8 +724,9 @@ function layerLabel(v){return v==='allow'?'allow':v==='deny'?'deny':'—'}
 async function explainAccess(){
   const pc=state.permChannel;if(!pc)return;
   const box=document.getElementById('permExplain');
-  const uid=(document.getElementById('explainUser')||{}).value;
-  const action=(document.getElementById('explainAction')||{}).value;
+  const userEl=document.getElementById('explainUser'),actionEl=document.getElementById('explainAction');
+  const uid=userEl instanceof HTMLSelectElement?userEl.value:undefined;
+  const action=actionEl instanceof HTMLSelectElement?actionEl.value:undefined;
   if(!uid){showToast('Pick a member first','error');return}
   let r;
   try{
@@ -756,7 +762,7 @@ async function previewPermChange(){
   const pc=state.permChannel;if(!pc)return;
   const box=document.getElementById('permPreview');
   const sel=document.getElementById('permTarget');
-  const val=sel?sel.value:'';
+  const val=sel instanceof HTMLSelectElement?sel.value:'';
   if(!val){showToast('Pick a role or member in the override matrix first','error');return}
   const kind=val.charAt(0),tid=parseInt(val.slice(2),10);
   const masks=collectOverrideMasks();
@@ -804,7 +810,7 @@ async function saveChannelPerms(){
       const box=document.getElementById('permRole'+role.role_id);
       if(!box)continue;
       const wasHidden=(role.deny&0x2)!==0;
-      if(!box.checked){if(!wasHidden){await api('PUT','/channels/'+pc.id+'/permissions/'+role.role_id,{allow:0,deny:DENY_PRIVATE});touchedRoles.add(role.role_id)}}
+      if(!(box instanceof HTMLInputElement&&box.checked)){if(!wasHidden){await api('PUT','/channels/'+pc.id+'/permissions/'+role.role_id,{allow:0,deny:DENY_PRIVATE});touchedRoles.add(role.role_id)}}
       else if(wasHidden){await api('DELETE','/channels/'+pc.id+'/permissions/'+role.role_id);touchedRoles.add(role.role_id)}
     }
     /* Then the matrix, if a target is selected — unless the quick-toggle loop
@@ -814,7 +820,7 @@ async function saveChannelPerms(){
        was just PUT). An all-inherit row is itself a delete: storing (0,0)
        would leave a row that resolves to nothing. */
     const sel=document.getElementById('permTarget');
-    const targetVal=sel?sel.value:'';
+    const targetVal=sel instanceof HTMLSelectElement?sel.value:'';
     const targetIsTouchedRole=targetVal.charAt(0)==='r'&&touchedRoles.has(parseInt(targetVal.slice(2),10));
     if(!targetIsTouchedRole){
       const path=permTargetPath();
@@ -840,6 +846,7 @@ async function saveChannelPerms(){
    reference an operator reads next to this grid, and every one of the 30
    defined bits must appear in exactly one group or it becomes ungrantable
    here. */
+/** @type {{title:string,bits:[number,string,string][]}[]} */
 const PERM_GROUPS=[
   {title:'General',bits:[
     [0x20000,'Manage Channels','Create, edit and delete channels and their overrides'],
@@ -1028,8 +1035,8 @@ async function moveRole(id,delta){
   if(!c||state.section!=='roles')return;
   c.innerHTML=html;
   const dir=delta<0?'up':'down',other=delta<0?'down':'up';
-  const btn=[c.querySelector('[data-focus="'+dir+'-'+id+'"]'),c.querySelector('[data-focus="'+other+'-'+id+'"]')].find(b=>b&&!b.disabled);
-  if(btn)btn.focus();
+  const btn=[c.querySelector('[data-focus="'+dir+'-'+id+'"]'),c.querySelector('[data-focus="'+other+'-'+id+'"]')].find(b=>b&&!(b instanceof HTMLButtonElement&&b.disabled));
+  if(btn instanceof HTMLElement)btn.focus();
 }
 
 /* Where a role at `pos` lands on the ladder. The role being edited is left
@@ -1074,7 +1081,7 @@ function rolePositionError(pos,editId){
 function renderRolePlacement(){
   const el=document.getElementById('rolePlacement');
   const input=document.getElementById('rolePos');
-  if(!el||!input)return;
+  if(!el||!(input instanceof HTMLInputElement))return;
   const pos=parseInt(input.value,10);
   const editId=state.roleEditId;
   const err=rolePositionError(pos,editId);
@@ -1097,7 +1104,7 @@ function renderRolePlacement(){
     +(!editing&&slot!==null&&slot!==pos&&def?'<div><button type="button" class="btn btn-outline" data-action="placeRoleAboveDefault" data-args="'+actArgs(slot)+'">Place just above '+esc(def.name)+' ('+slot+')</button></div>':'');
 }
 function placeRoleAboveDefault(slot){
-  const input=document.getElementById('rolePos');if(!input)return;
+  const input=document.getElementById('rolePos');if(!(input instanceof HTMLInputElement))return;
   input.value=String(slot);
   markModalDirty();
   renderRolePlacement();
@@ -1184,21 +1191,23 @@ function openRoleModal(id){
 function collectRolePerms(){
   let mask=0;
   document.querySelectorAll('#modalInner input[data-permbit]').forEach(box=>{
-    if(box.checked)mask|=parseInt(box.getAttribute('data-permbit'),10);
+    if(box instanceof HTMLInputElement&&box.checked)mask|=parseInt(box.getAttribute('data-permbit'),10);
   });
   return mask;
 }
 
 async function saveRole(id){
-  const name=document.getElementById('roleName').value.trim();
+  const nameEl=document.getElementById('roleName'),posEl=document.getElementById('rolePos'),noColorEl=document.getElementById('roleNoColor'),colorEl=document.getElementById('roleColor');
+  if(!(nameEl instanceof HTMLInputElement&&posEl instanceof HTMLInputElement&&noColorEl instanceof HTMLInputElement&&colorEl instanceof HTMLInputElement))return;
+  const name=nameEl.value.trim();
   if(!name){showToast('Name is required','error');return}
-  const position=parseInt(document.getElementById('rolePos').value,10);
+  const position=parseInt(posEl.value,10);
   const posErr=rolePositionError(position,id);
   if(posErr){showToast(posErr,'error');return}
-  const noColor=document.getElementById('roleNoColor').checked;
+  const noColor=noColorEl.checked;
   const body={
     name:name,
-    color:noColor?'':document.getElementById('roleColor').value,
+    color:noColor?'':colorEl.value,
     permissions:collectRolePerms(),
     position:position,
     hoist:/** @type {HTMLInputElement} */(document.getElementById('roleHoist')).checked,
@@ -1279,6 +1288,7 @@ async function emojiApi(method,path,opts){
 async function loadEmojiThumbnails(){
   const imgs=document.querySelectorAll('img[data-emoji-url]');
   for(const img of imgs){
+    if(!(img instanceof HTMLImageElement))continue;
     try{
       const res=await fetch(img.getAttribute('data-emoji-url'),{headers:{'Authorization':'Bearer '+state.token}});
       if(!res.ok)continue;
@@ -1320,8 +1330,8 @@ async function renderEmoji(){
 async function uploadEmoji(){
   const codeInput=document.getElementById('emojiShortcode');
   const fileInput=document.getElementById('emojiFile');
-  const shortcode=(codeInput&&codeInput.value||'').trim();
-  const file=fileInput&&fileInput.files&&fileInput.files[0];
+  const shortcode=(codeInput instanceof HTMLInputElement?codeInput.value:'').trim();
+  const file=fileInput instanceof HTMLInputElement&&fileInput.files&&fileInput.files[0];
   if(!shortcode){showToast('Enter a shortcode first','error');return}
   if(!file){showToast('Choose an image first','error');return}
   const fd=new FormData();

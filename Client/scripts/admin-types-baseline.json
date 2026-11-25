@@ -1,19 +1,4 @@
 {
   "_doc": "Admin-panel checkJs errors, keyed file -> \"<code>:<normalised message>\" -> count. This list only shrinks: scripts/check-admin-types.mjs fails a new identity or a higher count, and fails a listed identity the source no longer produces until `node scripts/check-admin-types.mjs --update` removes it. Keys are file + code + normalised message, never a line, so an edit above an error does not churn the file. TS2304/TS2552 (undefined name) are pinned at zero.",
-  "files": {
-    "admin/static/js/roles-channels.js": {
-      "2339:Property 'checked' does not exist on type 'Element'.": 1,
-      "2339:Property 'checked' does not exist on type 'HTMLElement'.": 2,
-      "2339:Property 'disabled' does not exist on type 'Element'.": 1,
-      "2339:Property 'disabled' does not exist on type 'HTMLElement'.": 1,
-      "2339:Property 'files' does not exist on type 'HTMLElement'.": 2,
-      "2339:Property 'focus' does not exist on type 'Element'.": 2,
-      "2339:Property 'src' does not exist on type 'Element'.": 2,
-      "2339:Property 'tabIndex' does not exist on type 'Element'.": 1,
-      "2339:Property 'value' does not exist on type 'Element'.": 2,
-      "2339:Property 'value' does not exist on type 'HTMLElement | {}'.": 2,
-      "2339:Property 'value' does not exist on type 'HTMLElement'.": 19,
-      "2363:The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.": 2
-    }
-  }
+  "files": {}
 }
