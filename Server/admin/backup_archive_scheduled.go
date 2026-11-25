@@ -140,8 +140,10 @@ func startScheduledArchive(ctx context.Context, database *db.DB, settings *servi
 	if !newest.IsZero() && time.Since(newest) < interval-archiveDueSlack {
 		return nil
 	}
-	if ctx.Err() != nil {
+	select {
+	case <-ctx.Done():
 		return nil // shutting down: start nothing the shutdown join has already passed
+	default:
 	}
 	st := scheduledArchives
 	st.mu.Lock()
