@@ -33,7 +33,7 @@ import {
   listenToMusic,
   getMusicVolume,
   setMusicVolume,
-} from "@lib/voice/livekitSession";
+} from "../../features/voice/livekitSession";
 import { createSidebarVoiceCallbacks } from "./VoiceCallbacks";
 import { createIncomingCallBanner } from "../../features/direct-messages/IncomingCallBanner";
 import { createRingController, createOutgoingCall } from "@lib/voice/callRing";

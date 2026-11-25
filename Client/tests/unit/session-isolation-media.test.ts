@@ -46,7 +46,7 @@ vi.mock("@lib/prefs/preferences", (importOriginal) => mocks.prefsPreferencesMock
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../src/features/connection/identity", () => mocks.netIdentityMock());
 
 // Now import
 import {
@@ -56,7 +56,7 @@ import {
   isVoiceSessionActive,
   setServerHost,
   setWsClient,
-} from "../../src/lib/voice/livekitSession";
+} from "../../src/features/voice/livekitSession";
 
 /** Rooms built and not yet disconnected. */
 function liveRooms(): number {

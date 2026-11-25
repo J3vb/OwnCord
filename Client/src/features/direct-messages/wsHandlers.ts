@@ -1,4 +1,4 @@
-// Direct-message WebSocket handlers — extracted from lib/dispatcher.ts, which
+// Direct-message WebSocket handlers — extracted from app/dispatcher.ts, which
 // keeps every socket subscription and calls these plain functions.
 import {
   channelsStore,

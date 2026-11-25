@@ -114,6 +114,17 @@ describe("the Android file saver", () => {
     expect(fsWriteMock).toHaveBeenCalledWith("C:\\a.zip", BYTES);
     expect(invokeMock).not.toHaveBeenCalled();
   });
+
+  it("opens the desktop dialog with the name's last segment, without format characters", async () => {
+    hostDesktopApp();
+    dialogMock.mockResolvedValue(null);
+    await fileSaver.pickSaveLocation("C:\\Users\\Public\\report\u202egpj.exe");
+    expect(dialogMock).toHaveBeenCalledWith({ defaultPath: "reportgpj.exe" });
+  });
+
+  it("suggests the cleaned name on Android too", async () => {
+    await expect(fileSaver.pickSaveLocation("../../.profile")).resolves.toBe("profile");
+  });
 });
 
 describe("the Android share sheet", () => {

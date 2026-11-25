@@ -28,7 +28,7 @@ func newNSFWTestDB(t *testing.T) *db.DB {
 func buildNSFWRouter(database *db.DB, broadcaster api.DMBroadcaster) http.Handler {
 	r := chi.NewRouter()
 	svc := service.New(database, auth.NewRateLimiter())
-	api.MountNSFWRoutes(r, svc, broadcaster)
+	api.MountNSFWRoutes(r, svc, broadcaster, nil)
 	return r
 }
 

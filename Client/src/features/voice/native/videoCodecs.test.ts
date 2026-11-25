@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const linux = vi.hoisted(() => ({ value: true }));
-vi.mock("./platform", () => ({ isLinuxDesktop: () => linux.value }));
+vi.mock("../../../lib/hostOs", () => ({ isLinuxDesktop: () => linux.value }));
 const videoCodecs = vi.hoisted(() => vi.fn());
 vi.mock("../../../platform/desktop", () => ({
   desktop: { nativeVoice: { videoCodecs } },

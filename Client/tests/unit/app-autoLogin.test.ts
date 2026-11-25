@@ -21,7 +21,9 @@ const hoisted = vi.hoisted(() => ({
   runHealthChecks: vi.fn(),
   warn: vi.fn(),
 }));
-vi.mock("@lib/net/credentials", () => ({ resumeSavedSession: hoisted.resumeSavedSession }));
+vi.mock("../../src/features/connection/credentials", () => ({
+  resumeSavedSession: hoisted.resumeSavedSession,
+}));
 vi.mock("../../src/app/session", () => ({ startSession: hoisted.startSession }));
 vi.mock("../../src/app/serverHealth", () => ({
   checkHealth: hoisted.checkHealth,

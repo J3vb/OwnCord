@@ -13,11 +13,11 @@ import {
 import { pttGates } from "@lib/ui/inputMode";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/voice/audioPipeline";
-import type { AudioElements } from "@lib/voice/audioElements";
+import type { AudioElements } from "./audioElements";
 import { type MediaControl, syncShareGrant } from "./mediaControl";
 import { voiceText } from "../../i18n/voice";
 import { type LostMedia, restoreLostMedia } from "./mediaLostNotice";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import type { SessionState } from "./sessionState";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";
 

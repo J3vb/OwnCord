@@ -14,7 +14,7 @@ const showToast = vi.hoisted(() => vi.fn());
 const importIdentityPublicKey = vi.hoisted(() => vi.fn());
 const computeKeyFingerprint = vi.hoisted(() => vi.fn());
 
-vi.mock("../../lib/voice/livekitSession", () => ({ rePinPeerIdentity, peerAnnouncedIdentityKey }));
+vi.mock("./livekitSession", () => ({ rePinPeerIdentity, peerAnnouncedIdentityKey }));
 vi.mock("../../lib/ui/toast", () => ({ showToast }));
 vi.mock("../../lib/net/e2eeCrypto", () => ({ importIdentityPublicKey, computeKeyFingerprint }));
 // Lets a test act at the instant an open prompt is torn down.

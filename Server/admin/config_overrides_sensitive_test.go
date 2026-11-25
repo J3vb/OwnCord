@@ -901,3 +901,34 @@ func TestConfigOverridesSensitive_ConcurrentPatchesCannotMergeIntoLockout(t *tes
 		}
 	}
 }
+
+// The upload directory stays apart from the folders that hold the server's own
+// files: the data directory, the database's folder and the backup folder, and
+// any folder above them, are refused; a separate folder inside data_dir is not.
+func TestConfigOverridesSensitive_StorageDirMustNotHoldServerFiles(t *testing.T) {
+	f := newSensitiveFixture(t, `["192.0.2.0/24"]`, "")
+	token := createAdminUser(t, f.database)
+	key := []string{"upload.storage_dir"}
+	backups := filepath.Join(f.dataDir, "backups")
+	separate := filepath.Join(f.dataDir, "files")
+	for _, dir := range []string{backups, separate} {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "a.bin"), []byte("x"), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if w := patchConfig(t, f.handler, token, map[string]any{"backup.dir": backups}, []string{"backup.dir"}, ""); w.Code != http.StatusOK {
+		t.Fatalf("PATCH backup.dir = %d; body: %s", w.Code, w.Body.String())
+	}
+	for _, dir := range []string{f.dataDir, filepath.Dir(f.dataDir), backups} {
+		w := patchConfig(t, f.handler, token, map[string]any{"upload.storage_dir": dir}, key, "")
+		if w.Code != http.StatusBadRequest || !strings.Contains(w.Body.String(), "upload.storage_dir must not be") {
+			t.Errorf("PATCH upload.storage_dir %s = %d %s, want 400 naming the folder", dir, w.Code, w.Body.String())
+		}
+	}
+	if w := patchConfig(t, f.handler, token, map[string]any{"upload.storage_dir": separate}, key, ""); w.Code != http.StatusOK {
+		t.Errorf("PATCH upload.storage_dir to a separate folder = %d; body: %s", w.Code, w.Body.String())
+	}
+}

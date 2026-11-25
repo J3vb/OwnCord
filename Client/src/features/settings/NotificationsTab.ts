@@ -5,7 +5,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { appendToggleRows, platformText, savePref } from "./helpers";
 import { buildSettingsSection } from "./settingsSection";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { previewSounds } from "@lib/media/soundPreview";
 import {
   APP_SOUNDS_VOLUME_KEY,

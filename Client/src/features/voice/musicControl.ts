@@ -9,7 +9,7 @@ import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { startMusic, stopMusic } from "@lib/voice/livekitSession";
+import { startMusic, stopMusic } from "./livekitSession";
 import { createLogger } from "@lib/logger";
 import { desktop } from "../../platform/desktop";
 import type { MusicSupport, MusicUnsupportedReason } from "../../platform/contracts/musicAudio";

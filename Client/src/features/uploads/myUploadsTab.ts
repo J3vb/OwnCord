@@ -12,7 +12,7 @@ import { ApiClientError, errorText } from "@lib/api";
 import { createElement, appendChildren, setOwnedTimeout } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { createIcon } from "@lib/icons";
-import { parseTimestamp } from "@lib/text/formatting";
+import { parseTimestamp } from "../messaging/formatting";
 import type { Attachment, UserStorage, UserUploadItem, UserUploadsQuery } from "@lib/types";
 import { channelsStore } from "@stores/channels.store";
 import { createConfirmModal } from "../dialogs/confirmModal";

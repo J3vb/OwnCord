@@ -139,7 +139,8 @@ func serveKeptThumb(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAcc
 }
 
 // serveConvertedPreview answers the thumbnail route for a HEIC, HEIF or TIFF original: always a JPEG, since
-// no webview shows the original. Generated once under the same slots (a HEIC holds heicSlotWeight of them);
+// no webview shows the original. Generated once under the same slots (a HEIC through acquireHeavy: one at a
+// time, never the last free slot);
 // a failed conversion is kept as an empty thumbnail and answered 404 from then on, so the original is never
 // served as an image. No free slot in time answers 503 with Retry-After and keeps nothing.
 func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.AttachmentAccess, uploads *service.UploadService, store FileStore, slots *thumbSlots, format string, allowedOrigins []string) {
@@ -162,11 +163,12 @@ func serveConvertedPreview(w http.ResponseWriter, r *http.Request, aa *db.Attach
 		return
 	}
 	defer f.Close() //nolint:errcheck
+	acquire := slots.acquire
 	weight := int64(1)
 	if format == "heic" {
-		weight = heicSlotWeight
+		acquire, weight = slots.acquireHeavy, heicSlotWeight
 	}
-	release, got := slots.acquire(r.Context(), weight)
+	release, got := acquire(r.Context(), weight)
 	if !got {
 		if r.Context().Err() == nil {
 			w.Header().Set("Retry-After", strconv.Itoa(int(thumbSlotWait/time.Second)))

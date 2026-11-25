@@ -1,5 +1,5 @@
 // Thread WebSocket handlers — reached through ./wsHandlers by
-// lib/dispatcher.ts, which keeps every socket subscription. Threads never
+// app/dispatcher.ts, which keeps every socket subscription. Threads never
 // enter channelsStore; threadsStore is their only home.
 import { threadsStoreInUse, withThreadsStore } from "@stores/threadsLoader";
 import type { ReadyPayload, ServerMessage } from "@lib/types";

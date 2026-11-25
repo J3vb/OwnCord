@@ -13,7 +13,7 @@ import { createTypingIndicator } from "../../../features/messaging/TypingIndicat
 import { getChannelMessages } from "@stores/messages.store";
 import { lastOwnEditable } from "../../../features/messaging/lastOwnEditable";
 import { watchReplyTarget } from "../../../features/messaging/composer/replyTargetWatch";
-import { canManageMessages } from "@lib/permissions";
+import { canManageMessages } from "@stores/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { composerPlaceholder } from "../../../features/messaging/composerPlaceholder";
@@ -23,7 +23,8 @@ import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../../features/safety/store";
 import { messagingText } from "../../../i18n/messaging";
 import { shellText } from "../../../i18n/shell";
-import { formatUntil, safetyText } from "../../../i18n/safety";
+import { safetyText } from "../../../i18n/safety";
+import { formatUntil } from "../../../features/safety/timeText";
 import { WsErrorCode } from "@lib/protocolTypes";
 import { log } from "./channelShared";
 import {

@@ -38,7 +38,7 @@ import {
 import { createLogger } from "@lib/logger";
 import { voiceStore } from "../../stores/voice.store";
 import { pickCommonCodec } from "./decodeCaps";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { channelPeerDecode } from "./peerDecode";
 import type { ShareSenderSample } from "./shareSenderStats";
 import type { PublishCodec } from "./videoCodec";

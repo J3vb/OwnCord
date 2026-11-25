@@ -7,7 +7,7 @@
 import { isImeCommit } from "@lib/text/ime";
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
-import { roleColorVar } from "@lib/text/formatting";
+import { roleColorVar } from "../messaging/formatting";
 import { requestsText } from "../../i18n/requests";
 import type {
   ProfileRoleControl,

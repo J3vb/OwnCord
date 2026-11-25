@@ -10,7 +10,7 @@
 
 import { createElement } from "@lib/dom";
 import { getKnownCategories } from "@stores/channels.store";
-import { visibleCategories } from "@lib/permissions";
+import { visibleCategories } from "@stores/permissions";
 import { shellText } from "../../i18n/shell";
 
 /** The option value for a channel's (or a ref's) category. */

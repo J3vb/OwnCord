@@ -18,7 +18,7 @@ const music = { volume: 100, muted: false };
 const setMusicVolume = vi.fn((_id: number, v: number) => void (music.volume = v));
 const setMusicMuted = vi.fn((_id: number, m: boolean) => void (music.muted = m));
 
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     setUserVolume: (...args: unknown[]) => setUserVolume(...args) as unknown,
     getUserVolume: (...args: unknown[]) => getUserVolume(...args) as unknown,

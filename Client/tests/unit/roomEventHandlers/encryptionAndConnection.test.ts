@@ -1,4 +1,4 @@
-// Tests for src/lib/voice/roomEventHandlers.ts, continued from tracks.test.ts.
+// Tests for src/features/voice/roomEventHandlers.ts, continued from tracks.test.ts.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/roomEventHandlersMocks";
@@ -6,7 +6,7 @@ import { DisconnectReason, Encryption_Type, RoomEvent, Track } from "livekit-cli
 import type { LocalTrackPublication, Participant, Room } from "livekit-client";
 import { onRoom } from "../../../src/features/voice/releaseRoom";
 import { beginJoinAttempt, finishJoinAttempt, voiceJoinSnapshot } from "@lib/voice/voiceJoinTrace";
-import type { RoomEventDeps } from "@lib/voice/roomEventHandlers";
+import type { RoomEventDeps } from "../../../src/features/voice/roomEventHandlers";
 import { voiceStore, setEncryptionDegraded, joinVoiceChannel } from "@stores/voice.store";
 import { expectConsole } from "../../helpers/console";
 import { captureLogs } from "../../helpers/log-capture";

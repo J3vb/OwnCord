@@ -14,7 +14,7 @@ import {
   useSidebarScope,
 } from "../../helpers/channelSidebarHarness";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/net/e2eeCrypto", (importOriginal) => mocks.netE2eeCryptoMock(importOriginal));
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>

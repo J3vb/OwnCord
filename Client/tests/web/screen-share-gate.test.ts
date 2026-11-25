@@ -5,7 +5,7 @@
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-vi.mock("@lib/voice/livekitSession", () => ({
+vi.mock("../../src/features/voice/livekitSession", () => ({
   getRoomForStats: vi.fn().mockReturnValue(null),
   retryMicPermission: vi.fn(),
   joinVoice: vi.fn(),

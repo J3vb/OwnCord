@@ -5,7 +5,7 @@
  */
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
-import { formatBadgeCount } from "@lib/text/formatting";
+import { formatBadgeCount } from "../messaging/formatting";
 import { trackCurrentView } from "../navigation/contentView";
 import type { ContentViewId, CountSource } from "../navigation/destinations";
 

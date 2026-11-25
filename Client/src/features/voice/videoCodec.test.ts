@@ -2,7 +2,7 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
 const isWindowsDesktop = vi.hoisted(() => vi.fn(() => false));
-vi.mock("./native/platform", () => ({
+vi.mock("../../lib/hostOs", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
   isWindowsDesktop: () => isWindowsDesktop(),
 }));

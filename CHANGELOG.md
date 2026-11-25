@@ -114,6 +114,20 @@ release changes the database, and anything an operator must do first.)
 
 - Shared music is silent until you choose to listen, one person at a time. Tap Listen to music on their tile in the call view, or Listen beside their name in the channel list; the tile and the voice panel show who you are listening to with a volume control and Stop. Listening to someone else switches over, and leaving the call clears it; if their connection drops and their music comes back, you keep listening. Mute music and each person's Music volume work as before. Needs this version of the app on the listener's side only.
 - The music tile shows who is listening ("Listening: You, Alex"), like a screen share shows who is watching. Needs this version of the server and app; with an older server the tile shows only you.
+- When the server runs its own voice server and reaches it on the same machine (the default), the voice server's sign-in port 7880 now listens on the local machine only. Voice works as before through 8443 and the media ports; to listen on other addresses, manage `livekit.yaml` yourself.
+
+**Accounts & admin**
+
+- Changing your sign-in name now needs a signed-in session, like changing the password; an API token can still edit the rest of the profile.
+- The admin panel refuses an upload folder that is the data folder, the database's folder, the backup folder or a folder above them.
+- A new install creates the database, its side files and uploaded files readable by the server's user only (folders likewise); existing files keep their permissions.
+- The server log records an upload by its id, size and type, without the file name.
+- Editing a channel's permission overrides (directly, through a category template, or by syncing) now needs the editor to be able to read that channel; the owner and Administrators are not limited.
+- Giving a member a role now follows the same rule as editing a role: a role manager without Administrator can only hand out permissions their own roles carry.
+- Banning an account removes its push notification registrations; the app registers again after the ban ends.
+- Warnings and timeouts are limited to 10 each per moderator per minute; blocking, the age-restricted content setting and closing DMs to 20 per account per minute.
+- Thread and forum post titles follow the display name text rules (single line, no invisible characters); existing titles are unchanged.
+- A connection that sends far more messages than any app does is answered "rate limited" and then closed.
 
 ### Fixed
 
@@ -161,6 +175,9 @@ release changes the database, and anything an operator must do first.)
 - Older messages kept on screen through a reload now show edits, deletes and reactions made while you were away.
 - A mention badge on a voice channel can be cleared with Mark as Read, and the DM header no longer shows a Media button left over from the last channel.
 - Screen readers read a revealed spoiler's text and the member list's collapse arrow.
+- A link preview card's small host line named the site the page claimed to be; it now names the link's real host.
+- The DM list could show a blocked person's text after they edited their message or after a reconnect; it now shows "Blocked message" when that message is loaded, and in a DM where everyone else is blocked.
+- The desktop Save dialog could open with a folder path or hidden characters in the suggested name; it now opens with a plain file name.
 
 **Server (Windows hosting)**
 

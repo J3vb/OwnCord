@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { attemptAutoReconnect } from "../../src/lib/voice/livekitReconnect";
+import { attemptAutoReconnect } from "../../src/features/voice/livekitReconnect";
 import type { ReconnectDeps } from "../../src/features/voice/reconnectDeps";
 import { expectConsole } from "../helpers/console";
 

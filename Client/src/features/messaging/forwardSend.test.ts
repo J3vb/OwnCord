@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockWsClient, type MockWsClient } from "../../../tests/helpers/mock-ws";
-import { activatePendingMessages, deactivatePendingMessages } from "../../lib/pendingMessages";
+import { activatePendingMessages, deactivatePendingMessages } from "./pendingMessages";
 import { isClaimedRequest } from "@lib/net/requestClaims";
 import {
   FORWARD_REPLY_TIMEOUT_MS,

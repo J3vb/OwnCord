@@ -2229,7 +2229,7 @@ A forum post's `ThreadInfo` also carries `post`: `{ "tag_ids": [3, 7], "first_me
 }
 ```
 
-`name` is 1 to 100 runes after sanitising. `auto_archive_minutes` is one of 60, 1440, 4320 or 10080; omitted or 0 means 1440. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the parent, which must be a text channel. The starter must be a live user message in that channel that has no thread. A message has at most one thread, and that makes the create idempotent without a request key: a retry by the thread's owner (a lost `thread_create_ok`) is answered with the same `thread_create_ok`, before the rate gate and without announcing anything. Rate limited to 5 per 10 minutes per user (`RATE_LIMITED`).
+`name` is 1 to 100 runes after sanitising, single-line visible text as for a display name (no control, invisible or direction-changing characters, runs of spaces collapsed). `auto_archive_minutes` is one of 60, 1440, 4320 or 10080; omitted or 0 means 1440. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the parent, which must be a text channel. The starter must be a live user message in that channel that has no thread. A message has at most one thread, and that makes the create idempotent without a request key: a retry by the thread's owner (a lost `thread_create_ok`) is answered with the same `thread_create_ok`, before the rate gate and without announcing anything. Rate limited to 5 per 10 minutes per user (`RATE_LIMITED`).
 
 Errors: `THREAD_EXISTS` (the message already has a thread that the caller did not make; the error payload carries `thread_id`, so the loser of a race learns the winner), `NOT_FOUND`, `FORBIDDEN`, `BAD_REQUEST`, `RATE_LIMITED`.
 
@@ -2299,7 +2299,7 @@ A forum holds no messages. A post is a thread whose parent is the forum, with no
 }
 ```
 
-`channel_id` is the forum. `name` is the title, 1 to 100 runes after sanitising. `content` and `attachments` follow the `chat_send` rules and the opening message needs one of them. `tag_ids` holds at most 5 distinct tags of the forum, and at least one when the forum has `require_tag`. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the forum (and `ATTACH_FILES` with attachments), is subject to the forum's slow mode, and shares the `thread_create` budget (5 per 10 minutes, `RATE_LIMITED`). The post's `auto_archive_minutes` is the forum's default. The post and its opening message commit in one transaction.
+`channel_id` is the forum. `name` is the title, 1 to 100 runes after sanitising, under the `thread_create` name rule. `content` and `attachments` follow the `chat_send` rules and the opening message needs one of them. `tag_ids` holds at most 5 distinct tags of the forum, and at least one when the forum has `require_tag`. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the forum (and `ATTACH_FILES` with attachments), is subject to the forum's slow mode, and shares the `thread_create` budget (5 per 10 minutes, `RATE_LIMITED`). The post's `auto_archive_minutes` is the forum's default. The post and its opening message commit in one transaction.
 
 The request is idempotent on `client_message_id`, as `chat_send` is: a retry of a post that committed is answered with the same `forum_post_create_ok` and `deduplicated: true`, before the `thread_create` budget is spent and even if the post has since been archived. A retry of a post that has since been deleted answers `ALREADY_DELETED`; a retry whose payload differs from the original answers `CONFLICT`. A retry from a caller who can no longer see the forum is acknowledged without the `thread` field. A malformed request (title, tag shape) is refused before it costs a token.
 
@@ -4078,7 +4078,13 @@ The full list is `error_codes.ws` of `protocol/schema.json`, generated into the
 | `REQUEST_TIMEOUT`          | A command's database work ran past the per-frame deadline and was not applied; the `error` carries the command's `id` (see Command deadlines). Unlike `SERVER_BUSY` it does not end the connection                                            |
 | `ANOTHER_DEVICE_ACTIVE`    | No longer sent; kept for clients that still talk to an older server, which refused a wake reconnect while a different session held the connection                                                                                             |
 
-After 10 consecutive invalid JSON messages, the connection is forcibly closed.
+Each account has an inbound budget of 600 frames per 5 seconds, shared by all
+of its connections and spent before a frame is decoded. A frame over it is
+answered `RATE_LIMITED` and not processed. A frame that is not valid JSON, or
+is over the budget, counts as a strike; a frame that parses into a known
+command clears the count. After 10 consecutive strikes the connection is
+closed. An unknown `type` or a payload that does not parse is answered with its
+error and is no strike.
 
 A command's `channel_id`, `message_id`, `thread_id`, `user_id` and
 `to_channel_id` must be positive integers. A missing, fractional, zero or

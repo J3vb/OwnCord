@@ -11,7 +11,7 @@ import { showToast } from "../../lib/ui/toast";
 import { connectText } from "../../i18n/connect";
 import { isClaimedRequest } from "@lib/net/requestClaims";
 import { isPollRequest } from "./pollRequests";
-import { pendingMessageBeforeRestore } from "../../lib/pendingMessages";
+import { pendingMessageBeforeRestore } from "./pendingMessages";
 import type { Payload } from "../connection/dispatchContext";
 import { WsErrorCode } from "@lib/protocolTypes";
 

@@ -179,7 +179,7 @@ audit/settings/permissions/setup calls in `api.ts`). The one bridge the client
 does have is a deep-link: `lib/adminPanel.ts` opens
 `https://{host}/admin#{section}` in the OS browser (wired from
 the Audit Log button handler in `createSidebarArea()`, `pages/main-page/SidebarArea.ts`, gated by
-`lib/permissions.ts::canViewAuditLog`).
+`stores/permissions.ts::canViewAuditLog`).
 
 > **Decision point.** If the target is for admins to manage the server from the
 > desktop app (audit log, settings, plugins) rather than the web panel, that is a

@@ -19,12 +19,12 @@ const sharedWindow = {
   ],
 };
 const mockShareStream = vi.fn<() => unknown>(() => sharedWindow);
-vi.mock("../../src/features/voice/native/platform", () => ({
+vi.mock("../../src/lib/hostOs", () => ({
   isLinuxDesktop: () => mockIsLinuxDesktop(),
   isWindowsDesktop: () => false,
   canPublishScreen: () => true,
 }));
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     getLocalScreenshareStream: () => mockShareStream(),
     getScreenshareQuality: () => mockShareQuality(),

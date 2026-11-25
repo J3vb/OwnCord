@@ -17,7 +17,9 @@ const hoisted = vi.hoisted(() => ({
   setTransientError: vi.fn(),
   warn: vi.fn(),
 }));
-vi.mock("@lib/net/credentials", () => ({ deleteCredential: hoisted.deleteCredential }));
+vi.mock("../../src/features/connection/credentials", () => ({
+  deleteCredential: hoisted.deleteCredential,
+}));
 vi.mock("@stores/ui.store", () => ({ setTransientError: hoisted.setTransientError }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({

@@ -13,10 +13,8 @@ channels, voice and video, and a server you own.
 
 > **Beta, and a hobby project.**
 > I build this for fun and run it for a small group of friends. It is not a
-> product. There is no support promise, and it is not production-ready. Expect
-> rough edges, fast changes and the odd breaking change.
->
-> Do not use it for anything sensitive.
+> product. There is no support promise. Expect rough edges, fast changes and
+> the odd breaking change.
 
 OwnCord has two parts:
 

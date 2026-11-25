@@ -8,7 +8,10 @@ import { membersStore } from "../../../src/stores/members.store";
 import { blocksStore } from "../../../src/stores/blocks.store";
 import { uiStore } from "../../../src/stores/ui.store";
 import { safetyText } from "../../../src/i18n/safety";
-import { createPresenceSender, setActivePresenceSender } from "../../../src/lib/presence/presence";
+import {
+  createPresenceSender,
+  setActivePresenceSender,
+} from "../../../src/features/presence/presence";
 import { createPresenceLimiter } from "../../../src/lib/net/rateLimiter";
 import { loadCustomStatus, saveCustomStatus } from "../../../src/lib/presence/userStatus";
 import {
@@ -23,10 +26,10 @@ import {
 import { resetMessagesState } from "../../helpers/storeResets";
 
 vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notificationsMock());
-vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
-vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
+vi.mock("../../../src/features/connection/identity", () => dispatcherMocks.identityMock());
 vi.mock("../../../src/features/connection/dispatchContext", async (importOriginal) =>
   dispatcherMocks.dispatchContextMock(await importOriginal<object>()),
 );

@@ -4,7 +4,11 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import { navigateToChannel, findChannelByName, findChannelById } from "@lib/nav/channelNavigation";
+import {
+  navigateToChannel,
+  findChannelByName,
+  findChannelById,
+} from "../../navigation/channelNavigation";
 import { parseInviteLink, parseMessageLink } from "@lib/nav/deepLink";
 import { getChannelMutesHost } from "@lib/prefs/channelMutes";
 import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";

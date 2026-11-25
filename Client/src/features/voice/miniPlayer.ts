@@ -12,7 +12,7 @@ import { Disposable } from "../../lib/disposable";
 import { createIcon, type IconName } from "../../lib/icons";
 import { syncVideoSurface } from "../../lib/voice/videoSurface";
 import { voiceText } from "../../i18n/voice";
-import { isAndroidApp } from "./native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 
 /** How far one arrow key press moves the player. */
 const KEY_STEP_PX = 24;

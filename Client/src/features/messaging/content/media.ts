@@ -30,12 +30,13 @@ import {
 } from "../../content-consent/external";
 import { renderConcealedItem } from "../../content-consent/concealed";
 import { contentText } from "../../../i18n/content";
+import { boundInboundText } from "@lib/text/inboundText";
 import {
   CODE_BLOCK_REGEX,
   INLINE_CODE_REGEX,
-  MASKED_LINK_REGEX,
   ANGLE_URL_REGEX,
-  SPOILER_REGEX,
+  stripMaskedLinks,
+  stripSpoilers,
   stripUrlTrailingPunctuation,
   URL_REGEX,
 } from "./contentParser";
@@ -346,12 +347,13 @@ export function extractUrls(content: string): string[] {
   // deliberate act of hiding the address, so it gets no embed either. The
   // same goes for `||spoilers||`: a hidden address must not be previewed, and
   // for `<https://…>`, which is how an author asks for no embed.
-  const withoutCodeBlocks = content
+  const withoutCode = boundInboundText(content)
     .replace(CODE_BLOCK_REGEX, "")
-    .replace(INLINE_CODE_REGEX, "")
-    .replace(MASKED_LINK_REGEX, "")
-    .replace(SPOILER_REGEX, "")
-    .replace(ANGLE_URL_REGEX, "");
+    .replace(INLINE_CODE_REGEX, "");
+  const withoutCodeBlocks = stripSpoilers(stripMaskedLinks(withoutCode)).replace(
+    ANGLE_URL_REGEX,
+    "",
+  );
   const matches = withoutCodeBlocks.match(URL_REGEX);
   // Strip the same trailing sentence punctuation the linkifier strips (see
   // stripUrlTrailingPunctuation), so the embed pipeline and the rendered

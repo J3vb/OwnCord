@@ -4,7 +4,7 @@
  * read_state for a followed thread id versus one nobody follows.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { wireDispatcher } from "../../src/app/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { makeThread } from "../helpers/thread-fixtures";
 import { channelsStore, resetChannelsStore, setChannels } from "../../src/stores/channels.store";

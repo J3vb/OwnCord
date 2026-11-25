@@ -364,10 +364,16 @@ func (d *DB) BanUserWithAction(ctx context.Context, targetID int64, reason strin
 		expiresStr = &s
 	}
 	reasonCopy := reason
-	if err := dbgen.New(tx).BanUser(ctx, dbgen.BanUserParams{
+	q := dbgen.New(tx)
+	if err := q.BanUser(ctx, dbgen.BanUserParams{
 		BanReason: &reasonCopy, BanExpires: expiresStr, ID: targetID,
 	}); err != nil {
 		return 0, fmt.Errorf("BanUserWithAction: %w", err)
+	}
+	// A banned account (temporary bans included) gets no push wake-ups; the app registers
+	// again on its next ready after the ban ends.
+	if _, err := q.DeleteUserPushSubscriptions(ctx, targetID); err != nil {
+		return 0, fmt.Errorf("BanUserWithAction push subscriptions: %w", err)
 	}
 	id, err := recordModerationAction(ctx, tx, "ban", targetID, actorID, reportID, reason, nil)
 	if err != nil {

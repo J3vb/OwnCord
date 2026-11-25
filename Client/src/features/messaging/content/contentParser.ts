@@ -13,7 +13,7 @@
  * (parsed form and its cache) and contentBlocks.
  */
 
-import type { MentionInfo } from "@lib/text/mentions";
+import type { MentionInfo } from "../mentions";
 import { formatDiscordTimestamp, type TimestampStyle } from "@lib/text/discordTimestamp";
 import { createElement } from "@lib/dom";
 import { isEmojiOnlyMessage } from "./customEmoji";
@@ -24,9 +24,9 @@ export {
   CODE_BLOCK_REGEX,
   INLINE_CODE_REGEX,
   URL_REGEX,
-  MASKED_LINK_REGEX,
-  SPOILER_REGEX,
   ANGLE_URL_REGEX,
+  stripMaskedLinks,
+  stripSpoilers,
   stripUrlTrailingPunctuation,
 } from "./contentRegex";
 export { renderInlineContent, renderMentions } from "./contentInline";

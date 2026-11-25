@@ -15,8 +15,10 @@ import (
 // restart drops it while the persisted lockout survives.
 const loginVouchWindow = 24 * time.Hour
 
+// loginVouchKey puts the address first and the username last, joined by '|', which no
+// RateKey output holds, so each (address, username) pair has a key of its own.
 func loginVouchKey(unameKey, ip string) string {
-	return "login_user_ok:" + unameKey + ":" + clientip.RateKey(ip)
+	return "login_user_ok:" + clientip.RateKey(ip) + "|" + unameKey
 }
 
 // loginVouched reports whether key holds a success inside loginVouchWindow. Check is

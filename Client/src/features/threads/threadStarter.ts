@@ -4,7 +4,7 @@
  */
 
 import { createElement } from "@lib/dom";
-import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
+import { formatMessageTimestamp, resolveAuthor, userRoleColorVar } from "../messaging/formatting";
 import { resolveDisplayName } from "@lib/ui/avatar";
 import { readableRoleColor } from "@lib/prefs/themes";
 import type { ApiClient } from "@lib/api";

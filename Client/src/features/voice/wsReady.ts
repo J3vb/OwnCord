@@ -12,7 +12,7 @@ import {
   noteWatchingResync,
   clearPeerWatching,
 } from "../../stores/voice.store";
-import { ensureIdentityKeyPublished } from "../../lib/net/identity";
+import { ensureIdentityKeyPublished } from "../connection/identity";
 import { moderatorAudioPlan, prevModeratorFlags } from "./moderatorAudioPlan";
 import type { PrevModeratorFlags } from "./moderatorAudioPlan";
 import { clearAfkMove } from "./moveHint";

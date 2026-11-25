@@ -80,7 +80,7 @@ func TestNSFW_WatermarkBumpsBeforeTheNotifySend(t *testing.T) {
 	bc := &orderRecordingNSFWBroadcaster{}
 	r := chi.NewRouter()
 	svc := service.New(database, auth.NewRateLimiter())
-	MountNSFWRoutes(r, svc, bc)
+	MountNSFWRoutes(r, svc, bc, nil)
 
 	t.Cleanup(func() { nsfwPostBumpPreNotifyHook = nil })
 	// The hook still marks the gap, appending to the SAME slice in real

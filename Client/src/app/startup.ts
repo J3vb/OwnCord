@@ -13,7 +13,7 @@ import { setSystemDateLocale } from "@lib/text/timeFormat";
 import { openNotificationTarget } from "@lib/notificationDelivery";
 import { initWindowState } from "@lib/prefs/windowState";
 import { saveUserStatus } from "@lib/presence/userStatus";
-import { getActivePresenceSender } from "@lib/presence/presence";
+import { getActivePresenceSender } from "../features/presence/presence";
 import type { ApiClient } from "@lib/api";
 import type { createLogger } from "@lib/logger";
 import {

@@ -3,7 +3,7 @@
 // fixed by the build.
 import { desktop } from "../../../platform/desktop";
 import type { NativeVoiceVideoCodecs } from "../../../platform/contracts/nativeVoice";
-import { isLinuxDesktop } from "./platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 
 const NONE: NativeVoiceVideoCodecs = { h264: false, vp9: false, decode: [] };
 

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 const linux = vi.hoisted(() => ({ value: true }));
-vi.mock("./platform", () => ({ isLinuxDesktop: () => linux.value }));
+vi.mock("../../../lib/hostOs", () => ({ isLinuxDesktop: () => linux.value }));
 const listDevices = vi.hoisted(() => vi.fn());
 const listCameras = vi.hoisted(() => vi.fn());
 const cameraSupport = vi.hoisted(() => vi.fn());

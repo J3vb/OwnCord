@@ -43,7 +43,7 @@ export const WS_LIVENESS = "src/lib/net/ws/wsLiveness.ts";
 export const WS_TRANSPORT = "src/lib/net/ws/wsTransport.ts";
 export const WS_INBOUND = "src/lib/net/ws/wsInbound.ts";
 export const WS_RECONNECT = "src/lib/net/ws/wsReconnect.ts";
-export const ROOM_EVENTS = "src/lib/voice/roomEventHandlers.ts";
+export const ROOM_EVENTS = "src/features/voice/roomEventHandlers.ts";
 export const SCREEN = "src/features/voice/screenTrackStop.ts";
 export const EXIT_WATCH = "src-tauri/src/exit_watch.rs";
 export const CRASH_LOG = "src-tauri/src/crash_log.rs";
@@ -57,7 +57,7 @@ export const EVENT_LOG = "src/lib/diagnostics/eventLog.ts";
 export const APP_EVENTS = "src/lib/diagnostics/appEvents.ts";
 export const VOICE_LOG = "src/lib/voice/voiceEventLog.ts";
 export const WATCHDOG = "src/lib/voice/cameraStallWatchdog.ts";
-export const DIAGNOSTICS = "src/lib/voice/livekitDiagnostics.ts";
+export const DIAGNOSTICS = "src/features/voice/livekitDiagnostics.ts";
 export const SCREEN_CHANGE = "src/features/voice/screenshareChange.ts";
 
 export const CAMERA_STATS = {

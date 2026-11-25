@@ -113,8 +113,11 @@ func validAutoArchive(minutes int) (int, error) {
 	return minutes, nil
 }
 
+// cleanThreadName is the thread and forum post title rule: single-line visible text (cleanVisibleBounded,
+// like display names), required, at most MaxThreadNameLen runes. Titles stored before the rule keep reading
+// back as they are; it applies to new writes.
 func cleanThreadName(name string) (string, error) {
-	cleaned, err := cleanTextBounded(name, MaxThreadNameLen, "name")
+	cleaned, err := cleanVisibleBounded(name, MaxThreadNameLen, "name")
 	if err != nil {
 		return "", err
 	}

@@ -30,6 +30,7 @@ import { installFrameShapes } from "../src/lib/net/wireCheck";
 import * as wireShapes from "../src/lib/net/wireShapes";
 import { installConsoleGuard } from "./helpers/console";
 import { installLifecycleGuard } from "./helpers/lifecycle";
+import { registerVoiceSessionLoader } from "../src/lib/voice/voiceSessionLoader";
 
 if (typeof globalThis.localStorage === "undefined") {
   throw new Error(
@@ -103,3 +104,7 @@ installLifecycleGuard();
 // captured per test, and a test that provokes one must claim it with
 // expectConsole (tests/helpers/console.ts) or fail.
 installConsoleGuard();
+
+// main.ts registers this at boot; a test that mocks the voice session facade
+// gets its mock through the same lazy import.
+registerVoiceSessionLoader(() => import("../src/features/voice/livekitSession"));

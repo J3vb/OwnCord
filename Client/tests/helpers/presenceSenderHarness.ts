@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, vi } from "vitest";
 import { membersStore } from "@stores/members.store";
-import { createPresenceSender } from "@lib/presence/presence";
+import { createPresenceSender } from "../../src/features/presence/presence";
 import { createPresenceLimiter, type RateLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
 import { resetMembersState } from "./storeResets";

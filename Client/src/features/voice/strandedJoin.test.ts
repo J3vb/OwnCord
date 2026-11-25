@@ -13,14 +13,14 @@ import {
 import { authStore } from "../../stores/auth.store";
 import type { Payload } from "../connection/dispatchContext";
 
-vi.mock("../../lib/voice/livekitSession", () => ({
+vi.mock("./livekitSession", () => ({
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
   leaveVoice: vi.fn(),
   isVoiceSessionActive: vi.fn(() => false),
   failPendingRejoin: vi.fn(),
 }));
-import { setMuted, leaveVoice, failPendingRejoin } from "../../lib/voice/livekitSession";
+import { setMuted, leaveVoice, failPendingRejoin } from "./livekitSession";
 
 const ownRow = (overrides: Partial<Payload<"voice_state">>): Payload<"voice_state"> =>
   ({ channel_id: 4, user_id: 9, username: "me", ...overrides }) as Payload<"voice_state">;

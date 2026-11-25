@@ -20,13 +20,13 @@ vi.mock("livekit-client", () => ({
 
 const voice = { localDeafened: false, currentChannelId: null as number | null };
 vi.mock("@stores/voice.store", () => ({ voiceStore: { getState: () => voice } }));
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     parseUserId: (identity: string) => Number(/^user-(\d+)$/.exec(identity)?.[1] ?? 0),
   }),
 );
 
-import { AudioElements } from "../../src/lib/voice/audioElements";
+import { AudioElements } from "../../src/features/voice/audioElements";
 
 function track(sid: string) {
   const el = document.createElement("audio");

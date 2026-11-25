@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const session = vi.hoisted(() => ({ setPttGated: vi.fn() }));
-vi.mock("../../lib/voice/livekitSession", () => ({ setPttGated: session.setPttGated }));
+vi.mock("./livekitSession", () => ({ setPttGated: session.setPttGated }));
 
 import {
   createTalkButton,

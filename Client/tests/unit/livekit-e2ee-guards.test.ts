@@ -20,7 +20,7 @@ vi.mock("@lib/net/e2eeCrypto", () =>
   }),
 );
 
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../src/features/connection/identity", () => mocks.netIdentityMock());
 
 const auth = vi.hoisted(() => ({ id: 1 }));
 vi.mock("@stores/auth.store", () => ({
@@ -75,7 +75,7 @@ vi.mock("@lib/voice/voiceJoinTrace", async (importOriginal) => ({
   markJoinMilestone: vi.fn(),
 }));
 
-import { E2EEManager } from "../../src/lib/voice/livekitE2EE";
+import { E2EEManager } from "../../src/features/voice/livekitE2EE";
 import { markJoinMilestone } from "@lib/voice/voiceJoinTrace";
 import { clearPeerVerification, clearPeerVerifications } from "@stores/voice.store";
 import {
@@ -86,7 +86,11 @@ import {
   signEphemeralKey,
   wrapRoomKey,
 } from "@lib/net/e2eeCrypto";
-import { getIdentityPin, getOrCreateIdentityKeyPair, storeIdentityPin } from "@lib/net/identity";
+import {
+  getIdentityPin,
+  getOrCreateIdentityKeyPair,
+  storeIdentityPin,
+} from "../../src/features/connection/identity";
 
 const SELF = 1;
 /** The key holder is the lowest user id in the call, so an offer from PEER_ID

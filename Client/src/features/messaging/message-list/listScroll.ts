@@ -9,9 +9,9 @@ import {
   isWindowDetached,
   type Message,
 } from "@stores/messages.store";
-import { formatBadgeCount } from "@lib/text/formatting";
+import { formatBadgeCount } from "../formatting";
 import { messagingText } from "../../../i18n/messaging";
-import { setLiveTailInView } from "@lib/readState";
+import { setLiveTailInView } from "@stores/readState";
 import {
   SCROLL_TOP_THRESHOLD,
   SCROLL_TOP_VIEWPORTS,

@@ -8,7 +8,7 @@ import { authStore } from "@stores/auth.store";
 import { dmDisplayName, dmStore, type DmChannel } from "@stores/dm.store";
 import { dmUnreadCount } from "@lib/dmUnread";
 import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
-import { formatBadgeCount } from "@lib/text/formatting";
+import { formatBadgeCount } from "../messaging/formatting";
 import { serverRailText } from "../../i18n/serverRail";
 
 export type DropZone = "before" | "after" | "into";

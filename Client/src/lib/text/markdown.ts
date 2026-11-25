@@ -18,6 +18,7 @@
 
 import { formatDiscordTimestamp, type TimestampStyle } from "./discordTimestamp";
 import { idMentionsToNames } from "./mentionNames";
+import { boundInboundText } from "./inboundText";
 import {
   ANGLE_URL_RE,
   buildMatches,
@@ -280,7 +281,7 @@ export function splitCodeFences(content: string): MarkdownSegment[] {
  */
 export function markdownToPlainText(content: string, spoilerLabel: string): string {
   const lines: string[] = [];
-  for (const segment of splitCodeFences(content)) {
+  for (const segment of splitCodeFences(boundInboundText(content))) {
     if (segment.kind === "code") {
       lines.push(segment.text);
       continue;

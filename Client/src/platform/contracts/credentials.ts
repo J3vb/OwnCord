@@ -1,5 +1,5 @@
 /**
- * Credential storage — the OS credential manager seam `lib/net/credentials.ts`
+ * Credential storage — the OS credential manager seam `features/connection/credentials.ts`
  * wraps today. Seam: `saveCredential`, `loadCredential`, `resumeSavedSession`,
  * `deleteCredential` and `loginWithSavedPassword` are exported functions
  * already, so each contract method below has that function's exact signature.
@@ -30,7 +30,7 @@ export type SavedSessionResume =
   | { readonly outcome: "certificate_unverified" }
   | { readonly outcome: "refused" };
 
-/** Re-declared, structurally identical to `SavedLoginResponse` (`lib/net/credentials.ts`). */
+/** Re-declared, structurally identical to `SavedLoginResponse` (`features/connection/credentials.ts`). */
 export interface SavedLoginResponse {
   readonly status: number;
   readonly body: string;

@@ -5,7 +5,7 @@ import { authStore } from "../../stores/auth.store";
 import { voiceStore, leaveVoiceChannel, setSwitchingTo } from "../../stores/voice.store";
 import { uiStore } from "../../stores/ui.store";
 import { showToast } from "../../lib/ui/toast";
-import { noteJoinFailed } from "./joinBackoff";
+import { noteJoinFailed } from "@lib/voice/joinBackoff";
 import {
   type JoinAnswerWait,
   forgetRefusedStay,

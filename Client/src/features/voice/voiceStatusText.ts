@@ -6,7 +6,7 @@
 
 import { isSelfMuted, type VoiceState, type VoiceStatus } from "@stores/voice.store";
 import { voiceText as t } from "../../i18n/voice";
-import { isAndroidApp } from "./native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 
 /** Header status text per voice-session lifecycle state
  *  (docs/architecture/ux/voice-and-e2ee.md §2). */

@@ -28,7 +28,7 @@ In mount order (`Server/api/router.go`):
 8. **MaxBodySize** -- 1 MiB default for all routes except `/api/v1/uploads` (100 MiB, or `upload.max_size_mb` plus 1 MiB when larger), `/api/v1/admin/plugins/install` (16 MiB envelope), `/api/v1/users/me/avatar` and `/api/v1/dms/{id}/icon` (3 MiB envelope), `/api/v1/users/me/banner` (5 MiB envelope), and `/admin/api/discord-imports/upload` (`upload.import_max_mb`, 500 MiB by default).
 9. **Coraza WAF** (optional) -- OWASP Core Rule Set request filtering, mounted only when `server.waf_enabled: true` (see `docs/server-configuration.md`).
 
-Note: chi's `middleware.RealIP` is deliberately **not** used -- client IPs are resolved from `X-Forwarded-For` only when the peer is listed in `server.trusted_proxies`.
+Note: chi's `middleware.RealIP` is deliberately **not** used -- forwarding headers are read only when the peer is listed in `server.trusted_proxies`. From such a peer the client IP is the rightmost `X-Forwarded-For` entry that is not itself a trusted proxy; only when `X-Forwarded-For` is absent or holds no valid address is a valid `X-Real-IP` used; otherwise the peer address. A trusted proxy must therefore set `X-Forwarded-For`, or set or strip `X-Real-IP`, so a client-supplied `X-Real-IP` never reaches the server.
 
 ---
 
@@ -342,7 +342,7 @@ renamed once shipped, because clients compare it. The common ones:
 | `NOT_FOUND`                      | 404         | Resource (channel, message, user, invite, file, backup) not found                                                                                                                                                                                                                                                                                                                                                                                                          |
 | `RATE_LIMITED`                   | 429         | Too many requests; `Retry-After` header gives the seconds left until a retry is allowed                                                                                                                                                                                                                                                                                                                                                                                    |
 | `AUTH_BUSY`                      | 429         | The bounded queue for password checks is full, or the request gave up waiting in it; nothing was checked or counted. Login, register and verify-totp set `Retry-After`                                                                                                                                                                                                                                                                                                     |
-| `LOGIN_SESSION_REQUIRED`         | 403         | An account-security route (password, two-factor, recovery codes or kit, sessions, account deletion, publishing a device key) was called with an API token; sign in and use the login session                                                                                                                                                                                                                                                                               |
+| `LOGIN_SESSION_REQUIRED`         | 403         | An account-security route (password, two-factor, recovery codes or kit, sessions, account deletion, publishing a device key, changing the sign-in name) was called with an API token; sign in and use the login session                                                                                                                                                                                                                                                    |
 | `INVALID_INPUT` / `BAD_REQUEST`  | 400         | Missing required fields, invalid query params, a non-positive or non-numeric id in a path (emoji and sticker image routes answer 404 instead), or a file over the upload size limit. A JSON body that does not decode (an empty one included where the body is required) is always `400 INVALID_INPUT` "malformed request body" on the `/api/v1` routes and `400 BAD_REQUEST` "malformed request body" under `/admin/api` and `/api/v1/moderation/members` and `/channels` |
 | `PAYLOAD_TOO_LARGE`              | 413         | A JSON body past its route's size cap (every route that reads JSON, `/admin/api` included), or an upload body padded past its cap, the plugin-install upload included                                                                                                                                                                                                                                                                                                      |
 | `UNSUPPORTED_MEDIA_TYPE`         | 415         | A plugin upload whose file part is labelled as something other than a `.zip`                                                                                                                                                                                                                                                                                                                                                                                               |
@@ -913,7 +913,7 @@ Update the authenticated user's profile. Broadcasts a `user_update` WebSocket
 message to all clients on success, carrying the full profile snapshot (the
 event replaces the client's copy rather than patching it).
 
-**Auth:** Required; a request carrying `identity_public_key` takes a login session (an API token gets `403 LOGIN_SESSION_REQUIRED` and nothing is applied)
+**Auth:** Required; a request carrying `identity_public_key`, or a `username` other than the current one, takes a login session (an API token gets `403 LOGIN_SESSION_REQUIRED` and nothing is applied)
 **Rate limit:** 10 requests/minute
 
 #### Request
@@ -2278,8 +2278,9 @@ owner transfer.
 
 ### DELETE /api/v1/dms/{channelId}
 
-Remove a DM from the caller's sidebar. What that means depends on the kind of DM,
-and the route is shared because the _gesture_ is shared:
+Remove a DM from the caller's sidebar (at most 20 per account per minute,
+`429 RATE_LIMITED`). What that means depends on the kind of DM, and the route
+is shared because the _gesture_ is shared:
 
 - **1:1 DM** — a hide. The channel and messages remain, the caller remains a
   participant, and a new message from either side re-opens it.
@@ -2653,7 +2654,8 @@ next read, with no client-side cache to invalidate.
 ### PUT /api/v1/channels/{id}/nsfw-acknowledgement
 
 Record the caller's own consent to the channel's labelled content.
-Idempotent. Sends the caller's other live sockets an `nsfw_ack` frame
+Idempotent. Acknowledge and revoke share a budget of 20 calls per account per
+minute (`429 RATE_LIMITED`). Sends the caller's other live sockets an `nsfw_ack` frame
 (`docs/protocol.md`) with `"acknowledged": true`.
 
 **Auth:** Required
@@ -2693,7 +2695,8 @@ with `"acknowledged": false`.
 ## User Blocks
 
 Blocking a user prevents DM creation and messaging in both directions
-(backed by the `user_blocks` table).
+(backed by the `user_blocks` table). Block and unblock share a budget of 20
+calls per account per minute (`429 RATE_LIMITED`).
 
 ### GET /api/v1/blocks
 
@@ -3706,11 +3709,12 @@ and unsequenced.
 
 #### Errors
 
-| Status | Code          | Cause                                                           |
-| ------ | ------------- | --------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | invalid id, self-target, or reason too long/unsafe              |
-| 403    | `FORBIDDEN`   | caller lacks `MODERATE_MEMBERS`, or does not outrank the target |
-| 404    | `NOT_FOUND`   | no such user                                                    |
+| Status | Code           | Cause                                                           |
+| ------ | -------------- | --------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`  | invalid id, self-target, or reason too long/unsafe              |
+| 403    | `FORBIDDEN`    | caller lacks `MODERATE_MEMBERS`, or does not outrank the target |
+| 404    | `NOT_FOUND`    | no such user                                                    |
+| 429    | `RATE_LIMITED` | more than 10 warnings by this moderator in a minute             |
 
 ---
 
@@ -3754,7 +3758,8 @@ reconnect needed.
 #### Errors
 
 Same shape as `warn` above, plus `400 BAD_REQUEST` for a duration outside
-60..2419200.
+60..2419200. Timeouts have their own budget of 10 per moderator per minute
+(`429 RATE_LIMITED`).
 
 ---
 
@@ -5296,8 +5301,11 @@ still replaces every role the member holds with that one.
 
 The checks are those of `PATCH` with `role_id`: `MANAGE_ROLES`, the actor must
 outrank the target's top role, and the role must sit below the actor's own top
-role. Both calls are idempotent (adding a held role or removing one that is not
-held changes nothing and writes no audit row). Each real change writes a
+role. Adding a role (and `PATCH` with `role_id`) also follows the role grant
+rule: every permission bit the role adds over what the target holds now must be
+in the actor's own roles, unless the actor holds `ADMINISTRATOR`. Removing a
+role is not limited by it. Both calls are idempotent (adding a held role or
+removing one that is not held changes nothing and writes no audit row). Each real change writes a
 `role_add` or `role_remove` audit row, drops the target's cached permissions and
 sends one `member_update` (with `role_ids`) plus a visibility refresh to the
 target's live connection. The same routes exist under
@@ -5309,12 +5317,12 @@ target's live connection. The same routes exist under
 
 #### Errors
 
-| Status | Code          | Cause                                                                                                                      |
-| ------ | ------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| 400    | `BAD_REQUEST` | Invalid id, unknown role, or the target is the caller                                                                      |
-| 403    | `FORBIDDEN`   | Missing `MANAGE_ROLES`, the actor does not outrank the target, or the role is at or above theirs                           |
-| 404    | `NOT_FOUND`   | User not found                                                                                                             |
-| 409    | `LAST_ROLE`   | `DELETE` only: the role is the member's only one. Two concurrent removals of a member's last two roles cannot both succeed |
+| Status | Code          | Cause                                                                                                                                    |
+| ------ | ------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| 400    | `BAD_REQUEST` | Invalid id, unknown role, or the target is the caller                                                                                    |
+| 403    | `FORBIDDEN`   | Missing `MANAGE_ROLES`, the actor does not outrank the target, the role is at or above theirs, or (add) it carries a bit the actor lacks |
+| 404    | `NOT_FOUND`   | User not found                                                                                                                           |
+| 409    | `LAST_ROLE`   | `DELETE` only: the role is the member's only one. Two concurrent removals of a member's last two roles cannot both succeed               |
 
 ---
 
@@ -6684,7 +6692,9 @@ A write runs the channel override guards over everything it touches: the
 escalation guard covers the bits written, the bits already on the category row
 and the bits already on every synced channel row it overwrites (a role cannot
 set or clear a bit its own role lacks), and the hierarchy rules apply to a role
-or member target. Any refusal is `403` and nothing is written; the category row
+or member target. The caller must also be able to read every synced channel
+the write reaches, and the channel a sync rewrites (the owner and
+`ADMINISTRATOR` excepted). Any refusal is `403` and nothing is written; the category row
 and the channel rows are written in one transaction, and the channel set is read
 inside it. A sync, or a `PATCH` with `sync_permissions: true`, is guarded the
 same way over the union of the rows it removes and the rows it writes, and
@@ -6785,7 +6795,10 @@ Write one override row. Same body for both layers:
 | `deny`  | integer | Bits refused in this channel |
 
 Bits outside `permissions.AllPerms` are masked off rather than rejected, so an
-unknown bit can never be persisted. A row with both masks `0` is meaningless —
+unknown bit can never be persisted. Saving or clearing a row also needs the
+caller's own `READ_MESSAGES` in that channel (the owner and `ADMINISTRATOR`
+excepted); the same holds for a category template write, for every synced
+channel it reaches, and for a sync. A row with both masks `0` is meaningless —
 the admin panel sends `DELETE` for that case instead.
 
 #### Response 200 OK
@@ -6808,12 +6821,12 @@ the role layer, `{user_id, username, role_id, allow, deny}` for the user layer.
 
 #### Errors
 
-| Status | Code            | When                          |
-| ------ | --------------- | ----------------------------- |
-| 400    | `BAD_REQUEST`   | Unparseable id or body        |
-| 400    | `INVALID_INPUT` | The channel is a DM           |
-| 403    | `FORBIDDEN`     | Missing `MANAGE_CHANNELS`     |
-| 404    | `NOT_FOUND`     | Unknown channel, role or user |
+| Status | Code            | When                                                             |
+| ------ | --------------- | ---------------------------------------------------------------- |
+| 400    | `BAD_REQUEST`   | Unparseable id or body                                           |
+| 400    | `INVALID_INPUT` | The channel is a DM                                              |
+| 403    | `FORBIDDEN`     | Missing `MANAGE_CHANNELS`, or the caller cannot read the channel |
+| 404    | `NOT_FOUND`     | Unknown channel, role or user                                    |
 
 ### DELETE /admin/api/channels/{id}/permissions/{roleId}
 

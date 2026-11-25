@@ -24,7 +24,7 @@ import { startSessionNotice } from "@lib/net/sessionNotice";
 import { uiStore } from "@stores/ui.store";
 import { onPrefChange } from "@lib/prefs/preferences";
 import { startAutoIdle } from "@lib/presence/autoIdle";
-import { startStatusTimerWatcher } from "@lib/presence/statusTimer";
+import { startStatusTimerWatcher } from "../../features/presence/statusTimer";
 import { getActiveChannel } from "@stores/channels.store";
 import { setChatHeaderCallChat } from "./ChatHeader";
 import { createCallChat } from "../../features/voice/callChat";
@@ -397,6 +397,7 @@ export function mountDeck(st: PageState, ms: MountScope): void {
     onSearch: () => ms.chatAreaResult.searchCtrl.open(),
     revealSidebar: () => st.sidebarDrawer?.open(),
     serverTabs: ms.switcher,
+    memberToggle: ms.chatAreaResult.chatHeaderRefs.memberListBtn,
   });
   if (teardown !== null) st.unsubscribers.push(teardown);
 }

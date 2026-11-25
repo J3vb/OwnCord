@@ -44,6 +44,12 @@ DELETE FROM push_subscriptions WHERE id = ? AND user_id = ?;
 -- statements rather than one.
 SELECT id FROM push_subscriptions WHERE user_id = ? ORDER BY last_seen_at DESC, id DESC;
 
+-- name: DeleteUserPushSubscriptions :execrows
+-- Every subscription of one account, inside the ban transaction
+-- (DB.BanUserWithAction): a banned account gets no wake-ups. The app
+-- registers again on its next ready after an unban.
+DELETE FROM push_subscriptions WHERE user_id = ?;
+
 -- name: SweepPushSubscriptions :execrows
 -- The staleness sweep (decision 5) and the rotation sweep (decision 2) in
 -- one statement: a row older than cutoff goes, and so does a row whose key

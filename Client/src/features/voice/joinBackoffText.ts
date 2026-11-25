@@ -1,5 +1,5 @@
 import { voiceText } from "../../i18n/voice";
-import { joinBackoffFromSwitch, joinRetryInMs } from "./joinBackoff";
+import { joinBackoffFromSwitch, joinRetryInMs } from "@lib/voice/joinBackoff";
 
 // Kept apart from joinBackoff so voice.store (startup closure) can reset the
 // backoff without pulling the voice catalog into the startup bundle.

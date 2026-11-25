@@ -16,7 +16,7 @@ import { resetUiState } from "../helpers/dmHarness";
 // clearAuth (used below to test the real logoutWasInVoice ordering fix)
 // lazily imports livekitSession when a voice session is active — mock it so
 // that stays a fire-and-forget call instead of pulling in the real SDK.
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 function resetStores(): void {
   resetVoiceState();

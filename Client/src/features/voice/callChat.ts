@@ -13,7 +13,7 @@ import { channelsStore } from "@stores/channels.store";
 import { voiceStore } from "@stores/voice.store";
 import { Disposable } from "@lib/disposable";
 import { loadPref, savePref } from "@lib/prefs/preferences";
-import { navigateToChannel } from "@lib/nav/channelNavigation";
+import { navigateToChannel } from "../navigation/channelNavigation";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { VideoModeController } from "./VideoModeController";
 

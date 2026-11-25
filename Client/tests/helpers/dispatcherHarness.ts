@@ -1,5 +1,5 @@
 import { vi, expect, beforeEach, afterEach } from "vitest";
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { wireDispatcher } from "../../src/app/dispatcher";
 import { authStore, type AuthState } from "../../src/stores/auth.store";
 import { voiceStore, type VoiceState } from "../../src/stores/voice.store";
 import { dmStore } from "../../src/stores/dm.store";

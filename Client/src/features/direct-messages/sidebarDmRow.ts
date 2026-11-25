@@ -3,7 +3,7 @@
  * redrawn (its signature) and what its context menu acts on.
  */
 import { createElement, appendChildren } from "@lib/dom";
-import { formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
+import { formatBadgeCount, formatDmRowTime } from "../messaging/formatting";
 import type { RowModel } from "@lib/net/reconcile";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
@@ -11,6 +11,7 @@ import { voiceStore } from "@stores/voice.store";
 import { CHANNEL_MUTE_CHANGED, getChannelMute, isChannelMuted } from "@lib/prefs/channelMutes";
 import { voiceText } from "../../i18n/voice";
 import { dmConversationOf, dmPreviewText, isDmInCall } from "./SidebarDmHelpers";
+import { watchBlockedPreviews } from "./blockedPreviewText";
 import type { DmConversation } from "./dmConversation";
 import { buildAvatar } from "./dmAvatars";
 import { buildMemberCount } from "./dmRow";
@@ -358,9 +359,9 @@ export function createLeavePrompt(signal: AbortSignal): {
 
 /**
  * Redraw a DM list when what it shows changes outside its own events: a mute
- * toggled anywhere (not in a store), a DM's call starting or ending, and the DM
- * list itself. The window listener dies with `signal`; the store listeners go
- * on `unsubs`.
+ * toggled anywhere (not in a store), a DM's call starting or ending, a preview
+ * flipping to or from the blocked-message label, and the DM list itself. The
+ * window listener dies with `signal`; the store listeners go on `unsubs`.
  */
 export function watchDmListInputs(
   signal: AbortSignal,
@@ -385,4 +386,5 @@ export function watchDmListInputs(
       () => redraw(),
     ),
   );
+  unsubs.push(watchBlockedPreviews(redraw));
 }

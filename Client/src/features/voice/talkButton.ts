@@ -62,7 +62,7 @@ function writeGate(gated: boolean, delay: number, stillWanted: () => boolean): v
   const at = ++edge;
   // In a call the session module is already loaded, so this resolves from the
   // module cache; importing it lazily keeps the voice SDK out of this module.
-  void import("../../lib/voice/livekitSession")
+  void import("./livekitSession")
     .then(({ setPttGated }) => {
       const state = voiceStore.getState();
       if (

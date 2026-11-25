@@ -35,7 +35,7 @@ vi.mock("../../platform/desktop", () => ({
     },
   },
 }));
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../voice/livekitSession", () =>
   voiceSession.withOverrides({ leaveVoice: host.leaveVoice, setMuted: host.setMuted }),
 );
 

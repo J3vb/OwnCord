@@ -9,7 +9,7 @@ import { stubTwemoji } from "../helpers/twemojiStub";
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 // The emoji image is behind the session token, so buildCustomEmojiImage goes
 // through the same authenticated fetch attachments use. Stub just that call —

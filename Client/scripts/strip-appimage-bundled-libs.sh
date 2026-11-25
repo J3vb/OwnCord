@@ -20,10 +20,34 @@ APPIMAGE_PATH="$(readlink -f "$APPIMAGE_PATH")"
 WORKDIR="$(mktemp -d)"
 trap 'rm -rf "$WORKDIR"' EXIT
 
+# The packer and the runtime it puts at the head of the image are fixed
+# releases, checked against the digests below before either is used. To move
+# to a newer release, change the tag and both digests for each arch together.
+APPIMAGETOOL_TAG="1.9.1"
+RUNTIME_TAG="20251108"
 ARCH="$(uname -m)"
+case "$ARCH" in
+  x86_64)
+    APPIMAGETOOL_SHA256="ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0"
+    RUNTIME_SHA256="2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d"
+    ;;
+  aarch64)
+    APPIMAGETOOL_SHA256="f0837e7448a0c1e4e650a93bb3e85802546e60654ef287576f46c71c126a9158"
+    RUNTIME_SHA256="00cbdfcf917cc6c0ff6d3347d59e0ca1f7f45a6df1a428a0d6d8a78664d87444"
+    ;;
+  *)
+    echo "unsupported architecture: $ARCH" >&2
+    exit 1
+    ;;
+esac
 APPIMAGETOOL="$WORKDIR/appimagetool"
+RUNTIME="$WORKDIR/runtime"
 curl -fsSL -o "$APPIMAGETOOL" \
-  "https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-${ARCH}.AppImage"
+  "https://github.com/AppImage/appimagetool/releases/download/${APPIMAGETOOL_TAG}/appimagetool-${ARCH}.AppImage"
+echo "$APPIMAGETOOL_SHA256  $APPIMAGETOOL" | sha256sum -c -
+curl -fsSL -o "$RUNTIME" \
+  "https://github.com/AppImage/type2-runtime/releases/download/${RUNTIME_TAG}/runtime-${ARCH}"
+echo "$RUNTIME_SHA256  $RUNTIME" | sha256sum -c -
 chmod +x "$APPIMAGETOOL"
 
 cd "$WORKDIR"
@@ -63,7 +87,9 @@ chmod -R a+rX squashfs-root
 # --appimage-extract-and-run: run without FUSE (CI containers/runners).
 # ARCH is required when repacking on a host arch that differs from the
 # payload naming; here it always matches the runner.
+# --runtime-file: pack with the checked runtime above; without it the packer
+# fetches one itself at pack time.
 ARCH="$ARCH" "$APPIMAGETOOL" --appimage-extract-and-run --no-appstream \
-  squashfs-root "$WORKDIR/repacked.AppImage"
+  --runtime-file "$RUNTIME" squashfs-root "$WORKDIR/repacked.AppImage"
 mv "$WORKDIR/repacked.AppImage" "$APPIMAGE_PATH"
 echo "stripped $removed bundled host-matched libs from $(basename "$APPIMAGE_PATH")"

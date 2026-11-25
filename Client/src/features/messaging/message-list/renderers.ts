@@ -16,7 +16,7 @@ export {
   shouldGroup,
   getUserRole,
   roleColorVar,
-} from "@lib/text/formatting";
+} from "../formatting";
 
 export {
   renderInlineContent,
@@ -32,10 +32,10 @@ import { applyDeleteGate, renderActionsBar } from "./messageActionBar";
 import { type Message } from "@stores/messages.store";
 import { messagingText } from "../../../i18n/messaging";
 import { uiStore } from "@stores/ui.store";
-import { formatFullDate } from "@lib/text/formatting";
-import { resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
+import { formatFullDate } from "../formatting";
+import { resolveAuthor, userRoleColorVar } from "../formatting";
 import { importedAuthorKey } from "../importedAuthor";
-import { highlightsCurrentUser } from "@lib/text/mentions";
+import { highlightsCurrentUser } from "../mentions";
 import { renderReplyRef } from "./renderReplyRef";
 import { renderKindRow } from "./renderRowKinds";
 import {

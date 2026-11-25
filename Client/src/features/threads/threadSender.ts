@@ -16,7 +16,7 @@ import {
   savePendingText,
   supportsMessageDeduplication,
   type PendingMessageOwner,
-} from "@lib/pendingMessages";
+} from "../messaging/pendingMessages";
 import type { Disposable } from "@lib/disposable";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import type { WsClient } from "@lib/ws";

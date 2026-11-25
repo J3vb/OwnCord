@@ -58,7 +58,7 @@ vi.mock("@stores/ui.store", () => ({
   uiStore: { getState: mockUiGetState },
 }));
 
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     leaveVoice: mockVoiceSessionLeave,
     setMuted: mockSetMuted,
@@ -79,7 +79,7 @@ import {
   createSidebarVoiceCallbacks,
 } from "../../src/pages/main-page/VoiceCallbacks";
 import type { WsClient } from "../../src/lib/ws";
-import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
+import { noteJoinFailed, noteJoinSucceeded } from "../../src/lib/voice/joinBackoff";
 import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
 import {
   clearOwedLeave,

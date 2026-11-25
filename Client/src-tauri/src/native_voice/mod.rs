@@ -299,6 +299,10 @@ pub async fn native_voice_connect<R: Runtime>(
     token: String,
     audio: AudioOptions,
 ) -> Result<Connected, String> {
+    // Only an address on this machine (the client's own tunnel, or a local
+    // server's loopback LiveKit) is dialed. Checked before anything else, so a
+    // refused address leaves a live session as it was.
+    owncord_parse::voice::validate_voice_url(&url).map_err(|e| e.to_string())?;
     // A publish of the old session may hold the lock on the SFU: end it.
     state.quick.begin_close(None);
     let (id, key, superseded, test) = {

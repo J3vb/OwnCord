@@ -12,7 +12,7 @@ import { createMessageList } from "../../src/features/messaging/MessageList";
 import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
 import { pinRowTarget } from "../../src/features/messaging/message-list/pinRows";
-import { shouldGroup } from "@lib/text/formatting";
+import { shouldGroup } from "../../src/features/messaging/formatting";
 import { isPinRowKind, isServerRowKind } from "@lib/text/messageKind";
 import {
   bulkDeleteMessages,

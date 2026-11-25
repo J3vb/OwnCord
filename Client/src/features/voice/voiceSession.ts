@@ -1,6 +1,6 @@
-// The LiveKit session class behind lib/voice/livekitSession.ts: one instance
+// The LiveKit session class behind features/voice/livekitSession.ts: one instance
 // owns the voice connection lifecycle and wires the join, room lifecycle and
-// media modules together. lib/voice/livekitSession.ts creates the singleton
+// media modules together. features/voice/livekitSession.ts creates the singleton
 // and exports its bound methods.
 //
 // The class is the top of a chain of layers, one concern each, so no file
@@ -23,12 +23,12 @@ import {
 import { createLogger } from "@lib/logger";
 import { voiceSpeakingEnabled } from "@lib/net/serverCapabilities";
 import { AudioPipeline } from "@lib/voice/audioPipeline";
-import { AudioElements } from "@lib/voice/audioElements";
-import { E2EEManager } from "@lib/voice/livekitE2EE";
-import { DeviceManager } from "@lib/voice/deviceManager";
+import { AudioElements } from "./audioElements";
+import { E2EEManager } from "./livekitE2EE";
+import { DeviceManager } from "./deviceManager";
 import { type CameraTrackState, type ScreenTrackState } from "./screenShare";
-import { buildSessionDebugInfo } from "@lib/voice/livekitDiagnostics";
-import type { RoomEventHandlers } from "@lib/voice/roomEventHandlers";
+import { buildSessionDebugInfo } from "./livekitDiagnostics";
+import type { RoomEventHandlers } from "./roomEventHandlers";
 import { getShareMotionPolicy } from "@lib/voice/shareFlags";
 import { JoinOrchestration } from "./joinOrchestration";
 import { RoomLifecycle } from "./roomLifecycle";
@@ -36,7 +36,7 @@ import { MediaControl } from "./mediaControl";
 import { restoreLocalVoiceState } from "./localVoiceRestore";
 import { dismissMediaLostNotice } from "./mediaLostNotice";
 import { noteVoiceLeave } from "./leaveOwed";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { nativeCounters } from "./native/counters";
 import { speechDetectionOf } from "./sileroDetection";
 import { createRingAnnouncer } from "./ringAnnouncer";

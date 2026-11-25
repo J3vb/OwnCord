@@ -9,11 +9,11 @@ import {
   httpError,
   signInErrorText,
 } from "../../src/lib/api";
-import { parseRelayedLogin } from "../../src/lib/net/credentials";
+import { parseRelayedLogin } from "../../src/features/connection/credentials";
 import { connectText } from "../../src/i18n/connect";
 
-vi.mock("../../src/lib/net/credentials", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/lib/net/credentials")>()),
+vi.mock("../../src/features/connection/credentials", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/connection/credentials")>()),
   ...mocks.netCredentialsMock(),
 }));
 vi.mock("../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());

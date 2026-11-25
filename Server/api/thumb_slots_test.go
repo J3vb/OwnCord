@@ -57,6 +57,41 @@ func TestThumbSlots_HEICWeightIsCappedAtTheSlotCount(t *testing.T) {
 	}
 }
 
+// While a HEIC conversion runs, an ordinary thumbnail still gets a slot on any
+// machine with two or more, and a second conversion waits only the slot wait.
+func TestThumbSlots_HeavyConversionLeavesASlotAndRunsAlone(t *testing.T) {
+	t.Parallel()
+	for _, n := range []int{2, 3, 4} {
+		slots := makeThumbSlots(n, 30*time.Millisecond)
+		heavy, ok := slots.acquireHeavy(context.Background(), heicSlotWeight)
+		if !ok {
+			t.Fatalf("%d slots: the conversion did not start", n)
+		}
+		thumb, ok := slots.acquire(context.Background(), 1)
+		if !ok {
+			t.Fatalf("%d slots: no slot left for a thumbnail while a conversion runs", n)
+		}
+		start := time.Now()
+		if _, ok := slots.acquireHeavy(context.Background(), heicSlotWeight); ok {
+			t.Fatalf("%d slots: a second conversion started beside the first", n)
+		}
+		if waited := time.Since(start); waited > 2*time.Second {
+			t.Errorf("%d slots: the second conversion waited %v, want about the 30 ms slot wait", n, waited)
+		}
+		thumb()
+		heavy()
+		if _, ok := slots.acquire(context.Background(), int64(n)); !ok {
+			t.Errorf("%d slots: not all free after release", n)
+		}
+	}
+	one := makeThumbSlots(1, 30*time.Millisecond)
+	release, ok := one.acquireHeavy(context.Background(), heicSlotWeight)
+	if !ok {
+		t.Fatal("a conversion never starts on a one-slot machine")
+	}
+	release()
+}
+
 // A request that ends while it waits stops waiting.
 func TestThumbSlots_WaitEndsWithTheRequest(t *testing.T) {
 	t.Parallel()

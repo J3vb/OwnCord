@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 const state = vi.hoisted(() => ({ fail: true, loads: 0 }));
 
-vi.mock("@lib/dispatcher", () => {
+vi.mock("../../src/app/dispatcher", () => {
   state.loads += 1;
   if (state.fail) throw new Error("chunk fetch failed");
   return { wireDispatcher: vi.fn(), wireConnectionStatus: vi.fn() };

@@ -14,11 +14,7 @@
 import { categoryGroups, groupLabel } from "../../stores/channels.store";
 import type { Channel, ChannelsState } from "../../stores/channels.store";
 import { mutedRowHidden } from "../../lib/prefs/hideMutedChannels";
-import {
-  hasPermission,
-  memberHasPermissionIn,
-  permissionsForMemberIn,
-} from "../../lib/permissions";
+import { hasPermission, memberHasPermissionIn, permissionsForMemberIn } from "@stores/permissions";
 import { Permission } from "../../lib/types";
 import type { FollowedThreadRow } from "../../stores/followedThreads.store";
 import type {

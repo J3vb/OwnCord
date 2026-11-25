@@ -4,13 +4,25 @@ The full detail behind [Contributing](contributing.md): every command, the
 git hooks, how CI picks its jobs, the test tiers and the dependency rules.
 Most changes never need this page.
 
+## Generated code
+
+Never hand-edit these. CI fails on drift, and the next run of the generator
+discards your edit. `npm run generate` from the root runs all four generators.
+
+| Generated                                                                                         | Source of truth                                                      | How to regenerate                                     |
+| ------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------- | ----------------------------------------------------- |
+| `Server/db/dbgen/`                                                                                | `Server/db/queries/sqlite/*.sql`, `Server/migrations/`               | `cd Server && make sqlc-generate`                     |
+| `Server/ws/message_types.go`, `Server/httperr/codes.go` **and** `Client/src/lib/protocolTypes.ts` | `protocol/schema.json`                                               | `cd Server && make protocol-generate`                 |
+| `Client/src/lib/net/wireShapes.ts`, `Client/src/lib/net/restShapes.ts`                            | `Client/src/lib/wire*.ts` payload types, `lib/net/restReplies.ts`    | `cd Client && npm run gen:wire`                       |
+| `gendocs:*` blocks in `docs/api.md`, `docs/schema.md`, `docs/server-configuration.md`             | `Server/api/route_groups.go`, `Server/migrations/`, `Server/config/` | `cd Server && go run -tags otel,wazero ./cmd/gendocs` |
+
 ## Commands
 
 ### Root commands (one entry point)
 
 Run these from the repository root. They call the per-stack commands listed
 further down. They are a convenience, not a replacement. None of them needs
-`make`, and they work the same on Windows, macOS and Linux.
+`make`, and they work the same on Windows and Linux. macOS is not a supported target.
 
 | Command                       | What it does                                                                                                    |
 | ----------------------------- | --------------------------------------------------------------------------------------------------------------- |
@@ -48,6 +60,7 @@ Run these from `Server/`.
 | `go build -tags otel .`                                   | Build with the OpenTelemetry SDK        |
 | `go build -tags wazero .`                                 | Build with the Wazero plugin runtime    |
 | `go test ./...`                                           | Run all server tests                    |
+| `go test ./api/ -run TestName`                            | Run one package, or one test by name    |
 | `go test ./... -cover`                                    | Run server tests with coverage          |
 | `go test -race ./...`                                     | Run server tests with the race detector |
 
@@ -140,28 +153,38 @@ whose Tauri build step leaves them out.
 
 **Tests**
 
-| Command                         | What it does                                              |
-| ------------------------------- | --------------------------------------------------------- |
-| `npm test`                      | Run all vitest tests (unit, integration and contract)     |
-| `npm run test:unit`             | Unit tests only                                           |
-| `npm run test:integration`      | Integration tests only                                    |
-| `npm run test:contract`         | Cross-component contract tests only                       |
-| `npm run test:coverage`         | All vitest tests with a coverage report                   |
-| `npm run test:watch`            | Vitest watch mode                                         |
-| `npm run test:browser`          | Vitest browser-mode tests                                 |
-| `npm run test:e2e`              | Playwright E2E, full suite (mocked Tauri)                 |
-| `npm run test:e2e:smoke`        | Playwright smoke subset (mocked Tauri)                    |
-| `npm run test:e2e:prod`         | Playwright E2E against a production build                 |
-| `npm run test:e2e:ui`           | Playwright UI mode                                        |
-| `npm run test:e2e:admin`        | Playwright E2E against a real Go server and the admin SPA |
-| `npm run test:e2e:fullstack`    | Playwright E2E against a real server and real media       |
-| `npm run test:e2e:soak`         | Long-session soak against a real server (about an hour)   |
-| `npm run test:e2e:native`       | Playwright E2E against the real Tauri exe over CDP        |
-| `npm run test:e2e:native-voice` | Linux native-voice interop against a local LiveKit server |
-| `npm run test:e2e:artifact`     | Installed release artifact smoke (CI only)                |
-| `npm run test:e2e:build-server` | Build the Go server the real-server suites use            |
-| `npm run test:mutate`           | Stryker mutation testing                                  |
-| `npm run test:mutate:dry`       | Stryker dry run (no mutations applied)                    |
+`npm test` takes about 3 minutes and `npm run check:client` about 6 to 7 on a
+typical cloud Linux machine. `make test` in `Server/` takes about 16 to 17.
+`npm test` prints many jsdom `Not implemented` lines for media. They are
+expected.
+
+The browser suites (`test:browser` and every `test:e2e*`) need Chromium. Run
+`npx playwright install chromium` in `Client/` once first. CI uses
+`scripts/ci/playwright-install.sh`.
+
+| Command                         | What it does                                                 |
+| ------------------------------- | ------------------------------------------------------------ |
+| `npm test`                      | Run all vitest tests (unit, integration and contract)        |
+| `npx vitest run <file>`         | Run one test file, e.g. `tests/unit/settings-search.test.ts` |
+| `npm run test:unit`             | Unit tests only                                              |
+| `npm run test:integration`      | Integration tests only                                       |
+| `npm run test:contract`         | Cross-component contract tests only                          |
+| `npm run test:coverage`         | All vitest tests with a coverage report                      |
+| `npm run test:watch`            | Vitest watch mode                                            |
+| `npm run test:browser`          | Vitest browser-mode tests                                    |
+| `npm run test:e2e`              | Playwright E2E, full suite (mocked Tauri)                    |
+| `npm run test:e2e:smoke`        | Playwright smoke subset (mocked Tauri)                       |
+| `npm run test:e2e:prod`         | Playwright E2E against a production build                    |
+| `npm run test:e2e:ui`           | Playwright UI mode                                           |
+| `npm run test:e2e:admin`        | Playwright E2E against a real Go server and the admin SPA    |
+| `npm run test:e2e:fullstack`    | Playwright E2E against a real server and real media          |
+| `npm run test:e2e:soak`         | Long-session soak against a real server (about an hour)      |
+| `npm run test:e2e:native`       | Playwright E2E against the real Tauri exe over CDP           |
+| `npm run test:e2e:native-voice` | Linux native-voice interop against a local LiveKit server    |
+| `npm run test:e2e:artifact`     | Installed release artifact smoke (CI only)                   |
+| `npm run test:e2e:build-server` | Build the Go server the real-server suites use               |
+| `npm run test:mutate`           | Stryker mutation testing                                     |
+| `npm run test:mutate:dry`       | Stryker dry run (no mutations applied)                       |
 
 **Mutation testing in CI.**
 
@@ -295,10 +318,17 @@ push.
   node scripts/ci-select.mjs --paths-file "$TMPDIR/changed-paths.txt"
   ```
 
+  That diff sees only committed work. Uncommitted changes give an empty list,
+  and an empty list selects every capability. Commit first, or use
+  `git diff --name-status -M origin/dev` (no `...HEAD`) to include tracked
+  files you have changed but not committed. New untracked files are in neither
+  form until you `git add` them.
+
   The file must hold `git diff --name-status` lines. A bare list of paths reads
   as no paths, and an empty or unreadable diff or an unknown path selects
-  every capability. The selector prints one name per line; this is what each
-  name runs:
+  every capability. The selector prints one `name=true` or `name=false` line
+  per name, then a last line that starts `ci-select: N path(s) ->` and holds
+  the same answer as JSON. This is what each name runs:
 
   | Name          | CI job(s) it gates                                                                                                                                                                   | Run it locally                                                           | Covered by `npm run check`?                                      |
   | ------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------ | ---------------------------------------------------------------- |
@@ -309,6 +339,7 @@ push.
   | `integration` | Client E2E (real server and media); Admin Panel E2E (real server)                                                                                                                    | In `Client/`: `npm run test:e2e:fullstack`, `npm run test:e2e:admin`     | No                                                               |
   | `native`      | Client E2E (Windows native)                                                                                                                                                          | Windows only: `npm run test:e2e:native` in `Client/` after a Tauri build | No. No local equivalent off Windows                              |
   | `webclient`   | Client E2E (web portal, non-blocking)                                                                                                                                                | In `Client/`: `npm run test:e2e:web`                                     | No                                                               |
+  | `android`     | Android APK (a signed arm64 build of the client). Gated by `Client/src/`, `Client/src-tauri/`, `Client/public/` and the client build configs; a test-only change skips it            | See [Android](#android). Needs the Android SDK and NDK                   | No                                                               |
   | `workflows`   | Workflow Security Lint                                                                                                                                                               | `zizmor --offline .github/workflows/`                                    | No. `actionlint` runs in `check:hygiene` if installed            |
   | `deps`        | Supply-chain Scan                                                                                                                                                                    | `osv-scanner` and `cargo deny`; see `osv-scanner.toml`                   | No                                                               |
   | `permissions` | The "Permissions mutation hotspot" step of Client Static Checks                                                                                                                      | In `Client/`: `npx stryker run tests/mutation/stryker.ci.config.mjs`     | No                                                               |

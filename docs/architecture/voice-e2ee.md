@@ -15,7 +15,7 @@ The short version:
 - The Go server issues short-lived, scoped LiveKit tokens and relays the E2EE
   key-exchange messages. Media goes between the client and LiveKit; the
   server never has the media key.
-- On the client, everything goes through `src/lib/voice/livekitSession.ts`, a facade
+- On the client, everything goes through `src/features/voice/livekitSession.ts`, a facade
   over the `src/features/voice/` modules.
 - Self-hosted servers often use self-signed certificates. So the LiveKit
   connection goes through a local Rust TLS proxy, pinned to the same TOFU
@@ -132,8 +132,10 @@ quiet frame. From there a soft "hmm" clears the bar while a key, a click or a
 thump stays under it. A skipped frame starts both models over. If the worker
 cannot start, a model file does not load within six seconds, or a score is
 not a number, the worker is stopped and the gate takes RNNoise's speech
-probability instead. The Linux native gate has no speech model: its rule is
-under "Audio parity: RNNoise and the capture path".
+probability instead. The Linux native gate never runs the Silero models, with
+Enhanced Noise Suppression on or off: it always uses RNNoise's probability, as
+the web path does only with Enhanced Noise Suppression off. Its rule is under
+"Audio parity: RNNoise and the capture path".
 
 Supporting pieces:
 
@@ -144,12 +146,12 @@ Supporting pieces:
   limited to `server.livekit_webhook_allowed_cidrs`, which falls back to
   `server.admin_allowed_cidrs`), `Server/api/livekit_proxy.go` (reverse proxy
   for LiveKit signalling).
-- **Client:** `src/lib/voice/livekitSession.ts` (facade owning the state machine:
+- **Client:** `src/features/voice/livekitSession.ts` (facade owning the state machine:
   idle/connecting/connected/reconnecting), `src/features/voice/`
   (`joinOrchestration.ts` joins with a monotonic `joinGeneration` to discard
   superseded ones; `roomLifecycle.ts` Room + E2EE worker creation and
   teardown; `mediaControl.ts` mute/deafen/devices; `remoteTracks.ts`;
-  `sessionState.ts` state types), `src/lib/voice/livekitE2EE.ts` (`E2EEManager`
+  `sessionState.ts` state types), `src/features/voice/livekitE2EE.ts` (`E2EEManager`
   facade: key-holder election, join/reconnect key exchange, announce handling,
   rotation-on-leave), its `src/features/voice/e2ee*.ts` modules
   (`e2eeIdentity.ts` identity signing and the ephemeral keypair;
@@ -157,14 +159,14 @@ Supporting pieces:
   and TOFU pin verification; `e2eeWorker.ts` key provider write queue;
   `e2eeOffer.ts` room-key offers), `src/lib/net/e2eeCrypto.ts` (ECDH
   primitives, safety-number fingerprints, long-term identity keys),
-  `src/lib/net/identity.ts` (OS-keyring identity key + peer identity pins),
+  `src/features/connection/identity.ts` (OS-keyring identity key + peer identity pins),
   `src/lib/voice/audioPipeline.ts` + `src/lib/voice/noiseSuppression.ts` (RNNoise WASM),
   `src/features/voice/screenShare.ts`, `src/features/voice/videoCodec.ts` (the camera and
   screen-share codec: VP8 by default, H.264, VP9, H.265 (hardware encoder, non-Intel GPU) or Auto by choice on Windows;
   Linux native publishes VP8 or, by choice when its encoder has it, H.264; Auto is VP8), `src/features/voice/codecSwitch.ts`
   (republishes a live VP9 or H.265 camera or share on a codec every viewer decodes when
   a peer that cannot decode it joins, and back once they leave),
-  `src/lib/voice/audioElements.ts` (per-user
+  `src/features/voice/audioElements.ts` (per-user
   volume up to 200% and a local Mute per user), `src-tauri/src/livekit_proxy.rs`
   (tunnel), `src-tauri/src/ptt.rs` (push-to-talk key polling).
 
@@ -195,8 +197,8 @@ device's key. A new client verifies an announce against its
 otherwise. An older client sends no key and its announces carry none.
 
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
-`Client/src/lib/voice/livekitSession.ts`, `Client/src/features/voice/`,
-`Client/src/lib/voice/livekitE2EE.ts`, `Client/src/lib/net/e2eeCrypto.ts`,
+`Client/src/features/voice/livekitSession.ts`, `Client/src/features/voice/`,
+`Client/src/features/voice/livekitE2EE.ts`, `Client/src/lib/net/e2eeCrypto.ts`,
 `Client/src-tauri/src/livekit_proxy.rs`.
 
 ## Linux: native LiveKit in the Rust backend
@@ -238,7 +240,7 @@ the subscriber's answer too (`vendor/livekit/OWNCORD-PATCH.md`).
 
 ### Phase 1: audio
 
-**Where the switch is.** `features/voice/native/platform.ts`'s
+**Where the switch is.** `lib/hostOs.ts`'s
 `isLinuxDesktop()` is the only platform check. `RoomLifecycle.createRoom`
 returns a `NativeRoom` (`features/voice/native/nativeRoom.ts`) instead of a
 livekit-client `Room` there, and `E2EEWorker.applyRoomKey` hands the key to the
@@ -267,7 +269,7 @@ adapter maps them onto `RoomEvent`s (`Disconnected`, `ActiveSpeakersChanged`,
 `EncryptionError` for a non-`Ok` frame-cryptor state — at once for the local
 identity; the backend reports each transition once, so a remote peer's failure
 is re-raised every second until its `Ok`, as the web worker does, and the
-shared 3 s decrypt grace in `lib/voice/roomEventHandlers.ts` decides when it degrades
+shared 3 s decrypt grace in `features/voice/roomEventHandlers.ts` decides when it degrades
 the call; the grace restarts only when a room key was installed since the
 peer's last failure, which `E2EEWorker` reports on both paths — participant
 join/leave).
@@ -992,8 +994,9 @@ speech the hysteresis and hold would keep it open through them; the verdict
 closes on both. A running RNNoise never reports exactly
 0, so a silent probability input (RNNoise not started, or stopped by a
 processor error) puts the detector back on its level alone rather than
-leaving the gate shut. The native gate follows the same rule with `speech`
-on the command: its probability is the return of `nnnoiseless`'s
+leaving the gate shut. That rule is the web path's with Enhanced Noise
+Suppression off (with it on, the Silero models decide, above); the native gate
+uses it in both cases, with `speech` on the command: its probability is the return of `nnnoiseless`'s
 `process_frame`, the processor runs RNNoise for the verdict alone while
 Enhanced Noise Suppression is off, and the audio goes out undenoised. The
 capture shares the

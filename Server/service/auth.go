@@ -266,7 +266,10 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 	// consumes none. Deliberately NOT auth.ScaledLimit: scaling the only cross-IP defence by
 	// the shared-NAT multiplier would give a distributed attacker more guesses
 	// (api/constants_test.go pins this call site).
-	if !s.limiter.Allow(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow) {
+	// Reserve, not Allow: a correct password refunds its own slot below, so a sign-in never
+	// spends the address budget while failures for every username stay counted.
+	refundAddrAttempt, ok := s.limiter.Reserve(failKey, auth.ScaledLimit(loginFailureThreshold)+1, loginFailureWindow)
+	if !ok {
 		return nil, ErrLockedOut
 	}
 	// A vouched address skips the per-username reservation; the per-IP budget still bounds it.
@@ -302,7 +305,9 @@ func (s *AuthService) authenticate(ctx context.Context, in LoginInput) (*db.User
 		return nil, ErrInvalidCredentials
 	}
 
-	s.limiter.Reset(ctx, failKey)
+	// The per-address counter is not cleared: it also holds other usernames' failures from
+	// this address, which one account's correct password says nothing about.
+	refundAddrAttempt()
 	s.limiter.Reset(ctx, userFailKey)
 	s.recordLoginVouch(ctx, successKey)
 	return user, nil

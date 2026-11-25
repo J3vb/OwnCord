@@ -12,7 +12,7 @@ import type { RegistrationMode } from "@lib/types";
 import { createServerPanel } from "../features/connection/ServerPanel";
 import { createLoginForm } from "../features/connection/LoginForm";
 import { createIncompatibleNotice } from "../features/connection/IncompatibleNotice";
-import { loadCredential } from "@lib/net/credentials";
+import { loadCredential } from "../features/connection/credentials";
 import { desktop } from "../platform/desktop";
 import { createConnectBranding } from "../features/connection/connectBranding";
 import { preAuthSettingsOptions } from "../features/connection/preAuthSettings";

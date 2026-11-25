@@ -14,7 +14,7 @@
  */
 
 import { setOwnedTimeout } from "../../lib/dom";
-import { newClientMessageId, pendingMessageSessionFloor } from "../../lib/pendingMessages";
+import { newClientMessageId, pendingMessageSessionFloor } from "./pendingMessages";
 import type { ClientMessage, ServerMessage } from "../../lib/types";
 import type { ConnectionState, WsListener } from "../../lib/ws";
 import { claimRequest, releaseRequest } from "@lib/net/requestClaims";

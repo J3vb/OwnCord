@@ -9,7 +9,7 @@ import { createConnectPage } from "../../src/pages/ConnectPage";
 import { makeCallbacks, testProfiles } from "../helpers/connectPageHarness";
 import { useMountContainer } from "../helpers/mountContainer";
 
-vi.mock("../../src/lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../src/features/connection/credentials", () => mocks.netCredentialsMock());
 vi.mock("../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 
 describe("LoginForm TOTP re-entrancy guard", () => {

@@ -22,7 +22,7 @@ export const shards = {
     "src/features/voice/cameraSwitch.ts",
     "src/features/voice/e2eeWorker.ts",
     "src/features/voice/videoGrid/gridCards.ts",
-    "src/lib/voice/livekitReconnect.ts",
+    "src/features/voice/livekitReconnect.ts",
     "src/lib/voice/videoSurface.ts",
   ],
   "livekit-4": [
@@ -48,7 +48,7 @@ export const shards = {
     "src/features/voice/native/nativeRoom.ts",
     "src/features/voice/securedBadge.ts",
     "src/features/voice/videoGrid/gridConstants.ts",
-    "src/lib/voice/livekitSession.ts",
+    "src/features/voice/livekitSession.ts",
   ],
   "livekit-7": [
     "src/features/voice/MusicPicker.ts",
@@ -151,7 +151,7 @@ export const shards = {
     "src/features/voice/connectionSounds.ts",
     "src/features/voice/e2eeSetup.ts",
     "src/lib/voice/appAudioTrack.ts",
-    "src/lib/voice/livekitE2EE.ts",
+    "src/features/voice/livekitE2EE.ts",
     "src/lib/voice/watchRequest.ts",
   ],
   "livekit-20": [
@@ -165,7 +165,7 @@ export const shards = {
   ],
   "livekit-21": [
     "src/features/voice/decodeCaps.ts",
-    "src/features/voice/joinBackoff.ts",
+    "src/lib/voice/joinBackoff.ts",
     "src/features/voice/mediaLostNotice.ts",
     "src/features/voice/releaseRoom.ts",
     "src/features/voice/sessionReconnect.ts",
@@ -210,7 +210,7 @@ export const shards = {
     "src/features/members/scrollReport.ts",
     "src/features/voice-messages/wav.ts",
     "src/lib/ui/savedNotice.ts",
-    "src/lib/voice/audioElements.ts",
+    "src/features/voice/audioElements.ts",
   ],
   "audio-media-5": [
     "src/features/members/memberMenuGates.ts",
@@ -222,7 +222,7 @@ export const shards = {
     "src/features/members/listeningCard.ts",
     "src/features/members/memberListModel.ts",
     "src/features/voice-messages/recorderDevices.ts",
-    "src/lib/voice/deviceManager.ts",
+    "src/features/voice/deviceManager.ts",
   ],
   "audio-media-7": [
     "src/features/channels/voiceRow.view.ts",
@@ -238,6 +238,7 @@ export const shards = {
     "src/lib/media/notificationSound.ts",
     "src/lib/voice/micProcessor.ts",
     "src/lib/voice/ptt.ts",
+    "src/lib/voice/voiceSessionLoader.ts",
   ],
   "audio-media-9": [
     "src/features/members/memberRowMenu.ts",
@@ -277,7 +278,7 @@ export const shards = {
     "src/features/connection/preAuthSettings.ts",
     "src/features/direct-messages/wsHandlers.ts",
     "src/lib/apiSharedTypes.ts",
-    "src/lib/net/credentials.ts",
+    "src/features/connection/credentials.ts",
     "src/lib/net/rateLimiter.ts",
     "src/lib/net/ws/wsTimers.ts",
     "src/lib/typesRest.ts",
@@ -288,7 +289,7 @@ export const shards = {
   "transport-auth-2": [
     "src/features/channels/wsGameActivity.ts",
     "src/lib/apiAccount.ts",
-    "src/lib/net/connectionDiagnostics.ts",
+    "src/features/connection/connectionDiagnostics.ts",
     "src/lib/net/identityPins.ts",
     "src/lib/net/sessionRegistry.ts",
     "src/lib/net/trustedDomains.ts",
@@ -301,7 +302,7 @@ export const shards = {
     "src/lib/net/keyPlacement.ts",
     "src/lib/net/serverClock.ts",
     "src/lib/net/ws/wsLiveness.ts",
-    "src/lib/voice/roomEventHandlers.ts",
+    "src/features/voice/roomEventHandlers.ts",
   ],
   "transport-auth-4": [
     "src/features/channels/wsHandlers.ts",
@@ -310,7 +311,7 @@ export const shards = {
     "src/features/moderation/wsHandlers.ts",
     "src/features/push/pushSettingRow.ts",
     "src/features/safety/wsHandlers.ts",
-    "src/lib/nav/pressWarm.ts",
+    "src/features/navigation/pressWarm.ts",
   ],
   "transport-auth-5": [
     "src/features/connection/dispatchContext.ts",
@@ -320,7 +321,7 @@ export const shards = {
     "src/features/push/pushInstance.ts",
     "src/lib/net/ws/generation.ts",
     "src/lib/net/ws/wsReconnect.ts",
-    "src/lib/pendingMessages.ts",
+    "src/features/messaging/pendingMessages.ts",
   ],
   "transport-auth-6": [
     "src/lib/apiShared.ts",
@@ -339,7 +340,7 @@ export const shards = {
     "src/lib/net/certReconnect.ts",
     "src/lib/net/legacyKeyMigration.ts",
     "src/lib/net/serverCapabilities.ts",
-    "src/lib/permissions.ts",
+    "src/stores/permissions.ts",
   ],
   "transport-auth-8": [
     "src/features/connection/logout.ts",
@@ -364,7 +365,7 @@ export const shards = {
     "src/features/message-requests/sync.ts",
     "src/features/messaging/sendErrors.ts",
     "src/features/voice/callChatResize.ts",
-    "src/lib/dispatcher.ts",
+    "src/app/dispatcher.ts",
     "src/lib/net/ws/wsInbound.ts",
     "src/lib/prefs/gameActivityPrefs.ts",
     "src/lib/wsConfig.ts",
@@ -381,9 +382,9 @@ export const shards = {
   "transport-auth-12": [
     "src/features/channels/wsReadySlices.ts",
     "src/features/push/readyPush.ts",
-    "src/features/voice/native/platform.ts",
+    "src/lib/hostOs.ts",
     "src/lib/net/hostNormalize.ts",
-    "src/lib/net/identity.ts",
+    "src/features/connection/identity.ts",
     "src/lib/net/ws/authFrame.ts",
     "src/lib/voice/roomSpeakers.ts",
   ],
@@ -407,7 +408,7 @@ export const shards = {
     "src/features/messaging/forwardTargets.ts",
     "src/features/messaging/sidePanelScope.ts",
     "src/lib/presence/statusAgreement.ts",
-    "src/lib/readState.ts",
+    "src/stores/readState.ts",
   ],
   "lib-rest-6": [
     "src/features/forums/ForumView.ts",
@@ -469,7 +470,7 @@ export const shards = {
     "src/features/messaging/pollRequests.ts",
     "src/lib/constants.ts",
     "src/lib/diagnostics/identifiers.ts",
-    "src/lib/presence/statusTimer.ts",
+    "src/features/presence/statusTimer.ts",
     "src/lib/ui/inlineError.ts",
     "src/lib/ui/treeKeys.ts",
     "src/lib/ui/typeAhead.ts",
@@ -481,7 +482,7 @@ export const shards = {
     "src/features/messaging/slashCommands.ts",
     "src/features/server-rail/serverTabMenus.ts",
     "src/lib/prefs/appearance.ts",
-    "src/lib/presence/presence.ts",
+    "src/features/presence/presence.ts",
   ],
   "lib-rest-15": [
     "src/features/direct-messages/callNotificationActions.ts",
@@ -512,6 +513,8 @@ export const shards = {
     "src/features/threads/threadAgo.ts",
     "src/features/threads/threadCommands.ts",
     "src/lib/prefs/screenLayout.ts",
+    "src/lib/text/fileName.ts",
+    "src/lib/text/inboundText.ts",
     "src/lib/text/nameLimits.ts",
     "src/lib/text/pickedMentions.ts",
   ],
@@ -586,7 +589,7 @@ export const shards = {
     "src/features/voice/popoutDocuments.ts",
     "src/lib/dmUnread.ts",
     "src/lib/nav/messageNavigation.ts",
-    "src/lib/text/mentions.ts",
+    "src/features/messaging/mentions.ts",
   ],
   "lib-rest-27": [
     "src/features/deck/mountDeckFrame.ts",
@@ -632,7 +635,7 @@ export const shards = {
     "src/features/messaging/sameValue.ts",
     "src/features/voice/wsErrors.ts",
     "src/lib/presence/roleLookup.ts",
-    "src/lib/text/formatting.ts",
+    "src/features/messaging/formatting.ts",
   ],
   "lib-rest-32": [
     "src/features/direct-messages/keptCallDms.ts",
@@ -647,14 +650,14 @@ export const shards = {
     "src/lib/net/requestClaims.ts",
     "src/lib/prefs/notificationLevel.ts",
     "src/lib/presence/profiles.ts",
-    "src/lib/readStateAway.ts",
+    "src/stores/readStateAway.ts",
     "src/lib/text/discordTimestamp.ts",
     "src/lib/text/markdownScan.ts",
   ],
   "lib-rest-34": [
     "src/features/profiles/avatarSource.ts",
     "src/lib/diagnostics/eventCodes.ts",
-    "src/lib/nav/channelNavigation.ts",
+    "src/features/navigation/channelNavigation.ts",
     "src/lib/text/duration.ts",
     "src/lib/ui/a11y.ts",
     "src/lib/ui/modalFactory.ts",
@@ -690,6 +693,7 @@ export const shards = {
     "src/features/members/memberGroupHeader.ts",
   ],
   "lib-rest-38": [
+    "src/features/deck/deckPing.ts",
     "src/features/deck/roomInfoModel.ts",
     "src/features/deck/roomInfoPanel.ts",
     "src/features/members/memberColumn.ts",
@@ -717,7 +721,9 @@ export const shards = {
   "stores-4": [
     "src/features/messaging/content/serverLinkCard.ts",
     "src/lib/voice/appAudioShare.ts",
+    "src/features/direct-messages/blockedPreviewText.ts",
     "src/stores/dm.store.ts",
+    "src/stores/dmModel.ts",
     "src/stores/messages.store.ts",
     "src/stores/stickers.store.ts",
     "src/stores/voiceListening.ts",
@@ -833,6 +839,7 @@ export const shards = {
     "src/features/moderation/api.ts",
     "src/features/safety/signInNotice.ts",
     "src/features/safety/store.ts",
+    "src/features/safety/timeText.ts",
     "src/features/settings/themePreview.ts",
   ],
   "safety-moderation-11": [
@@ -859,7 +866,7 @@ export const shards = {
     "src/features/navigation/destinations.ts",
     "src/features/reports/reportDialog.ts",
     "src/features/settings/settingRow.ts",
-    "src/lib/voice/livekitDiagnostics.ts",
+    "src/features/voice/livekitDiagnostics.ts",
   ],
   "safety-moderation-15": [
     "src/features/moderation/History.ts",

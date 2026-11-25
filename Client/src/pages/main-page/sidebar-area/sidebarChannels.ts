@@ -15,7 +15,7 @@ import {
 } from "../../../features/threads/threadNavigation";
 import { createDeleteChannelModal } from "../../../features/channels/DeleteChannelModal";
 import { createSidebarVoiceCallbacks, createVoiceModerationCallbacks } from "../VoiceCallbacks";
-import { markChannelRead } from "@lib/readState";
+import { markChannelRead } from "@stores/readState";
 import { uiStore } from "@stores/ui.store";
 import { type CategoryRef } from "@stores/channels.store";
 import { shellText } from "../../../i18n/shell";

@@ -398,7 +398,7 @@ impl LocalParticipant {
             req.audio_features.push(proto::AudioTrackFeature::TfPreconnectBuffer as i32);
         }
 
-        // OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.10.0.
+        // OWNCORD-PATCH (stereo publish): not in upstream livekit 0.10.0.
         apply_stereo_request(&mut req, &options, matches!(track, LocalTrack::Audio(_)));
 
         req.packet_trailer_features =
@@ -448,7 +448,9 @@ impl LocalParticipant {
             }
         }
         let track_info = self.inner.rtc_engine.add_track(req).await?;
-        let publication = LocalTrackPublication::new(track_info.clone(), track.clone());
+        // OWNCORD-PATCH (signal input): an unusable track entry fails the publish.
+        let publication = LocalTrackPublication::new(track_info.clone(), track.clone())
+            .map_err(RoomError::Internal)?;
         track.update_info(track_info); // Update sid + source
 
         // set track for publication to listen mute/unmute events
@@ -1185,7 +1187,7 @@ impl LocalParticipant {
     }
 }
 
-// OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.10.0. Marks an audio
+// OWNCORD-PATCH (stereo publish): not in upstream livekit 0.10.0. Marks an audio
 // track's AddTrackRequest as stereo, both ways livekit-client does, so the
 // SFU's publisher answer carries `stereo=1`. Video tracks are left alone.
 // `AddTrackRequest.stereo` is deprecated in favour of TF_STEREO, but the

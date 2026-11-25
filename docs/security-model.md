@@ -27,10 +27,9 @@ This repository is public. A commit message can reveal a weakness.
 
 ## Security model
 
-This section is a short summary of the sources listed at the end. It was
-written against commit `7732f969` (2026-09-25) and spot-checked against `dev`
-on 2026-10-13. If it disagrees with the code, the code wins, then the source
-documents. Any disagreement is a bug in this page.
+This section is a short summary of the sources listed at the end. If it
+disagrees with the code, the code wins, then the source documents. Any
+disagreement is a bug in this page.
 
 ### Trust model
 
@@ -55,9 +54,11 @@ documents. Any disagreement is a bug in this page.
     hashes still sign in and are replaced at the next sign-in.
   - Session and API tokens are stored as SHA-256 hashes, never the token
     itself.
-  - TOTP secrets are encrypted with a server-local AES-256 key. Secrets saved
-    before that encryption existed are a known exception: they are read as
-    they are, with a warning logged, and never rewritten in place.
+  - TOTP secrets are encrypted with a server-local AES-256 key. At start-up,
+    before anything is served, the server encrypts any secret still stored
+    from before that encryption existed, a restored older backup included.
+    A stored secret that is not in the encrypted form is refused, never used
+    as it is.
 - **Each server stands alone.** There is no federation, no messaging between
   servers, no directory or discovery, and no global identity. An account is a
   row in one server's database. The same username on two servers is two
@@ -109,10 +110,16 @@ documents. Any disagreement is a bug in this page.
 
   `security.auth_rate_limit_multiplier` scales each limit (default 1.0).
 
-- **Lockouts.** Ten failed logins within 15 minutes lock that username for 15
-  minutes, whatever IP they came from. This count is never scaled, because it
-  is the only defence that works across IP addresses. The same count, scaled,
-  also locks the source IP.
+- **Lockouts.** Ten failed logins for one username within 15 minutes lock
+  that username for 15 minutes, whatever IP they came from. This count is never
+  scaled, because it is the only defence that works across IP addresses. Anyone
+  who knows a username can start it; the account's existing sessions keep
+  working. An address that signed in to that account in the last 24 hours is
+  exempt from the username count and lock, but still needs the right password
+  and stays under the per-IP limits. That exemption is kept in memory, so a
+  restart clears it; the lock itself survives a restart. Failed logins from one
+  IP, for any username, are counted the same way with the scaled limit and lock
+  that IP.
 - **How long things last.**
   - A session expires 30 days after it was last used, and never more than a
     year after sign-in. REST requests, the WebSocket handshake and the
@@ -138,7 +145,8 @@ documents. Any disagreement is a bug in this page.
     a used or lost kit.
   - The owner-issued credential works once and expires in 15 minutes.
   - Five failed attempts, per account or per address, lock recovery for 15
-    minutes.
+    minutes. The per-account lock applies from every address, with no
+    exemption, and covers the kit and the owner-issued credential alike.
   - No administrator below the owner can reset another account's
     credentials.
 - **First-run setup.** The setup endpoint creates the first Owner account. It
@@ -192,7 +200,8 @@ documents. Any disagreement is a bug in this page.
 - **Logs.** Values that carry secrets redact themselves when logged (see
   [Logging and redaction](#logging-and-redaction)). User IDs, usernames,
   session IDs, devices and IP addresses are logged on purpose. No `slog` call
-  in server code logs message content.
+  in server code logs message content or the name of an uploaded file; an
+  upload is logged by its id, size and type.
 - **Desktop credentials** go in the OS keyring (Windows Credential Manager,
   macOS Keychain or Secret Service). This covers the login token or password,
   the voice-E2EE identity private key and unsent message drafts.
@@ -283,13 +292,18 @@ documents. Any disagreement is a bug in this page.
 - **Identity keys and pinning.**
   - Each install holds a long-lived ECDSA P-256 identity key per account and
     server (keychain account `identity:{userId}@{host}`).
-  - Peers pin one key per account (`{host}:{userId}`) the first time they see
-    it (trust on first use).
-  - If that key later changes, the change is accepted automatically once the
-    peer's announcement verifies against the new key. The pin is replaced.
-    The user gets a lasting notice naming the peer, and a "key changed" badge
-    in the call list for the rest of the call. They can then compare safety
-    numbers outside the app. A user's second device shows up the same way.
+  - Peers pin a key per account (`{host}:{userId}`) the first time they see
+    it (trust on first use). One account can have a key per device, so a
+    client keeps up to five keys per peer (`MAX_PINS_PER_USER`), drops the
+    oldest past that, and trusts any of them.
+  - When a peer announces a key that is not among their pins, it is accepted
+    automatically once the announcement verifies against that key, and added
+    to the pins; nothing is overwritten. The user gets a lasting notice naming
+    the peer, and a "key changed" badge in the call list while that key is in
+    the call. They can then compare safety numbers outside the app. A switch
+    back to a key already pinned for that peer is silent. A user can forget a
+    key in the trusted keys panel, except the one in the current call and the
+    last one left.
   - A pinned peer whose key is no longer delivered is blocked until pinned
     again.
 - **Key rotation.** The key holder makes a new room key whenever someone
@@ -485,6 +499,8 @@ documents. Any disagreement is a bug in this page.
 - `require_2fa` needs every user to have 2FA turned on, and needs
   `registration_mode` to be `closed`. While it is on, registration cannot be
   reopened.
+- **Per-account limits:** up to 25 sessions (sign-ins) and 10 live WebSocket
+  connections per account. Past either limit the oldest is evicted.
 - **Session expiry:**
   - A session expires 30 days after it was last used.
   - An authenticated REST request, the WebSocket handshake and the WebSocket

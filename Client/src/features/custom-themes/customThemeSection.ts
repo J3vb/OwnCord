@@ -30,7 +30,7 @@ import {
 import { createConfirmModal } from "../dialogs/confirmModal";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { runningScreenLayout } from "../../lib/prefs/screenLayout";
 import { buildBackgroundEditor } from "./themeBackgroundEditor";
 

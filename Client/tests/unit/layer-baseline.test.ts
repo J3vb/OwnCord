@@ -30,20 +30,16 @@ const baseline = JSON.parse(
 
 /** Upward value-import sites that may remain. Lower this in every change that
  *  removes one; it never rises. */
-const DEBT_SITE_CAP = 58;
+const DEBT_SITE_CAP = 0;
 
-/** The upward imports a written rule requires (Client/CLAUDE.md: the
- *  dispatcher door, and messages.store over its reducer modules). */
+/** The upward imports a written rule requires (Client/CLAUDE.md:
+ *  messages.store over its reducer modules; the REST client enforcing the
+ *  NSFW consent gate on every channel-content call, so no caller can skip it;
+ *  the native push-to-talk service reading the call state its key gates). */
 const SANCTIONED_PAIRS = [
-  "lib/dispatcher.ts -> features/channels/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/connection/dispatchContext.ts",
-  "lib/dispatcher.ts -> features/connection/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/direct-messages/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/message-requests/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/messaging/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/moderation/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/safety/wsHandlers.ts",
-  "lib/dispatcher.ts -> features/voice/wsHandlers.ts",
+  "lib/api.ts -> features/content-consent/nsfw.ts",
+  "lib/api.ts -> stores/channels.store.ts",
+  "platform/desktop/pushToTalkService.ts -> stores/voice.store.ts",
   "stores/messages.store.ts -> features/messaging/historyWindows.ts",
   "stores/messages.store.ts -> features/messaging/liveMessages.ts",
   "stores/messages.store.ts -> features/messaging/messageEdits.ts",

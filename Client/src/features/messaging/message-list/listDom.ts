@@ -5,7 +5,7 @@
  * modules find these nodes on the state.
  */
 import { createElement } from "@lib/dom";
-import { markChannelRead } from "@lib/readState";
+import { markChannelRead } from "@stores/readState";
 import { messagingText } from "../../../i18n/messaging";
 import { renderUnreadBar } from "./renderers";
 import type { ListState, ListApi } from "./listState";

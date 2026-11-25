@@ -4,7 +4,7 @@ import * as mocks from "../helpers/sidebarStubMocks";
 import * as stubs from "../helpers/sidebarStubs";
 import { resetChannelsState, signInAs } from "../helpers/storeSeeds";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.rePinOnlySessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => mocks.rePinOnlySessionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.inertE2eeCryptoMock());
 
 import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
@@ -16,7 +16,7 @@ import {
   type Channel,
 } from "../../src/stores/channels.store";
 import { isCategoryCollapsed } from "../../src/stores/ui.store";
-import { setMarkReadSender } from "@lib/readState";
+import { setMarkReadSender } from "../../src/stores/readState";
 import type { ReadyChannel } from "../../src/lib/types";
 
 const CHANNELS: ReadyChannel[] = [

@@ -69,6 +69,7 @@ export const CAPABILITIES = [
   "server", // Server Build & Test (both OS legs), Server Deadlock & Tag Tests, Server Race Tests, Server Coverage Floor
   "client", // Client Static Checks, Client Unit Tests, Node policy
   "rust", // Rust Unit Tests
+  "livekitvendor", // the vendored livekit patch tests, a step inside Rust Unit Tests
   "browser", // Client E2E (Playwright) + Client E2E (parity subset)
   "integration", // Client E2E (real server and media) + Admin Panel E2E
   "native", // Client E2E (Windows native)
@@ -145,6 +146,15 @@ const RUST_READS_OUTSIDE = new Set([
   "Client/scripts/check-glibc-floor.sh",
   "Client/scripts/check-nvenc-linked.sh",
 ]);
+
+/**
+ * The vendored livekit crate and the lockfile it resolves through. A step
+ * inside rust-tests, not a job: `cargo test --lib` there covers the root
+ * package only, so the patched crate's own tests run in their own step, against
+ * the root lockfile, when either input moves.
+ */
+const LIVEKIT_VENDOR_PREFIX = "Client/src-tauri/vendor/livekit/";
+const LIVEKIT_VENDOR_PATHS = new Set(["Client/src-tauri/Cargo.lock"]);
 
 /**
  * The native-voice interop suite. Its only runner is the rust-tests job
@@ -249,7 +259,7 @@ export { K6_HARNESS_PATHS };
  * tests that import it and the inputs of Stryker's dry run.
  */
 const PERMISSIONS_MUTATION_PATHS = new Set([
-  "Client/src/lib/permissions.ts",
+  "Client/src/stores/permissions.ts",
   "Client/tests/unit/permissions.test.ts",
   "Client/tests/unit/channel-permission-bits-3a13.test.ts",
   "Client/tests/unit/channel-categories.test.ts",
@@ -340,6 +350,9 @@ export function classify(paths) {
     if (CLIENT_READS_OUTSIDE.has(path)) add("client", "browser");
     if (RUST_READS_OUTSIDE.has(path)) add("rust");
     if (RUST_HARNESS_PREFIXES.some((p) => path.startsWith(p))) add("rust");
+    if (path.startsWith(LIVEKIT_VENDOR_PREFIX) || LIVEKIT_VENDOR_PATHS.has(path)) {
+      add("rust", "livekitvendor");
+    }
     if (K6_HARNESS_PATHS.has(path)) add("server");
     if (PERMISSIONS_MUTATION_PATHS.has(path)) add("permissions");
     if (DEPS_FILES.has(path)) add("deps");

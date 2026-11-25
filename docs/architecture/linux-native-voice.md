@@ -15,7 +15,7 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   `[target.'cfg(target_os = "linux")'.dependencies]`. Design:
   [docs/architecture/voice-e2ee.md](voice-e2ee.md).
 - Linux voice runs in that backend (`src-tauri/src/native_voice/`) behind the
-  `livekitSession` facade: `features/voice/native/platform.ts`'s
+  `livekitSession` facade: `lib/hostOs.ts`'s
   `isLinuxDesktop()` (the Tauri host on a Linux, non-Android user agent) is the
   only switch, `RoomLifecycle.createRoom` builds a `NativeRoom` adapter there,
   `E2EEWorker.applyRoomKey` sends the key over the `NativeVoice` platform

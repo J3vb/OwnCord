@@ -9,7 +9,7 @@ import {
   type DiagnosticResult,
   type DiagnosticStage,
   type DiagnosticStatus,
-} from "@lib/net/connectionDiagnostics";
+} from "../connection/connectionDiagnostics";
 import { createDisclosure, setStatusIcon, statusIcon, type StatusKind } from "./status";
 
 const DIAGNOSTIC_STATUS_KEYS = {

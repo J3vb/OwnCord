@@ -18,7 +18,9 @@ jobs:
     #    metered API credential, so the repository states its own trust boundary
     #    here rather than relying on any downstream check. Add a login to this
     #    list to grant access; there is no other way in.
-    # 2. The trigger text mentions @claude.
+    # 2. The trigger text mentions @claude. For the issues event the text is
+    #    the issue itself, so its author must be on the allowlist too: assigning
+    #    an issue is an action by the actor on text somebody else may have written.
     #
     # scripts/checks/check-workflow-guards.mjs asserts that both this actor term and the
     # cost bounds below survive; actionlint checks expression syntax and cannot
@@ -29,7 +31,7 @@ jobs:
         (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@claude')) ||
         (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@claude')) ||
         (github.event_name == 'pull_request_review' && contains(github.event.review.body, '@claude')) ||
-        (github.event_name == 'issues' && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
+        (github.event_name == 'issues' && contains(fromJSON('["J3vb"]'), github.event.issue.user.login) && (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')))
       )
     runs-on: ubuntu-latest
     # Repeated triggers on one issue or pull request collapse into a single run

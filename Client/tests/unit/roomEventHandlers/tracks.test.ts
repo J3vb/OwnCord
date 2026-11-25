@@ -1,5 +1,5 @@
 /**
- * Tests for src/lib/voice/roomEventHandlers.ts (was 57.1% statements / 62.5%
+ * Tests for src/features/voice/roomEventHandlers.ts (was 57.1% statements / 62.5%
  * functions, no test file).
  *
  * These handlers are the whole reaction surface of a live voice call: audio and

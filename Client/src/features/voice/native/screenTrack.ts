@@ -20,7 +20,7 @@ import type {
 } from "../../../platform/contracts/nativeVoice";
 import type { PublishCodec } from "../videoCodec";
 import type { StreamQuality } from "../screenShare";
-import { PICKER_DISMISSED, PORTAL_NOT_STARTED } from "./platform";
+import { PICKER_DISMISSED, PORTAL_NOT_STARTED } from "@lib/hostOs";
 import { nativeCounters } from "./counters";
 import { NativeVideoRenderer } from "./videoRenderer";
 

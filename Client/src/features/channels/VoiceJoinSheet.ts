@@ -17,7 +17,8 @@ import { membersStore } from "@stores/members.store";
 import { uiStore } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
 import { safetyStore } from "../safety/store";
-import { formatUntil, safetyText } from "../../i18n/safety";
+import { safetyText } from "../../i18n/safety";
+import { formatUntil } from "../safety/timeText";
 import { shellText } from "../../i18n/shell";
 import { voiceText as t } from "../../i18n/voice";
 import {

@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
-import { noteJoinFailed, noteJoinSucceeded } from "../../../src/features/voice/joinBackoff";
+import { noteJoinFailed, noteJoinSucceeded } from "../../../src/lib/voice/joinBackoff";
 import { savePref } from "../../../src/lib/prefs/preferences";
 import { channelsStore, setActiveChannel } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";
@@ -25,11 +25,11 @@ vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
 );
 vi.mock("@lib/logger", () => mocks.loggerMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/media/notificationSound", () => mocks.mediaNotificationSoundMock());
 vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messagesCallAlertsMock());
 vi.mock("../../../src/features/updates/UpdateNotifier", () => mocks.updateNotifierMock());
-vi.mock("@lib/voice/audioElements", () => mocks.voiceAudioElementsMock());
+vi.mock("../../../src/features/voice/audioElements", () => mocks.voiceAudioElementsMock());
 vi.mock("@lib/presence/autoIdle", () => mocks.presenceAutoIdleMock());
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
@@ -449,7 +449,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
     m.page = await mountSettled(m.container, ws);
-    const lk = await import("@lib/voice/livekitSession");
+    const lk = await import("../../../src/features/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
     incomingCall(ws);

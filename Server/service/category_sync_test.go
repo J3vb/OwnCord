@@ -308,7 +308,7 @@ func TestSyncChannelPermissions_RowsChangedUnderTheCheckAreRefused(t *testing.T)
 	f := newCatPermFixture(t)
 	ctx := context.Background()
 	refused := error(nil)
-	guard, err := f.svc.prepareSync(ctx, f.mod, f.b.ID, f.cat.ID, &refused)
+	guard, err := f.svc.prepareSync(ctx, 7, f.mod, f.b.ID, f.cat.ID, &refused)
 	mustDo(t, "prepareSync", err)
 	// A role row appears after the check and before the write.
 	if _, err := f.database.ExecContext(ctx,

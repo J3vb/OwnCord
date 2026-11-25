@@ -15,7 +15,7 @@ import { dmStore, type DmChannel } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
-import { formatBadgeCount } from "@lib/text/formatting";
+import { formatBadgeCount } from "../messaging/formatting";
 import { serverRailText } from "../../i18n/serverRail";
 import type { CountSource } from "../navigation/destinations";
 import {

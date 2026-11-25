@@ -5,7 +5,7 @@
 // page's owner arrive through createConnectProfiles(). Nothing here runs at
 // import time.
 
-import { deleteCredential } from "@lib/net/credentials";
+import { deleteCredential } from "../features/connection/credentials";
 import { createLogger } from "@lib/logger";
 import type { ProfileManager } from "@lib/presence/profiles";
 import type { SessionScope } from "@lib/net/sessionScope";

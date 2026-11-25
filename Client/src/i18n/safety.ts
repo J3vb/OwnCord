@@ -1,5 +1,4 @@
-import { serverNow, serverTime } from "../features/safety/store";
-import { defineCatalog, formatDate } from "./format";
+import { defineCatalog } from "./format";
 
 /** Moderation notices and restrictions. */
 export const safetyText = defineCatalog("safety", {
@@ -65,15 +64,3 @@ export const safetyText = defineCatalog("safety", {
   "appeals.unavailable":
     "Kicks can't be appealed. While a ban is in effect you can't sign in to appeal here: contact the server's operator directly. Once a ban ends, it appears in your history and can be appealed.",
 });
-
-/** A server timestamp as a date and time, e.g. "Sep 23, 2026, 2:05 PM". */
-export function formatWhen(raw: string): string {
-  return formatDate(serverTime(raw), { dateStyle: "medium", timeStyle: "short" });
-}
-
-/** An expiry: only the time when it is today, else the date and time. */
-export function formatUntil(raw: string, now: number = serverNow()): string {
-  const at = serverTime(raw);
-  const sameDay = new Date(at).toDateString() === new Date(now).toDateString();
-  return sameDay ? formatDate(at, { timeStyle: "short" }) : formatWhen(raw);
-}

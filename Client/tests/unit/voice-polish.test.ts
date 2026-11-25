@@ -12,7 +12,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import * as voiceWidget from "../helpers/voiceWidgetHarness";
 
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     getUserVolume: vi.fn().mockReturnValue(100),
   }),

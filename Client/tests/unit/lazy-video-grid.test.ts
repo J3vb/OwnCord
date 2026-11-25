@@ -28,7 +28,7 @@ vi.mock("@lib/logger", () => ({
   }),
 }));
 
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     getUserVolume: vi.fn(() => 100),
   }),

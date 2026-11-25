@@ -115,7 +115,7 @@ and proceeds, so a reviewer can see what was assumed.
   cannot touch the live connection. New code follows it: a handler checks it
   still owns the attempt before acting, reconnect cleanup touches only its
   own attempt's resources, and server events reach stores only through
-  `src/lib/dispatcher.ts` (`no-store-write-in-ws-on` and
+  `src/app/dispatcher.ts` (`no-store-write-in-ws-on` and
   `src/features/dispatcherDoor.test.ts` enforce that door).
 
 ## Gotchas

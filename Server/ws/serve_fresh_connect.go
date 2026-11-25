@@ -66,12 +66,7 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	// its revoke after our registerNow and finds us. Only the resume-fallback path inherits
 	// subscriptions.
 	if c.lastSeq > 0 {
-		// Compared by the held-role set: a non-top role changes what they may read without moving the
-		// users.role_id mirror.
-		if fresh, err := database.GetMemberRoles(ctx, c.userID); err != nil || fresh == nil || !sameRoleSet(fresh.IDs, heldRoles.IDs) {
-			//nolint:contextcheck // revokeUnreadableChannels takes no context by design (admin HubBroadcaster interface).
-			h.revokeUnreadableChannels(c.userID)
-		}
+		h.revalidateInheritedTopics(ctx, database, c, heldRoles.IDs)
 	}
 
 	// Settle the status before buildReady reads members so ready and the presence broadcast cannot disagree.
@@ -95,6 +90,37 @@ func (h *Hub) handleFreshConnect(ctx context.Context, conn *websocket.Conn, c *C
 	h.announceFreshConnect(c)
 
 	return nil
+}
+
+// revalidateInheritedTopics re-checks, after registerNow, the channel topics a resume fallback
+// inherited. A held-role change always runs the revocation pass. Otherwise the socket's channel
+// topics are compared with a fresh allowed set: a per-channel permission edit whose visibility
+// walk finished before this socket registered leaves the role set unchanged, and only this read
+// sees it. The pass runs only when a topic is outside the set (or the read fails), so a normal
+// fallback does not move the visibility watermark.
+func (h *Hub) revalidateInheritedTopics(ctx context.Context, database ReadySnapshotReader, c *Client, heldIDs []int64) {
+	// Compared by the held-role set: a non-top role changes what they may read without moving the
+	// users.role_id mirror.
+	fresh, err := database.GetMemberRoles(ctx, c.userID)
+	revoke := err != nil || fresh == nil || !sameRoleSet(fresh.IDs, heldIDs)
+	if !revoke {
+		allowed, allowedErr := h.computeAllowedChannels(ctx, database, c.user)
+		revoke = allowedErr != nil || holdsTopicOutside(h.pubsub.TopicsForClient(c), allowed)
+	}
+	if revoke {
+		//nolint:contextcheck // revokeUnreadableChannels takes no context by design (admin HubBroadcaster interface).
+		h.revokeUnreadableChannels(c.userID)
+	}
+}
+
+// holdsTopicOutside reports whether topics include a channel topic not in allowed.
+func holdsTopicOutside(topics []Topic, allowed map[int64]bool) bool {
+	for _, topic := range topics {
+		if chID := channelTopicID(topic); chID != 0 && !allowed[chID] {
+			return true
+		}
+	}
+	return false
 }
 
 // freshConnectSettleVoice runs a fresh connect's voice steps before ready is built, under

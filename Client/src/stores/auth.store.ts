@@ -8,6 +8,7 @@ import type { UploadPolicy, UserWithRole } from "@lib/types";
 import { createLogger } from "@lib/logger";
 import { registerSessionReset, runSessionResets } from "@lib/net/sessionRegistry";
 import type { SessionResetReason } from "@lib/net/sessionRegistry";
+import { loadVoiceSession } from "@lib/voice/voiceSessionLoader";
 
 const log = createLogger("auth.store");
 
@@ -160,7 +161,7 @@ export function clearAuth(reason: LogoutReason = "user"): void {
   // ahead of the `session` phase too; no session entry writes voiceStore.
   const wasInVoice = voice !== undefined && voice.currentChannelId !== null;
   if (voice !== undefined && voice.currentChannelId !== null && voice.voiceStatus !== "idle") {
-    void import("@lib/voice/livekitSession")
+    void loadVoiceSession()
       .then(({ leaveVoice }) => leaveVoice(false))
       .catch((e) => log.warn("Failed to leave voice session during clearAuth", e));
   }

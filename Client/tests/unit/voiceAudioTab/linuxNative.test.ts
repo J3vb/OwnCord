@@ -8,7 +8,7 @@ import { nativeLevelListener } from "../../helpers/voiceAudioTabMocks";
 import { VOLUME_SLIDERS } from "../../helpers/voiceAudioTabHarness";
 
 vi.mock("../../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 const {
   mockSetVoiceSensitivity,
@@ -68,7 +68,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
       nativeVideoCodecs: () => nativeVideoCodecs() as unknown,
     }));
     vi.doMock("@lib/logger", () => appLogger);
-    vi.doMock("../../../src/features/voice/native/platform", () => ({
+    vi.doMock("../../../src/lib/hostOs", () => ({
       isLinuxDesktop: () => true,
       isAndroidApp: () => false,
     }));
@@ -143,7 +143,7 @@ describe("VoiceAudioTab on the Linux native audio engine", () => {
     });
   });
   afterEach(() => {
-    vi.doUnmock("../../src/features/voice/native/platform");
+    vi.doUnmock("../../src/lib/hostOs");
     vi.doUnmock("../../src/features/voice/native/devices");
     vi.doUnmock("../../src/features/voice/native/videoCodecs");
     vi.doUnmock("../../src/platform/desktop");

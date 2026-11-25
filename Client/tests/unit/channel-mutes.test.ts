@@ -18,7 +18,7 @@ import { STORAGE_PREFIX } from "@lib/prefs/preferences";
 // listener at load. loadNotifications() re-imports against these instances,
 // so its vi.resetModules() does not install a second copy of each listener.
 import * as attachments from "../../src/features/messaging/content/attachments";
-import * as formatting from "@lib/text/formatting";
+import * as formatting from "../../src/features/messaging/formatting";
 import * as channelMutes from "@lib/prefs/channelMutes";
 import * as appLogger from "@lib/logger";
 
@@ -26,7 +26,7 @@ import * as appLogger from "@lib/logger";
 // root-relative id works from any test directory.
 const APP_LIFETIME_MODULES = [
   ["/src/features/messaging/content/attachments", attachments],
-  ["@lib/text/formatting", formatting],
+  ["/src/features/messaging/formatting", formatting],
   ["@lib/prefs/channelMutes", channelMutes],
   ["@lib/logger", appLogger],
 ] as const;

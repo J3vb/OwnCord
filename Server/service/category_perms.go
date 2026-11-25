@@ -121,14 +121,20 @@ func requireGrantableAcross(actorRole *db.Role, allow, deny int64, rows ...db.Ov
 	return requireGrantableChannelOverride(actorRole, allow, deny)
 }
 
-// categoryOverrideGuard is the guard a category write passes into the write transaction.
+// categoryOverrideGuard is the guard a category write passes into the write transaction;
+// viewed is categoryViewGate's test for each synced channel the write reaches.
 // A refusal is also recorded in *refused because the db layer wraps errors with the
 // operation name and the API answers the bare text.
-func categoryOverrideGuard(actorRole *db.Role, allow, deny int64, refused *error) db.CategoryOverrideGuard {
+func categoryOverrideGuard(actorRole *db.Role, allow, deny int64, viewed func(channelID int64) bool, refused *error) db.CategoryOverrideGuard {
 	return func(sc db.CategoryOverrideScope) error {
 		rows := make([]db.OverrideBits, 0, len(sc.Channels)+1)
 		rows = append(rows, sc.Category)
 		for _, c := range sc.Channels {
+			if !viewed(c.ChannelID) {
+				// Synced after categoryViewGate ran, so never checked: refuse and let the caller retry.
+				*refused = fmt.Errorf("%w%.0w", ErrPermsChanged, ErrConflict)
+				return *refused
+			}
 			rows = append(rows, db.OverrideBits{Allow: c.Allow, Deny: c.Deny})
 		}
 		if err := requireGrantableAcross(actorRole, allow, deny, rows...); err != nil {
@@ -169,6 +175,35 @@ func (s *channelOverrides) resolveCategoryUserTarget(ctx context.Context, actorR
 	return user, nil
 }
 
+// categoryTemplateWrite is the shared body of a template write on categoryID: it loads
+// the store and the category, runs resolve (the target checks), then categoryViewGate,
+// then write under the guard built over its result (categoryOverrideGuard), and maps
+// the outcome with mapCategoryOverrideErr. It returns the category and the channel ids
+// write reports.
+func (s *channelOverrides) categoryTemplateWrite(ctx context.Context, actorID int64, actorRole *db.Role, categoryID, allow, deny int64, resolve func() error, write func(CategoryPermStore, db.CategoryOverrideGuard) ([]int64, error)) (*db.ChannelCategory, []int64, error) {
+	cp, err := s.catPermStore()
+	if err != nil {
+		return nil, nil, err
+	}
+	cat, err := s.requireCategory(ctx, categoryID)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := resolve(); err != nil {
+		return nil, nil, err
+	}
+	viewed, err := s.categoryViewGate(ctx, cp, actorID, actorRole, categoryID)
+	if err != nil {
+		return nil, nil, err
+	}
+	var refused error
+	ids, err := write(cp, categoryOverrideGuard(actorRole, allow, deny, viewed, &refused))
+	if err := mapCategoryOverrideErr(err, refused); err != nil {
+		return nil, nil, err
+	}
+	return cat, ids, nil
+}
+
 // PutCategoryRoleOverride writes a role's template row on the category and every synced channel.
 func (s *channelOverrides) PutCategoryRoleOverride(ctx context.Context, actorID int64, actorRole *db.Role, categoryID, roleID, allowRaw, denyRaw int64) (CategoryOverrideResult, error) {
 	return s.categoryRoleMutation(ctx, actorID, actorRole, categoryID, roleID, allowRaw&permissions.AllPerms, denyRaw&permissions.AllPerms, false)
@@ -180,27 +215,20 @@ func (s *channelOverrides) DeleteCategoryRoleOverride(ctx context.Context, actor
 }
 
 func (s *channelOverrides) categoryRoleMutation(ctx context.Context, actorID int64, actorRole *db.Role, categoryID, roleID, allow, deny int64, clear bool) (CategoryOverrideResult, error) {
-	cp, err := s.catPermStore()
+	var role *db.Role
+	resolve := func() error {
+		var err error
+		role, err = s.resolveCategoryRoleTarget(ctx, actorRole, roleID)
+		return err
+	}
+	cat, ids, err := s.categoryTemplateWrite(ctx, actorID, actorRole, categoryID, allow, deny, resolve,
+		func(cp CategoryPermStore, guard db.CategoryOverrideGuard) ([]int64, error) {
+			if clear {
+				return cp.ClearCategoryRoleOverride(ctx, categoryID, roleID, guard)
+			}
+			return cp.WriteCategoryRoleOverride(ctx, categoryID, roleID, allow, deny, guard)
+		})
 	if err != nil {
-		return CategoryOverrideResult{}, err
-	}
-	cat, err := s.requireCategory(ctx, categoryID)
-	if err != nil {
-		return CategoryOverrideResult{}, err
-	}
-	role, err := s.resolveCategoryRoleTarget(ctx, actorRole, roleID)
-	if err != nil {
-		return CategoryOverrideResult{}, err
-	}
-	var refused error
-	guard := categoryOverrideGuard(actorRole, allow, deny, &refused)
-	var ids []int64
-	if clear {
-		ids, err = cp.ClearCategoryRoleOverride(ctx, categoryID, roleID, guard)
-	} else {
-		ids, err = cp.WriteCategoryRoleOverride(ctx, categoryID, roleID, allow, deny, guard)
-	}
-	if err := mapCategoryOverrideErr(err, refused); err != nil {
 		return CategoryOverrideResult{}, err
 	}
 
@@ -234,27 +262,20 @@ func (s *channelOverrides) DeleteCategoryUserOverride(ctx context.Context, actor
 }
 
 func (s *channelOverrides) categoryUserMutation(ctx context.Context, actorID int64, actorRole *db.Role, categoryID, userID, allow, deny int64, clear bool) (CategoryOverrideResult, error) {
-	cp, err := s.catPermStore()
+	var user *db.User
+	resolve := func() error {
+		var err error
+		user, err = s.resolveCategoryUserTarget(ctx, actorRole, userID)
+		return err
+	}
+	cat, ids, err := s.categoryTemplateWrite(ctx, actorID, actorRole, categoryID, allow, deny, resolve,
+		func(cp CategoryPermStore, guard db.CategoryOverrideGuard) ([]int64, error) {
+			if clear {
+				return cp.ClearCategoryUserOverride(ctx, categoryID, userID, guard)
+			}
+			return cp.WriteCategoryUserOverride(ctx, categoryID, userID, allow, deny, guard)
+		})
 	if err != nil {
-		return CategoryOverrideResult{}, err
-	}
-	cat, err := s.requireCategory(ctx, categoryID)
-	if err != nil {
-		return CategoryOverrideResult{}, err
-	}
-	user, err := s.resolveCategoryUserTarget(ctx, actorRole, userID)
-	if err != nil {
-		return CategoryOverrideResult{}, err
-	}
-	var refused error
-	guard := categoryOverrideGuard(actorRole, allow, deny, &refused)
-	var ids []int64
-	if clear {
-		ids, err = cp.ClearCategoryUserOverride(ctx, categoryID, userID, guard)
-	} else {
-		ids, err = cp.WriteCategoryUserOverride(ctx, categoryID, userID, allow, deny, guard)
-	}
-	if err := mapCategoryOverrideErr(err, refused); err != nil {
 		return CategoryOverrideResult{}, err
 	}
 
