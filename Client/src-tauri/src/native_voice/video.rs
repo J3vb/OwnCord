@@ -286,7 +286,20 @@ type Ws = tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>;
 
 async fn send_remote(ws: Ws, track: RemoteVideoTrack) {
     let mut frames = NativeVideoStream::new(track.rtc_track());
-    send_acked(ws, &mut frames, |frame| pack_i420(&frame.buffer.to_i420())).await;
+    // A frame past the ceiling (`remote_frame_fits`) is dropped before it is
+    // converted and copied for the page; the first one is logged.
+    let mut logged = false;
+    let mut drawn = Box::pin((&mut frames).filter(move |frame| {
+        let (w, h) = (frame.buffer.width(), frame.buffer.height());
+        let fits = owncord_parse::voice::remote_frame_fits(w, h);
+        if !fits && !logged {
+            logged = true;
+            log::warn!("[native_voice] dropping received video frames of {w}x{h}");
+        }
+        std::future::ready(fits)
+    }));
+    send_acked(ws, &mut drawn, |frame| pack_i420(&frame.buffer.to_i420())).await;
+    drop(drawn);
     frames.close();
 }
 

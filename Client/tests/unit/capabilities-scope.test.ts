@@ -112,6 +112,19 @@ describe("Tauri default capability — HTTP scope", () => {
     expect(find("core:webview:allow-set-webview-zoom")).toBe("core:webview:allow-set-webview-zoom");
   });
 
+  it("grants the dialog plugin's save dialog only, and no opener command", () => {
+    // The page asks for a save location (platform/desktop/fileSave.ts) and
+    // nothing else; links open through the app's own open_external_url, and
+    // the native side calls both plugins from Rust, which needs no grant.
+    const ids = permissions.map((p) => (typeof p === "string" ? p : p.identifier));
+    expect(ids.filter((id) => id.startsWith("dialog:"))).toEqual(["dialog:allow-save"]);
+    expect(ids.filter((id) => id.startsWith("opener:"))).toEqual([]);
+    const desktopIds = (desktopCapabilityJson.permissions as readonly Permission[]).map((p) =>
+      typeof p === "string" ? p : p.identifier,
+    );
+    expect(desktopIds.filter((id) => /^(dialog|opener):/.test(id))).toEqual([]);
+  });
+
   it("filesystem grants stay under $APPLOG only", () => {
     // $APPDATA holds credential_fallback.json/.key, certs.json and
     // identity_pins.json. fs:default grants recursive read of the app data

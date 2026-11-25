@@ -42,11 +42,12 @@ impl Debug for LocalTrackPublication {
 }
 
 impl LocalTrackPublication {
-    pub(crate) fn new(info: proto::TrackInfo, track: LocalTrack) -> Self {
-        Self {
-            inner: super::new_inner(info, Some(track.into())),
+    // OWNCORD-PATCH (signal input): fails on an unusable track entry.
+    pub(crate) fn new(info: proto::TrackInfo, track: LocalTrack) -> Result<Self, String> {
+        Ok(Self {
+            inner: super::new_inner(info, Some(track.into()))?,
             local: Arc::new(LocalInfo::default()),
-        }
+        })
     }
 
     pub(crate) fn on_muted(&self, f: impl Fn(TrackPublication) + Send + 'static) {

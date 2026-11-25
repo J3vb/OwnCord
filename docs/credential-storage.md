@@ -57,6 +57,12 @@ peers see as a changed key.
 | Voice-E2EE identity private key | `identity:{userId}@{host}`        | base64 JWK (P-256 private key)                       |
 | Pending message text            | `pending-messages:{owner_digest}` | JSON array of text drafts and stable send identities |
 
+`save_credential` and `delete_credential` take `{host}` only when it is a
+server address: a name or IPv4 address with an optional port, a bracketed IPv6
+address with an optional port, or a bare IPv6 address. A name that starts with
+`identity:` or `pending-messages:` is refused, so a login is never written or
+deleted under another entry's name.
+
 For pending messages, `owner_digest` is the lowercase hexadecimal SHA-256 digest
 of JSON `[host, userId]`. So each queue belongs to one full host (port
 included) and one signed-in user. Different accounts or server ports never

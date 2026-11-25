@@ -269,6 +269,14 @@ handler. Marked `OWNCORD-PATCH (signal input)` in
   invalid sid are skipped; non-finite speaker levels count as 0 and speakers
   sort with `total_cmp`. A restarted join response missing a part skips that
   part and still completes the restart.
+- A participant's track entry with an invalid track sid or an unsupported
+  type (`Data`) is skipped by `RemoteParticipant::update_info`.
+  `checked_track_ids` (`src/room/publication/mod.rs`) is the one check:
+  `new_inner` and both publication constructors return an error on such an
+  entry, the publication and track `update_info` keep their previous values,
+  a local publish whose reply carries one fails with `RoomError::Internal`,
+  and a participant update with an invalid participant sid keeps the previous
+  sid. Tests: `publication::signal_input_tests`.
 - Pure helpers (`parse_sdp_type`, `parse_remote_description`,
   `parse_ice_candidate_json`, `split_join_response`, `sanitize_audio_level`)
   have unit tests in both files.

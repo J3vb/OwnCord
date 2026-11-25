@@ -240,7 +240,11 @@ pub(super) fn update_info(
     info.disconnect_reason = new_info.disconnect_reason().into();
     info.kind = new_info.kind().into();
     info.kind_details = crate::utils::convert_kind_details(&new_info.kind_details);
-    info.sid = new_info.sid.try_into().unwrap();
+    // OWNCORD-PATCH (signal input): an invalid sid keeps the previous one.
+    match ParticipantSid::try_from(new_info.sid) {
+        Ok(sid) => info.sid = sid,
+        Err(sid) => log::warn!("ignoring invalid participant sid in update: {:?}", sid),
+    }
     info.identity = new_info.identity.into();
     info.joined_at = new_info.joined_at_ms;
 

@@ -70,18 +70,19 @@ impl Debug for RemoteTrackPublication {
 }
 
 impl RemoteTrackPublication {
+    // OWNCORD-PATCH (signal input): fails on an unusable track entry.
     pub(crate) fn new(
         info: proto::TrackInfo,
         track: Option<RemoteTrack>,
         auto_subscribe: bool,
-    ) -> Self {
-        Self {
-            inner: super::new_inner(info, track.map(Into::into)),
+    ) -> Result<Self, String> {
+        Ok(Self {
+            inner: super::new_inner(info, track.map(Into::into))?,
             remote: Arc::new(RemoteInner {
                 info: RwLock::new(RemoteInfo { subscribed: auto_subscribe, allowed: true }),
                 events: Default::default(),
             }),
-        }
+        })
     }
 
     /// This is called by the RemoteParticipant when it successfully subscribe to the track or when

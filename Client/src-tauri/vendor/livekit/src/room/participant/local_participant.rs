@@ -448,7 +448,9 @@ impl LocalParticipant {
             }
         }
         let track_info = self.inner.rtc_engine.add_track(req).await?;
-        let publication = LocalTrackPublication::new(track_info.clone(), track.clone());
+        // OWNCORD-PATCH (signal input): an unusable track entry fails the publish.
+        let publication = LocalTrackPublication::new(track_info.clone(), track.clone())
+            .map_err(RoomError::Internal)?;
         track.update_info(track_info); // Update sid + source
 
         // set track for publication to listen mute/unmute events
