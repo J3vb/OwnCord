@@ -9,7 +9,7 @@ import base from "../../vitest.config.ts";
 // run take minutes. Only the test files that import permissions.ts run here,
 // found by scanning, so a new one joins without editing this file.
 const root = resolve(import.meta.dirname, "../..");
-const IMPORTS_PERMISSIONS = /from\s+["'][^"']*lib\/permissions(\.ts)?["']/;
+const IMPORTS_PERMISSIONS = /from\s+["'][^"']*stores\/permissions(\.ts)?["']/;
 
 /** @param {string} dir @returns {string[]} */
 function testFiles(dir) {
