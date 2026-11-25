@@ -339,6 +339,16 @@ below must stay in this form, one per tag.
   - Drop when: upstream handles these inputs without unwrap or panic. Check each
     site; some may already be fixed.
 
+- `OWNCORD-PATCH (lint scope)`
+  - Where: `src/lib.rs` (the crate-level `#![allow(warnings, clippy::...)]`).
+  - Why: the crate is a workspace member so its tests can run against the root
+    `Cargo.lock`, and that puts it under the root `cargo clippy --all-targets --
+    -D warnings` run. Upstream code is linted upstream; this keeps the root lint
+    run about OwnCord's own code. Our patches are reviewed through their tests.
+  - Test: the Rust Unit Tests job's clippy step stays green with the crate in the
+    workspace.
+  - Drop when: the vendored crate leaves the workspace.
+
 ## Dropping it
 
 Remove `vendor/livekit` and the `[patch.crates-io]` table once a livekit
@@ -358,4 +368,4 @@ cargo test -p livekit --lib -- signal_input stereo rtc_session
 
 This runs the signal input helpers (`signal_input_tests`), the `rtc_session` tests and `stereo_is_signalled_for_audio_only`. CI runs it in the Rust Unit Tests job when anything under `vendor/livekit/` or `Cargo.lock` changes (the `livekitvendor` selection in `scripts/ci-select.mjs`), and every night in `nightly-test-depth.yml`. Run it after re-applying the patch to a new upstream version. CI also covers the behaviour through `session.rs`'s publish-options tests and the native-voice interop case "a native share's audio reaches the browser as stereo with the channels apart".
 
-The crate's own `Cargo.lock` is upstream's, kept verbatim; nothing builds from it. The workspace membership and the three formatting-only edits that keep `cargo fmt --all -- --check` clean (`sanitize_audio_level`, `parse_remote_description`, the subscriber answer in `rtc_session.rs`) are part of the patch.
+The crate's own `Cargo.lock` is upstream's, kept verbatim; nothing builds from it. The workspace membership, the crate-level lint allow and the three formatting-only edits that keep `cargo fmt --all -- --check` clean (`sanitize_audio_level`, `parse_remote_description`, the subscriber answer in `rtc_session.rs`) are part of the patch.
