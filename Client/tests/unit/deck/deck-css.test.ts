@@ -221,4 +221,46 @@ describe("deck.css", () => {
     );
     expect(colourRuleBreaches(led)).toEqual([]);
   });
+  describe("the fold", () => {
+    const FOLD =
+      "(max-width: 1200px), (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px)";
+    const NARROW =
+      "(max-width: 899px), (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px)";
+
+    it("is one block, directly after the 899 px block, with the 1200 px prelude", () => {
+      const preludes = preludesOf("app/deck.css");
+      expect(preludes.filter((p) => p === FOLD)).toHaveLength(1);
+      expect(preludes.indexOf(FOLD)).toBe(preludes.indexOf(NARROW) + 1);
+      const rules = deckRules();
+      const lastNarrow = rules.map((r) => r.media).lastIndexOf(NARROW);
+      expect(rules[lastNarrow + 1]?.media).toBe(FOLD);
+    });
+
+    it("fixes the column under the chat header and above the status bar, with no shadow", () => {
+      const rule = rulesFor(MEMBER).find((r) => r.media === FOLD);
+      expect(rule).toBeDefined();
+      const fixed = parseDeckCss("html.layout-deck .x { position: fixed; }")[0]!.declarations[0]!;
+      expect(JSON.stringify(declarationOf(MEMBER, "position", FOLD)?.value)).toBe(
+        JSON.stringify(fixed.value),
+      );
+      expect(declarationOf(MEMBER, "top", FOLD)?.vars).toEqual([
+        "--deck-above-header",
+        "--header-height",
+      ]);
+      expect(declarationOf(MEMBER, "bottom", FOLD)?.vars).toEqual(["--deck-below"]);
+      expect(declarationOf(MEMBER, "width", FOLD)).toBeDefined();
+      expect(rule!.declarations.map((d) => d.property)).not.toContain("box-shadow");
+      expect(
+        keywordOf(declarationOf("html.layout-deck .member-column-resize", "display", FOLD)),
+      ).toBe("none");
+      expect(colourRuleBreaches(rulesFor(MEMBER))).toEqual([]);
+    });
+
+    it("the 899 px block hides the top bar's ping", () => {
+      expect(keywordOf(declarationOf("html.layout-deck .deck-ping", "display", NARROW))).toBe(
+        "none",
+      );
+      expect(rulesFor("html.layout-deck .deck-ping").map((r) => r.media)).toEqual([NARROW]);
+    });
+  });
 });

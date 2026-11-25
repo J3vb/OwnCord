@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createMemberColumn, type MemberColumn } from "../../src/features/members/memberColumn";
+import {
+  createMemberColumn,
+  DECK_FOLD_QUERY,
+  type MemberColumn,
+} from "../../src/features/members/memberColumn";
 import type { MemberPanel } from "../../src/features/members/memberPanel";
 import { channelsStore, type Channel } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";
@@ -828,6 +832,143 @@ describe("MemberColumn", () => {
       } finally {
         stop();
       }
+    });
+  });
+  describe("the Command Deck fold", () => {
+    let mq: FakeMediaQueryList;
+    let media: ReturnType<typeof vi.fn<(query: string) => FakeMediaQueryList>>;
+
+    beforeEach(() => {
+      mq = new FakeMediaQueryList();
+      media = vi.fn(() => mq);
+      vi.stubGlobal("matchMedia", media);
+      buildPanel.mockImplementation(() => {
+        const element = document.createElement("div");
+        element.dataset["testid"] = "member-list";
+        const input = document.createElement("input");
+        input.dataset["testid"] = "member-search";
+        element.appendChild(input);
+        const panel = { element, destroy: vi.fn() };
+        panels.push(panel);
+        return panel;
+      });
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const search = (): HTMLInputElement =>
+      body.querySelector<HTMLInputElement>('[data-testid="member-search"]')!;
+
+    /** Run `fn` with the page running Command Deck, then put Classic back. */
+    function underDeck(fn: () => void): void {
+      setRunningScreenLayout("deck");
+      try {
+        fn();
+      } finally {
+        setRunningScreenLayout("classic");
+      }
+    }
+
+    it("asks for (max-width: 1200px) under Deck and (max-width: 899px) under Classic", () => {
+      expect(DECK_FOLD_QUERY).toBe("(max-width: 1200px)");
+      underDeck(() => {
+        ctrl = make();
+      });
+      // The phone check asks for its own coarse-pointer query beside the width one.
+      const widths = (): string[] =>
+        media.mock.calls.map(([q]) => q).filter((q) => !q.startsWith("(pointer: coarse)"));
+      expect(widths()).toEqual(["(max-width: 1200px)"]);
+      ctrl.destroy();
+      media.mockClear();
+      ctrl = make();
+      expect(widths()).toEqual(["(max-width: 899px)"]);
+    });
+
+    it("crossing above 1200 px with the overlay open: the open pref decides, and focus is kept or falls back", () => {
+      underDeck(() => {
+        mq.matches = true;
+        ctrl = make();
+        ctrl.sync();
+        expect(column.hidden).toBe(true);
+        ctrl.toggle();
+        expect(column.hidden).toBe(false);
+        expect(document.activeElement).toBe(search());
+
+        // Open pref true (the default): the column stays, in flow, and focus stays.
+        mq.set(false);
+        expect(column.hidden).toBe(false);
+        expect(ctrl.isOverlayOpen()).toBe(false);
+        expect(document.activeElement).toBe(search());
+        expect(fallbackFocus).not.toHaveBeenCalled();
+
+        // Open pref false: back in the fold, open it, then widen: it hides and focus falls back.
+        savePref(MEMBER_OPEN_PREF, false);
+        expect(column.hidden).toBe(true);
+        fallbackFocus.mockClear();
+        mq.set(true);
+        ctrl.toggle();
+        expect(column.hidden).toBe(false);
+        expect(document.activeElement).toBe(search());
+        mq.set(false);
+        expect(column.hidden).toBe(true);
+        expect(fallbackFocus).toHaveBeenCalledTimes(1);
+        expect(localStorage.getItem("owncord:settings:memberListOpen")).toBe("false");
+      });
+    });
+
+    it("crossing to 1200 px or less: the in-flow column becomes a closed overlay and focus falls back", () => {
+      underDeck(() => {
+        mq.matches = false;
+        ctrl = make();
+        ctrl.sync();
+        expect(column.hidden).toBe(false);
+        search().focus();
+        mq.set(true);
+        expect(column.hidden).toBe(true);
+        expect(button.getAttribute("aria-pressed")).toBe("false");
+        expect(fallbackFocus).toHaveBeenCalledTimes(1);
+        // The saved choice is untouched: widening shows the column again.
+        mq.set(false);
+        expect(column.hidden).toBe(false);
+      });
+    });
+
+    it("during the call view, a column opened above 1200 px closes in the fold and opens again past it", () => {
+      underDeck(() => {
+        mq.matches = false;
+        ctrl = make();
+        ctrl.sync();
+        ctrl.setCallView(true);
+        expect(column.hidden).toBe(true);
+        ctrl.toggle();
+        expect(column.hidden).toBe(false);
+        mq.set(true);
+        expect(column.hidden).toBe(true);
+        mq.set(false);
+        expect(column.hidden).toBe(false);
+      });
+    });
+
+    it("Escape with focus in the Deck overlay closes it and focuses the toggle", () => {
+      underDeck(() => {
+        mq.matches = true;
+        ctrl = make();
+        ctrl.sync();
+        ctrl.toggle();
+        expect(column.hidden).toBe(false);
+        const esc = new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        });
+        search().dispatchEvent(esc);
+        expect(esc.defaultPrevented).toBe(true);
+        expect(column.hidden).toBe(true);
+        expect(document.activeElement).toBe(button);
+        expect(fallbackFocus).not.toHaveBeenCalled();
+        expect(localStorage.getItem("owncord:settings:memberListOpen")).toBeNull();
+      });
     });
   });
 });
