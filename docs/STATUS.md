@@ -8,7 +8,7 @@ live in the [changelog](../CHANGELOG.md) and the linked pages.
 builds (`scripts/release/verify-release-status.mjs`), so add the row in the release PR,
 together with the changelog section.
 
-_Last updated 2026-11-18._
+_Last updated 2026-11-25._
 
 ## Current release
 
@@ -41,14 +41,33 @@ Newest first, one line each. The full notes are the matching section of
 
 ## Nightly health
 
+Checked against workflow runs on 2026-11-25.
+
 - **Upgrade rehearsal and drills** (`upgrade-rehearsal.yml`): red every night
-  from 2026-10-02 to 2026-10-11 in the restore drill, fixed on `dev` by #2290.
-  Since #2307 every drill phase runs and a release is refused while the latest
-  nightly is red or older than 72 hours.
+  from 2026-10-02 to 2026-10-11 in the restore drill, fixed on `dev` by #2290
+  (historical). Since #2307 every drill phase runs and a release is refused
+  while the latest nightly is red or older than 72 hours. The scheduled runs
+  on `main` passed every night from 2026-11-20 to 2026-11-25. The container
+  leg's disk-full phase used to skip; since #3577 (merged 2026-11-25) it fills
+  a real tmpfs volume, and it passed in two manual runs on 2026-11-25
+  ([45667252808](https://github.com/J3vb/OwnCord/actions/runs/45667252808),
+  [45672802673](https://github.com/J3vb/OwnCord/actions/runs/45672802673)).
+  The scheduled runs have not yet run that phase.
 - **Test depth** (`nightly-test-depth.yml`): fuzzing, the hub simulation, the
-  long-session soak and permission mutation testing pass. The full-client
-  mutation baseline does not complete yet; its `lib-rest` shard is marked
-  informational until it is fixed.
+  long-session soak and permission mutation testing pass when the run is
+  green. The run was red on 2026-11-23, 2026-11-24 and 2026-11-25: a stale
+  fuzz check and the mutation dry run read files that the app had since
+  reprinted. #3572 fixed both on 2026-11-25. No run after the fix has finished
+  yet, so the nightly is not yet shown green. The full-client mutation
+  baseline does not complete yet; its `lib-rest` shard is marked informational
+  until it is fixed.
+- **Supply chain** (`weekly-supply-chain.yml`): a pull request scan covers only
+  the manifests it changes; the weekly scan re-scans everything. A full scan
+  on `dev` was green on 2026-11-25
+  ([45548533772](https://github.com/J3vb/OwnCord/actions/runs/45548533772)).
+  The scheduled weekly run on `main` on 2026-11-23 was red on published advisories in two Rust crates (`cookie`, `url`) that `dev` already carries fixed versions of; `main` picks them up with the next release.
+- **Web portal end-to-end lane**: advisory. A failure there does not block a
+  merge or a release.
 
 ## Roadmap
 
