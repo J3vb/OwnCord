@@ -58,6 +58,8 @@ Server/scripts/reports/
 
 # Server runtime artifacts
 Server/chatserver.exe
+Server/Server
+Server/chatserver
 dbinventory.exe
 Server/chatserver.exe~
 Server/owncord-server.exe

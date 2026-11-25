@@ -25,19 +25,24 @@ to a merged pull request. Every command and rule in full is in the
 
 Find the part you want to change, then the tests that cover it.
 
-| You want to change                 | Start in                                                                                                  | Tests                                                   |
-| ---------------------------------- | --------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
-| Server REST or WebSocket behaviour | [api/](../Server/api/), [ws/](../Server/ws/), then [service/](../Server/service/)                         | Tests beside the Go package: [Server (Go)](#server-go)  |
-| The desktop app's screens          | [features/](../Client/src/features/); [client architecture](architecture/client.md) says who owns what    | Client tests: [Client (Tauri v2)](#client-tauri-v2)     |
-| Native desktop behaviour           | [src-tauri/src/](../Client/src-tauri/src/) and [platform/desktop/](../Client/src/platform/desktop/)       | Rust tests. Check it on the system it is for.           |
-| The server's admin panel           | [admin/static/js/](../Server/admin/static/js/)                                                            | Server admin tests and the admin tests in `Client/`     |
-| A database query or table          | [queries/](../Server/db/queries/) or a new [migration](../Server/migrations/). Never edit generated code. | The regenerate check and the service tests              |
-| A WebSocket message type           | [protocol/schema.json](../protocol/schema.json), then regenerate                                          | The regenerate check and the server and client tests    |
-| A check, a build or CI             | [scripts/](../scripts/) and [.github/workflows/](../.github/workflows/)                                   | The script's own tests. These changes run every CI job. |
+| You want to change                 | Start in                                                                                                                    | Tests                                                   |
+| ---------------------------------- | --------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------- |
+| Server REST or WebSocket behaviour | [api/](../Server/api/), [ws/](../Server/ws/), then [service/](../Server/service/)                                           | Tests beside the Go package: [Server (Go)](#server-go)  |
+| The desktop app's screens          | [features/](../Client/src/features/), one folder per feature; [client architecture](architecture/client.md) maps the layers | Client tests: [Client (Tauri v2)](#client-tauri-v2)     |
+| Native desktop behaviour           | [src-tauri/src/](../Client/src-tauri/src/) and [platform/desktop/](../Client/src/platform/desktop/)                         | Rust tests. Check it on the system it is for.           |
+| The server's admin panel           | [admin/static/js/](../Server/admin/static/js/)                                                                              | Server admin tests and the admin tests in `Client/`     |
+| A database query or table          | [queries/](../Server/db/queries/) or a new [migration](../Server/migrations/). Never edit generated code.                   | The regenerate check and the service tests              |
+| A WebSocket message type           | [protocol/schema.json](../protocol/schema.json), then regenerate                                                            | The regenerate check and the server and client tests    |
+| A check, a build or CI             | [scripts/](../scripts/) and [.github/workflows/](../.github/workflows/)                                                     | The script's own tests. These changes run every CI job. |
 
 **Never hand-edit generated code.** CI fails when it drifts, and the next
-regenerate throws your edit away. The generated folders and how to regenerate
-them are listed in the root [CLAUDE.md](../CLAUDE.md#generated-code--never-hand-edit).
+regenerate throws your edit away. The generated files and how to regenerate
+them are listed in [Generated code](contributing-reference.md#generated-code).
+`npm run generate` from the root regenerates all of them.
+
+**User-visible text** (labels, messages, errors) lives in the English catalogs
+in [Client/src/i18n/](../Client/src/i18n/), not in the component that shows it.
+`tests/unit/ui-strings.test.ts` fails on new UI text outside a catalog.
 
 When something fails and you ask for help, include the command, the folder you
 ran it in and the error. A check you could not run is something to mention,
@@ -55,7 +60,11 @@ not a pass.
 
 - **Go 1.27** for the server. Go downloads the exact version for you.
 - **Node.js 26 and npm 11** for the desktop app and the root scripts. Another
-  major version is refused on install.
+  major version is refused on install. Get Node 26 from
+  [nodejs.org](https://nodejs.org/en/download), or with a version manager. The
+  version file is `Client/.nvmrc`; there is none at the repository root. So
+  `cd Client && nvm install && nvm use` (or `fnm use --install-if-missing`),
+  then go back to the root. npm 11 comes with Node 26.
 - **Rust** for the desktop app. rustup installs the right version for you. You
   do not need Rust for server-only work.
 - **Docker** is optional.
@@ -74,7 +83,8 @@ Windows builds and server-only work need none of this.
 
 ### Available Commands
 
-From the repository root. They work the same on Windows, macOS and Linux.
+From the repository root. They work the same on Windows and Linux. macOS is
+not a supported target: nothing in CI or the scripts covers it.
 
 | Command                       | What it does                                     |
 | ----------------------------- | ------------------------------------------------ |
@@ -94,13 +104,18 @@ runs those. A tool you do not have installed is skipped with a note.
 
 You never need Node for server work. From `Server/`:
 
-| Command              | What it does                               |
-| -------------------- | ------------------------------------------ |
-| `go build .`         | Build the server                           |
-| `make test`          | Run the tests the way CI does              |
-| `make test-deadlock` | The deadlock-detection pass CI also runs   |
-| `make sqlc-generate` | Regenerate the database code               |
-| `make docs-generate` | Regenerate the generated parts of the docs |
+| Command              | What it does                                 |
+| -------------------- | -------------------------------------------- |
+| `go build .`         | Build the server                             |
+| `make test`          | Run the tests the way CI does (about 17 min) |
+| `make test-deadlock` | The deadlock-detection pass CI also runs     |
+| `make sqlc-generate` | Regenerate the database code                 |
+| `make docs-generate` | Regenerate the generated parts of the docs   |
+
+Times are rough, from a typical cloud Linux machine with 4 cores. Run one
+package or one test while you work:
+`go test ./api/...` or `go test ./api/ -run TestName` (add `-race` to match CI).
+`go build .` leaves a `Server/Server` binary (Linux) that git ignores.
 
 Every make target: [Server commands](contributing-reference.md#server-go).
 
@@ -108,14 +123,23 @@ Every make target: [Server commands](contributing-reference.md#server-go).
 
 From `Client/`:
 
-| Command               | What it does                                 |
-| --------------------- | -------------------------------------------- |
-| `npm run tauri dev`   | Run the desktop app with live reload         |
-| `npm run tauri build` | Build the installer                          |
-| `npm test`            | Run the unit, integration and contract tests |
-| `npm run test:e2e`    | Run the browser tests                        |
-| `npm run typecheck`   | Check the types                              |
-| `npm run lint`        | Run the linters                              |
+| Command                                    | What it does                                               |
+| ------------------------------------------ | ---------------------------------------------------------- |
+| `npm run tauri dev`                        | Run the desktop app with live reload                       |
+| `npm run tauri build`                      | Build the installer                                        |
+| `npm test`                                 | Run the unit, integration and contract tests (about 3 min) |
+| `npx vitest run tests/unit/<file>.test.ts` | Run one test file (a few seconds)                          |
+| `npm run test:e2e`                         | Run the browser tests                                      |
+| `npm run typecheck`                        | Check the types                                            |
+| `npm run lint`                             | Run the linters                                            |
+
+`npm test` prints many `Not implemented: HTMLMediaElement's play()` lines from
+jsdom. They are expected and do not mean a test failed.
+
+The browser tests need a Chromium once per machine. From `Client/`, run
+`npx playwright install chromium` (add `--with-deps` on a bare Linux box).
+
+`npm run check:client`, the client checks CI runs, takes about 6 to 7 minutes.
 
 Every script, mutation testing and the Android build:
 [Client commands](contributing-reference.md#client-tauri-v2).
@@ -160,9 +184,7 @@ The policy: [SECURITY.md](../SECURITY.md).
 
 - **Branch from `dev`, and open your pull request against `dev`.** `dev` is
   where all work comes together.
-- `main` only holds releases. A release merges `dev` into `main`. During the
-  2.9.x fix-only period, `main` takes only fixes that already landed on `dev`;
-  see [Fix-only period](maintainers.md#fix-only-period-29x).
+- `main` only holds releases. A release merges `dev` into `main`.
 
 `dev` only takes pull requests. The required checks must pass, but no review
 approval is needed, so you can merge your own PR once CI is green.
@@ -206,9 +228,9 @@ For anything more than a small change, the body explains why:
 End with a **`Not included:`** line naming nearby work you chose to leave out,
 and why. It shows the gap was seen, not missed.
 
-A change made by an AI agent with no person watching also lists the files it
-changed, the state it writes and the two edge cases it tested, as the root
-[CLAUDE.md](../CLAUDE.md#ai-quality-guardrails--engineering-standards) asks.
+A change made by an AI agent with no person watching also lists, in the body,
+the files it changed, the state it writes (stores, tables, config keys, files)
+and the two edge cases it tested.
 
 ## Pull Request Process
 
@@ -221,6 +243,11 @@ changed, the state it writes and the two edge cases it tested, as the root
 If a server owner or user would notice your change, add a line to
 `CHANGELOG.md` under `## Unreleased`. Follow that file's "How to write an
 entry": short, plain, one line per fix, no ids and no file paths.
+
+- **Needs a line:** a fix for a bug people could hit, a new setting, a new
+  search word or label people will see, a changed default.
+- **Does not:** a refactor, a test, a CI or docs change, a rename inside the
+  code.
 
 ## Testing
 
