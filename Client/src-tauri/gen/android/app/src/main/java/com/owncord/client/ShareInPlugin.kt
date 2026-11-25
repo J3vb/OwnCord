@@ -67,8 +67,13 @@ object SharedName {
 // and the webview asks again shortly. One share at a time: a new one
 // replaces the last, and a share nobody took within ten minutes is dropped.
 @TauriPlugin
-class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
-  private val io = RetirableWorker()
+class ShareInPlugin internal constructor(
+  private val activity: Activity,
+  private val io: RetirableWorker,
+) : Plugin(activity) {
+  // The one Tauri calls; a test passes its own worker to the other.
+  constructor(activity: Activity) : this(activity, RetirableWorker())
+
   // Copy work holds this, not the activity, so a queued copy cannot keep a
   // retired screen alive.
   private val appContext = activity.applicationContext

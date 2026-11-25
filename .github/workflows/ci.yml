@@ -2211,6 +2211,12 @@ jobs:
         if: always()
         run: rm -f "$RUNNER_TEMP/owncord-release.jks" src-tauri/gen/android/keystore.properties
 
+      # The JVM unit tests next to the app's Kotlin code (src/test). They run
+      # after the build, which writes the Gradle files Tauri generates.
+      - name: Android unit tests
+        working-directory: Client/src-tauri/gen/android
+        run: ./gradlew --no-daemon :app:testArm64DebugUnitTest
+
       - name: Check signature, page alignment and size
         id: apk
         env:
