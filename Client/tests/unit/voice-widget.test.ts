@@ -97,6 +97,8 @@ function seedVoiceLobby(id = 1, voiceMaxVideo = 0): void {
   });
 }
 
+const CAMERA_ON = "Turn on camera (the call can see you)";
+
 describe("VoiceWidget", () => {
   let container: HTMLDivElement;
 
@@ -464,7 +466,7 @@ describe("VoiceWidget", () => {
     const widget = mountVoiceWidget();
     const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
     const shareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
-    expect(cameraBtn.title).toBe("Turn on camera (the call can see you)");
+    expect(cameraBtn.title).toBe(CAMERA_ON);
     expect(shareBtn.title).toBe("Share your screen");
 
     voiceStore.setState((prev) => ({ ...prev, localCamera: true, localScreenshare: true }));
@@ -841,7 +843,7 @@ describe("VoiceWidget", () => {
     setConnectionStatus("connected");
     uiStore.flush();
     expect(cameraBtn.disabled).toBe(false);
-    expect(cameraBtn.title).toBe("Turn on camera (the call can see you)");
+    expect(cameraBtn.title).toBe(CAMERA_ON);
 
     widget.destroy?.();
   });
@@ -858,7 +860,7 @@ describe("VoiceWidget", () => {
 
     setVoiceStatus("connected");
     expect(cameraBtn.disabled).toBe(false);
-    expect(cameraBtn.title).toBe("Turn on camera (the call can see you)");
+    expect(cameraBtn.title).toBe(CAMERA_ON);
 
     widget.destroy?.();
   });
