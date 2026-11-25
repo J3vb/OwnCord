@@ -108,14 +108,18 @@ Most home connections get a new public address now and then.
 
 ## Outgoing connections
 
-OwnCord sends no telemetry. It does connect out for a few things you turned
-on:
+OwnCord sends no telemetry. It does connect out for a few things:
 
 - **Voice start-up:** LiveKit asks a public STUN server for your address.
 - **First start:** the voice server download from GitHub, if the server runs
   voice itself.
 - **Update checks:** `api.github.com`, when an admin or an app checks for
   updates.
+- **Link previews** (on by default): the page behind each new link a member
+  posts, fetched from the server's address. Turn it off with
+  `link_previews.enabled: false`.
+- **Push notifications** (off by default, `push.enabled`): the push service of
+  each device that registered for them.
 
 The full list is in [diagnostics.md](architecture/diagnostics.md#egress-inventory).
 

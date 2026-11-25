@@ -155,13 +155,15 @@ changed" roster badge with the new safety number. The call is not held up,
 so an unexpected notice is the cue to compare safety numbers out of band. To close the first-contact window,
 compare identity-key fingerprints out of band (the verification surface in
 [architecture/ux/voice-and-e2ee.md](ux/voice-and-e2ee.md) §7
-shows them). Pins are **one per account**, keyed `{host}:{userId}`
-(`Client/src/features/connection/identity.ts:11-12`; `features/voice/e2eePeerState.ts:158`, `:258`), while
-identity keys are per install — so a peer's second device shows up as a
-key change of the same account and overwrites the pin, and their first
-device then does the same in turn. Until a stable device identifier exists,
-expect that flip-flop (and its notices) with multi-device peers and verify
-each key out of band.
+shows them). Pins are a **set per account**, keyed `{host}:{userId}`
+(`Client/src/features/connection/identity.ts:11-12`), holding up to five keys, oldest
+dropped first (`Client/src/lib/net/identityPins.ts:25`, `:49`), because
+identity keys are per install. A key not yet in the set raises the notice
+once and joins it; nothing is overwritten, and any key in the set is trusted
+(`features/voice/e2eePeerState.ts:289`). So a peer switching back to a device
+already pinned is silent, and the notice marks only the first use of each new
+key. Verify each key out of band; the trusted keys panel can forget any key
+but the one in the current call and the last one left.
 
 ## Transport
 
@@ -501,10 +503,11 @@ does not claim").
   `TestAccountSecurityMethods_RefuseAPITokenPrincipal`).
 - Admin force-logout revokes all of a user's sessions
   (`Server/admin/api.go:114`; test `TestForceLogout_AuthorizationMatrix`).
-- Voice E2EE identity is per install, but peers keep **one pin per account**
-  (`{host}:{userId}`, `Client/src/features/connection/identity.ts:11-12`): your second device
-  appears to them as a key change that replaces the pin (with a notice), and
-  your first device then does the same. Not per-device pinning.
+- Voice E2EE identity is per install, and peers keep **up to five pins per
+  account** (`{host}:{userId}`, `Client/src/features/connection/identity.ts:11-12`,
+  `Client/src/lib/net/identityPins.ts:25`): your second device appears to them
+  once as a key change (with a notice) and is then pinned beside the first, so
+  switching between them shows no further notice.
 
 ## What beta does not claim
 
@@ -628,6 +631,8 @@ destination. Anything else on the wire is a finding.
 | LiveKit at `voice.livekit_url` (default `ws://localhost:7880`)                                                                                                                         | a user joins voice; health probe of the supervised process                                                                                       | media SFU signalling                                                                                                                                                                                                           | **none today**: empty credentials are replaced by random ones and an empty URL defaults to `ws://localhost:7880` (`Server/config/config.go:645-662`), so a voice join always attempts `voice.livekit_url`; with no LiveKit running the attempt fails on loopback. A real `voice.enabled` switch is a server change | `Server/api/livekit_proxy.go:23-28`; `Server/livekitproc/process.go:47-52`, `:372-377`                                              |
 | hosts on `plugins.http_allowlist`                                                                                                                                                      | an installed plugin with the `http` capability calls out                                                                                         | plugin feature                                                                                                                                                                                                                 | empty by default; plugins off by default (`Server/config/config.go:352`, `:356`)                                                                                                                                                                                                                                   | `Server/plugin/host_http.go:115`, `:169-187`                                                                                        |
 | any `https` host on port 443 a member linked, the image its page names, and the Klipy GIF CDN                                                                                          | a **browser-client** viewer, signed in, opens a link preview, a GIF or an outside image they consented to                                        | the browser client has no native broker, so the server fetches for it and the viewer's address never reaches the linked host                                                                                                   | `server.browser_client_enabled` (off by default)                                                                                                                                                                                                                                                                   | `Server/externalcontent/broker.go`, `Server/api/external_handler.go`                                                                |
+| any `https` host on port 443 a member linked in a message, and the preview image that page names                                                                                       | a member posts or edits a message with a link the server has no card for; at most 5 links a message, 20 links a minute per author                | build the link preview card and its thumbnail on the server, through the external-content broker; the linked host sees the server's address                                                                                    | `link_previews.enabled: false` (on by default)                                                                                                                                                                                                                                                                     | `Server/internal/app/link_previews.go:42-58`; `Server/unfurl/unfurler.go`; `Server/externalcontent/broker.go`                       |
+| the push service named in each stored Web Push subscription's endpoint                                                                                                                 | a new message, call ring or owner alert for a member with a registered device                                                                    | an encrypted wake-up with no message text, channel name or sender, and a VAPID header                                                                                                                                          | `push.enabled` (off by default)                                                                                                                                                                                                                                                                                    | `Server/service/push_dispatch.go`; `Server/service/push.go`                                                                         |
 | `acme-v02.api.letsencrypt.org`                                                                                                                                                         | startup and renewal, only when `tls.mode: acme`                                                                                                  | certificate issuance                                                                                                                                                                                                           | any other `tls.mode` (default `self_signed`)                                                                                                                                                                                                                                                                       | `Server/auth/tls.go:262-331`                                                                                                        |
 | operator's OTLP collector (`telemetry.otlp_endpoint`)                                                                                                                                  | startup, only when `telemetry.exporter: otlp`                                                                                                    | traces and metrics to a collector the operator runs                                                                                                                                                                            | `telemetry.exporter: none` (default)                                                                                                                                                                                                                                                                               | `Server/config/config.go:148-166`; `Server/internal/app/telemetry.go:18`                                                            |
 | `127.0.0.1:<port>/health`                                                                                                                                                              | `healthcheck` subcommand (Docker `HEALTHCHECK`)                                                                                                  | liveness probe of itself                                                                                                                                                                                                       | n/a — loopback                                                                                                                                                                                                                                                                                                     | `Server/internal/app/healthcheck.go:24-94`                                                                                          |
@@ -646,7 +651,7 @@ is cut, never on an operator's machine.
 
 Two of the GitHub paths (`updater.go`, `livekitproc/download.go`) use a plain
 `http.Client` against fixed, prefix-validated GitHub URLs; the Klipy proxy,
-plugin HTTP and the browser client's external-content broker go through `Server/safefetch`, which classifies every resolved
+plugin HTTP, Web Push, the server's link previews and the browser client's external-content broker go through `Server/safefetch`, which classifies every resolved
 answer, connects only to the ones it vetted, and bounds time, bytes,
 redirects, content types and concurrency (`Server/safefetch/classify.go`,
 `destination.go`, `body.go`; tests `TestClassifyAddr_*`, `TestFetch_*`).

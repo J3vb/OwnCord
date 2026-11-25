@@ -33,14 +33,19 @@ local machine and the private ranges `10.0.0.0/8`, `172.16.0.0/12` and
 `192.168.0.0/16` (plus their IPv6 equivalents). Tailscale addresses are in
 `100.64.0.0/10`, which is **not** included, so you get a `403` error.
 
-To manage the server over the tailnet, add the range to `config.yaml`:
+To manage the server over the tailnet, add the Tailscale address of each
+device you manage it from to `config.yaml` (`tailscale ip -4` on that device
+shows it):
 
 ```yaml
 server:
   admin_allowed_cidrs:
     - "127.0.0.0/8"
-    - "100.64.0.0/10" # Tailscale tailnet
+    - "100.101.102.103/32" # your laptop on the tailnet
 ```
+
+Avoid adding the whole `100.64.0.0/10` range: internet providers also use it
+for shared addresses, so it can cover more than your tailnet.
 
 Setting this list replaces the default. So add back any other ranges you still
 need, such as your LAN.

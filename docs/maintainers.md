@@ -237,6 +237,11 @@ needs these GitHub Actions secrets:
 - `SERVER_UPDATE_SIGNING_PRIVATE_KEY`
 - `SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD`
 
-To rotate the server update key, update
-[Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt).
-Roll it over in stages so running servers keep accepting updates.
+Each side trusts exactly one key, and a release carries one signature per
+file. A server checks updates against the key embedded from
+[Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt);
+the desktop app against `plugins.updater.pubkey` in
+`Client/src-tauri/tauri.conf.json`. Changing either key therefore cannot be
+staged: the first release signed with the new key is refused by every server
+or app still running a build with the old one. Those owners and users must
+install that release by hand; after that, updates work again.
