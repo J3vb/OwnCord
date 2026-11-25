@@ -10,7 +10,7 @@ import { syncVideoSurface } from "@lib/voice/videoSurface";
 import { bindVideoZoom } from "@lib/ui/zoomPan";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { voiceText } from "../../../i18n/voice";
-import { isAndroidApp } from "../native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import type { ShareSenderSample } from "../shareSenderStats";
 import {
   STATS_POLL_MS,

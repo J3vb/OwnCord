@@ -25,7 +25,7 @@ import { createDisclosure } from "./status";
 import { buildSettingsSection } from "./settingsSection";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
-import { isAndroidApp, isLinuxDesktop } from "../voice/native/platform";
+import { isAndroidApp, isLinuxDesktop } from "@lib/hostOs";
 import { settingsText as t } from "../../i18n/settings";
 import { copyThenRelabel } from "@lib/ui/clipboard";
 import { EVENT_LOG_PREF_KEY, setEventSinkEnabled } from "@lib/diagnostics/eventSink";

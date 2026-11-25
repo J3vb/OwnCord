@@ -19,7 +19,7 @@ const sharedWindow = {
   ],
 };
 const mockShareStream = vi.fn<() => unknown>(() => sharedWindow);
-vi.mock("../../src/features/voice/native/platform", () => ({
+vi.mock("../../src/lib/hostOs", () => ({
   isLinuxDesktop: () => mockIsLinuxDesktop(),
   isWindowsDesktop: () => false,
   canPublishScreen: () => true,

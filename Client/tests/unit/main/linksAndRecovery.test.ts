@@ -25,7 +25,9 @@ import {
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
 vi.mock("@lib/prefs/appearance", () => mocks.prefsAppearanceMock());
-vi.mock("@lib/net/connectionDiagnostics", () => mocks.netConnectionDiagnosticsMock());
+vi.mock("../../../src/features/connection/connectionDiagnostics", () =>
+  mocks.netConnectionDiagnosticsMock(),
+);
 vi.mock("@pages/mainPagePrefetch", () => mocks.pagesMainPagePrefetchMock());
 vi.mock("../../../src/features/messaging/pendingMessages", () => mocks.pendingMessagesMock());
 vi.mock("../../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());

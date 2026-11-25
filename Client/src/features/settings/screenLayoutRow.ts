@@ -10,7 +10,7 @@ import {
   type ScreenLayout,
 } from "@lib/prefs/screenLayout";
 import { settingsText as t } from "../../i18n/settings";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { buildChoiceRow } from "./settingRow";
 
 /** The row, or null when it does not show (Developer mode off, or the Android app). */

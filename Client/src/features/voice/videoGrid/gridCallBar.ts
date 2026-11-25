@@ -7,7 +7,7 @@ import { createIcon, type IconName } from "@lib/icons";
 import { showToast } from "@lib/ui/toast";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { voiceText } from "../../../i18n/voice";
-import { canPublishScreen } from "../native/platform";
+import { canPublishScreen } from "@lib/hostOs";
 import { openPopoutWindow } from "../popout";
 import { createRouteSlot } from "../routeSlot";
 import { voiceStore } from "@stores/voice.store";

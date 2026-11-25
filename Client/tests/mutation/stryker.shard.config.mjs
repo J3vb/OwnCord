@@ -288,7 +288,7 @@ export const shards = {
   "transport-auth-2": [
     "src/features/channels/wsGameActivity.ts",
     "src/lib/apiAccount.ts",
-    "src/lib/net/connectionDiagnostics.ts",
+    "src/features/connection/connectionDiagnostics.ts",
     "src/lib/net/identityPins.ts",
     "src/lib/net/sessionRegistry.ts",
     "src/lib/net/trustedDomains.ts",
@@ -381,7 +381,7 @@ export const shards = {
   "transport-auth-12": [
     "src/features/channels/wsReadySlices.ts",
     "src/features/push/readyPush.ts",
-    "src/features/voice/native/platform.ts",
+    "src/lib/hostOs.ts",
     "src/lib/net/hostNormalize.ts",
     "src/features/connection/identity.ts",
     "src/lib/net/ws/authFrame.ts",

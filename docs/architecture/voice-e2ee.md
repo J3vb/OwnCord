@@ -240,7 +240,7 @@ the subscriber's answer too (`vendor/livekit/OWNCORD-PATCH.md`).
 
 ### Phase 1: audio
 
-**Where the switch is.** `features/voice/native/platform.ts`'s
+**Where the switch is.** `lib/hostOs.ts`'s
 `isLinuxDesktop()` is the only platform check. `RoomLifecycle.createRoom`
 returns a `NativeRoom` (`features/voice/native/nativeRoom.ts`) instead of a
 livekit-client `Room` there, and `E2EEWorker.applyRoomKey` hands the key to the

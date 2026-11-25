@@ -144,7 +144,7 @@ describe("E2EEWorker.applyRoomKey on the Linux native backend", () => {
   it("sends the same base64 text to the native key provider, not the web one", async () => {
     vi.resetModules();
     vi.doMock("../../lib/logger", () => appLogger);
-    vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
+    vi.doMock("../../lib/hostOs", () => ({ isLinuxDesktop: () => true }));
     const setRoomKey = vi.fn(async () => undefined);
     vi.doMock("../../platform/desktop", () => ({ desktop: { nativeVoice: { setRoomKey } } }));
     const { E2EEWorker: LinuxWorker } = await import("./e2eeWorker");
@@ -159,7 +159,7 @@ describe("E2EEWorker.applyRoomKey on the Linux native backend", () => {
     expect(setRoomKey).toHaveBeenCalledWith("b64:9");
     expect(onKeyInstalled).toHaveBeenCalledTimes(1);
     expect(setKey).not.toHaveBeenCalled();
-    vi.doUnmock("./native/platform");
+    vi.doUnmock("../../lib/hostOs");
     vi.doUnmock("../../platform/desktop");
     vi.doUnmock("../../lib/logger");
   });
@@ -169,7 +169,7 @@ describe("E2EEWorker.clearRoomKey on the Linux native backend", () => {
   it("lands before the next session's key, even when the clear is slow", async () => {
     vi.resetModules();
     vi.doMock("../../lib/logger", () => appLogger);
-    vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
+    vi.doMock("../../lib/hostOs", () => ({ isLinuxDesktop: () => true }));
     const order: string[] = [];
     const clearing = deferred();
     const clearRoomKey = vi.fn(async () => {
@@ -192,7 +192,7 @@ describe("E2EEWorker.clearRoomKey on the Linux native backend", () => {
     clearing.resolve();
     await expect(applied).resolves.toBe(true);
     expect(order).toEqual(["clear", "set b64:7"]);
-    vi.doUnmock("./native/platform");
+    vi.doUnmock("../../lib/hostOs");
     vi.doUnmock("../../platform/desktop");
     vi.doUnmock("../../lib/logger");
   });
@@ -203,7 +203,7 @@ const KEY = new Uint8Array([5]);
 async function loadWorker(linux: boolean) {
   vi.resetModules();
   vi.doMock("../../lib/logger", () => appLogger);
-  vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => linux }));
+  vi.doMock("../../lib/hostOs", () => ({ isLinuxDesktop: () => linux }));
   const clearRoomKey = vi.fn(async () => undefined);
   const setRoomKey = vi.fn(async () => undefined);
   vi.doMock("../../platform/desktop", () => ({
@@ -215,7 +215,7 @@ async function loadWorker(linux: boolean) {
 }
 
 function unmock(): void {
-  vi.doUnmock("./native/platform");
+  vi.doUnmock("../../lib/hostOs");
   vi.doUnmock("../../platform/desktop");
   vi.doUnmock("../../lib/logger");
 }
@@ -372,7 +372,7 @@ describe("E2EEWorker key slots on the Linux native backend", () => {
     vi.useFakeTimers();
     vi.resetModules();
     vi.doMock("../../lib/logger", () => appLogger);
-    vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
+    vi.doMock("../../lib/hostOs", () => ({ isLinuxDesktop: () => true }));
     const setRoomKey = vi.fn(async () => undefined);
     const useKeySlot = vi.fn(async () => undefined);
     vi.doMock("../../platform/desktop", () => ({
@@ -388,7 +388,7 @@ describe("E2EEWorker key slots on the Linux native backend", () => {
     expect(setRoomKey).toHaveBeenCalledWith("b64:3", { slot: 1, stage: true });
     await vi.advanceTimersByTimeAsync(mod.KEY_SWITCH_DELAY_MS);
     expect(useKeySlot).toHaveBeenCalledWith(1);
-    vi.doUnmock("./native/platform");
+    vi.doUnmock("../../lib/hostOs");
     vi.doUnmock("../../platform/desktop");
     vi.doUnmock("../../lib/logger");
     vi.useRealTimers();

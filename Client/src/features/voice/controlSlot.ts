@@ -6,7 +6,7 @@
 
 import { Disposable } from "../../lib/disposable";
 import { createLogger } from "../../lib/logger";
-import { isAndroidApp } from "./native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 
 const log = createLogger("control-slot");
 

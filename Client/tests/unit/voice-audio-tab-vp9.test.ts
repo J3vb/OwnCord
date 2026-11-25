@@ -4,9 +4,7 @@ import * as codecMocks from "../helpers/voiceCodecTabMocks";
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
 const supportsVP9 = vi.hoisted(() => vi.fn(() => true));
 
-vi.mock("../../src/features/voice/native/platform", () =>
-  codecMocks.nativePlatformMock(() => isLinuxDesktop()),
-);
+vi.mock("../../src/lib/hostOs", () => codecMocks.nativePlatformMock(() => isLinuxDesktop()));
 const nativeVp9 = vi.hoisted(() => ({ value: false }));
 vi.mock("../../src/features/voice/native/videoCodecs", () => ({
   nativeVideoCodecs: () => Promise.resolve({ h264: true, vp9: nativeVp9.value, decode: [] }),

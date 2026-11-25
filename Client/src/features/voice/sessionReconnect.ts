@@ -26,7 +26,7 @@ import { showToast } from "@lib/ui/toast";
 import { isDmKeptForCall } from "../direct-messages/keptCallDms";
 import { joinSequence, noteJoinSent } from "./joinRequest";
 import { restoreMediaAfterReconnect } from "./localVoiceRestore";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { voiceText } from "../../i18n/voice";
 import { SessionTokens } from "./sessionTokens";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";

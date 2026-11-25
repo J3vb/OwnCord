@@ -52,8 +52,8 @@ const { mockExportSupportBundle } = vi.hoisted(() => ({
   mockExportSupportBundle: vi.fn<any>(),
 }));
 const linuxDesktop = vi.hoisted(() => ({ on: false }));
-vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/voice/native/platform")>()),
+vi.mock("../../src/lib/hostOs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/hostOs")>()),
   isLinuxDesktop: () => linuxDesktop.on,
 }));
 vi.mock("@lib/supportBundle", () => ({ exportSupportBundle: mockExportSupportBundle }));

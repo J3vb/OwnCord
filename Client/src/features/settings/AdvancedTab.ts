@@ -9,7 +9,7 @@ import { clearPendingPersistedLogs } from "@lib/logPersistence";
 import { desktop } from "../../platform/desktop";
 import type { WindowPrefName, WindowPrefsState } from "../../platform/contracts/windowPrefs";
 import { appendToggleRows, createToggle } from "./helpers";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { buildGameActivityRows } from "./GameActivityRows";
 import { buildMusicActivityRows } from "./MusicActivityRows";
 import { settingsText as t } from "../../i18n/settings";

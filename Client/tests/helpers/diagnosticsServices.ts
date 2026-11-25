@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 import type { SessionScope } from "@lib/net/sessionScope";
-import type { DiagnosticServices } from "@lib/net/connectionDiagnostics";
+import type { DiagnosticServices } from "../../src/features/connection/connectionDiagnostics";
 
 /** Healthy diagnostics services for one session; tests override what they
  *  exercise. `config` is read on every call, so a test may swap it. */

@@ -17,7 +17,7 @@ import {
   nativeCameraSupport,
   onNativeDevicesChanged,
 } from "../../voice/native/devices";
-import { isLinuxDesktop } from "../../voice/native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { desktop } from "../../../platform/desktop";
 import { NativeVideoRenderer } from "../../voice/native/videoRenderer";
 import { settingsText as t } from "../../../i18n/settings";

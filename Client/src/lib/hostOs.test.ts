@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach, vi } from "vitest";
-import { isAndroidApp, isLinuxDesktop, isWindowsDesktop } from "./platform";
+import { isAndroidApp, isLinuxDesktop, isWindowsDesktop } from "./hostOs";
 
 const WEBKITGTK =
   "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15";

@@ -169,7 +169,7 @@ the three call service commands in `call_service.rs` (`set_call_service`,
 to OwnCord), the five notification commands in `android_notifications.rs`,
 the three call audio commands in `mobile_audio.rs`, `system_idle_follow`
 in `idle_android.rs` and the four push commands in `push.rs`. The one environment-detection helper is
-`features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
+`lib/hostOs.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
 
@@ -474,7 +474,7 @@ native surface itself lives only in `platform/desktop/`.
 
 **Media devices are not on this map, deliberately.** No generic `@tauri-apps`
 surface exists for them: the cross-platform media-device call sites
-(`features/voice/deviceManager.ts`, `lib/net/connectionDiagnostics.ts`,
+(`features/voice/deviceManager.ts`, `features/connection/connectionDiagnostics.ts`,
 `features/settings/VoiceAudioTab.ts`) use the Web API
 `navigator.mediaDevices`, while the Linux-native voice session lists its audio
 and camera devices through its own `native_voice_*` commands (the audio

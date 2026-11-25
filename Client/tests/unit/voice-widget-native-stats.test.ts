@@ -24,7 +24,7 @@ vi.mock("../../src/platform/desktop", () => ({
     musicAudio: { support: () => Promise.resolve({ ok: false, reason: "platform" }) },
   },
 }));
-vi.mock("../../src/features/voice/native/platform", () => ({
+vi.mock("../../src/lib/hostOs", () => ({
   isLinuxDesktop: () => true,
   isWindowsDesktop: () => false,
   canPublishScreen: () => true,

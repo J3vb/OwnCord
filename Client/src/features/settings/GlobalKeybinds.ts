@@ -49,7 +49,7 @@ import {
 } from "@lib/prefs/keybinds";
 import { inputMode } from "@lib/ui/inputMode";
 import { loadPref, onPrefChange } from "@lib/prefs/preferences";
-import { canPublishScreen } from "../voice/native/platform";
+import { canPublishScreen } from "@lib/hostOs";
 import { onPopoutDocument } from "../voice/popoutDocuments";
 import {
   inPicker,

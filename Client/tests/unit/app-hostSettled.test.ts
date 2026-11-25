@@ -22,7 +22,9 @@ const { mockOnOpenUrl } = vi.hoisted(() => ({
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
 vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("../../src/features/connection/connectionDiagnostics", () => ({
+  configureConnectionDiagnostics: vi.fn(),
+}));
 const { mockPrefetchMainPage } = vi.hoisted(() => ({ mockPrefetchMainPage: vi.fn() }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: mockPrefetchMainPage }));
 vi.mock("../../src/features/messaging/pendingMessages", () => ({

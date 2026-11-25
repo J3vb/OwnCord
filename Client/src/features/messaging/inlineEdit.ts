@@ -12,7 +12,7 @@
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "@lib/dom";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { inlineEditText } from "../../i18n/inlineEdit";
 import { replaceEmojiShortcodes } from "./shortcodes";
 import { FORMAT_MARKERS, wrapWithMarker } from "./markdownMarkers";

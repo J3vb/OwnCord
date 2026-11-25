@@ -36,7 +36,7 @@ import { claimBack, holdBackGuard, type BackClaim, type BackGuard } from "@lib/u
 import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
-import { isAndroidApp } from "../../features/voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { shellText } from "../../i18n/shell";
 
 /**

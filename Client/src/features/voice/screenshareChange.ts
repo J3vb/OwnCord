@@ -40,7 +40,7 @@ import {
   type VideoTrackDeps,
 } from "./screenShare";
 import { bumpLocalShareRev } from "../../stores/voice.store";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { fitGpuH264Share, gpuH264SizeCap, setH264GpuProfiles } from "../../lib/voice/h264Profile";
 import { h264GpuPublish } from "./videoCodec";
 import {

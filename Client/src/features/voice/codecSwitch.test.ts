@@ -9,7 +9,7 @@ const republish = vi.hoisted(() => vi.fn());
 const isLinuxDesktop = vi.hoisted(() => vi.fn(() => false));
 const nativeVp9 = vi.hoisted(() => ({ value: false }));
 
-vi.mock("./native/platform", () => ({
+vi.mock("../../lib/hostOs", () => ({
   isLinuxDesktop: () => isLinuxDesktop(),
   isWindowsDesktop: () => false,
 }));
