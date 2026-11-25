@@ -297,6 +297,23 @@ func (d *drill) dBackup(s *dStage) ([]failure, error) {
 	return problems, nil
 }
 
+// wallReached checks, for the container leg, that the fill stopped because the volume is full: ENOSPC with
+// room left means the helper hit some other limit, not the filesystem the server writes to.
+func wallReached(f filler) error {
+	vf, ok := f.(*volumeFiller)
+	if !ok {
+		return nil
+	}
+	avail, err := vf.free()
+	if err != nil {
+		return unmeasured("reading the free space after the fill: %v", err)
+	}
+	if avail >= drillFillStep {
+		return unmeasured("the fill was refused with %d MiB still free", avail>>20)
+	}
+	return nil
+}
+
 // dFull fills to the wall and sends 50 messages: every send must be answered, the server must still be there,
 // and the log must name what happened. Quiet paths are recorded as candidate findings only this drill can
 // see.
@@ -304,15 +321,8 @@ func (d *drill) dFull(f filler, s *dStage) ([]failure, error) {
 	if err := d.fillToWall(f); err != nil {
 		return nil, err
 	}
-	if vf, ok := f.(*volumeFiller); ok {
-		// ENOSPC with room left means the helper hit some other limit, not the filesystem the server writes to.
-		avail, err := vf.free()
-		if err != nil {
-			return nil, unmeasured("reading the free space after the fill: %v", err)
-		}
-		if avail >= drillFillStep {
-			return nil, unmeasured("the fill was refused with %d MiB still free", avail>>20)
-		}
+	if err := wallReached(f); err != nil {
+		return nil, err
 	}
 	fmt.Printf("%s: full — %d MiB of junk on the filesystem, which now refuses more\n", d.phase, f.total()>>20)
 	var problems []failure
