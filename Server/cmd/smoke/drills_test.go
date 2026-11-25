@@ -583,6 +583,19 @@ func TestTableShowsSkipReason(t *testing.T) {
 	}
 }
 
+func TestDrillServerCarriesTheSweepLabel(t *testing.T) {
+	plain := strings.Join((&dockerTarget{vol: "v"}).dataMountArgs(), " ")
+	if plain != "-v v:"+containerData {
+		t.Errorf("ordinary leg mounts %q, want the named volume with -v", plain)
+	}
+	drill := strings.Join((&dockerTarget{vol: "v", tmpfsVol: true}).dataMountArgs(), " ")
+	for _, want := range []string{"--label " + drillLabel, "--mount type=volume,src=v,dst=" + containerData} {
+		if !strings.Contains(drill, want) {
+			t.Errorf("disk drill server args %q lack %q", drill, want)
+		}
+	}
+}
+
 func TestCreateTmpfsVolumeArgs(t *testing.T) {
 	got := strings.Join(tmpfsVolumeArgs("owncord-drill-vol-7", 24), " ")
 	for _, want := range []string{

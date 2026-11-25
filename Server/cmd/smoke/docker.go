@@ -124,14 +124,8 @@ func (t *dockerTarget) start(version string) error {
 	t.name = fmt.Sprintf("owncord-upgrade-%d-%d-%s", os.Getpid(), t.runs, version)
 	// The flags are docker-smoke.sh's start() plus the published port and LiveKit override; more would test a
 	// posture no owner runs.
-	data := []string{"-v", t.vol + ":" + containerData}
-	if t.tmpfsVol {
-		// --mount, not -v: -v on a name that does not exist silently makes a disk-backed volume, and a fill on
-		// that would write the runner's disk. --mount fails instead.
-		data = []string{"--mount", "type=volume,src=" + t.vol + ",dst=" + containerData}
-	}
 	args := []string{"run", "-d", "--name", t.name}
-	args = append(args, data...)
+	args = append(args, t.dataMountArgs()...)
 	args = append(args,
 		"-v", filepath.ToSlash(t.configPath())+":"+containerConfig,
 		"-p", containerPublish,
@@ -333,6 +327,17 @@ func (t *dockerTarget) cleanup() {
 	if t.dir != "" {
 		_ = os.RemoveAll(t.dir)
 	}
+}
+
+// dataMountArgs mounts the data directory. For the disk drill's tmpfs volume it uses --mount, not -v: -v on a
+// name that does not exist silently makes a disk-backed volume, and a fill on that would write the runner's
+// disk. The server then also carries the drill label, so a run killed before teardown leaves nothing the next
+// run's sweep cannot find: a volume a stopped container still references cannot be removed.
+func (t *dockerTarget) dataMountArgs() []string {
+	if !t.tmpfsVol {
+		return []string{"-v", t.vol + ":" + containerData}
+	}
+	return []string{"--label", drillLabel, "--mount", "type=volume,src=" + t.vol + ",dst=" + containerData}
 }
 
 // Labels and names that mark everything the disk drill creates, so a run killed before its cleanup is found and
