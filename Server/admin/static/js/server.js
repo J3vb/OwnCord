@@ -713,8 +713,9 @@ function openRestoreModal(name,date){
   openModal('<div class="modal-header"><h3>Restore backup</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body">'
     +'<p>Replace the live database with <strong>'+esc(name)+'</strong>'+(date?', taken '+esc(new Date(date).toLocaleString()):'')+'.</p>'
     +'<ul class="modal-list"><li><strong style="color:var(--text-danger)">Everything since that backup is lost</strong>: messages, members, roles and settings.</li>'
-    +'<li>A safety copy of the current database (<code>pre_restore_…</code>) is saved first and appears in this list.</li>'
-    +'<li>The server restarts by itself. Everyone, including you, is disconnected and may need to sign in again.</li></ul>'
+    +'<li>A safety copy of the current database (<code>pre_restore_…</code>) is saved first and shows in this list. Restore it to undo this.</li>'
+    +'<li>The server restarts by itself. Everyone, including you, is disconnected and may need to sign in again.</li>'
+    +'<li>People who erased their account since stay erased.</li></ul>'
     +'<div class="form-group" style="margin-top:16px"><label class="form-label" for="restoreConfirm">Type <strong style="color:var(--text-normal);text-transform:none">'+esc(name)+'</strong> to confirm</label><input class="form-input" id="restoreConfirm" autocomplete="off" autocapitalize="off" spellcheck="false" data-input-action="checkRestoreConfirm" data-args="'+actArgs(name)+'"></div>'
     +'<p class="auth-error" id="restoreErr" role="alert"></p></div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" id="restoreConfirmBtn" data-action="confirmRestore" data-args="'+actArgs(name)+'" disabled>Restore and restart</button></div>');

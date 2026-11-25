@@ -270,7 +270,7 @@ describe("enableCamera", () => {
   });
 
   it.each([
-    ["NotAllowedError", "Camera permission denied"],
+    ["NotAllowedError", "Camera blocked. Allow it in your system settings, then try again."],
     ["NotFoundError", "No camera found"],
     ["OverconstrainedError", "Failed to start camera"],
   ])("maps a %s to a specific message", async (name, message) => {

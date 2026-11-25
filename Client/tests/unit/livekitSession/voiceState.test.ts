@@ -1087,7 +1087,7 @@ describe("LiveKitSession", () => {
       await session.retryMicPermission();
 
       expect(errorCb).toHaveBeenCalledWith(
-        "Microphone still unavailable — check your browser permissions",
+        "Microphone still unavailable — check your microphone permission",
       );
       // setListenOnly(false) should NOT have been called on failure
       expect(setListenOnly).not.toHaveBeenCalled();

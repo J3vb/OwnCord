@@ -513,7 +513,7 @@ function removeMemberRole(uid,rid){return changeMemberRole(uid,rid,false)}
    year); 0 is a permanent ban. */
 const BAN_DURATIONS=[[0,'Permanent'],[1,'1 hour'],[24,'1 day'],[168,'7 days'],[720,'30 days']];
 function openBanUser(uid,uname){
-  openModal('<div class="modal-header"><h3>Ban User</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:16px">Ban <strong style="color:var(--text-normal)">'+esc(uname)+'</strong> from the server?</p>'
+  openModal('<div class="modal-header"><h3>Ban User</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body"><p style="color:var(--text-muted);margin-bottom:16px">Ban <strong style="color:var(--text-normal)">'+esc(uname)+'</strong> from the server? They are signed out now and can\'t sign in until the ban ends. You can unban them later.</p>'
     +'<div class="form-group"><label class="form-label" for="banDuration">Duration</label><select class="form-input" id="banDuration" style="appearance:auto">'+BAN_DURATIONS.map(([h,l])=>'<option value="'+h+'">'+l+'</option>').join('')+'</select></div>'
     +'<div class="form-group"><label class="form-label" for="banReason">Reason</label><textarea class="form-input form-textarea" id="banReason" placeholder="Reason for ban..."></textarea></div></div><div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" data-action="confirmBan" data-args="'+actArgs(uid)+'">Ban User</button></div>');
 }

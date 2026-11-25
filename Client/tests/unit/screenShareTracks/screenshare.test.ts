@@ -372,7 +372,9 @@ describe("enableScreenshare", () => {
     await enableScreenshare({ manualScreenTracks: [] }, deps);
 
     expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
-    expect(deps.onError).toHaveBeenCalledWith("Screen sharing permission denied");
+    expect(deps.onError).toHaveBeenCalledWith(
+      "Screen sharing was blocked. Allow it in your system settings, then try again.",
+    );
   });
 
   it("stays silent when the user cancels the picker (polish #10)", async () => {
@@ -426,7 +428,9 @@ describe("enableScreenshare", () => {
     await enableScreenshare({ manualScreenTracks: [] }, deps);
 
     expectConsole("error", /\[screenShare\] Failed to enable screenshare/);
-    expect(deps.onError).toHaveBeenCalledWith("Screen sharing permission denied");
+    expect(deps.onError).toHaveBeenCalledWith(
+      "Screen sharing was blocked. Allow it in your system settings, then try again.",
+    );
   });
 
   it("reports an aborted capture as a failure, not a cancel", async () => {

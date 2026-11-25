@@ -288,7 +288,7 @@ export function createServerPanel(
         const deleteBtn = createElement("button", {
           class: "srv-btn danger",
           type: "button",
-          "aria-label": connectText("servers.delete"),
+          "aria-label": connectText("servers.remove"),
         });
         deleteBtn.textContent = "";
         deleteBtn.appendChild(createIcon("x", 14));

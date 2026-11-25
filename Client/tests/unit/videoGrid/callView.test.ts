@@ -233,7 +233,7 @@ describe("VideoGrid", () => {
       const camera = barButton("camera");
       const share = barButton("share");
       expect(camera.getAttribute("aria-pressed")).toBe("false");
-      expect(camera.getAttribute("aria-label")).toBe("Turn on camera");
+      expect(camera.getAttribute("aria-label")).toBe("Turn on camera (the call can see you)");
       expect(share.getAttribute("aria-label")).toBe("Share your screen");
 
       grid.setCallState({

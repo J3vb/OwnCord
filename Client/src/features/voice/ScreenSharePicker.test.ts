@@ -116,7 +116,7 @@ describe("showScreenSharePicker", () => {
   it("says a window shares only its app's sound on X11, and all sound behind the portal", async () => {
     const x11 = await openWithAudio();
     expect(x11.root.querySelector("#ssp-audio-hint")?.textContent).toBe(
-      "A screen shares all sound except OwnCord's own. One window shares only its app's sound.",
+      "A screen shares all sound except OwnCord's own. One window shares only its app's sound. People watching hear it.",
     );
     clickGoLive(x11.root);
     await x11.picking;
@@ -130,7 +130,7 @@ describe("showScreenSharePicker", () => {
     });
     const portal = await mounted();
     expect(portal.querySelector("#ssp-audio-hint")?.textContent).toBe(
-      "All sound playing on this computer, except OwnCord's own.",
+      "All sound playing on this computer, except OwnCord's own. People watching your share will hear it.",
     );
     clickGoLive(portal);
     await portalPick;

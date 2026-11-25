@@ -464,7 +464,7 @@ describe("VoiceWidget", () => {
     const widget = mountVoiceWidget();
     const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
     const shareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
-    expect(cameraBtn.title).toBe("Turn on camera");
+    expect(cameraBtn.title).toBe("Turn on camera (the call can see you)");
     expect(shareBtn.title).toBe("Share your screen");
 
     voiceStore.setState((prev) => ({ ...prev, localCamera: true, localScreenshare: true }));
@@ -841,7 +841,7 @@ describe("VoiceWidget", () => {
     setConnectionStatus("connected");
     uiStore.flush();
     expect(cameraBtn.disabled).toBe(false);
-    expect(cameraBtn.title).toBe("Turn on camera");
+    expect(cameraBtn.title).toBe("Turn on camera (the call can see you)");
 
     widget.destroy?.();
   });
@@ -858,7 +858,7 @@ describe("VoiceWidget", () => {
 
     setVoiceStatus("connected");
     expect(cameraBtn.disabled).toBe(false);
-    expect(cameraBtn.title).toBe("Turn on camera");
+    expect(cameraBtn.title).toBe("Turn on camera (the call can see you)");
 
     widget.destroy?.();
   });

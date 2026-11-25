@@ -94,7 +94,7 @@ export function confirmDeleteProfile(
   const confirm = createElement(
     "button",
     { class: "btn-danger", type: "button", "data-testid": "confirm-delete-server" },
-    connectText("servers.delete"),
+    connectText("servers.remove"),
   );
   appendChildren(footer, cancel, confirm);
   const content = createElement("div", {});
