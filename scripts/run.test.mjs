@@ -13,12 +13,17 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
+import { resolveStrict, summarise } from "./run.mjs";
 
 const runner = fileURLToPath(new URL("./run.mjs", import.meta.url));
 // Use Node's absolute path, but leave build tools (and git) unavailable.
-// Listing must not execute a task or require a prepared checkout.
+// Listing must not execute a task or require a prepared checkout. A strict run
+// of the hygiene task runs this file too, so OWNCORD_STRICT is dropped here and
+// set only by the tests that exercise it.
 const env = Object.fromEntries(
-  Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "path"),
+  Object.entries(process.env).filter(
+    ([key]) => key.toLowerCase() !== "path" && key !== "OWNCORD_STRICT",
+  ),
 );
 env.PATH = "";
 
@@ -313,6 +318,95 @@ test("a skipped optional tool is named and the task still passes", () => {
   } finally {
     rmSync(fixture, { recursive: true, force: true });
   }
+});
+
+test("strict mode turns a skipped tool into exit 3 and INCOMPLETE", () => {
+  const r = summarise("check", ["golangci-lint", "sqlc", "sqlc"], { strict: true });
+  assert.equal(r.code, 3);
+  assert.match(r.stderr, /check: INCOMPLETE, golangci-lint, sqlc not installed/);
+  assert.equal(r.stdout, "");
+});
+
+test("the default summary still passes with the skip line", () => {
+  const r = summarise("check", ["sqlc"]);
+  assert.equal(r.code, 0);
+  assert.match(r.stdout, /check: passed, with sqlc skipped \(not installed\)\. CI runs them\./);
+  assert.equal(r.stderr, "");
+});
+
+test("strict mode with nothing skipped passes", () => {
+  const r = summarise("check", [], { strict: true });
+  assert.equal(r.code, 0);
+  assert.match(r.stdout, /check: passed$/);
+  assert.equal(r.stderr, "");
+});
+
+test("release:preflight is strict by default and --no-strict opts out loudly", () => {
+  assert.equal(resolveStrict("release:preflight", { env: {} }), true);
+  assert.equal(resolveStrict("check", { env: {} }), false);
+  assert.equal(resolveStrict("check", { env: { OWNCORD_STRICT: "1" } }), true);
+  assert.equal(resolveStrict("check", { strict: true, env: {} }), true);
+  assert.equal(resolveStrict("release:preflight", { noStrict: true, env: {} }), false);
+  assert.equal(
+    resolveStrict("release:preflight", { noStrict: true, env: { OWNCORD_STRICT: "1" } }),
+    false,
+  );
+  const r = summarise("release:preflight", ["sqlc"], { noStrict: true });
+  assert.equal(r.code, 0);
+  assert.match(r.stdout, /release:preflight: passed, but INCOMPLETE \(--no-strict\): sqlc skipped/);
+});
+
+function runSkipFixture(args, extraEnv = {}) {
+  const fixture = mkdtempSync(join(tmpdir(), "owncord-runner-"));
+  try {
+    mkdirSync(join(fixture, "scripts"));
+    mkdirSync(join(fixture, "Server"));
+    mkdirSync(join(fixture, "Client"));
+    const source = readFileSync(runner, "utf8");
+    const task = '"check:docs": CHECK_DOCS,';
+    writeFileSync(
+      join(fixture, "scripts", "run.mjs"),
+      source.replace(
+        task,
+        `"check:docs": [
+          step("node", ["-e", ""], "."),
+          optional("owncord-absent-tool", "owncord-absent-tool", ["--check"], ".", "not on PATH"),
+        ],`,
+      ),
+    );
+    return spawnSync(process.execPath, [join(fixture, "scripts", "run.mjs"), ...args], {
+      env: { ...env, ...extraEnv, PATH: dirname(process.execPath) },
+      encoding: "utf8",
+      timeout: 10_000,
+    });
+  } finally {
+    rmSync(fixture, { recursive: true, force: true });
+  }
+}
+
+test("--strict and OWNCORD_STRICT=1 end a skipped run with exit 3", () => {
+  for (const result of [
+    runSkipFixture(["check:docs", "--strict"]),
+    runSkipFixture(["--strict", "check:docs"]),
+    runSkipFixture(["check:docs"], { OWNCORD_STRICT: "1" }),
+  ]) {
+    assert.equal(result.status, 3, result.stderr);
+    assert.match(result.stderr, /check:docs: INCOMPLETE, owncord-absent-tool not installed/);
+    assert.doesNotMatch(result.stdout, /check:docs: passed/);
+  }
+});
+
+test("--strict with --no-strict is a usage error", () => {
+  const result = runSkipFixture(["check:docs", "--strict", "--no-strict"]);
+  assert.equal(result.status, 2);
+  assert.match(result.stderr, /usage:/);
+});
+
+test("--help documents strict mode", () => {
+  const result = list("--help");
+  assert.match(result.stdout, /--strict/);
+  assert.match(result.stdout, /--no-strict/);
+  assert.match(result.stdout, /release:preflight/);
 });
 
 test("Windows npm and npx launch without a shell and preserve argument boundaries", () => {

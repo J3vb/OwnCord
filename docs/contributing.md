@@ -86,19 +86,27 @@ Windows builds and server-only work need none of this.
 From the repository root. They work the same on Windows and Linux. macOS is
 not a supported target: nothing in CI or the scripts covers it.
 
-| Command                       | What it does                                     |
-| ----------------------------- | ------------------------------------------------ |
-| `npm run bootstrap`           | Install everything                               |
-| `npm run check`               | Run the checks CI runs, for the whole repository |
-| `npm run check:server`        | The server checks only                           |
-| `npm run check:client`        | The desktop app checks only                      |
-| `npm run check:rust`          | The Rust checks only                             |
-| `npm run format`              | Format everything                                |
-| `npm run generate`            | Regenerate all generated code and doc blocks     |
-| `node scripts/run.mjs --list` | Show the exact command each task runs, and where |
+| Command                                | What it does                                      |
+| -------------------------------------- | ------------------------------------------------- |
+| `npm run bootstrap`                    | Install everything                                |
+| `npm run check`                        | Run the checks CI runs, for the whole repository  |
+| `npm run check:server`                 | The server checks only                            |
+| `npm run check:client`                 | The desktop app checks only                       |
+| `npm run check:rust`                   | The Rust checks only                              |
+| `npm run format`                       | Format everything                                 |
+| `npm run generate`                     | Regenerate all generated code and doc blocks      |
+| `node scripts/run.mjs --list`          | Show the exact command each task runs, and where  |
+| `node scripts/run.mjs --strict <task>` | Fail with exit 3 if any optional tool was skipped |
 
 `npm run check` skips the browser test suites and a few security scans. CI
 runs those. A tool you do not have installed is skipped with a note.
+
+To make a skip an error, add `--strict` (or set `OWNCORD_STRICT=1`): a task
+that skipped a tool ends with `<task>: INCOMPLETE` and exit code 3, listing what
+is missing. `release:preflight` is strict by default, since a release must not
+rest on checks that never ran; `--no-strict` opts out and prints a loud line
+that the result is incomplete. A tool that is installed but fails is always a
+failure, strict or not.
 
 #### Server (Go)
 
