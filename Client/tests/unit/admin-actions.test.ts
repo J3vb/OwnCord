@@ -149,7 +149,7 @@ describe("AdminActions", () => {
 
       // First click changes text to confirmation
       kickItem.click();
-      expect(kickItem.textContent).toBe("Log them out?");
+      expect(kickItem.textContent).toBe("Log them out of every device? They can sign in again.");
       expect(onKick).not.toHaveBeenCalled();
 
       // Second click confirms
@@ -192,7 +192,7 @@ describe("AdminActions", () => {
 
         // Armed, then left alone — a stray later click must not log anyone out.
         kickItem.click();
-        expect(kickItem.textContent).toBe("Log them out?");
+        expect(kickItem.textContent).toBe("Log them out of every device? They can sign in again.");
         vi.advanceTimersByTime(5000);
         expect(kickItem.textContent).toBe("Force Logout");
         kickItem.click();

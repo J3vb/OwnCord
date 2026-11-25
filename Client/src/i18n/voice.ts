@@ -51,7 +51,7 @@ export const voiceText = defineCatalog("voice", {
   "widget.control.undeafen": "Undeafen",
   "widget.control.camera": "Camera",
   "widget.control.screenshare": "Screenshare",
-  "widget.control.cameraOn": "Turn on camera",
+  "widget.control.cameraOn": "Turn on camera (the call can see you)",
   "widget.control.cameraOff": "Turn off camera",
   "widget.control.shareStart": "Share your screen",
   "widget.control.shareStop": "Stop sharing",
@@ -232,18 +232,19 @@ export const voiceText = defineCatalog("voice", {
   "picker.appsTab": { one: "Applications ({count})", other: "Applications ({count})" },
   "picker.tabEmpty": "Nothing to share in this tab.",
   "picker.portalNote":
-    "Your desktop will now ask which screen or window to share. Choose the source there; OwnCord only sets the quality below.",
+    "Your desktop will now ask which screen or window to share. People in the call can then watch it. OwnCord only sets the quality below.",
   "picker.windowsNote":
-    "Windows will now ask which screen or window to share. A whole screen shares all sound except OwnCord's own. OwnCord only sets the quality below.",
+    "Windows will now ask which screen or window to share. People in the call can then watch it. A whole screen shares all sound except OwnCord's own. OwnCord only sets the quality below.",
   "picker.browserNote":
-    "Your browser will now ask which screen or window to share. OwnCord only sets the quality below.",
+    "Your browser will now ask which screen or window to share. People in the call can then watch it. OwnCord only sets the quality below.",
   "picker.audio": "Audio",
   "picker.audioUnavailable":
     "Audio sharing needs a PulseAudio or PipeWire sound server, and none answered; only the picture is shared.",
   "picker.shareAudio": "Share audio",
-  "picker.shareAudioHint": "All sound playing on this computer, except OwnCord's own.",
+  "picker.shareAudioHint":
+    "All sound playing on this computer, except OwnCord's own. People watching your share will hear it.",
   "picker.shareAudioHintWindow":
-    "A screen shares all sound except OwnCord's own. One window shares only its app's sound.",
+    "A screen shares all sound except OwnCord's own. One window shares only its app's sound. People watching hear it.",
   "picker.shareAppAudio": "Share the app's sound",
   "picker.shareAppAudioHint": "When you share one window, its app's sound is shared too.",
   "picker.quality": "Stream quality",
@@ -293,7 +294,7 @@ export const voiceText = defineCatalog("voice", {
     "Couldn't secure the voice call — no encryption key arrived. Try joining again.",
   "join.backoff": "Voice join failed — try again in {seconds} s",
   "join.switchBackoff": "Please wait {seconds} s before switching voice channels",
-  "mic.stillUnavailable": "Microphone still unavailable — check your browser permissions",
+  "mic.stillUnavailable": "Microphone still unavailable — check your microphone permission",
   "mic.unavailableMuted": "Microphone unavailable — you are muted",
   "session.listenOnlyPermission": "Microphone permission denied — joined in listen-only mode",
   "session.listenOnlyMissing": "No microphone found — joined in listen-only mode",
@@ -306,13 +307,14 @@ export const voiceText = defineCatalog("voice", {
   "reconnect.shareAgain": "Share again",
   "event.voiceDisconnected": "Voice connection lost — disconnected",
   "share.joinVoiceFirst": "Join a voice channel first",
-  "share.cameraDenied": "Camera permission denied",
+  "share.cameraDenied": "Camera blocked. Allow it in your system settings, then try again.",
   "share.noCamera": "No camera found",
   "share.cameraFailed": "Failed to start camera",
   "share.cameraSwitchFailed": "Couldn't use that camera. Still using the previous one.",
   "share.gstreamerMissing":
     "Camera support is missing. Install the GStreamer plugins: gstreamer1.0-plugins-good (Ubuntu/Debian), gstreamer1-plugins-good (Fedora) or gst-plugins-good (Arch), then restart OwnCord.",
-  "share.screenDenied": "Screen sharing permission denied",
+  "share.screenDenied":
+    "Screen sharing was blocked. Allow it in your system settings, then try again.",
   "share.screenFailed": "Failed to start screen sharing",
   "share.changeFailed": "Couldn't change what you're sharing",
   "share.qualityFailed": "Couldn't change the stream quality",

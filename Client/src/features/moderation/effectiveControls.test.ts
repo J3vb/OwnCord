@@ -228,7 +228,7 @@ describe("confirming", () => {
   it.each([
     [REMOVE, "Remove message", "removal", "Message removed for everyone."],
     [KICK, "Log out", "kick", "Logged out of every session. They can sign in again."],
-    [BAN, "Ban", "ban", "Member banned. They were disconnected and can't sign in again."],
+    [BAN, "Ban", "ban", "Member banned. They were disconnected and can't sign in until unbanned."],
   ] as const)(
     "%s sends through the report and says so only once the server answers",
     async (label, confirmLabel, kind, done) => {

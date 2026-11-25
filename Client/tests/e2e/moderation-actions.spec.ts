@@ -293,7 +293,7 @@ test.describe("removal, kick and ban accessibility", () => {
     await page.keyboard.press("Enter");
     await expect(dialog).toHaveCount(0);
     await expect(status).toHaveText(
-      "Member banned. They were disconnected and can't sign in again.",
+      "Member banned. They were disconnected and can't sign in until unbanned.",
     );
   });
 
