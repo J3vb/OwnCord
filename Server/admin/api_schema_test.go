@@ -271,6 +271,22 @@ CREATE TABLE IF NOT EXISTS moderation_actions (
     created_at      TEXT    NOT NULL DEFAULT (datetime('now'))
 );
 
+-- BanUserWithAction removes the banned account's push subscriptions in the
+-- ban transaction, so this minimal schema needs the table (045 plus 093).
+CREATE TABLE IF NOT EXISTS push_subscriptions (
+    id           INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id      INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    endpoint     TEXT    NOT NULL,
+    p256dh       TEXT    NOT NULL,
+    auth         TEXT    NOT NULL,
+    device_name  TEXT    NOT NULL DEFAULT '',
+    vapid_key_id TEXT    NOT NULL,
+    created_at   TEXT    NOT NULL DEFAULT (datetime('now')),
+    last_seen_at TEXT    NOT NULL DEFAULT (datetime('now')),
+    session_id   INTEGER REFERENCES sessions(id) ON DELETE CASCADE,
+    UNIQUE (user_id, endpoint)
+);
+
 INSERT OR IGNORE INTO settings (key, value) VALUES
     ('server_name', 'Test Server'),
     ('motd', 'Hello');

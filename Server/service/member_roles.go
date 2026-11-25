@@ -31,8 +31,11 @@ func (s *ModerationService) memberRoleStore() (MemberRoleStore, error) {
 // the actor's top role). A held role is a no-op: no write, audit row or fan-out. Cached
 // permissions are dropped before clients are told.
 func (s *ModerationService) AddUserRole(ctx context.Context, actorID, targetID, roleID int64) (*db.Role, error) {
-	_, target, role, err := s.authorizeRoleAssignment(ctx, actorID, targetID, roleID)
+	actorRole, target, role, err := s.authorizeRoleAssignment(ctx, actorID, targetID, roleID)
 	if err != nil {
+		return nil, err
+	}
+	if err := s.requireRoleGrantable(ctx, actorRole, targetID, role); err != nil {
 		return nil, err
 	}
 	rs, err := s.memberRoleStore()

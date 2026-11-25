@@ -34,6 +34,11 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 	if c.isSendClosed() {
 		return
 	}
+	// The budget is spent before any decode or database read, so an over-budget
+	// frame costs one limiter check and (until the strike limit) one reply.
+	if !h.allowInboundFrame(c) {
+		return
+	}
 	// fctx is this frame's database deadline, derived from the connection context
 	// so a disconnect cancels it. Exempt types (command_deadline.go) use c.ctx.
 	// handleMessageApply uses it only for the voice join's pre-commit work.
@@ -53,17 +58,18 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 
 	ctor, ok := getCommandConstructor(env.Type)
 	if !ok {
-		slog.Warn("ws handleMessage unknown type", "user_id", c.userID, "msg_type", msgType, "req_id", reqID)
 		c.sendMsg(buildErrorMsg(ErrCodeUnknownType, fmt.Sprintf("unknown message type: %s", msgType)))
+		h.strikeFrame(c, strikeUnknownType, "msg_type", msgType, "req_id", reqID)
 		return
 	}
 
 	cmd, parseErr := ctor(c.userID, env.ID, env.Payload)
 	if parseErr != nil {
-		slog.Warn("ws command parse error", "user_id", c.userID, "msg_type", msgType, "req_id", reqID, "err", parseErr)
 		c.sendMsg(buildErrorMsgWithID(ErrCodeBadRequest, "invalid payload", env.ID))
+		h.strikeFrame(c, strikeBadPayload, "msg_type", msgType, "req_id", reqID, "err", parseErr)
 		return
 	}
+	clearFrameStrikes(c)
 
 	var username string
 	var avatar, displayName *string
@@ -195,30 +201,16 @@ func sessionUserBanned(banned bool, banExpires *string) bool {
 	return auth.IsEffectivelyBanned(&db.User{Banned: banned, BanExpires: banExpires})
 }
 
-// handleMessageDecode parses the frame into an envelope, maintaining the
-// consecutive-invalid-JSON counter, and returns capped msg_type / req_id; false
+// handleMessageDecode parses the frame into an envelope, striking the
+// connection on invalid JSON (strikeFrame), and returns capped msg_type / req_id; false
 // means the frame was rejected.
 func (h *Hub) handleMessageDecode(c *Client, raw []byte) (envelope, string, string, bool) {
 	var env envelope
 	if err := json.Unmarshal(raw, &env); err != nil {
-		c.mu.Lock()
-		c.invalidCount++
-		count := c.invalidCount
-		c.mu.Unlock()
-
-		slog.Warn("ws handleMessage invalid JSON", "user_id", c.userID, "err", err, "invalid_count", count)
 		c.sendMsg(buildErrorMsg(ErrCodeInvalidJSON, "message must be valid JSON"))
-
-		if count >= 10 {
-			slog.Warn("ws too many invalid messages, closing connection", "user_id", c.userID, "invalid_count", count)
-			h.kickClient(c)
-		}
+		h.strikeFrame(c, strikeInvalidJSON, "err", err)
 		return env, "", "", false
 	}
-
-	c.mu.Lock()
-	c.invalidCount = 0
-	c.mu.Unlock()
 
 	// Cap client-controlled fields before logging (log injection, unbounded
 	// entries).

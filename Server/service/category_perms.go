@@ -121,14 +121,20 @@ func requireGrantableAcross(actorRole *db.Role, allow, deny int64, rows ...db.Ov
 	return requireGrantableChannelOverride(actorRole, allow, deny)
 }
 
-// categoryOverrideGuard is the guard a category write passes into the write transaction.
+// categoryOverrideGuard is the guard a category write passes into the write transaction;
+// viewed is categoryViewGate's test for each synced channel the write reaches.
 // A refusal is also recorded in *refused because the db layer wraps errors with the
 // operation name and the API answers the bare text.
-func categoryOverrideGuard(actorRole *db.Role, allow, deny int64, refused *error) db.CategoryOverrideGuard {
+func categoryOverrideGuard(actorRole *db.Role, allow, deny int64, viewed func(channelID int64) bool, refused *error) db.CategoryOverrideGuard {
 	return func(sc db.CategoryOverrideScope) error {
 		rows := make([]db.OverrideBits, 0, len(sc.Channels)+1)
 		rows = append(rows, sc.Category)
 		for _, c := range sc.Channels {
+			if !viewed(c.ChannelID) {
+				// Synced after categoryViewGate ran, so never checked: refuse and let the caller retry.
+				*refused = fmt.Errorf("%w%.0w", ErrPermsChanged, ErrConflict)
+				return *refused
+			}
 			rows = append(rows, db.OverrideBits{Allow: c.Allow, Deny: c.Deny})
 		}
 		if err := requireGrantableAcross(actorRole, allow, deny, rows...); err != nil {
@@ -192,8 +198,12 @@ func (s *channelOverrides) categoryRoleMutation(ctx context.Context, actorID int
 	if err != nil {
 		return CategoryOverrideResult{}, err
 	}
+	viewed, err := s.categoryViewGate(ctx, cp, actorID, actorRole, categoryID)
+	if err != nil {
+		return CategoryOverrideResult{}, err
+	}
 	var refused error
-	guard := categoryOverrideGuard(actorRole, allow, deny, &refused)
+	guard := categoryOverrideGuard(actorRole, allow, deny, viewed, &refused)
 	var ids []int64
 	if clear {
 		ids, err = cp.ClearCategoryRoleOverride(ctx, categoryID, roleID, guard)
@@ -246,8 +256,12 @@ func (s *channelOverrides) categoryUserMutation(ctx context.Context, actorID int
 	if err != nil {
 		return CategoryOverrideResult{}, err
 	}
+	viewed, err := s.categoryViewGate(ctx, cp, actorID, actorRole, categoryID)
+	if err != nil {
+		return CategoryOverrideResult{}, err
+	}
 	var refused error
-	guard := categoryOverrideGuard(actorRole, allow, deny, &refused)
+	guard := categoryOverrideGuard(actorRole, allow, deny, viewed, &refused)
 	var ids []int64
 	if clear {
 		ids, err = cp.ClearCategoryUserOverride(ctx, categoryID, userID, guard)

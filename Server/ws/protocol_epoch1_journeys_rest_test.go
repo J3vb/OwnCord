@@ -43,7 +43,7 @@ func (r *epochRig) mountREST(t *testing.T) *restRig {
 	t.Helper()
 	router := chi.NewRouter()
 	api.MountDMRoutes(router, r.svc, r.hub, nil, nil)
-	api.MountNSFWRoutes(router, r.svc, r.hub)
+	api.MountNSFWRoutes(router, r.svc, r.hub, nil)
 	api.MountProfileRoutes(router, r.svc, nil, auth.NewRateLimiter(), nil, r.hub, nil)
 	srv := httptest.NewServer(router)
 	t.Cleanup(srv.Close)

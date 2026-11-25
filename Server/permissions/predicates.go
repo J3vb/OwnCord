@@ -283,6 +283,27 @@ func CanManageChannels(s Subject) error {
 	return missing(ManageChannels)
 }
 
+// CanEditAnyChannelOverrides: the owner or an Administrator saves overrides on
+// any channel, whatever its own access there.
+func CanEditAnyChannelOverrides(rolePerms, topRoleID int64, topRolePosition int) bool {
+	return IsOwner(topRoleID, topRolePosition) || HasAdmin(rolePerms)
+}
+
+// CanEditChannelOverrides gates saving overrides on one channel: anyone else
+// needs READ_MESSAGES there (archive ignored); the bit guards stay with the caller.
+func CanEditChannelOverrides(s Subject, topRoleID int64, topRolePosition int) error {
+	if CanEditAnyChannelOverrides(s.RolePerms, topRoleID, topRolePosition) {
+		return nil
+	}
+	if s.Channel.Type == "dm" {
+		return dmMember(s)
+	}
+	if !s.Has(ReadMessages) {
+		return missing(ReadMessages)
+	}
+	return nil
+}
+
 // CanModerateVoice is the actor's authority in the TARGET's channel: effective
 // MUTE_MEMBERS (so a channel deny holds) and READ_MESSAGES; a DM call also
 // requires participation. Rank stays with the caller.

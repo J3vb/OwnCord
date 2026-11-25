@@ -326,7 +326,7 @@ func (s *ChannelService) AdminUpdateChannel(ctx context.Context, actorID int64, 
 		Base:   existing,
 		Before: req.Before,
 	}
-	if err := s.prepareUpdateSync(ctx, req, existing.ID, target.id, &update, &refused); err != nil {
+	if err := s.prepareUpdateSync(ctx, actorID, req, existing.ID, target.id, &update, &refused); err != nil {
 		return nil, nil, err
 	}
 	// The write deletes the channel's standing acknowledgements in the SAME transaction

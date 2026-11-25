@@ -34,6 +34,9 @@ func newCatPermFixture(t *testing.T) *catPermFixture {
 	seedRole(t, database, f.mod)
 	seedRole(t, database, f.admin)
 	seedRole(t, database, f.low)
+	// The tests act as user 7, who holds f.mod: an override edit also needs the
+	// editor's own read access to every channel it reaches.
+	seedUserRole(t, database, 7, f.mod.ID)
 	change, err := svc.CreateCategory(ctx, 1, "Games")
 	mustDo(t, "CreateCategory", err)
 	f.cat = change.Category

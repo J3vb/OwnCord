@@ -132,6 +132,9 @@ func (s *channelOverrides) PutRoleOverride(ctx context.Context, actorID int64, a
 	if err != nil {
 		return OverrideResult{}, err
 	}
+	if err := s.requireOverrideView(ctx, actorID, actorRole, ch.ID); err != nil {
+		return OverrideResult{}, err
+	}
 	if err := s.st.UpsertChannelOverride(ctx, ch.ID, roleID, allow, deny); err != nil {
 		return OverrideResult{}, fmt.Errorf("%w: failed to save channel permission: %w", ErrInternal, err)
 	}
@@ -152,6 +155,9 @@ func (s *channelOverrides) PutRoleOverride(ctx context.Context, actorID int64, a
 func (s *channelOverrides) DeleteRoleOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, roleID int64) (OverrideResult, error) {
 	role, err := s.resolveOverrideRole(ctx, actorRole, ch.ID, roleID, 0, 0)
 	if err != nil {
+		return OverrideResult{}, err
+	}
+	if err := s.requireOverrideView(ctx, actorID, actorRole, ch.ID); err != nil {
 		return OverrideResult{}, err
 	}
 	if err := s.st.DeleteChannelOverride(ctx, ch.ID, roleID); err != nil {
@@ -215,6 +221,9 @@ func (s *channelOverrides) PutUserOverride(ctx context.Context, actorID int64, a
 	if err != nil {
 		return OverrideResult{}, err
 	}
+	if err := s.requireOverrideView(ctx, actorID, actorRole, ch.ID); err != nil {
+		return OverrideResult{}, err
+	}
 	if err := s.st.UpsertChannelUserOverride(ctx, ch.ID, userID, allow, deny); err != nil {
 		return OverrideResult{}, fmt.Errorf("%w: failed to save channel user permission: %w", ErrInternal, err)
 	}
@@ -233,6 +242,9 @@ func (s *channelOverrides) PutUserOverride(ctx context.Context, actorID int64, a
 func (s *channelOverrides) DeleteUserOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, userID int64) (OverrideResult, error) {
 	user, err := s.resolveOverrideUser(ctx, actorRole, ch.ID, userID, 0, 0)
 	if err != nil {
+		return OverrideResult{}, err
+	}
+	if err := s.requireOverrideView(ctx, actorID, actorRole, ch.ID); err != nil {
 		return OverrideResult{}, err
 	}
 	if err := s.st.DeleteChannelUserOverride(ctx, ch.ID, userID); err != nil {

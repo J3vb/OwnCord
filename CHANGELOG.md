@@ -123,6 +123,15 @@ release changes the database, and anything an operator must do first.)
 - A new install creates the database, its side files and uploaded files readable by the server's user only (folders likewise); existing files keep their permissions.
 - The server log records an upload by its id, size and type, without the file name.
 
+**Accounts & admin**
+
+- Editing a channel's permission overrides (directly, through a category template, or by syncing) now needs the editor to be able to read that channel; the owner and Administrators are not limited.
+- Giving a member a role now follows the same rule as editing a role: a role manager without Administrator can only hand out permissions their own roles carry.
+- Banning an account removes its push notification registrations; the app registers again after the ban ends.
+- Warnings and timeouts are limited to 10 each per moderator per minute; blocking, the age-restricted content setting and closing DMs to 20 per account per minute.
+- Thread and forum post titles follow the display name text rules (single line, no invisible characters); existing titles are unchanged.
+- A connection that sends far more messages than any app does is answered "rate limited" and then closed.
+
 ### Fixed
 
 **Login & connection**

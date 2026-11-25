@@ -190,9 +190,14 @@ func (s *ModerationService) Warn(ctx context.Context, actorID, targetID int64, r
 	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
 		return 0, err
 	}
+	refund, err := s.reserveModAction("mod_warn", actorID)
+	if err != nil {
+		return 0, err
+	}
 
 	id, err := s.st.WarnUser(ctx, targetID, actorID, reportID, reason)
 	if err != nil {
+		refund()
 		if errors.Is(err, db.ErrOutranked) {
 			return 0, fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
 		}
