@@ -6,6 +6,7 @@
 // session, and the class there now delegates here.
 import { invokeOrThrow, tryInvoke } from "./nativeInvoke";
 import { createLogger } from "@lib/logger";
+import { LiveKitAddressError, isLoopbackDirectUrl, isProxyPath } from "@lib/voice/livekitAddress";
 import type { NativeProxies } from "../contracts/nativeProxies";
 
 // --- HTTP ------------------------------------------------------------------
@@ -156,38 +157,28 @@ async function startLiveKitTunnel(): Promise<TunnelEndpoint> {
   return tunnel;
 }
 
-/** True when `url` is a plain ws:/http: URL on a loopback host — exactly the
- *  LiveKit origins tauri.conf.json's connect-src allows. */
-function isLoopbackDirectUrl(url: string): boolean {
-  try {
-    const { protocol, hostname } = new URL(url);
-    return (
-      (protocol === "ws:" || protocol === "http:") &&
-      (hostname === "localhost" || hostname === "127.0.0.1")
-    );
-  } catch {
-    return false;
+/** Whether the server host is this machine. Handles IPv6 bracket notation
+ *  (e.g. "[::1]:7880") and a bare IPv6 address (e.g. "::1"). */
+function isLocalServerHost(serverHostValue: string): boolean {
+  let host: string;
+  if (serverHostValue.startsWith("[")) {
+    host = serverHostValue.slice(1, serverHostValue.indexOf("]"));
+  } else if ((serverHostValue.match(/:/g) ?? []).length > 1) {
+    // Bare IPv6 address (multiple colons, no brackets) — use as-is
+    host = serverHostValue;
+  } else {
+    host = serverHostValue.split(":")[0] ?? "";
   }
+  return host === "localhost" || host === "127.0.0.1" || host === "::1";
 }
 
-/** Resolve a LiveKit connection URL. Routes through the local Rust TLS
- *  proxy for remote servers (to handle self-signed certs), or returns
- *  the direct URL for a local server whose LiveKit is also on a loopback
- *  host. */
+/** Resolve a LiveKit connection URL. Routes the server's proxy path through
+ *  the local Rust TLS proxy (to handle self-signed certs), or returns the
+ *  direct URL for a local server whose LiveKit is also on a loopback host.
+ *  Any other address is refused with a `LiveKitAddressError`. */
 async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise<string> {
   if (serverHost !== null) {
-    // Extract hostname, handling IPv6 bracket notation (e.g. "[::1]:7880")
-    // and bare IPv6 (e.g. "::1").
-    let host: string;
-    if (serverHost.startsWith("[")) {
-      host = serverHost.slice(1, serverHost.indexOf("]"));
-    } else if ((serverHost.match(/:/g) ?? []).length > 1) {
-      // Bare IPv6 address (multiple colons, no brackets) — use as-is
-      host = serverHost;
-    } else {
-      host = serverHost.split(":")[0] ?? "";
-    }
-    const isLocal = host === "localhost" || host === "127.0.0.1" || host === "::1";
+    const isLocal = isLocalServerHost(serverHost);
     // Only a loopback ws:/http: direct URL is used as-is, on every platform.
     // Anything else (LiveKit Cloud, a TLS LiveKit on another host, or a
     // docker-compose service name like ws://livekit:7880 that does not
@@ -196,7 +187,11 @@ async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise
       livekitLog.debug("LiveKit URL resolved via direct (local)", { url: directUrl });
       return directUrl;
     }
-    if (proxyPath.startsWith("/")) {
+    if (isLocal && isLoopbackDirectUrl(proxyPath)) {
+      livekitLog.debug("LiveKit URL resolved via direct (local)", { url: proxyPath });
+      return proxyPath;
+    }
+    if (isProxyPath(proxyPath)) {
       // Remote server: route through the local Rust TLS proxy so WebView2
       // doesn't reject self-signed certificates on the LiveKit signal WS.
       const tunnel = await startLiveKitTunnel();
@@ -207,6 +202,10 @@ async function resolveLiveKitUrl(proxyPath: string, directUrl?: string): Promise
       });
       return `ws://127.0.0.1:${tunnel.port}/${tunnel.token}${proxyPath}`;
     }
+  }
+  if (!isProxyPath(proxyPath)) {
+    livekitLog.warn("LiveKit URL refused: not the server's proxy path");
+    throw new LiveKitAddressError();
   }
   livekitLog.debug("LiveKit URL resolved as passthrough", { url: proxyPath });
   return proxyPath;

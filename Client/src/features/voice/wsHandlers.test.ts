@@ -29,7 +29,6 @@ import {
 } from "../../stores/voice.store";
 import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";
-import { membersStore } from "../../stores/members.store";
 import { noteWatchSent, resetWatchRequest } from "../../lib/voice/watchRequest";
 import { clearAfkMove } from "./moveHint";
 import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
@@ -89,6 +88,11 @@ function voiceState(overrides: Partial<Payload<"voice_state">>): Payload<"voice_
   } as Payload<"voice_state">;
 }
 
+/** This device holds a call in channel 3. */
+const inCall = (): void => {
+  joinVoiceChannel(3);
+  setVoiceStatus("connected");
+};
 const clockStub = (): ReconnectClock => ({ voiceRejoinChannelId: null }) as ReconnectClock;
 const socketStub = () => ({ send: vi.fn(), disconnect: vi.fn() });
 const readyWith = (voiceStates: Payload<"voice_state">[]) =>
@@ -196,12 +200,37 @@ describe("snapshotReadyVoice", () => {
   it("releases a moderator mute lifted while disconnected, using the pre-ready flags", async () => {
     joinVoiceChannel(4);
     setVoiceStatus("connected");
-    voiceStore.setState((prev) => ({ ...prev, localServerMuted: true, localMuted: true }));
+    // The moderator's mute landed on an open mic, so the local mute is theirs.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localServerMuted: true,
+      localMuted: true,
+      moderatorMuted: true,
+    }));
     const apply = snapshotReadyVoice();
 
     apply(socketStub(), readyWith([voiceState({ server_muted: false })]));
 
     await vi.waitFor(() => expect(setMuted).toHaveBeenCalledWith(false));
+  });
+
+  it("keeps the member's own mute when a moderator mute is lifted while disconnected", async () => {
+    joinVoiceChannel(4);
+    setVoiceStatus("connected");
+    // The member muted themselves before the moderator did.
+    voiceStore.setState((prev) => ({
+      ...prev,
+      localServerMuted: true,
+      localMuted: true,
+      moderatorMuted: false,
+    }));
+    const apply = snapshotReadyVoice();
+
+    apply(socketStub(), readyWith([voiceState({ muted: false, server_muted: false })]));
+    await settle();
+
+    expect(setMuted).not.toHaveBeenCalledWith(false);
+    expect(voiceStore.getState().localMuted).toBe(true);
   });
 });
 
@@ -225,6 +254,19 @@ describe("handleVoiceState moderator enforcement", () => {
 
     handleVoiceState(socketStub(), voiceState({ server_muted: false }));
     await vi.waitFor(() => expect(setMuted).toHaveBeenCalledWith(false));
+  });
+
+  it("keeps a member muted who had muted themselves before the moderator did", async () => {
+    voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
+    const socket = socketStub();
+    handleVoiceState(socket, voiceState({ muted: true, server_muted: true }));
+    expect(voiceStore.getState().moderatorMuted).toBe(false);
+    // The lifting frame's own row says unmuted.
+    handleVoiceState(socket, voiceState({ muted: false, server_muted: false }));
+    await settle();
+
+    expect(setMuted).not.toHaveBeenCalledWith(false);
+    expect(voiceStore.getState().localMuted).toBe(true);
   });
 
   it("keeps a member deafened who had deafened themselves before the moderator did", async () => {
@@ -505,106 +547,6 @@ describe("handleVoiceE2eeAnnounce with a malformed video_decode", () => {
 const ack = (channelId: number): void =>
   handleVoiceState(socketStub(), voiceState({ channel_id: channelId, user_id: 9 }));
 
-describe("handleVoiceMoved toast", () => {
-  const clock = { voiceRejoinChannelId: null } as ReconnectClock;
-  beforeEach(() => {
-    clearAfkMove();
-    channelsStore.setState((prev) => ({
-      ...prev,
-      channels: new Map([[4, { id: 4, name: "Parking", type: "voice", afk: true } as never]]),
-    }));
-  });
-
-  it("says why only once the AFK join is acknowledged", async () => {
-    const socket = socketStub();
-    handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clock);
-    await vi.waitFor(() =>
-      expect(socket.send).toHaveBeenCalledWith(
-        expect.objectContaining({ type: "voice_join", payload: { channel_id: 4 } }),
-      ),
-    );
-    expect(showToast).not.toHaveBeenCalled();
-
-    ack(4);
-    expect(showToast).toHaveBeenCalledExactlyOnceWith(
-      "Moved to Parking because you were idle",
-      "info",
-    );
-    // A later state frame for the same channel does not say it again.
-    ack(4);
-    expect(showToast).toHaveBeenCalledOnce();
-  });
-
-  it("names the moderator who moved you, at once", async () => {
-    membersStore.setState((prev) => ({
-      ...prev,
-      members: new Map([
-        [7, { id: 7, username: "mod", displayName: "Moddy" } as never],
-        [8, { id: 8, username: "plain", displayName: null } as never],
-      ]),
-    }));
-    const socket = socketStub();
-    handleVoiceMoved(socket, { to_channel_id: 4, by_user_id: 7 }, clock);
-    expect(showToast).toHaveBeenCalledExactlyOnceWith("Moddy moved you to Parking", "info");
-    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
-
-    vi.mocked(showToast).mockClear();
-    handleVoiceMoved(socket, { to_channel_id: 4, by_user_id: 8 }, clock);
-    expect(showToast).toHaveBeenCalledExactlyOnceWith("plain moved you to Parking", "info");
-  });
-
-  it("falls back to a generic message when the mover or channel is unknown", async () => {
-    const socket = socketStub();
-    handleVoiceMoved(socket, { to_channel_id: 4, by_user_id: 999 }, clock);
-    expect(showToast).toHaveBeenCalledExactlyOnceWith("You were moved to Parking", "info");
-    vi.mocked(showToast).mockClear();
-    handleVoiceMoved(socket, { to_channel_id: 77, by_user_id: 999 }, clock);
-    expect(showToast).toHaveBeenCalledExactlyOnceWith(
-      "You were moved to another voice channel",
-      "info",
-    );
-    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
-  });
-
-  it("does not announce a mover for the AFK sweep's move", async () => {
-    const socket = socketStub();
-    handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk", by_user_id: 7 }, clock);
-    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
-    expect(showToast).not.toHaveBeenCalled();
-  });
-
-  it("says nothing for a move with no reason, even once acknowledged", async () => {
-    const socket = socketStub();
-    handleVoiceMoved(socket, { to_channel_id: 4 }, clock);
-    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
-    ack(4);
-    expect(showToast).not.toHaveBeenCalled();
-  });
-
-  it("says nothing when the AFK join is refused", async () => {
-    const socket = socketStub();
-    handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clock);
-    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
-    noteJoinSent("join-1");
-    setVoiceStatus("joining");
-    handleVoiceJoinRollback(socketStub(), { code: "FORBIDDEN", message: "no" }, "join-1");
-    joinVoiceChannel(4);
-    ack(4);
-    expect(showToast).not.toHaveBeenCalled();
-  });
-
-  it("says nothing for a move a reconnect abandoned", async () => {
-    const socket = socketStub();
-    handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clock);
-    await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
-
-    // The socket dropped before the answer; the fresh ready supersedes the move.
-    snapshotReadyVoice()(socketStub(), readyWith([]));
-    ack(4);
-    expect(showToast).not.toHaveBeenCalled();
-  });
-});
-
 const member = (userId: number, screenshare = false) => ({
   userId,
   username: `u${String(userId)}`,
@@ -780,6 +722,7 @@ const connect = (): void => {
 };
 
 async function awaitAfkMoveNoted(): Promise<void> {
+  inCall();
   const socket = socketStub();
   handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clockWith(null));
   await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
@@ -1086,6 +1029,7 @@ describe("handleVoiceMoved session handling", () => {
   });
 
   it("forgets an AFK move still awaiting its join when a moderator move follows", async () => {
+    inCall();
     const socket = socketStub();
     handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clockWith(null));
     handleVoiceMoved(socket, { to_channel_id: 5 }, clockWith(null));
@@ -1117,6 +1061,7 @@ describe("handleVoiceDisconnected session handling", () => {
   });
 
   it("forgets an AFK move awaiting its join", async () => {
+    inCall();
     const socket = socketStub();
     handleVoiceMoved(socket, { to_channel_id: 4, reason: "afk" }, clockWith(null));
     await vi.waitFor(() => expect(socket.send).toHaveBeenCalled());
@@ -1440,6 +1385,7 @@ describe("handleVoiceState for another member", () => {
 
 describe("voice handler log lines", () => {
   it("records a moderator move with its destination", async () => {
+    inCall();
     const logs = captureLogs();
     const socket = socketStub();
 

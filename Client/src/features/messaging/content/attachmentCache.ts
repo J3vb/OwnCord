@@ -22,6 +22,7 @@ export {
   clearAttachmentCaches,
 } from "./attachmentCacheState";
 export type { FileLink } from "./attachmentCacheState";
+export { currentGeneration as attachmentCacheGeneration } from "./attachmentObjectUrls";
 export {
   fetchImageAsObjectUrl,
   hasCachedImage,

@@ -191,6 +191,7 @@ export const shards = {
     "src/features/voice/videoRepublish.ts",
     "src/lib/voice/audioRoomCapabilities.ts",
     "src/lib/voice/livekitUrlResolver.ts",
+    "src/lib/voice/livekitAddress.ts",
   ],
   "audio-media-1": ["src/lib/ui/qrCode.ts"],
   "audio-media-2": [

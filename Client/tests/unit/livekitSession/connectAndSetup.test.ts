@@ -87,11 +87,12 @@ describe("LiveKitSession", () => {
       expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
 
-    it("passes through proxyPath that does not start with / for remote host", async () => {
+    it("refuses a proxyPath that does not start with / for remote host", async () => {
       session.setServerHost("example.com:443");
-      const url = await (session as any).resolveLiveKitUrl("wss://example.com/livekit");
+      await expect(
+        (session as any).resolveLiveKitUrl("wss://example.com/livekit"),
+      ).rejects.toMatchObject({ name: "LiveKitAddressError" });
       expect(mockInvoke).not.toHaveBeenCalled();
-      expect(url).toBe("wss://example.com/livekit");
     });
 
     it("does not return directUrl when serverHost is remote even if directUrl is provided", async () => {

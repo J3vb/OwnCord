@@ -3,6 +3,7 @@
 // and screen-share call goes through a dynamic import: dispatcher.ts is in the
 // startup chunk, and livekit-client must stay out of it.
 import { enforceModeratorAudioState } from "./wsReady";
+import { prevModeratorFlags } from "./moderatorAudioPlan";
 import { authStore } from "../../stores/auth.store";
 import {
   voiceStore,
@@ -26,7 +27,15 @@ import {
   setJoinAnswerWait,
 } from "./joinRequest";
 import { joinAnswerWaitFor } from "./wsErrors";
-import { noteVoiceMoved, noteAfkMove, takeAfkMove, clearAfkMove } from "./moveHint";
+import {
+  noteVoiceMoved,
+  noteAfkMove,
+  takeAfkMove,
+  clearAfkMove,
+  noteCallEndedByServer,
+  clearCallEndedByServer,
+  callEndedByServerRecently,
+} from "./moveHint";
 import { settleVoiceLeave } from "./leaveOwed";
 import { channelsStore } from "../../stores/channels.store";
 import { membersStore, memberDisplayName } from "../../stores/members.store";
@@ -44,8 +53,7 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
   // overwrites them, so enforceModeratorAudioState can detect a falling
   // edge (a restriction that WAS in effect and is now lifted) rather than
   // only ever seeing the post-update state.
-  const prevServerMuted = isSelf ? (voiceStore.getState().localServerMuted ?? false) : false;
-  const prevServerDeafened = isSelf ? (voiceStore.getState().localServerDeafened ?? false) : false;
+  const prev = prevModeratorFlags(voiceStore.getState());
   updateVoiceState(payload);
   if (!isSelf) {
     // The other person in the DM's call: they accepted this user's request.
@@ -77,8 +85,7 @@ export function handleVoiceState(ws: DispatchWs, payload: Payload<"voice_state">
     ws,
     payload.server_muted === true,
     payload.server_deafened === true,
-    prevServerMuted,
-    prevServerDeafened,
+    prev,
     payload.muted,
     payload.deafened,
   );
@@ -104,11 +111,39 @@ function announceModeratorMove(byUserId: number, toChannelId: number): void {
 // A moderator moved this client: tear the media session down and re-join the
 // destination through the ordinary join path (the server already removed us
 // from the old room and broadcast voice_leave).
+/**
+ * Whether a voice_moved is for this device: it holds a call (any status but
+ * idle, or a channel in the store, which covers a channel switch and the
+ * reconnect loop), a restart re-join is still pending, or the server's own
+ * voice_leave just ended the call it held — a move evicts first and sends
+ * voice_moved right after, so the store is usually idle by the time it lands.
+ * A destination the channel list knows as anything but a voice channel is
+ * never one a move goes to.
+ */
+function moveIsForThisDevice(payload: Payload<"voice_moved">, clock: ReconnectClock): boolean {
+  const known = channelsStore.getState().channels.get(payload.to_channel_id);
+  if (known !== undefined && known.type !== "voice") return false;
+  const { voiceStatus, currentChannelId } = voiceStore.getState();
+  return (
+    voiceStatus !== "idle" ||
+    currentChannelId !== null ||
+    clock.voiceRejoinChannelId !== null ||
+    callEndedByServerRecently()
+  );
+}
+
 export function handleVoiceMoved(
   ws: DispatchWs,
   payload: Payload<"voice_moved">,
   clock: ReconnectClock,
 ): void {
+  if (!moveIsForThisDevice(payload, clock)) {
+    log.info("Ignoring voice_moved: this device holds no call", {
+      toChannelId: payload.to_channel_id,
+    });
+    return;
+  }
+  clearCallEndedByServer();
   log.info("Moved to another voice channel by a moderator", {
     toChannelId: payload.to_channel_id,
   });
@@ -165,6 +200,7 @@ export function handleVoiceDisconnected(
   // restart-rejoin must not put the user back.
   cancelVoiceRejoin(clock);
   clearAfkMove();
+  clearCallEndedByServer();
   log.info("Disconnected from voice by a moderator", { channelId: payload.channel_id });
   void livekitSession().then(({ leaveVoice }) => leaveVoice(false));
   leaveVoiceChannel();
@@ -215,6 +251,8 @@ export function handleVoiceLeave(payload: Payload<"voice_leave">, clock: Reconne
   // precedes the voice_moved frame arrives before the note is made.
   if (isSelf) clearAfkMove();
   if (isSelf) settleVoiceLeave(payload.channel_id);
+  // The server ended the call this device holds; a voice_moved may follow.
+  if (shouldTeardownSession) noteCallEndedByServer();
   // Notify E2EE state machine so key holder can rotate the room key, and
   // (when applicable) tear down the media session — both through one lazy
   // import so the two effects cannot land in different ticks.

@@ -240,6 +240,7 @@ describe("WS Dispatcher", () => {
         localMuted: true,
         localDeafened: true,
         moderatorDeafened: true,
+        moderatorMuted: true,
         localServerMuted: true,
         localServerDeafened: true,
       });
