@@ -10,11 +10,10 @@
       "features/messaging/messageEdits.ts": 1,
       "features/messaging/messageModel.ts": 1,
       "features/messaging/reactionState.ts": 1
-    }
-  },
-  "debt": {
+    },
     "platform/desktop/pushToTalkService.ts": {
       "stores/voice.store.ts": 1
     }
-  }
+  },
+  "debt": {}
 }
