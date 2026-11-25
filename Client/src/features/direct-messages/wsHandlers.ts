@@ -14,8 +14,6 @@ import {
   clearDmUnread,
   dmDisplayName,
   dmChannelFromPayload,
-  hideBlockedDmPreviews,
-  setDmPreviewFilter,
 } from "../../stores/dm.store";
 import type { DmChannel } from "../../stores/dm.store";
 import { clearChannelVoiceUsers } from "../../stores/voice.store";
@@ -24,10 +22,6 @@ import type { DispatchApi, Payload, WsRoute } from "../connection/dispatchContex
 import { log, route } from "../connection/dispatchContext";
 import { ServerMessageType as S } from "@lib/protocolTypes";
 import { clearRequestPending } from "./pendingRequests";
-import { blockedPreviewText } from "./blockedPreviewText";
-
-// Every DM preview the store takes from here on passes the block check.
-setDmPreviewFilter(blockedPreviewText);
 
 /** The DM slice of `ready`: restate dmStore and reconcile the channels-store mirror rows. */
 export function applyReadyDms(payload: Payload<"ready">): void {
@@ -104,11 +98,7 @@ export function applyReadyBlocks(
     const blockedByMeRevAtFetch = blocksStore.getState().blockedByMeRev ?? 0;
     api
       .listBlocks()
-      .then((r) => {
-        setBlockedByMe(r.blocked_user_ids, blockedByMeRevAtFetch);
-        // The DM previews of this ready were set before the list arrived.
-        hideBlockedDmPreviews();
-      })
+      .then((r) => setBlockedByMe(r.blocked_user_ids, blockedByMeRevAtFetch))
       .catch((err) => log.warn("Failed to load block list", { error: String(err) }));
   }
 }

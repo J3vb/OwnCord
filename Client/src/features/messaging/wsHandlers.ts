@@ -21,7 +21,7 @@ import {
   setMessagePinned,
 } from "../../stores/messages.store";
 import { setTyping, clearTyping } from "../../stores/members.store";
-import { dmPreviewText, dmStore, reviseDmLastMessage } from "../../stores/dm.store";
+import { dmStore, reviseDmLastMessage } from "../../stores/dm.store";
 import type { ConnectionState } from "../../lib/ws";
 import { invalidateReactionUsers } from "./reactionUsers";
 import { handleThreadDeleted, handleThreadFollow, handleThreadState } from "./threadFrames";
@@ -94,9 +94,7 @@ export function handleChatEdited(
   payload: Payload<"chat_edited">,
 ): void {
   editMessage(payload);
-  reviseDmLastMessage(payload.channel_id, payload.message_id, {
-    lastMessage: dmPreviewText(payload.channel_id, payload.message_id, payload.content),
-  });
+  reviseDmLastMessage(payload.channel_id, payload.message_id, { lastMessage: payload.content });
   if (hasDmPreviewRefetch(payload.channel_id)) {
     reviseDmPreviewAfterDelete(api, payload.channel_id, []);
   }

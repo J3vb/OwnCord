@@ -207,7 +207,7 @@ export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
     ...(p.icon !== undefined && { icon: p.icon }),
     lastMessageId: p.last_message_id,
     lastReadMessageId: p.last_read_message_id,
-    lastMessage: dmPreviewText(p.channel_id, p.last_message_id, p.last_message, participants),
+    lastMessage: p.last_message,
     lastMessageAt: p.last_message_at,
     unreadCount: p.unread_count,
     mentionCount: p.mention_count ?? 0,
@@ -309,55 +309,6 @@ export function updateDmLastMessagePreview(
         ...rest,
       ],
     };
-  });
-}
-
-/** Rewrites a DM's last-message text before the list holds it. The DM ws
- *  handlers set it (they own the block check); unset = the text as it came. */
-export type DmPreviewFilter = (
-  channelId: number,
-  messageId: number | null,
-  text: string,
-  participants: readonly DmUser[],
-) => string;
-
-let previewFilter: DmPreviewFilter = (_channelId, _messageId, text) => text;
-
-export function setDmPreviewFilter(filter: DmPreviewFilter): void {
-  previewFilter = filter;
-}
-
-/** The text the DM list shows for a DM's last message, through the preview
- *  filter; `participants` defaults to the DM's as this client lists it. */
-export function dmPreviewText(
-  channelId: number,
-  messageId: number | null,
-  text: string,
-  participants?: readonly DmUser[],
-): string {
-  const members =
-    participants ??
-    dmStore.getState().channels.find((c) => c.channelId === channelId)?.participants;
-  return previewFilter(channelId, messageId, text, members ?? []);
-}
-
-/** Run dmPreviewText over every listed DM's preview, for a block list that
- *  arrived after the previews did. */
-export function hideBlockedDmPreviews(): void {
-  dmStore.setState((prev) => {
-    let changed = false;
-    const channels = prev.channels.map((c) => {
-      const lastMessage = dmPreviewText(
-        c.channelId,
-        c.lastMessageId,
-        c.lastMessage,
-        c.participants,
-      );
-      if (lastMessage === c.lastMessage) return c;
-      changed = true;
-      return { ...c, lastMessage };
-    });
-    return changed ? { channels } : prev;
   });
 }
 

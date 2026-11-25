@@ -1,5 +1,5 @@
 // A DM preview that showed a deleted message: blank it, then take the server's last message.
-import { dmPreviewText, dmStore, reviseDmLastMessage } from "../../stores/dm.store";
+import { dmStore, reviseDmLastMessage } from "../../stores/dm.store";
 import type { DispatchApi } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 
@@ -37,7 +37,7 @@ export function reviseDmPreviewAfterDelete(
       if (p === undefined || (p.last_message_id !== null && p.last_message_id > shown)) return;
       reviseDmLastMessage(channelId, shown, {
         lastMessageId: p.last_message_id,
-        lastMessage: dmPreviewText(channelId, p.last_message_id, p.last_message),
+        lastMessage: p.last_message,
         lastMessageAt: p.last_message_at,
       });
     },

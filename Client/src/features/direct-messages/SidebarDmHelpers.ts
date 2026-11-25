@@ -24,6 +24,7 @@ import { markdownToPlainText } from "@lib/text/markdown";
 import { connectText } from "../../i18n/connect";
 import { rowActivity } from "../members/listeningLine";
 import { RestErrorCode } from "@lib/protocolTypes";
+import { blockedPreviewText } from "./blockedPreviewText";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -162,11 +163,13 @@ export async function handleCreateGroupDm(
  * The last-message line a DM row shows, for both DM lists: the message's
  * visible words with an unclicked spoiler replaced by its label, or "No
  * messages yet" for a DM that was never messaged. An attachment-only message
- * has no words, so its line is empty.
+ * has no words, so its line is empty. A blocked author's message shows the
+ * blocked-message label, checked here so the row follows the block list.
  */
 export function dmPreviewText(dm: DmChannel): string {
   if (dm.lastMessageAt === "") return connectText("app.dmNoMessages");
-  return markdownToPlainText(dm.lastMessage, connectText("notifications.spoiler"));
+  const text = blockedPreviewText(dm.channelId, dm.lastMessageId, dm.lastMessage, dm.participants);
+  return markdownToPlainText(text, connectText("notifications.spoiler"));
 }
 
 /** Someone is in this DM's call. The one source both DM lists read for the glyph. */
