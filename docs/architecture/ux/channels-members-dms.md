@@ -138,6 +138,46 @@ role), consistent with the affordance principle.
 > parallel, never-updated `roles.store` has been deleted — so the member context
 > menu can no longer mis-map a role name→id from stale data.
 
+### 2.3 Buddies (Command Deck)
+
+Under Command Deck the right-hand column draws the same list as **Buddies**;
+Classic keeps its role groups. Search, the profile popup, the context menu,
+keyboard movement between rows and the banned section are the shared list's
+and do not change.
+
+- **Title.** "Buddies" and "{online}/{total}": online members
+  (`getOnlineMembers()`, the tree's rule) out of all members. Screen readers
+  hear "{online} of {total} online".
+- **Groups.** By activity, in this order: IN GAME (online, idle or dnd with a
+  game; the dot still shows idle or dnd), ONLINE, AWAY (idle, no game), DO NOT
+  DISTURB (dnd, no game) and OFFLINE (offline or invisible, whatever the game).
+  Headers read like Classic's, "IN GAME — 3"; empty groups are not drawn; rows
+  sort by name within a group. Only the game decides IN GAME, so someone who
+  only listens to music is in ONLINE. A search filters within the groups and the
+  counts show the matches.
+- **Rows.** Two lines at a fixed height that grows only with the text size
+  (at least 40 px). Line 1: the avatar and status dot, the name, and a voice
+  icon for a member in a server voice room (your own room and the AFK room
+  included), whose tooltip and the row's description name the room. Line 2:
+  the controller icon and the game; without a game the custom status, else
+  the song ("Listening to Spotify"), else nothing. In OFFLINE only the custom
+  status shows, never a stale game or song. Offline-status rows are dimmed;
+  AWAY and DO NOT DISTURB rows are not. A member who looks offline but is in a
+  voice room stays in OFFLINE with the voice icon.
+- **What the client cannot show.** No play time on the row (the profile card
+  keeps "for 23 min"), no "away for" time (the client is not told when someone
+  went idle), and no voice icon for a room the viewer cannot read (the server
+  sends no voice state for it).
+- **Updates.** A status change moves the row to its new group and keeps its
+  element, so focus and an open profile popup stay. A change of line 2 (a game
+  starts or stops) rebuilds the row, which closes its popup, as a custom status
+  change does in Classic. Voice moves patch the icon in place; speaking, mute,
+  camera and screen share do not touch the list.
+
+Code: `src/features/members/buddies/` (`activityGroups.ts`,
+`buddiesRenderer.ts`, `buddyContext.ts`, `buddiesTitle.ts`, `buddiesSetup.ts`),
+`src/features/members/memberVoice.ts`, `src/styles/app/buddies.css`.
+
 ---
 
 ## 3. Direct messages

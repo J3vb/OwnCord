@@ -80,6 +80,8 @@ export interface SceneOptions {
   readonly viewport?: { readonly width: number; readonly height: number };
   /** Extra text channels in one more category, to make the tree scroll. */
   readonly fillers?: number;
+  /** The roster in `ready`, in place of the scene's three members. */
+  readonly members?: unknown[];
 }
 
 const BACKLOG: [string, number] = ["Backlog", 5];
@@ -109,7 +111,7 @@ export async function startDeckScene(page: Page, options: SceneOptions = {}): Pr
       wsHandlers: voiceWsHandlers(),
       readyOverrides: {
         channels: [...SCENE_CHANNELS, ...fillerChannels(options.fillers ?? 0)],
-        members: MEMBERS,
+        members: options.members ?? MEMBERS,
         voice_states: [
           { user_id: 2, channel_id: 6, muted: true, deafened: false, screenshare: true },
           { user_id: 3, channel_id: 6, muted: false, deafened: false },

@@ -6,6 +6,11 @@ import { createMemberList } from "../../../src/features/members/MemberList";
 import { classicMemberRows, classicView } from "../../../src/features/members/memberRowRenderer";
 import { flattenModel, type MemberModel } from "../../../src/features/members/memberModel";
 import { membersStore, updatePresence } from "@stores/members.store";
+import { channelsStore } from "@stores/channels.store";
+import { voiceStore } from "@stores/voice.store";
+import { makeChannel } from "../../helpers/channelFactory";
+import { resetVoiceState } from "../../helpers/storeSeeds";
+import { voiceUser } from "../../helpers/voiceUsers";
 import {
   defaultOpts,
   makeMember,
@@ -13,6 +18,7 @@ import {
   useMemberListSuite,
 } from "../../helpers/memberListHarness";
 import { runListContract, tagSource, type ContractEntry } from "../../helpers/memberListContract";
+import { buddiesListOptions } from "../../../src/features/members/buddies/buddiesSetup";
 
 const classicEntry: ContractEntry = {
   options: { view: classicView() },
@@ -20,8 +26,22 @@ const classicEntry: ContractEntry = {
   firstHeader: { before: "ADMIN — 1", after: "ADMIN — 2" },
 };
 
+/** Command Deck's options, as the member panel passes them. */
+function deckOptions(): ContractEntry["options"] {
+  const options = buddiesListOptions();
+  if (options.view === undefined) throw new Error("the Deck options carry no view");
+  return { ...options, view: options.view };
+}
+
+const deckEntry: ContractEntry = {
+  options: deckOptions(),
+  headerSelector: ".buddies-group",
+  firstHeader: { before: "ONLINE — 3", after: "ONLINE — 4" },
+};
+
 const ENTRIES: Readonly<Record<string, ContractEntry>> = {
   classic: classicEntry,
+  deck: deckEntry,
 };
 
 for (const [name, entry] of Object.entries(ENTRIES)) runListContract(name, entry);
@@ -126,5 +146,69 @@ describe("member list options: view, rows and flatten", () => {
     list.mount(host);
     expect(host.querySelector(".member-role-group")).toBeNull();
     expect(host.querySelectorAll(".member-item")).toHaveLength(3);
+  });
+});
+
+describe("member list contract: deck", () => {
+  let host: HTMLDivElement;
+  let list: ReturnType<typeof createMemberList> | null = null;
+  useMemberListSuite(
+    (c) => {
+      host = c;
+      list = null;
+      resetVoiceState();
+      channelsStore.setState((prev) => ({ ...prev, channels: new Map() }));
+    },
+    () => list,
+  );
+
+  const mount = (): void => {
+    setTestMembers([
+      makeMember({ id: 1, username: "ann" }),
+      makeMember({ id: 2, username: "bob", status: "idle" }),
+      makeMember({ id: 3, username: "cy", status: "offline" }),
+    ]);
+    list = createMemberList({ ...defaultOpts(), ...deckOptions() });
+    list.mount(host);
+  };
+  const row = (id: number): HTMLElement =>
+    host.querySelector<HTMLElement>(`[data-testid="member-${id}"]`)!;
+  const headers = (): string[] =>
+    [...host.querySelectorAll(".buddies-group")].map((el) => el.textContent ?? "");
+
+  it("keeps focus on a member who starts a game while idle, then stops", () => {
+    mount();
+    const away = host.querySelector('[data-testid="buddies-group-away"]');
+    const online = host.querySelector('[data-testid="buddies-group-online"]');
+    row(2).focus();
+    updatePresence(2, "idle", undefined, undefined, { name: "Chess", started_at: 1 });
+    membersStore.flush();
+    expect(headers()).toEqual(["IN GAME — 1", "ONLINE — 1", "OFFLINE — 1"]);
+    expect(document.activeElement).toBe(row(2));
+    expect(host.querySelector('[data-testid="buddies-group-online"]')).toBe(online);
+    updatePresence(2, "idle", undefined, undefined, null);
+    membersStore.flush();
+    expect(headers()).toEqual(["ONLINE — 1", "AWAY — 1", "OFFLINE — 1"]);
+    expect(document.activeElement).toBe(row(2));
+    expect(host.querySelector('[data-testid="buddies-group-away"]')).not.toBe(away);
+  });
+
+  it("patches the voice icon in place when a member joins a room", () => {
+    channelsStore.setState((prev) => ({
+      ...prev,
+      channels: new Map([[6, makeChannel({ id: 6, name: "Lounge", type: "voice" })]]),
+    }));
+    channelsStore.flush();
+    mount();
+    const kept = row(1);
+    kept.focus();
+    voiceStore.setState((prev) => ({
+      ...prev,
+      voiceUsers: new Map([[6, new Map([[1, voiceUser(1, { username: "ann" })]])]]),
+    }));
+    voiceStore.flush();
+    expect(row(1)).toBe(kept);
+    expect(document.activeElement).toBe(kept);
+    expect(kept.querySelector<HTMLElement>(".buddy-voice")?.title).toBe("In Lounge");
   });
 });
