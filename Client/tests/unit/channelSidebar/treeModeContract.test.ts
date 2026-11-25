@@ -28,7 +28,7 @@ import { publishFollowedThreads } from "../../../src/stores/followedThreads.stor
 import { withMusicSharer } from "../../../src/stores/voicePeers";
 import { muteChannel, invalidateMuteCache } from "@lib/prefs/channelMutes";
 import { setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
-import { listenToMusic } from "@lib/voice/livekitSession";
+import { listenToMusic } from "../../../src/features/voice/livekitSession";
 import type { ReadyChannel } from "../../../src/lib/types";
 import type { ReadyMember } from "../../../src/lib/types";
 import {
@@ -39,7 +39,7 @@ import {
 } from "../../helpers/channelSidebarHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/net/e2eeCrypto", (importOriginal) => mocks.netE2eeCryptoMock(importOriginal));
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>

@@ -9,7 +9,7 @@ import * as voiceSession from "../helpers/voiceSessionMock";
 
 const getUserVolume = vi.fn((..._args: unknown[]) => 100);
 
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     setUserVolume: vi.fn(),
     getUserVolume: (...args: unknown[]) => getUserVolume(...args) as unknown,

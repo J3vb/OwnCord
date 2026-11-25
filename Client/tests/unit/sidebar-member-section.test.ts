@@ -3,7 +3,7 @@ import { useMountContainer } from "../helpers/mountContainer";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 // We need to mock livekitSession before importing anything that uses auth.store
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     switchInputDevice: vi.fn().mockResolvedValue(undefined),
     switchOutputDevice: vi.fn().mockResolvedValue(undefined),

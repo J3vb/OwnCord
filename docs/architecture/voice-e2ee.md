@@ -15,7 +15,7 @@ The short version:
 - The Go server issues short-lived, scoped LiveKit tokens and relays the E2EE
   key-exchange messages. Media goes between the client and LiveKit; the
   server never has the media key.
-- On the client, everything goes through `src/lib/voice/livekitSession.ts`, a facade
+- On the client, everything goes through `src/features/voice/livekitSession.ts`, a facade
   over the `src/features/voice/` modules.
 - Self-hosted servers often use self-signed certificates. So the LiveKit
   connection goes through a local Rust TLS proxy, pinned to the same TOFU
@@ -146,7 +146,7 @@ Supporting pieces:
   limited to `server.livekit_webhook_allowed_cidrs`, which falls back to
   `server.admin_allowed_cidrs`), `Server/api/livekit_proxy.go` (reverse proxy
   for LiveKit signalling).
-- **Client:** `src/lib/voice/livekitSession.ts` (facade owning the state machine:
+- **Client:** `src/features/voice/livekitSession.ts` (facade owning the state machine:
   idle/connecting/connected/reconnecting), `src/features/voice/`
   (`joinOrchestration.ts` joins with a monotonic `joinGeneration` to discard
   superseded ones; `roomLifecycle.ts` Room + E2EE worker creation and
@@ -197,7 +197,7 @@ device's key. A new client verifies an announce against its
 otherwise. An older client sends no key and its announces carry none.
 
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
-`Client/src/lib/voice/livekitSession.ts`, `Client/src/features/voice/`,
+`Client/src/features/voice/livekitSession.ts`, `Client/src/features/voice/`,
 `Client/src/features/voice/livekitE2EE.ts`, `Client/src/lib/net/e2eeCrypto.ts`,
 `Client/src-tauri/src/livekit_proxy.rs`.
 

@@ -38,7 +38,7 @@ vi.mock("../../src/features/connection/credentials", () => ({
   deleteCredential: hoisted.deleteCredential,
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
 }));
-vi.mock("@lib/voice/livekitSession", () => ({ leaveVoice: hoisted.leaveVoice }));
+vi.mock("../../src/features/voice/livekitSession", () => ({ leaveVoice: hoisted.leaveVoice }));
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({
     debug: vi.fn(),

@@ -21,7 +21,7 @@ import {
 import { noteJoinSent } from "./joinRequest";
 import type { Payload, ReconnectClock } from "../connection/dispatchContext";
 
-vi.mock("../../lib/voice/livekitSession", () => ({
+vi.mock("./livekitSession", () => ({
   leaveVoice: vi.fn(),
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
@@ -33,7 +33,7 @@ vi.mock("../../lib/voice/livekitSession", () => ({
   resendWatching: vi.fn(),
 }));
 vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
-import { leaveVoice } from "../../lib/voice/livekitSession";
+import { leaveVoice } from "./livekitSession";
 import { showToast } from "../../lib/ui/toast";
 import {
   clockStub,

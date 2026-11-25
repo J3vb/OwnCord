@@ -57,7 +57,7 @@ export const EVENT_LOG = "src/lib/diagnostics/eventLog.ts";
 export const APP_EVENTS = "src/lib/diagnostics/appEvents.ts";
 export const VOICE_LOG = "src/lib/voice/voiceEventLog.ts";
 export const WATCHDOG = "src/lib/voice/cameraStallWatchdog.ts";
-export const DIAGNOSTICS = "src/lib/voice/livekitDiagnostics.ts";
+export const DIAGNOSTICS = "src/features/voice/livekitDiagnostics.ts";
 export const SCREEN_CHANGE = "src/features/voice/screenshareChange.ts";
 
 export const CAMERA_STATS = {

@@ -20,7 +20,7 @@ import {
 import { clearHost, hostAndroidApp } from "../../helpers/androidHost";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 const {
   mockSetUserVolume,

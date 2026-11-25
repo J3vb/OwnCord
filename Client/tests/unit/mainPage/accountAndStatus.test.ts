@@ -35,7 +35,7 @@ vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
 );
 vi.mock("@lib/logger", () => mocks.loggerMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/media/notificationSound", () => mocks.mediaNotificationSoundMock());
 vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messagesCallAlertsMock());
 vi.mock("../../../src/features/updates/UpdateNotifier", () => mocks.updateNotifierMock());

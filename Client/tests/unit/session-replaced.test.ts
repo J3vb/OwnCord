@@ -20,7 +20,7 @@ vi.mock("@tauri-apps/api/core", async () => ({
 vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
-vi.mock("@lib/voice/livekitSession", () => ({ leaveVoice: vi.fn() }));
+vi.mock("../../src/features/voice/livekitSession", () => ({ leaveVoice: vi.fn() }));
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("../../src/features/connection/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),

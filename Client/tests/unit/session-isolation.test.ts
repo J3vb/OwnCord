@@ -89,7 +89,7 @@ vi.mock("@lib/presence/profiles", () => ({
 
 // The media session is its own suite (session-isolation-media.test.ts); here
 // only the switch's call into it is observed.
-vi.mock("@lib/voice/livekitSession", () => ({ leaveVoice: vi.fn() }));
+vi.mock("../../src/features/voice/livekitSession", () => ({ leaveVoice: vi.fn() }));
 vi.mock("@lib/media/notificationSound", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@lib/media/notificationSound")>()),
   cleanupNotificationAudio: vi.fn(),
@@ -215,7 +215,7 @@ import { currentUserPermissions } from "../../src/stores/permissions";
 import { cleanupNotificationAudio } from "@lib/media/notificationSound";
 // The app loads this with the dispatcher chunk (mocked here); it registers the audio reset.
 import "../../src/features/notifications/notifications";
-import { leaveVoice } from "@lib/voice/livekitSession";
+import { leaveVoice } from "../../src/features/voice/livekitSession";
 import { deleteCredential, resumeSavedSession } from "../../src/features/connection/credentials";
 import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { createProfileManager } from "@lib/presence/profiles";

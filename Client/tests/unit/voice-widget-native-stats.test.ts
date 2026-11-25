@@ -29,7 +29,7 @@ vi.mock("../../src/lib/hostOs", () => ({
   isWindowsDesktop: () => false,
   canPublishScreen: () => true,
 }));
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     getLocalScreenshareStream: () => null,
     getRoomForStats: () => host.room,

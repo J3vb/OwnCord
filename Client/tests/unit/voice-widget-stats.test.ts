@@ -14,7 +14,7 @@ const connectionStatsMock = vi.hoisted(() => ({
   qualityListeners: [] as unknown[],
 }));
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({

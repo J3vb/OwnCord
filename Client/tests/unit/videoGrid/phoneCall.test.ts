@@ -15,7 +15,7 @@ import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/android
 import { routeButtonMock, routeButtonsMade } from "../../helpers/routeButtonStub";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 // The shared Back history, replaced by a stub that records the claims.
 const backClaims = vi.hoisted(() => ({

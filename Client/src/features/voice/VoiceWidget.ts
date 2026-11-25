@@ -20,7 +20,7 @@ import {
   type ConnectionStatsPoller,
 } from "@lib/voice/connectionStats";
 import { enhancedNoiseSuppressionEnabled } from "@lib/voice/audioPipeline";
-import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "@lib/voice/livekitSession";
+import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "./livekitSession";
 import { writeLiveStats } from "@lib/voice/liveStats";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../../i18n/voice";

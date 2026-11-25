@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/voice/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
+vi.mock("../../src/features/voice/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
 vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),

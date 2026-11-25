@@ -1,5 +1,5 @@
 import { vi, beforeEach, afterEach } from "vitest";
-import { LiveKitSession } from "../../src/lib/voice/livekitSession";
+import { LiveKitSession } from "../../src/features/voice/livekitSession";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";
 import { mockLoadPref, mockVoiceState, mockRoom } from "./livekitSessionMocks";
 import { createDeferred } from "./deferred";

@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import { useMountContainer } from "../helpers/mountContainer";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   renderMentionSegment,

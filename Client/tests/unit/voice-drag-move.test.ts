@@ -3,7 +3,7 @@ import { useMountContainer } from "../helpers/mountContainer";
 import { addVoiceUser } from "../helpers/voiceUsers";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 const { mockOpenUserProfilePopup } = vi.hoisted(() => ({
   mockOpenUserProfilePopup: vi.fn(() => () => undefined),

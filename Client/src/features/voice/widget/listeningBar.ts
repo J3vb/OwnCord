@@ -4,7 +4,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { USER_VOLUME_CHANGED } from "@lib/constants";
-import { getMusicVolume, listenToMusic } from "@lib/voice/livekitSession";
+import { getMusicVolume, listenToMusic } from "../livekitSession";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import type { VoiceState } from "@stores/voice.store";
 import { voiceText as t } from "../../../i18n/voice";

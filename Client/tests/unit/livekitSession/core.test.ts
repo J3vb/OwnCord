@@ -4,7 +4,7 @@ import {
   parseUserId,
   LiveKitSession,
   getRoomForStats,
-} from "../../../src/lib/voice/livekitSession";
+} from "../../../src/features/voice/livekitSession";
 import {
   setLocalMuted,
   setLocalDeafened,
@@ -23,7 +23,7 @@ import {
   setMuted as boundSetMuted,
   setDeafened as boundSetDeafened,
   cleanupAll as boundCleanupAll,
-} from "../../../src/lib/voice/livekitSession";
+} from "../../../src/features/voice/livekitSession";
 import {
   useLiveKitSessionHarness,
   stubPrefs,

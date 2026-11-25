@@ -2,13 +2,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as ptt from "../../helpers/pttHarness";
 import { loggerMock } from "../../helpers/loggerMock";
+import { registerTestVoiceSessionLoader } from "../../helpers/voiceSessionLoader";
 
 vi.mock("@tauri-apps/api/core", () => ptt.tauriCoreMock());
 vi.mock("@tauri-apps/api/event", () => ptt.tauriEventMock());
 vi.mock("@lib/prefs/preferences", () => ptt.preferencesMock());
 vi.mock("@stores/voice.store", () => ptt.voiceStoreMock());
 vi.mock("@lib/logger", () => loggerMock());
-vi.mock("../../../src/lib/voice/livekitSession", () => ptt.livekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => ptt.livekitSessionMock());
 
 const {
   mockInvoke,
@@ -26,6 +27,10 @@ const {
 // ---------------------------------------------------------------------------
 
 import { pushToTalk } from "../../../src/platform/desktop/pushToTalkService";
+import {
+  registerVoiceSessionLoader,
+  type VoiceSessionControls,
+} from "../../../src/lib/voice/voiceSessionLoader";
 
 const { init: initPtt, stop: stopPtt, updateKey: updatePttKey } = pushToTalk;
 
@@ -531,6 +536,44 @@ describe("PTT binding lifecycle races", () => {
     expect(mockSetMuted).not.toHaveBeenCalled();
   });
 
+  describe("while the voice session facade is still loading", () => {
+    let finishLoad!: () => void;
+    /** Binds a key, then makes the next facade load wait for `finishLoad`. */
+    async function bindThenSlowLoad(): Promise<(e: { payload: unknown }) => void> {
+      const handlers = captureListeners();
+      await updatePttKey(0x20);
+      mockSetPttGated.mockClear();
+      registerVoiceSessionLoader(
+        () =>
+          new Promise<VoiceSessionControls>((resolve) => {
+            finishLoad = () => resolve(import("../../../src/features/voice/livekitSession"));
+          }),
+      );
+      return handlers["ptt-state"]!;
+    }
+    afterEach(() => {
+      registerVoiceSessionLoader(() => import("../../../src/features/voice/livekitSession"));
+    });
+
+    it("applies a press once the facade loads", async () => {
+      const onState = await bindThenSlowLoad();
+      onState({ payload: true });
+      await Promise.resolve();
+      expect(mockSetPttGated).not.toHaveBeenCalled();
+      finishLoad();
+      await vi.waitFor(() => expect(mockSetPttGated).toHaveBeenCalledWith(false));
+    });
+
+    it("drops a press whose call ended before the facade loaded", async () => {
+      const onState = await bindThenSlowLoad();
+      onState({ payload: true });
+      pttState.currentChannelId = null;
+      finishLoad();
+      await vi.dynamicImportSettled();
+      expect(mockSetPttGated).not.toHaveBeenCalled();
+    });
+  });
+
   it("ignores queued events from a removed binding and mic work for a previous call", async () => {
     mockInvoke.mockImplementation((command: string) =>
       Promise.resolve(command === "ptt_polling_supported" ? true : undefined),
@@ -753,6 +796,7 @@ describe("PTT on the portal backend", () => {
   const starts = () => mockInvoke.mock.calls.filter((c) => c[0] === "ptt_start").length;
   const emit = (event: string, payload: unknown) => handlers.get(event)!({ payload });
   async function service() {
+    await registerTestVoiceSessionLoader();
     const mod = await import("../../../src/platform/desktop/pushToTalkService");
     return mod.pushToTalk;
   }

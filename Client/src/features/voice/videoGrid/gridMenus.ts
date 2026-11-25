@@ -1,7 +1,7 @@
 /**
  * The video grid's tile menus and per-user volume, split from gridStreams.ts.
  */
-import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
+import { getUserLocalMute, getUserVolume } from "../livekitSession";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { CellEntry } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";

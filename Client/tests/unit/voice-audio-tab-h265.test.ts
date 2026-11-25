@@ -37,7 +37,7 @@ vi.mock("livekit-client", async (importOriginal) => ({
   supportsH265: () => supportsH265(),
 }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => codecMocks.inertPushToTalkMock());
-vi.mock("@lib/voice/livekitSession", () => codecMocks.reapplyAudioSessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => codecMocks.reapplyAudioSessionMock());
 
 import { installFakeAudio } from "../helpers/fakeAudioContext";
 import {

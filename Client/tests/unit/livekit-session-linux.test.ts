@@ -266,7 +266,7 @@ globalThis.Worker = vi.fn(function () {
   throw new Error("no E2EE web worker on Linux");
 }) as unknown as typeof Worker;
 
-import { LiveKitSession } from "../../src/lib/voice/livekitSession";
+import { LiveKitSession } from "../../src/features/voice/livekitSession";
 import { vadThreshold } from "../../src/lib/voice/gateScale";
 import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";

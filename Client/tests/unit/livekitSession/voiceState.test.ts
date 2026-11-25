@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
-import { LiveKitSession, setPttPollingLive } from "../../../src/lib/voice/livekitSession";
+import { LiveKitSession, setPttPollingLive } from "../../../src/features/voice/livekitSession";
 import { setTalkButton } from "../../../src/lib/ui/inputMode";
 import {
   setLocalMuted,

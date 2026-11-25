@@ -10,7 +10,7 @@ const FEATURES = "../../src/features";
 const PAGE = "../../src/pages/main-page";
 
 const FACTORIES: ReadonlyArray<readonly [string, () => object]> = [
-  ["@lib/voice/livekitSession", mocks.voiceLivekitSessionMock],
+  [`${FEATURES}/voice/livekitSession`, mocks.voiceLivekitSessionMock],
   ["@lib/logger", mocks.loggerMock],
   ["@lib/ui/toast", mocks.uiToastMock],
   ["@lib/presence/profiles", mocks.presenceProfilesMock],

@@ -16,6 +16,7 @@ import { settleNotificationLevelDefault } from "@lib/prefs/notificationLevel";
 import { createWsClient } from "@lib/ws";
 import { markActiveChannelReadOnUnload } from "./stores/readState";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
+import { registerVoiceSessionLoader } from "@lib/voice/voiceSessionLoader";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
@@ -44,6 +45,8 @@ applyStoredLogLevel(import.meta.env.DEV ? "debug" : "info");
 const log = createLogger("main");
 
 installGlobalGuards();
+// Logout and push-to-talk reach the (lazy) voice session facade through this.
+registerVoiceSessionLoader(() => import("./features/voice/livekitSession"));
 
 // Install global error handlers first
 installGlobalErrorHandlers();

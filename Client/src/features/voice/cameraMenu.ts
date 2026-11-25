@@ -4,7 +4,7 @@ import { showContextMenu } from "@lib/ui/contextMenu";
 import { createIcon } from "@lib/icons";
 import { loadPref } from "@lib/prefs/preferences";
 import { createElement } from "@lib/dom";
-import { switchVideoDevice } from "@lib/voice/livekitSession";
+import { switchVideoDevice } from "./livekitSession";
 import { createLogger } from "@lib/logger";
 import { nativeCameraDevices } from "./native/devices";
 import { voiceText as t } from "../../i18n/voice";

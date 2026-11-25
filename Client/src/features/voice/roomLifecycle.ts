@@ -32,7 +32,7 @@ import {
   stopManualScreenTracks,
   bumpGeneration,
 } from "./screenShare";
-import { attachDiagnosticListeners } from "../../lib/voice/livekitDiagnostics";
+import { attachDiagnosticListeners } from "./livekitDiagnostics";
 import { recordVoiceLeft } from "../../lib/voice/voiceEventLog";
 import { detachRoom, onRoom } from "./releaseRoom";
 import type { RoomEventHandlers } from "../../features/voice/roomEventHandlers";

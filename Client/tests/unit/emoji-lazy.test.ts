@@ -8,7 +8,7 @@
 import { describe, it, expect, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 import { createEmojiPicker } from "../../src/features/messaging/EmojiPicker";
 import { createMessageInput } from "../../src/features/messaging/MessageInput";

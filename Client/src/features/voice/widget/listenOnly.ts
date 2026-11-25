@@ -1,6 +1,6 @@
 /** The voice widget's listen-only affordance: a "Grant Microphone" button and its persistent explanation. */
 import { createElement, setText } from "@lib/dom";
-import { retryMicPermission } from "@lib/voice/livekitSession";
+import { retryMicPermission } from "../livekitSession";
 import { voiceStore } from "@stores/voice.store";
 import { voiceText as t } from "../../../i18n/voice";
 

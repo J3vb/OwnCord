@@ -10,7 +10,7 @@ import {
   switchOutputDevice,
   switchVideoDevice,
   getLocalMicSettings,
-} from "@lib/voice/livekitSession";
+} from "../../voice/livekitSession";
 import {
   nativeAudioDevices,
   nativeCameraDevices,

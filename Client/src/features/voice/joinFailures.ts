@@ -3,7 +3,7 @@
 // the ownership check in JoinOrchestration; none awaits.
 import { leaveVoiceChannel, voiceStore } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
-import { logIceConnectionInfo } from "../../lib/voice/livekitDiagnostics";
+import { logIceConnectionInfo } from "./livekitDiagnostics";
 import { setJoinedVoiceStatus } from "../../features/voice/roomEventHandlers";
 import { voiceText } from "../../i18n/voice";
 import { releaseRoom } from "./releaseRoom";

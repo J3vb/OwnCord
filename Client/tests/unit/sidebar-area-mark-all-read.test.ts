@@ -17,7 +17,7 @@ import {
   resetSidebarStoresAsMember,
 } from "../helpers/sidebarAreaOpts";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.rePinSessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => mocks.rePinSessionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.e2eeCryptoMock());
 vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 vi.mock("../../src/features/voice/UserBar", () => mocks.userBarMock());

@@ -33,7 +33,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("../../src/features/notifications/notifications", () =>
   dispatcherMocks.notificationsMock(),
 );
-vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("../../src/features/connection/identity", () => dispatcherMocks.identityMock());
 vi.mock("../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
@@ -90,7 +90,7 @@ import {
 import { safetyStore } from "../../src/features/safety/store";
 import type { ServerMessage } from "../../src/lib/types";
 import { showToast } from "@lib/ui/toast";
-import * as livekitSession from "@lib/voice/livekitSession";
+import * as livekitSession from "../../src/features/voice/livekitSession";
 import { createOutgoingCall, createRingController } from "../../src/lib/voice/callRing";
 
 // Fixture loading and placeholder substitution live in tests/helpers/protocolFixtures.ts.

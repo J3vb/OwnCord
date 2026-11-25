@@ -94,7 +94,7 @@ export function configureSession(
 // module is necessarily already loaded, so this import resolves from the
 // module cache in a microtask.
 export function voiceSessionLeave(sendWsLeave: boolean): void {
-  void import("@lib/voice/livekitSession")
+  void import("../features/voice/livekitSession")
     .then(({ leaveVoice }) => leaveVoice(sendWsLeave))
     .catch((e) => log.warn("Failed to leave voice session", e));
 }

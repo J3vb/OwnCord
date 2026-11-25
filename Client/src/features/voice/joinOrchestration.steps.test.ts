@@ -23,8 +23,8 @@ vi.mock("../../stores/voice.store", async (importOriginal) => {
     leaveVoiceChannel: vi.fn(actual.leaveVoiceChannel),
   };
 });
-vi.mock("../../lib/voice/livekitDiagnostics", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../lib/voice/livekitDiagnostics")>()),
+vi.mock("./livekitDiagnostics", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("./livekitDiagnostics")>()),
   logIceConnectionInfo: vi.fn(),
 }));
 
@@ -33,7 +33,7 @@ import { onRoom } from "./releaseRoom";
 import { voiceJoinSnapshot } from "../../lib/voice/voiceJoinTrace";
 import { joinRetryInMs, noteJoinSucceeded } from "@lib/voice/joinBackoff";
 import { leaveVoiceChannel, setVoiceStatus, voiceStore } from "../../stores/voice.store";
-import { logIceConnectionInfo } from "../../lib/voice/livekitDiagnostics";
+import { logIceConnectionInfo } from "./livekitDiagnostics";
 import { voiceText } from "../../i18n/voice";
 
 type FakeRoom = Room & {

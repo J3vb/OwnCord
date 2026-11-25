@@ -36,7 +36,7 @@ vi.mock("../../lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("../../features/voice/deviceManager", () => ({ isMicPolicyGated: () => false }));
-vi.mock("../../lib/voice/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
+vi.mock("./livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
 vi.mock("./videoCapFollow", () => ({
   VideoCapFollower: vi.fn(function () {
     return { kick: vi.fn(), stop: vi.fn() };
@@ -317,8 +317,7 @@ describe("RoomLifecycle on the Linux native backend", () => {
     );
     vi.doMock("./native/nativeRoom", () => ({ createNativeRoom }));
     const { RoomLifecycle: LinuxLifecycle } = await import("./roomLifecycle");
-    const { attachDiagnosticListeners: attach } =
-      await import("../../lib/voice/livekitDiagnostics");
+    const { attachDiagnosticListeners: attach } = await import("./livekitDiagnostics");
     const { Room: WebRoom } = await import("livekit-client");
     const webRoomsBefore = vi.mocked(WebRoom).mock.calls.length;
     const ctx = setup();
