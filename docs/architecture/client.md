@@ -147,6 +147,17 @@ scheduled.
 | Theming             | `src/lib/prefs/themes.ts` + `styles/tokens.css`                                          | CSS custom properties; 4 built-in themes + custom overrides                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 | GIF picker          | `src/lib/media/gifProvider.ts` + `features/messaging/GifPicker.ts`                       | Calls the user's own server (`/api/v1/gif/*`) through `api.ts` — no provider API key in the bundle. Server answers `503 GIF_DISABLED` when unconfigured: the picker shows "GIFs are not enabled on this server" and `onUnavailable` disables the composer's GIF button (with a `title`/`aria-label` reason) instead of failing silently. Returned media URLs are still pinned to the `klipy.com` CDN, and the GIF images themselves are fetched through the external-content broker.                                                                                                                                                              |
 
+#### Settings search
+
+The Settings search box filters the tabs by what they say. The code is in
+`src/features/settings/settingsSearch.ts` (the index and the filter). Small helpers
+that tabs share are in `src/features/settings/helpers.ts`. The index lists the
+text each tab shows. It matches only text that is on screen: there is no
+synonym or hidden keyword list, so a new search word must also be a word the
+user can see. `tests/unit/settings-search.test.ts` renders every tab and fails
+when an indexed string is not on screen, or a row label or description on
+screen is not indexed. All text comes from the catalogs in `src/i18n/`.
+
 #### Lifecycle ownership
 
 Timers and listeners are owned through two primitives (B7-11):
