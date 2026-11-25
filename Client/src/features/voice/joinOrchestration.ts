@@ -25,7 +25,7 @@ import {
   finishJoinAttempt,
   setJoinUrlKind,
 } from "../../lib/voice/voiceJoinTrace";
-import { noteJoinSucceeded } from "./joinBackoff";
+import { noteJoinSucceeded } from "@lib/voice/joinBackoff";
 import type { JoinHost } from "./joinHost";
 import {
   clearForNewAttempt,

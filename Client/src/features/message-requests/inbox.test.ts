@@ -8,7 +8,7 @@ vi.mock("@lib/logger", () => ({
 
 import type { DmRequestListItem, DmRequestPayload, DmRequestState } from "@lib/types";
 import type { WsClient } from "@lib/ws";
-import { wireDispatcher } from "@lib/dispatcher";
+import { wireDispatcher } from "../../app/dispatcher";
 import { clearAuth } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";

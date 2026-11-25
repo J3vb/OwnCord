@@ -3,7 +3,7 @@ import { handleVoiceJoinRollback, handleVoicePasswordRefusal } from "./wsHandler
 import { closePasswordPrompt, promptForChannelPassword, sendPasswordJoin } from "./passwordPrompt";
 import { sendUserJoin } from "./joinClick";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
-import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
+import { joinRetryInMs, noteJoinSucceeded } from "@lib/voice/joinBackoff";
 import {
   voiceStore,
   resetVoiceStore,

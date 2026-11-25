@@ -14,7 +14,7 @@ import {
 } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/ui/toast";
-import { noteJoinFailed } from "../../features/voice/joinBackoff";
+import { noteJoinFailed } from "@lib/voice/joinBackoff";
 import { sendUserJoin, switchWaiting } from "../../features/voice/joinClick";
 import { noteVoiceLeave } from "../../features/voice/leaveOwed";
 import { joinBackoffText } from "../../features/voice/joinBackoffText";

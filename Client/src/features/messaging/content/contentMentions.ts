@@ -17,7 +17,7 @@ import {
   isEveryoneToken,
   resolveMentionUserId,
   type MentionInfo,
-} from "@lib/text/mentions";
+} from "../mentions";
 import "../mentionNameLookups";
 import { EMOJI_TOKEN_REGEX, buildCustomEmojiNode } from "./customEmoji";
 import { UNICODE_EMOJI_REGEX, buildEmojiImage, showsAsImage } from "./emojiImage";

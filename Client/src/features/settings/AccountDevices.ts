@@ -5,7 +5,7 @@ import { errorText, ApiClientError } from "@lib/api";
 import type { OwnApiToken, SessionInfo } from "@lib/api";
 import { showToast } from "@lib/ui/toast";
 import { deviceLabel } from "@lib/net/deviceLabel";
-import { formatMessageTimestamp } from "@lib/text/formatting";
+import { formatMessageTimestamp } from "../messaging/formatting";
 import { uiStore } from "@stores/ui.store";
 import type { SettingsOverlayOptions } from "./SettingsOverlay";
 import { accountText as t } from "../../i18n/account";

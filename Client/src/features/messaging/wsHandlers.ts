@@ -1,5 +1,5 @@
 // Chat message, reaction, typing and optimistic-send WebSocket handlers —
-// extracted from lib/dispatcher.ts, which keeps every socket subscription and
+// extracted from app/dispatcher.ts, which keeps every socket subscription and
 // calls these plain functions.
 import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";
@@ -26,8 +26,8 @@ import type { ConnectionState } from "../../lib/ws";
 import { invalidateReactionUsers } from "./reactionUsers";
 import { handleThreadDeleted, handleThreadFollow, handleThreadState } from "./threadFrames";
 import { loadedThreadsStore } from "../../stores/threadsLoader";
-import { isChannelAway } from "@lib/readState";
-import { acknowledgePendingMessage } from "../../lib/pendingMessages";
+import { isChannelAway } from "@stores/readState";
+import { acknowledgePendingMessage } from "./pendingMessages";
 import type { DispatchApi, Payload, ReconnectClock, WsRoute } from "../connection/dispatchContext";
 import { log, route } from "../connection/dispatchContext";
 import { ServerMessageType as S } from "@lib/protocolTypes";
@@ -75,7 +75,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   const isReplayFrame = isReplayedFrame(clock, payload);
   const isMention = raisesMentionBadge(payload, isReplayFrame);
   // "active" only means "the reader is watching" while the window is
-  // focused (isChannelAway, lib/readState.ts). A minimised or unfocused window
+  // focused (isChannelAway, stores/readState.ts). A minimised or unfocused window
   // shows nothing, so a message landing in the active channel then must count
   // like one in any other channel (badge, taskbar, divider) — the same
   // predicate the ready-time mark-read uses.

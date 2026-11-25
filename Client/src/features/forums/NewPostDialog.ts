@@ -21,7 +21,7 @@ import { createIcon } from "@lib/icons";
 import { createModal } from "@lib/ui/modalFactory";
 import { errorText, type ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { newClientMessageId, pendingMessageRetryFloor } from "@lib/pendingMessages";
+import { newClientMessageId, pendingMessageRetryFloor } from "../messaging/pendingMessages";
 import type { WsClient } from "@lib/ws";
 import type { ThreadInfo } from "@lib/types";
 import { authStore } from "@stores/auth.store";

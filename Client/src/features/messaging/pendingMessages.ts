@@ -3,14 +3,14 @@
  * browser builds keep drafts in memory and never write message text to Web Storage.
  */
 import { addOptimisticMessage, markSendFailed } from "@stores/messages.store";
-import { desktop } from "../platform/desktop";
+import { desktop } from "../../platform/desktop";
 import type {
   PendingMessageOwner,
   PendingMessageStore,
-} from "../platform/contracts/pendingMessages";
-import type { MessageUser } from "./types";
-import { createLogger } from "./logger";
-import { serverNow } from "./net/serverClock";
+} from "../../platform/contracts/pendingMessages";
+import type { MessageUser } from "@lib/types";
+import { createLogger } from "@lib/logger";
+import { serverNow } from "@lib/net/serverClock";
 
 const log = createLogger("pending-messages");
 export const PENDING_MESSAGE_MAX_AGE_MS = 24 * 60 * 60 * 1000;

@@ -16,7 +16,7 @@ import {
   type Channel,
 } from "../../src/stores/channels.store";
 import { isCategoryCollapsed } from "../../src/stores/ui.store";
-import { setMarkReadSender } from "@lib/readState";
+import { setMarkReadSender } from "../../src/stores/readState";
 import type { ReadyChannel } from "../../src/lib/types";
 
 const CHANNELS: ReadyChannel[] = [

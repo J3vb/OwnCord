@@ -17,7 +17,7 @@ import {
   getIdentityPin,
   storeIdentityPin,
   type ForgetIdentityPinResult,
-} from "../../lib/net/identity";
+} from "../connection/identity";
 import type { OfferBinding } from "../../lib/net/e2eeCrypto";
 import { authStore } from "../../stores/auth.store";
 import { trustedPins } from "../../lib/net/identityPins";

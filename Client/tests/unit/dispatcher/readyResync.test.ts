@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, onTestFinished } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
-import { wireDispatcher } from "../../../src/lib/dispatcher";
+import { wireDispatcher } from "../../../src/app/dispatcher";
 import { expectConsole } from "../../helpers/console";
 import { channelsStore } from "../../../src/stores/channels.store";
 import {
@@ -24,9 +24,9 @@ import {
   loadReactionUsers,
   setReactionUsersFetcher,
 } from "../../../src/features/messaging/reactionUsers";
-import { setMarkReadSender } from "../../../src/lib/readState";
+import { setMarkReadSender } from "../../../src/stores/readState";
 import type { MessageResponse } from "../../../src/lib/types";
-import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../../src/lib/net/identity";
+import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../../src/features/connection/identity";
 import {
   useDispatcherHarness,
   readyChannel,
@@ -47,7 +47,7 @@ vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notif
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
-vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
+vi.mock("../../../src/features/connection/identity", () => dispatcherMocks.identityMock());
 vi.mock("../../../src/features/connection/dispatchContext", async (importOriginal) =>
   dispatcherMocks.dispatchContextMock(await importOriginal<object>()),
 );

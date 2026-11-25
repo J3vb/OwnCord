@@ -68,7 +68,7 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     reason: "app-lifetime preference listener installed once at module load",
   },
   {
-    file: "lib/text/formatting.ts",
+    file: "features/messaging/formatting.ts",
     receiver: "window",
     event: "owncord:pref-change",
     category: "app-lifetime",

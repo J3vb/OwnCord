@@ -12,7 +12,7 @@ import { messagingText } from "../../../i18n/messaging";
 /** Maximum rows shown at once, as for mentions. */
 export const MAX_CHANNEL_SUGGESTIONS = 10;
 
-/** Names the `#channel` grammar can express (lib/text/mentions CHANNEL_TOKEN_REGEX). */
+/** Names the `#channel` grammar can express (features/messaging/mentions CHANNEL_TOKEN_REGEX). */
 const CHANNEL_NAME = /^[\p{L}\p{N}_-]{1,64}$/u;
 
 export interface ChannelSuggestion {
@@ -47,7 +47,7 @@ function byPosition(
  * group in sidebar order. DMs are not channels here, and a name the `#token`
  * grammar cannot express is left out: inserting it would not link. Of
  * channels sharing a name (in any case) only the one a `#name` link opens is
- * offered, the first in store order (lib/nav/channelNavigation findChannelByName).
+ * offered, the first in store order (features/navigation/channelNavigation findChannelByName).
  */
 export function filterChannelSuggestions(query: string): ChannelSuggestion[] {
   const q = query.toLowerCase();

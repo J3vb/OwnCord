@@ -32,12 +32,14 @@ const hoisted = vi.hoisted(() => ({
 
 vi.mock("@lib/logger", () => loggerMock({ error: hoisted.logError }));
 vi.mock("@lib/text/safeRender", () => ({ safeMount: vi.fn() }));
-vi.mock("@lib/net/credentials", () => ({
+vi.mock("../../src/features/connection/credentials", () => ({
   deleteCredential: vi.fn(),
   loginWithSavedPassword: vi.fn(),
   readRelayedLogin: vi.fn(),
 }));
-vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
+vi.mock("../../src/features/messaging/pendingMessages", () => ({
+  deactivatePendingMessages: vi.fn(),
+}));
 vi.mock("@pages/ConnectPage", () => ({
   createConnectPage: (callbacks: Record<string, (...args: never[]) => unknown>) => {
     hoisted.callbacks = callbacks;
@@ -75,7 +77,10 @@ vi.mock("../../src/app/session", () => ({
 }));
 
 import { setUpdateRequiredHost, uiStore } from "@stores/ui.store";
-import { loginWithSavedPassword, readRelayedLogin } from "@lib/net/credentials";
+import {
+  loginWithSavedPassword,
+  readRelayedLogin,
+} from "../../src/features/connection/credentials";
 import { renderConnect } from "../../src/app/connectRoute";
 
 const PAGE_METHODS = [

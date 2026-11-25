@@ -257,7 +257,7 @@ vi.mock("@lib/net/e2eeCrypto", () => ({
   computeKeyFingerprint: vi.fn(async () => "AB12"),
   computeRawKeyFingerprint: vi.fn(async () => "5E55"),
 }));
-vi.mock("@lib/net/identity", () => ({
+vi.mock("../../src/features/connection/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => ({ publicKey: {}, privateKey: {} })),
   getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
   storeIdentityPin: vi.fn(async () => true),

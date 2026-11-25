@@ -4,8 +4,8 @@ import { mockInvoke, eventHandlers, emitTauriEvent } from "../helpers/ws-mocks";
 import { PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { expectConsole } from "../../helpers/console";
 import { clearAuth } from "@stores/auth.store";
-import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { setMarkReadSender } from "@lib/readState";
+import { deactivatePendingMessages } from "../../../src/features/messaging/pendingMessages";
+import { setMarkReadSender } from "../../../src/stores/readState";
 import type { ReadyChannel } from "@lib/types";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -16,7 +16,10 @@ import {
   createCertMismatchModal,
 } from "../../../src/features/connection/CertMismatchModal";
 import { reconnectAfterCertAccept } from "@lib/net/certReconnect";
-import { setActivePresenceSender, type PresenceSender } from "@lib/presence/presence";
+import {
+  setActivePresenceSender,
+  type PresenceSender,
+} from "../../../src/features/presence/presence";
 import { startupInvokes } from "../../helpers/mainMocks";
 import {
   latestConnectPage,
@@ -31,10 +34,10 @@ vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
 vi.mock("@lib/prefs/appearance", () => mocks.prefsAppearanceMock());
 vi.mock("@lib/net/connectionDiagnostics", () => mocks.netConnectionDiagnosticsMock());
 vi.mock("@pages/mainPagePrefetch", () => mocks.pagesMainPagePrefetchMock());
-vi.mock("@lib/pendingMessages", () => mocks.pendingMessagesMock());
+vi.mock("../../../src/features/messaging/pendingMessages", () => mocks.pendingMessagesMock());
 vi.mock("../../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
 vi.mock("@lib/logPersistence", () => mocks.logPersistenceMock());
-vi.mock("@lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../../src/features/connection/credentials", () => mocks.netCredentialsMock());
 vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
 vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
@@ -46,7 +49,7 @@ vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());
 vi.mock("@lib/api", (importOriginal) => mocks.apiMock(importOriginal));
 vi.mock("@pages/ConnectPage", () => mocks.pagesConnectPageMock());
 vi.mock("@pages/MainPage", () => mocks.pagesMainPageMock());
-vi.mock("@lib/dispatcher", () => mocks.dispatcherMock());
+vi.mock("../../../src/app/dispatcher", () => mocks.dispatcherMock());
 
 const { mockPrefetchMainPage, mockLogin, capturedConnectCallbacks } = mocks;
 

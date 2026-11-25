@@ -9,7 +9,10 @@ import {
   wrapRoomKey,
   generateECDHKeyPair,
 } from "@lib/net/e2eeCrypto";
-import { getOrCreateIdentityKeyPair, storeIdentityPin } from "@lib/net/identity";
+import {
+  getOrCreateIdentityKeyPair,
+  storeIdentityPin,
+} from "../../../src/features/connection/identity";
 import {
   PEER_ID,
   OFFER_RECEIVER,
@@ -20,7 +23,7 @@ import {
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../../src/features/connection/identity", () => mocks.netIdentityMock());
 vi.mock("@stores/auth.store", () => mocks.authStoreMock());
 vi.mock("@stores/members.store", () => mocks.membersStoreMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());

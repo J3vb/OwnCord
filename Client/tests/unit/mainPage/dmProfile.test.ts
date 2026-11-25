@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/mainPageMocks";
-import { noteJoinFailed, noteJoinSucceeded } from "../../../src/features/voice/joinBackoff";
+import { noteJoinFailed, noteJoinSucceeded } from "../../../src/lib/voice/joinBackoff";
 import { savePref } from "../../../src/lib/prefs/preferences";
 import { channelsStore, setActiveChannel } from "../../../src/stores/channels.store";
 import { uiStore } from "../../../src/stores/ui.store";

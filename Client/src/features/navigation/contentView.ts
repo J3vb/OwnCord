@@ -21,7 +21,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, clearChildren, setOwnedTimeout } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createLogger } from "@lib/logger";
-import { canModerateMembers } from "@lib/permissions";
+import { canModerateMembers } from "@stores/permissions";
 import { authStore, onAuthCleared } from "@stores/auth.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";
 import { setActiveView, uiStore } from "@stores/ui.store";

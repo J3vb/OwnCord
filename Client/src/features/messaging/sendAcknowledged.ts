@@ -1,6 +1,6 @@
 /** What the mounted channel does when the server accepts a send. */
 
-import { canManageMessages } from "@lib/permissions";
+import { canManageMessages } from "@stores/permissions";
 import type { ChatSendOkPayload } from "@lib/wireServer";
 import { channelsStore } from "@stores/channels.store";
 import type {

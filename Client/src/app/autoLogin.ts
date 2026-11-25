@@ -8,8 +8,8 @@
 
 import { errorText, TransportError } from "@lib/api";
 import type { ApiClient } from "@lib/api";
-import { resumeSavedSession } from "@lib/net/credentials";
-import type { SavedSessionResume } from "@lib/net/credentials";
+import { resumeSavedSession } from "../features/connection/credentials";
+import type { SavedSessionResume } from "../features/connection/credentials";
 import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";
 import { setOwnedTimeout } from "@lib/dom";
 import { createLogger } from "@lib/logger";

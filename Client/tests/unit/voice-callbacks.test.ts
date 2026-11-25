@@ -79,7 +79,7 @@ import {
   createSidebarVoiceCallbacks,
 } from "../../src/pages/main-page/VoiceCallbacks";
 import type { WsClient } from "../../src/lib/ws";
-import { noteJoinFailed, noteJoinSucceeded } from "../../src/features/voice/joinBackoff";
+import { noteJoinFailed, noteJoinSucceeded } from "../../src/lib/voice/joinBackoff";
 import { takeJoinRefusal } from "../../src/features/voice/joinRequest";
 import {
   clearOwedLeave,

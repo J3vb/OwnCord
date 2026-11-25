@@ -327,7 +327,7 @@ a plain scroll still scrolls the grid (`bindVideoZoom` in `src/lib/ui/zoomPan.ts
 lightbox). Scrolling back to 1x, a new or stopped stream, and popping out start it unzoomed; the
 mini-player and your own screen share's cover do not zoom.
 Choosing a text channel from the stream view, the open one included (`onChannelReselect` in
-`lib/nav/channelNavigation.ts`), leaves it with voice still up, and the stream you watch keeps playing in
+`features/navigation/channelNavigation.ts`), leaves it with voice still up, and the stream you watch keeps playing in
 a **mini-player** over the app (`features/voice/miniPlayer.ts`, loaded on first use; the tile's own video
 moves in, as with Pop out). It shows the streamer's name, drags (or moves with the arrow keys) anywhere
 inside the window and keeps that spot for the session; **Return to stream** (or a double-click or
@@ -485,7 +485,7 @@ ended.
 Peer identity state lives in `voice.store` (per-participant
 `status: verified | changed | unverified | mismatch | unknown` + `safetyNumber`), written by
 `features/voice/e2eePeerState.ts` (driven by `features/voice/livekitE2EE.ts`) as
-announces are verified against the pinned identity keys (`lib/net/identity.ts`).
+announces are verified against the pinned identity keys (`features/connection/identity.ts`).
 
 | State        | Roster / DM tile badge (`verifyPresentation()`, `features/voice/peerVerification.ts`)                                          | Interaction                                                     |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------ | --------------------------------------------------------------- |
@@ -534,7 +534,7 @@ trust action entirely (a blind accept is refused).
 The trusted keys panel (`features/voice/trustedKeysPanel.ts`, lazy-loaded by
 `openTrustedKeysPanel()`) lists every key pinned for the peer, newest first,
 with its safety number, and marks the key of the device in the call. "Forget
-this key" (`forgetIdentityPin` in `lib/net/identity.ts`, through the same
+this key" (`forgetIdentityPin` in `features/connection/identity.ts`, through the same
 serialized pin write as an add) is offered on every other key; the key in the
 call and the last key are never removed. A forgotten key that shows up again
 is treated like any changed key: accepted, with the notice and the `changed`
@@ -827,5 +827,5 @@ and the E2EE verification badge), `src/features/voice/videoGrid/VideoGrid.ts`,
 `src-tauri/src/mobile_audio.rs` and `MobileAudioPlugin.kt` (the Android app's call audio),
 `src-tauri/src/call_service.rs` and `CallServicePlugin.kt` (the Android app's call service and screen-on),
 `CallButtons.kt`, `CallActionReceiver.kt` and `CallRing.kt` (its call notifications' buttons and the incoming call's notification),
-`src/lib/net/e2eeCrypto.ts`, `src/lib/net/identity.ts`; and the structural map in
+`src/lib/net/e2eeCrypto.ts`, `src/features/connection/identity.ts`; and the structural map in
 [../voice-e2ee.md](../voice-e2ee.md).

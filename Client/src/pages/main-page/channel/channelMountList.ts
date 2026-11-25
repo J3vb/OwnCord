@@ -19,7 +19,7 @@ import { getChannelMessages, reattachToPresent } from "@stores/messages.store";
 import { jumpToMessage } from "@lib/nav/messageNavigation";
 import { reportEntryText } from "../../../i18n/reportEntry";
 import { messagingText } from "../../../i18n/messaging";
-import { markChannelRead } from "@lib/readState";
+import { markChannelRead } from "@stores/readState";
 import { renderDeletePreview } from "./channelShared";
 import type { ChannelState, ChannelApi, MountScope } from "./channelState";
 

@@ -4,9 +4,9 @@
 // is installed when the page is created and cleared when it is destroyed, so a
 // torn-down connection never leaves one pointed at a dead socket. A feature
 // that needs a new slot adds a hook here, not to MainPage.
-import { setMarkReadSender } from "@lib/readState";
+import { setMarkReadSender } from "@stores/readState";
 import { setMarkUnreadSender } from "../../features/messaging/message-list/markUnread";
-import { setActivePresenceSender } from "@lib/presence/presence";
+import { setActivePresenceSender } from "../../features/presence/presence";
 import { setScreenSourcePicker } from "../../features/voice/native/screenPickerSlot";
 import {
   clearReactionUsersCache,

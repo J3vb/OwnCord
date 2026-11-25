@@ -43,14 +43,27 @@ vi.mock("@lib/voice/livekitSession", () => ({
   disableScreenshare: vi.fn(async () => {}),
 }));
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
+// Mocked at both paths: releases before the move keep it in lib/net/.
 vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
+vi.mock("../../src/features/connection/identity", () => ({
+  ensureIdentityKeyPublished: vi.fn(async () => true),
+}));
 vi.mock("../../src/features/voice/screenShare", () => ({
   rollbackPendingVideo: vi.fn(() => undefined),
 }));
 
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { existsSync } from "node:fs";
 import { createMockWsClient } from "../helpers/mock-ws";
-import type { WsClient } from "../../src/lib/ws";
+
+// The dispatcher moved from lib/ to app/; the release this runs against may
+// still have it in lib/. Vitest runs from Client/, so the probe and the
+// root-relative id both resolve against the old tree.
+const dispatcherId = existsSync("src/app/dispatcher.ts")
+  ? "/src/app/dispatcher"
+  : "/src/lib/dispatcher";
+const { wireDispatcher } = (await import(
+  /* @vite-ignore */ dispatcherId
+)) as typeof import("../../src/app/dispatcher");
 import type { ServerMessage } from "../../src/lib/types";
 
 interface WireFrame {
@@ -117,7 +130,7 @@ describe("n-1 compat: fixtures new since the previous release, through its dispa
       vi.spyOn(console, level).mockImplementation(() => {});
     }
     ws = createMockWsClient();
-    cleanup = wireDispatcher(ws as unknown as WsClient);
+    cleanup = wireDispatcher(ws);
   });
 
   afterEach(() => {

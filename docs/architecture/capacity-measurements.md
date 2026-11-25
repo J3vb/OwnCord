@@ -694,7 +694,7 @@ writer carries it. This profile uses the idle-heavy model the owner chose
     client's own throttle (`Client/src/features/messaging/MessageInput.ts`), and no
     one else types.
 - **Presence only on a status flip.** Each user flips once per 10 minutes,
-  as `Client/src/lib/presence/presence.ts` sends `presence_update` only on a change.
+  as `Client/src/features/presence/presence.ts` sends `presence_update` only on a change.
   Each user has its own slot in that period, so 2,000 users flip at about
   3.3/s.
 - **Timers keep their phase across reconnects (OC-0445).** A herd redial

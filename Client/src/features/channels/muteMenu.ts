@@ -5,7 +5,7 @@
  */
 
 import { MUTE_DURATIONS_MS } from "@lib/prefs/channelMutes";
-import { formatClockTime, formatFullDate } from "@lib/text/formatting";
+import { formatClockTime, formatFullDate } from "../messaging/formatting";
 import { shellText } from "../../i18n/shell";
 
 const DURATION_KEYS = {

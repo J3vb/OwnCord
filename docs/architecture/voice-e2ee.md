@@ -159,7 +159,7 @@ Supporting pieces:
   and TOFU pin verification; `e2eeWorker.ts` key provider write queue;
   `e2eeOffer.ts` room-key offers), `src/lib/net/e2eeCrypto.ts` (ECDH
   primitives, safety-number fingerprints, long-term identity keys),
-  `src/lib/net/identity.ts` (OS-keyring identity key + peer identity pins),
+  `src/features/connection/identity.ts` (OS-keyring identity key + peer identity pins),
   `src/lib/voice/audioPipeline.ts` + `src/lib/voice/noiseSuppression.ts` (RNNoise WASM),
   `src/features/voice/screenShare.ts`, `src/features/voice/videoCodec.ts` (the camera and
   screen-share codec: VP8 by default, H.264, VP9, H.265 (hardware encoder, non-Intel GPU) or Auto by choice on Windows;

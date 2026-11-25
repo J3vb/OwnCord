@@ -14,7 +14,7 @@ import { closeOnBackdropClick } from "@lib/ui/modalFactory";
 import { showToast } from "@lib/ui/toast";
 import { createLogger } from "@lib/logger";
 import type { MountableComponent } from "@lib/text/safeRender";
-import type { ForgetIdentityPinResult } from "@lib/net/identity";
+import type { ForgetIdentityPinResult } from "../connection/identity";
 import { computeKeyFingerprint, importIdentityPublicKey } from "@lib/net/e2eeCrypto";
 import { shellText } from "../../i18n/shell";
 import { trustedKeysText as t } from "../../i18n/trustedKeys";

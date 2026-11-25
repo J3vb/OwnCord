@@ -16,7 +16,7 @@ import {
 } from "../../../src/features/voice/wsHandlers";
 import { joinAnswerWaitFor } from "../../../src/features/voice/wsErrors";
 import { noteJoinSent, setJoinAnswerWait } from "../../../src/features/voice/joinRequest";
-import { noteJoinSucceeded } from "../../../src/features/voice/joinBackoff";
+import { noteJoinSucceeded } from "../../../src/lib/voice/joinBackoff";
 import {
   createSidebarVoiceCallbacks,
   createVoiceWidgetCallbacks,
@@ -52,7 +52,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../../src/features/connection/identity", () => mocks.netIdentityMock());
 
 /** The user's click: the store names the channel, then voice_join goes out. */
 function click(channelId: number, joinId: string): void {

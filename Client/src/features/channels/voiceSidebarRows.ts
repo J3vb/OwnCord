@@ -24,7 +24,7 @@ import type { VoiceUser } from "@stores/voice.store";
 import { safetyStore } from "../safety/store";
 import { attachVoiceUserDrag, markVoiceDropTarget } from "../voice/dragMove";
 import { openPeerShield } from "../voice/peerVerification";
-import { joinRetryInMs } from "../voice/joinBackoff";
+import { joinRetryInMs } from "@lib/voice/joinBackoff";
 import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
 import { openUserProfilePopup } from "../profiles/openUserProfilePopup";
 import { shellText } from "../../i18n/shell";

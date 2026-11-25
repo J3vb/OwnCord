@@ -5,7 +5,7 @@ import type { SearchResultItem } from "@lib/types";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { channelsStore } from "@stores/channels.store";
 import { blocksStore } from "@stores/blocks.store";
-import { parseTimestamp, resolveAuthor } from "@lib/text/formatting";
+import { parseTimestamp, resolveAuthor } from "../messaging/formatting";
 import { resolveDisplayName } from "@lib/ui/avatar";
 import { createImportedName, createImportedTag } from "../messaging/message-list/importedAuthor";
 import { formatDate } from "../../i18n/format";

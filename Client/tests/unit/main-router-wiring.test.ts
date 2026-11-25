@@ -18,7 +18,7 @@ vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
 vi.mock("@lib/prefs/appearance", () => mocks.prefsAppearanceMock());
 vi.mock("@lib/net/connectionDiagnostics", () => mocks.netConnectionDiagnosticsMock());
-vi.mock("@lib/pendingMessages", () => mocks.pendingMessagesMock());
+vi.mock("../../src/features/messaging/pendingMessages", () => mocks.pendingMessagesMock());
 vi.mock("../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
 vi.mock("@lib/logPersistence", () => mocks.logPersistenceMock());
 vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
@@ -29,7 +29,7 @@ vi.mock("@lib/presence/profiles", () => ({
 }));
 vi.mock("@pages/MainPage", () => mocks.pagesMainPageMock());
 vi.mock("@pages/mainPagePrefetch", () => mocks.pagesMainPagePrefetchMock());
-vi.mock("@lib/dispatcher", () => ({ wireConnectionStatus: vi.fn(() => () => {}) }));
+vi.mock("../../src/app/dispatcher", () => ({ wireConnectionStatus: vi.fn(() => () => {}) }));
 
 type PendingInvite = { code: string; host?: string } | null;
 

@@ -1,4 +1,4 @@
-// Voice WebSocket handlers — extracted from lib/dispatcher.ts, which keeps
+// Voice WebSocket handlers — extracted from app/dispatcher.ts, which keeps
 // every socket subscription and calls these plain functions. Every LiveKit
 // and screen-share call goes through a dynamic import: dispatcher.ts is in the
 // startup chunk, and livekit-client must stay out of it.

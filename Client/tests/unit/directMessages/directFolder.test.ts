@@ -20,7 +20,7 @@ import {
   uiStore,
 } from "../../../src/stores/ui.store";
 import { setVoiceStates, voiceStore } from "../../../src/stores/voice.store";
-import { formatBadgeCount } from "@lib/text/formatting";
+import { formatBadgeCount } from "../../../src/features/messaging/formatting";
 import { totalDmUnread } from "@lib/dmUnread";
 import { invalidateMuteCache, muteChannel } from "@lib/prefs/channelMutes";
 import { dmRecipient, makeDm, resetDmAndUiState } from "../../helpers/dmHarness";

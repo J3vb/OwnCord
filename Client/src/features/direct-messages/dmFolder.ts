@@ -18,7 +18,7 @@ import { Disposable } from "@lib/disposable";
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { reconcileModels } from "@lib/net/reconcile";
-import { formatBadgeCount } from "@lib/text/formatting";
+import { formatBadgeCount } from "../messaging/formatting";
 import { showContextMenu } from "@lib/ui/contextMenu";
 import { dmUnreadCount, totalDmUnread } from "@lib/dmUnread";
 import { dmStore, type DmChannel } from "@stores/dm.store";

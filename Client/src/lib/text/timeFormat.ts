@@ -11,10 +11,10 @@
  * Settings overrides it.
  *
  * A leaf module — it imports only `preferences.ts` — so both the low-level
- * `i18n/format.ts` and `lib/text/formatting.ts` can read it without a cycle.
+ * `i18n/format.ts` and `features/messaging/formatting.ts` can read it without a cycle.
  *
  * The value is cached here and refreshed by the app-lifetime `owncord:pref-change`
- * listener in `lib/text/formatting.ts` (and set directly by `saveTimeFormat`), so
+ * listener in `features/messaging/formatting.ts` (and set directly by `saveTimeFormat`), so
  * hot timestamp formatters do not touch localStorage on every call.
  */
 

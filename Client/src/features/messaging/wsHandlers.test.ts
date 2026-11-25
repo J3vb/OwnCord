@@ -23,7 +23,7 @@ import { dmStore, setDmChannels, updateDmLastMessage } from "../../stores/dm.sto
 import { channelsStore } from "../../stores/channels.store";
 import { authStore } from "../../stores/auth.store";
 import { setMembers, setTyping, getTypingUsers } from "../../stores/members.store";
-import { activatePendingMessages, deactivatePendingMessages } from "../../lib/pendingMessages";
+import { activatePendingMessages, deactivatePendingMessages } from "./pendingMessages";
 import { createReconnectClock } from "../connection/dispatchContext";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import type { DmChannelsResponse } from "../../lib/types";
@@ -32,7 +32,7 @@ vi.mock("../notifications/notifications", () => ({ notifyIncomingMessage: vi.fn(
 import { notifyIncomingMessage } from "../notifications/notifications";
 vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 import { showToast } from "../../lib/ui/toast";
-import { setLiveTailInView } from "../../lib/readState";
+import { setLiveTailInView } from "@stores/readState";
 import { expectConsole } from "../../../tests/helpers/console";
 
 function chat(id: number, timestamp: string): Payload<"chat_message"> {

@@ -43,7 +43,7 @@ vi.mock("../../src/features/messaging/TypingIndicator", () => ({
   createTypingIndicator: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
 vi.mock("../../src/pages/main-page/ChatHeader", () => ({ updateChatHeaderForDm: vi.fn() }));
-vi.mock("@lib/readState", () => ({
+vi.mock("../../src/stores/readState", () => ({
   setKnownThreadCheck: vi.fn(),
   setThreadReadPointer: vi.fn(),
   markChannelRead: vi.fn(),
@@ -78,7 +78,7 @@ import {
 import { setAuth } from "@stores/auth.store";
 import { channelsStore, setActiveChannel, setChannels, setRoles } from "@stores/channels.store";
 import { setConnectionStatus } from "@stores/ui.store";
-import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { deactivatePendingMessages } from "../../src/features/messaging/pendingMessages";
 import { failPendingOnDisconnect } from "../../src/features/messaging/wsHandlers";
 import { ATTACHMENT_TTL_MS } from "../../src/features/messaging/attachmentTtl";
 import { messagingText } from "../../src/i18n/messaging";

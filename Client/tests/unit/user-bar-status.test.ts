@@ -5,7 +5,7 @@ import { authStore } from "@stores/auth.store";
 import { uiStore, setConnectionStatus } from "@stores/ui.store";
 import { createUserBar } from "../../src/features/voice/UserBar";
 import { loadUserStatus, saveUserStatus } from "@lib/presence/userStatus";
-import { createPresenceSender } from "@lib/presence/presence";
+import { createPresenceSender } from "../../src/features/presence/presence";
 import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
 import { resetAuthState } from "../helpers/storeSeeds";

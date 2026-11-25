@@ -3,7 +3,7 @@
 // Owns the scroll flags and reads two stores; readState.ts holds the rest.
 import { isWindowDetached } from "@stores/messages.store";
 import { uiStore } from "@stores/ui.store";
-import { dialogOpen } from "./ui/dialogOpen";
+import { dialogOpen } from "@lib/ui/dialogOpen";
 
 /** Channels whose mounted list is scrolled away from the live tail. */
 const liveTailOutOfView = new Set<number>();

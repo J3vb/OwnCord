@@ -3,7 +3,7 @@
  * redrawn (its signature) and what its context menu acts on.
  */
 import { createElement, appendChildren } from "@lib/dom";
-import { formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
+import { formatBadgeCount, formatDmRowTime } from "../messaging/formatting";
 import type { RowModel } from "@lib/net/reconcile";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";

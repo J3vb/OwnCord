@@ -21,7 +21,7 @@ import {
   highlightsCurrentUser,
   mentionsCurrentUser,
   resolveMentionUserId,
-} from "../../src/lib/text/mentions";
+} from "../../src/features/messaging/mentions";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";

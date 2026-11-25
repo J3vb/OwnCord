@@ -14,7 +14,7 @@ import {
 } from "@lib/presence/userStatus";
 import { loadEmojiCatalog } from "../../src/features/messaging/emojiCatalog";
 import { savePref } from "@lib/prefs/preferences";
-import { createPresenceSender } from "@lib/presence/presence";
+import { createPresenceSender } from "../../src/features/presence/presence";
 import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import type { WsClient } from "@lib/ws";
 import { clearHost, hostAndroidApp } from "../helpers/androidHost";

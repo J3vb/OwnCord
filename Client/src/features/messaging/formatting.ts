@@ -11,7 +11,7 @@ import { getTimeFormat, refreshDateFormat, refreshTimeFormat } from "@lib/text/t
 import { formatDate } from "../../i18n/format";
 import { setOwnedTimeout } from "@lib/dom";
 import { messageStatusText } from "../../i18n/messageStatus";
-import { isServerRowKind } from "./messageKind";
+import { isServerRowKind } from "@lib/text/messageKind";
 
 // -- Constants ----------------------------------------------------------------
 

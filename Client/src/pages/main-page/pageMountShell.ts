@@ -24,7 +24,7 @@ import { startSessionNotice } from "@lib/net/sessionNotice";
 import { uiStore } from "@stores/ui.store";
 import { onPrefChange } from "@lib/prefs/preferences";
 import { startAutoIdle } from "@lib/presence/autoIdle";
-import { startStatusTimerWatcher } from "@lib/presence/statusTimer";
+import { startStatusTimerWatcher } from "../../features/presence/statusTimer";
 import { getActiveChannel } from "@stores/channels.store";
 import { setChatHeaderCallChat } from "./ChatHeader";
 import { createCallChat } from "../../features/voice/callChat";

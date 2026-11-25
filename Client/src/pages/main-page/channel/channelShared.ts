@@ -3,7 +3,7 @@ import { createElement } from "@lib/dom";
 import { createLogger } from "@lib/logger";
 import type { QueuedSend } from "../../../features/messaging/sendQueue";
 import type { Message } from "@stores/messages.store";
-import { resolveAuthor } from "@lib/text/formatting";
+import { resolveAuthor } from "../../../features/messaging/formatting";
 import { resolveDisplayName } from "@lib/ui/avatar";
 import { markdownToPlainText } from "@lib/text/markdown";
 import { authStore } from "@stores/auth.store";

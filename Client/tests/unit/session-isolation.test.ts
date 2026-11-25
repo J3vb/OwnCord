@@ -37,10 +37,10 @@ vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
 vi.mock("@lib/prefs/appearance", () => mainMocks.prefsAppearanceMock());
 vi.mock("@lib/net/connectionDiagnostics", () => mainMocks.netConnectionDiagnosticsMock());
-vi.mock("@lib/pendingMessages", () => mainMocks.pendingMessagesMock());
+vi.mock("../../src/features/messaging/pendingMessages", () => mainMocks.pendingMessagesMock());
 vi.mock("../../src/platform/desktop/pushToTalk", () => mainMocks.desktopPushToTalkMock());
 vi.mock("@lib/logPersistence", () => mainMocks.logPersistenceMock());
-vi.mock("@lib/net/credentials", () => mainMocks.netCredentialsMock());
+vi.mock("../../src/features/connection/credentials", () => mainMocks.netCredentialsMock());
 vi.mock("@lib/prefs/windowState", () => mainMocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
@@ -171,7 +171,7 @@ vi.mock("@pages/MainPage", () => mainMocks.pagesMainPageMock());
 // stay faithful to: the real dispatcher's auth_ok handler calls setAuth() on
 // the REAL authStore (imported below, not mocked) — so main.ts's own race
 // against that write is exercised unmodified, not sidestepped.
-vi.mock("@lib/dispatcher", async () => {
+vi.mock("../../src/app/dispatcher", async () => {
   const { authStore, setAuth } = await import("@stores/auth.store");
   const { setMembers } = await import("@stores/members.store");
   const { setDmChannels } = await import("@stores/dm.store");
@@ -209,12 +209,12 @@ import { dmStore, setDmChannels } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { voiceStore } from "@stores/voice.store";
-import { currentUserPermissions } from "@lib/permissions";
+import { currentUserPermissions } from "../../src/stores/permissions";
 import { cleanupNotificationAudio } from "@lib/media/notificationSound";
 // The app loads this with the dispatcher chunk (mocked here); it registers the audio reset.
 import "../../src/features/notifications/notifications";
 import { leaveVoice } from "@lib/voice/livekitSession";
-import { deleteCredential, resumeSavedSession } from "@lib/net/credentials";
+import { deleteCredential, resumeSavedSession } from "../../src/features/connection/credentials";
 import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { createProfileManager } from "@lib/presence/profiles";
 import { createConnectPage } from "@pages/ConnectPage";

@@ -8,7 +8,7 @@ import { migrateCollapsedToCategoryIds } from "../../../features/channels/collap
 import { createServerHeader } from "../../../features/server-header/serverHeader";
 import { attachServerMenu } from "../ServerMenu";
 import { createInviteManagerController } from "../OverlayManagers";
-import { markAllRead } from "@lib/readState";
+import { markAllRead } from "@stores/readState";
 import { loadCollapsedCategories, openSettings } from "@stores/ui.store";
 import { channelsStore, NO_CATEGORY } from "@stores/channels.store";
 import type { SidebarScope } from "./sidebarScope";

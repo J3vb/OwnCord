@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
-import { attachPressWarm } from "../../src/lib/nav/pressWarm";
-import { setChannelWarmHandler } from "../../src/lib/nav/channelNavigation";
+import { attachPressWarm } from "../../src/features/navigation/pressWarm";
+import { setChannelWarmHandler } from "../../src/features/navigation/channelNavigation";
 
 function press(el: HTMLElement, init: Partial<PointerEventInit> = {}): void {
   const e = new Event("pointerdown", { bubbles: true }) as Event & Record<string, unknown>;

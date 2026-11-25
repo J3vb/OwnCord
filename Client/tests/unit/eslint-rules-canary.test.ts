@@ -132,7 +132,7 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/no-store-write-in-ws-on",
     shape: "getState() mutator",
-    filePath: "src/lib/presence/presence.ts",
+    filePath: "src/features/presence/presence.ts",
     code: `import { messagesStore } from "@stores/messages.store";
     ws.on("x", (p) => { messagesStore.getState().addMessage(p); });`,
     messageId: "storeWriteOutsideDispatcher",
@@ -184,13 +184,13 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/subscription-result-kept",
     shape: "ws.on",
-    filePath: "src/lib/dispatcher.ts",
+    filePath: "src/app/dispatcher.ts",
     code: `this.ws.on("x", () => {});`,
     messageId: "discarded",
   },
   {
     rule: "local/layer-direction",
-    filePath: "src/lib/presence/presence.ts",
+    filePath: "src/features/presence/presence.ts",
     code: `import { MainPage } from "@pages/MainPage";`,
     messageId: "upwardImport",
     hasOptions: true,

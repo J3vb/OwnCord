@@ -10,7 +10,7 @@
 
 import { formatByteSize } from "@lib/voice/connectionStats";
 import { appendChildren, createElement, setText } from "@lib/dom";
-import { parseTimestamp } from "@lib/text/formatting";
+import { parseTimestamp } from "../messaging/formatting";
 import { channelsStore } from "@stores/channels.store";
 import { memberDisplayName, membersStore } from "@stores/members.store";
 import { formatDate } from "../../i18n/format";

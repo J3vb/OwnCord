@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as dispatcherMocks from "../../helpers/dispatcherMocks";
-import { wireDispatcher, wireConnectionStatus } from "../../../src/lib/dispatcher";
+import { wireDispatcher, wireConnectionStatus } from "../../../src/app/dispatcher";
 import { createMockWsClient } from "../../helpers/mock-ws";
 import { expectConsole } from "../../helpers/console";
 import { uiStore } from "../../../src/stores/ui.store";
@@ -12,7 +12,7 @@ vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notif
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
-vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
+vi.mock("../../../src/features/connection/identity", () => dispatcherMocks.identityMock());
 vi.mock("../../../src/features/connection/dispatchContext", async (importOriginal) =>
   dispatcherMocks.dispatchContextMock(await importOriginal<object>()),
 );

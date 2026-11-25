@@ -13,7 +13,7 @@ import {
   canViewAuditLog,
   canManageInvites,
   canModerateMembers,
-} from "../../src/lib/permissions";
+} from "../../src/stores/permissions";
 import { Permission } from "../../src/lib/types";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";

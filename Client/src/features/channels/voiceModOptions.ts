@@ -7,7 +7,7 @@
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import type { VoiceUser } from "@stores/voice.store";
-import { currentUserRoleHasPermission } from "@lib/permissions";
+import { currentUserRoleHasPermission } from "@stores/permissions";
 import { Permission } from "@lib/types";
 import { voiceText } from "../../i18n/voice";
 import type { VoiceModMenuOptions } from "./sidebar/volumeMenu";

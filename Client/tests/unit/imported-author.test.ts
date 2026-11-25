@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 
 import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
-import { shouldGroup } from "@lib/text/formatting";
+import { shouldGroup } from "../../src/features/messaging/formatting";
 import { messageResponseToMessage } from "../../src/features/messaging/messageModel";
 import {
   IMPORTED_NAME_MAX,

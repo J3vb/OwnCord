@@ -24,7 +24,7 @@
     "dispatcher": {
       "budget": 13000,
       "lazy": true,
-      "note": "src/lib/dispatcher.ts and the feature socket handlers only it imports. Loaded at boot after the first screen, and awaited before a sign-in dials."
+      "note": "src/app/dispatcher.ts and the feature socket handlers only it imports. Loaded at boot after the first screen, and awaited before a sign-in dials."
     },
     "wireShapes": {
       "budget": 3200,

@@ -14,7 +14,7 @@ import { membersStore } from "../../../src/stores/members.store";
 import { setRoles } from "../../../src/stores/channels.store";
 import { setConnectionStatus } from "../../../src/stores/ui.store";
 import { shellText } from "../../../src/i18n/shell";
-import { formatClockTime, userRoleColorVar } from "../../../src/lib/text/formatting";
+import { formatClockTime, userRoleColorVar } from "../../../src/features/messaging/formatting";
 import { restoreTZ, tzPinHonored } from "../../helpers/tz-pin";
 import {
   resetStores,

@@ -10,7 +10,7 @@ vi.mock("@lib/logger", () => loggerMock());
 import { createMessageController } from "../../src/features/messaging/MessageController";
 import { WARM_MAX_AGE_MS } from "../../src/features/messaging/channelWarmup";
 import { getChannelMessages, isChannelLoaded } from "../../src/stores/messages.store";
-import { warmChannel, cancelChannelWarm } from "../../src/lib/nav/channelNavigation";
+import { warmChannel, cancelChannelWarm } from "../../src/features/navigation/channelNavigation";
 import { channelsStore } from "../../src/stores/channels.store";
 import type { Channel } from "../../src/stores/channels.store";
 import type { MessageResponse } from "../../src/lib/types";

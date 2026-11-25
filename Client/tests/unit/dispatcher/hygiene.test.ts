@@ -2,7 +2,7 @@ import { describe, it, expect } from "vitest";
 // Vite's `?raw` suffix inlines the file's source text as a string (see
 // src/vite-env.d.ts's `vite/client` types) — used below for a structural
 // bundle-hygiene assertion, without pulling in node:fs.
-import dispatcherSource from "../../../src/lib/dispatcher.ts?raw";
+import dispatcherSource from "../../../src/app/dispatcher.ts?raw";
 
 describe("bundle hygiene", () => {
   // screenShare.ts has VALUE imports from livekit-client (~1.3 MB) at module

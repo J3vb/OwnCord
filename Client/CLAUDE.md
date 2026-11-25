@@ -10,7 +10,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   extracted from `lib/voice/livekitSession.ts` and `features/voice/livekitE2EE.ts` (the
   facades; the `e2ee*.ts` files are `E2EEManager`'s), with colocated
   `*.test.ts`; `src/features/{connection,direct-messages,message-requests,channels,messaging,voice,safety,moderation}/wsHandlers.ts`
-  hold the WebSocket handler bodies extracted from `lib/dispatcher.ts`;
+  hold the WebSocket handler bodies extracted from `app/dispatcher.ts`;
   `src/features/messaging/` also holds `stores/messages.store.ts`'s pure
   reducers and message model — the store stays the facade, so import its
   mutators from `@stores/messages.store`, never from the reducer modules; new
@@ -74,7 +74,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   list in `vitest.config.ts`, which runs as the `desktop-node` project on
   `forks`. Each test has a 2 s budget (`testTimeout`): wait on fake timers,
   never on the real clock.
-- `src/lib/dispatcher.ts` is the single WS-event entry point **into the
+- `src/app/dispatcher.ts` is the single WS-event entry point **into the
   stores**: server events reach domain stores only through a `ws.on(...)`
   subscription registered there. The handler bodies live in
   `src/features/*/wsHandlers.ts` as plain functions that only `dispatcher.ts`
@@ -95,7 +95,10 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   then `features/`, then `stores/`, then `lib/`, `platform/`
   and `i18n/`, then `styles/` and `assets/`. A static import, `export … from`
   or dynamic `import()` of a higher layer fails lint; `import type` does not
-  count. The imports that predate the rule are listed in
+  count. Two kinds of upward edge are sanctioned on purpose: `messages.store`
+  over its reducer modules, and `lib/api.ts` reading the NSFW consent gate
+  (`features/content-consent/nsfw.ts`, `channels.store`) so every channel-content
+  call passes it. The other imports that predate the rule are listed in
   `scripts/layer-baseline.json`, which only shrinks
   (`tests/unit/layer-baseline.test.ts` fails on a stale entry): when you remove
   one, delete its entry and lower the cap in that test. The rank list and the

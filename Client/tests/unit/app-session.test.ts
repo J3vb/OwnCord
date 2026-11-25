@@ -33,7 +33,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: vi.fn() }));
-vi.mock("@lib/net/credentials", () => ({
+vi.mock("../../src/features/connection/credentials", () => ({
   saveCredential: hoisted.saveCredential,
   deleteCredential: hoisted.deleteCredential,
   createUserUpdateCredentialSaver: vi.fn(() => vi.fn()),
@@ -72,7 +72,7 @@ vi.mock("../../src/features/connection/ConnectedOverlay", () => ({
 }));
 
 let dispatcherSeq = 0;
-vi.mock("@lib/dispatcher", () => ({
+vi.mock("../../src/app/dispatcher", () => ({
   wireDispatcher: vi.fn(() => {
     const id = ++dispatcherSeq;
     return () => events.push(`dispatcher-${id}-unsub`);

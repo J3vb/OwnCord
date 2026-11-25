@@ -8,7 +8,7 @@ import {
   applyPresenceBatch,
   type Member,
 } from "@stores/members.store";
-import { createPresenceSender } from "@lib/presence/presence";
+import { createPresenceSender } from "../../src/features/presence/presence";
 import { createPresenceLimiter } from "@lib/net/rateLimiter";
 import {
   loadStatusTimer,

@@ -3,7 +3,7 @@
 // needs a pin write, logging the pin write outcome, resolving the identity key
 // an announce is checked against (a read of the members store) and showing the
 // new-device notice (a toast).
-import { getIdentityPin, storeIdentityPin } from "../../lib/net/identity";
+import { getIdentityPin, storeIdentityPin } from "../connection/identity";
 import { trustedPins } from "../../lib/net/identityPins";
 import { createLogger } from "../../lib/logger";
 import { memberDisplayName, membersStore } from "../../stores/members.store";

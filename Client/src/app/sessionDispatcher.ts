@@ -1,4 +1,4 @@
-// The signed-in event wiring (lib/dispatcher.ts and every feature's socket
+// The signed-in event wiring (app/dispatcher.ts and every feature's socket
 // handlers) and the frame shape table are their own chunks, so the connect
 // screen does not load them.
 // configureSession starts the download at boot; startSession waits for it
@@ -9,7 +9,7 @@ import { installFrameShapes } from "@lib/net/wireCheck";
 
 const log = createLogger("sessionDispatcher");
 
-export type DispatcherModule = typeof import("@lib/dispatcher");
+export type DispatcherModule = typeof import("./dispatcher");
 
 let pending: Promise<DispatcherModule> | null = null;
 let loaded: DispatcherModule | null = null;
@@ -25,7 +25,7 @@ export function loadedDispatcher(): DispatcherModule | null {
  */
 export function loadDispatcher(): Promise<DispatcherModule> {
   if (pending === null) {
-    const attempt = Promise.all([import("@lib/dispatcher"), import("@lib/net/wireShapes")]).then(
+    const attempt = Promise.all([import("./dispatcher"), import("@lib/net/wireShapes")]).then(
       ([dispatcher, shapes]) => {
         installFrameShapes(shapes);
         loaded = dispatcher;

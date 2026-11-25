@@ -8,7 +8,7 @@
  * there), falling back to the role on a server that never said.
  */
 
-import { channelBitOrRole } from "@lib/permissions";
+import { channelBitOrRole } from "@stores/permissions";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import type { WsClient } from "@lib/ws";

@@ -14,7 +14,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { atEachMidnight } from "@lib/text/formatting";
+import { atEachMidnight } from "../messaging/formatting";
 import { reconcileChildren } from "@lib/net/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import type { ModalInstance } from "@lib/ui/modalFactory";

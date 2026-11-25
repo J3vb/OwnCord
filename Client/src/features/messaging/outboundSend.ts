@@ -17,7 +17,7 @@ import {
   recoveredPendingText,
   supportsMessageDeduplication,
   savePendingText,
-} from "@lib/pendingMessages";
+} from "./pendingMessages";
 import { WsErrorCode } from "@lib/protocolTypes";
 import { serverNow } from "@lib/net/serverClock";
 import type { SentAttachment } from "./MessageInput";

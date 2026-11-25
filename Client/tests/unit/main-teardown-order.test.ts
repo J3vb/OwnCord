@@ -39,10 +39,10 @@ vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
 vi.mock("@lib/prefs/appearance", () => mocks.prefsAppearanceMock());
 vi.mock("@lib/net/connectionDiagnostics", () => mocks.netConnectionDiagnosticsMock());
 vi.mock("@pages/mainPagePrefetch", () => mocks.pagesMainPagePrefetchMock());
-vi.mock("@lib/pendingMessages", () => mocks.pendingMessagesMock());
+vi.mock("../../src/features/messaging/pendingMessages", () => mocks.pendingMessagesMock());
 vi.mock("../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
 vi.mock("@lib/logPersistence", () => mocks.logPersistenceMock());
-vi.mock("@lib/net/credentials", () => ({
+vi.mock("../../src/features/connection/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
   resumeSavedSession: vi.fn().mockResolvedValue(null),
@@ -116,11 +116,11 @@ vi.mock("@lib/ws", async (importOriginal) => {
 
 // Dispatcher stand-in with the two behaviours the order depends on: it
 // subscribes an onStateChange listener (as the real one does at
-// lib/dispatcher.ts:281,338,348) that records the transitions it observes,
+// app/dispatcher.ts:281,338,348) that records the transitions it observes,
 // and its returned unsubscribe records and removes it. Its auth_ok handler
 // writes authStore like the real one, so the overlay flow is unchanged.
 let dispatcherSeq = 0;
-vi.mock("@lib/dispatcher", async () => {
+vi.mock("../../src/app/dispatcher", async () => {
   const { authStore, setAuth } = await import("@stores/auth.store");
   return {
     wireDispatcher: (ws: {
@@ -147,7 +147,7 @@ import { mockInvoke, emitTauriEvent } from "./helpers/ws-mocks";
 import { PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { expectConsole } from "../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
-import { deleteCredential } from "@lib/net/credentials";
+import { deleteCredential } from "../../src/features/connection/credentials";
 import { joinVoiceChannel } from "@stores/voice.store";
 import { readyFrame } from "../helpers/wsSuiteHarness";
 import { createConnectPage } from "@pages/ConnectPage";

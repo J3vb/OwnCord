@@ -13,7 +13,8 @@ import { ApiClientError, type ApiClient } from "@lib/api";
 import { createElement, setText } from "@lib/dom";
 import { openSettings } from "@stores/ui.store";
 import { createLogger } from "@lib/logger";
-import { formatWhen, safetyText as t } from "../../i18n/safety";
+import { safetyText as t } from "../../i18n/safety";
+import { formatWhen } from "./timeText";
 import type { AppealsApi } from "./Appeals";
 import {
   refreshOwnModeration,

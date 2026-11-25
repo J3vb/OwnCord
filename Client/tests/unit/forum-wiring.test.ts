@@ -2,7 +2,7 @@
 // store, the dispatcher, the quick switcher, the "#" autocomplete and the
 // header glyph.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { wireDispatcher } from "../../src/app/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { makePost, seedForum, FORUM, TAGS } from "../helpers/forum-fixtures";
 import { createIcon } from "@lib/icons";

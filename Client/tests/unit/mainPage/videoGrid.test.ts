@@ -427,7 +427,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     m.page = await mountSettled(m.container, ws);
     const lk = await import("@lib/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
-    const { noteJoinFailed } = await import("../../../src/features/voice/joinBackoff");
+    const { noteJoinFailed } = await import("../../../src/lib/voice/joinBackoff");
     noteJoinFailed(Date.now(), true);
     noteJoinFailed(Date.now(), true);
     noteJoinFailed(Date.now(), true);
@@ -439,7 +439,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(lk.enableCamera).not.toHaveBeenCalled();
     m.page.destroy?.();
-    const { noteJoinSucceeded } = await import("../../../src/features/voice/joinBackoff");
+    const { noteJoinSucceeded } = await import("../../../src/lib/voice/joinBackoff");
     noteJoinSucceeded();
   });
 

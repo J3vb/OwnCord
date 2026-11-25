@@ -10,9 +10,9 @@
  */
 
 import type { Channel } from "@stores/channels.store";
-import { navigateToChannel } from "@lib/nav/channelNavigation";
+import { navigateToChannel } from "../../navigation/channelNavigation";
 import { formatChannelLink } from "@lib/nav/deepLink";
-import { markChannelRead, showsUnreadBadge } from "@lib/readState";
+import { markChannelRead, showsUnreadBadge } from "@stores/readState";
 import {
   getChannelMute,
   getChannelMutesHost,
