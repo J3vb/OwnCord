@@ -292,7 +292,7 @@ function toggleMemberMenu(uid){
   menu.style.top=Math.max(8,r.bottom+4+h>window.innerHeight?r.top-4-h:r.bottom+4)+'px';
   menu.style.left=Math.max(8,Math.min(r.right-w,window.innerWidth-w-8))+'px';
   memberMenuBtn=btn;btn.setAttribute('aria-expanded','true');
-  menu.querySelector('[role="menuitem"]')?.focus();
+  const first=menu.querySelector('[role="menuitem"]');if(first instanceof HTMLElement)first.focus();
 }
 /* Choosing an item closes the menu before the delegated action runs (this
    listener is on the menu, the dispatcher on the document), with focus back
@@ -310,7 +310,7 @@ document.addEventListener('keydown',e=>{
     const items=[...document.querySelectorAll('#memberMenu [role="menuitem"]')];
     const i=items.indexOf(document.activeElement);
     const next={ArrowDown:i+1,ArrowUp:i-1,Home:0,End:items.length-1}[e.key];
-    if(next!==undefined){e.preventDefault();items[(next+items.length)%items.length].focus()}
+    if(next!==undefined){e.preventDefault();const to=items[(next+items.length)%items.length];if(to instanceof HTMLElement)to.focus()}
     else if(e.key==='Escape'){e.preventDefault();e.stopPropagation();closeMemberMenu(true)}
     else if(e.key==='Tab')closeMemberMenu(false);
     return;
@@ -321,7 +321,7 @@ document.addEventListener('keydown',e=>{
     const tabs=[...document.querySelectorAll('.member-tab')];const i=tabs.indexOf(t);
     const next={ArrowRight:i+1,ArrowLeft:i-1,Home:0,End:tabs.length-1}[e.key];
     if(next===undefined)return;
-    e.preventDefault();tabs[(next+tabs.length)%tabs.length].click();
+    e.preventDefault();const to=tabs[(next+tabs.length)%tabs.length];if(to instanceof HTMLElement)to.click();
   }
 });
 window.addEventListener('resize',()=>closeMemberMenu(false));
@@ -523,7 +523,8 @@ function openIssueRecovery(uid,uname){
 }
 
 async function confirmIssueRecovery(uid){
-  const verification=document.getElementById('recoveryVerification')?.value||'';
+  const vsel=document.getElementById('recoveryVerification');
+  const verification=vsel instanceof HTMLSelectElement?vsel.value:'';
   try{
     const r=await api('POST','/users/'+uid+'/recovery-credential',{verification});
     const until=r.expires_at?new Date(r.expires_at).toLocaleTimeString():'15 minutes from now';
@@ -532,7 +533,8 @@ async function confirmIssueRecovery(uid){
 }
 
 async function confirmBan(uid){
-  const reason=document.getElementById('banReason')?.value||'';
+  const rbox=document.getElementById('banReason');
+  const reason=rbox instanceof HTMLTextAreaElement?rbox.value:'';
   const sel=document.getElementById('banDuration');
   const hours=sel instanceof HTMLSelectElement?parseInt(sel.value,10)||0:0;
   const body=hours>0?{banned:true,ban_reason:reason,ban_duration_hours:hours}:{banned:true,ban_reason:reason};
@@ -560,7 +562,8 @@ function openEraseUser(uid,uname){
 }
 
 async function confirmEraseUser(uid,uname){
-  const typed=(document.getElementById('eraseConfirm')?.value||'').trim();
+  const cbox=document.getElementById('eraseConfirm');
+  const typed=cbox instanceof HTMLInputElement?cbox.value.trim():'';
   if(typed!==uname){showToast('Type the username exactly to confirm','error');return}
   try{await api('DELETE','/users/'+uid);closeModal();showToast('Account erased permanently');renderContent()}catch(e){showToast(e.message,'error')}
 }
