@@ -283,6 +283,12 @@ markers (`grep -rn 'signal input' src`), and the two `OWNCORD-PATCH (WP VB-2)` m
 
 ## Tests
 
-The signal input helpers are covered by `cargo test --manifest-path vendor/livekit/Cargo.toml --lib signal_input` and the `rtc_session` tests, also run by hand. `stereo_is_signalled_for_audio_only` (in the patched `local_participant.rs`) covers the helper, but CI does not run it: the Rust job tests only the root package. Run it by hand with `cargo test --manifest-path vendor/livekit/Cargo.toml --lib stereo` after re-applying the patch. CI covers the behaviour through `session.rs`'s publish-options tests and the native-voice interop case "a native share's audio reaches the browser as stereo with the channels apart".
+The patched crate is a member of the root workspace, so its tests build against the root `Cargo.lock` and the pinned libwebrtc. From `Client/src-tauri/` (after the Linux toolchain step in `CLAUDE.md`):
 
-The crate's own `Cargo.lock` is upstream's, kept verbatim; nothing builds from it.
+```
+cargo test -p livekit --lib -- signal_input stereo rtc_session
+```
+
+This runs the signal input helpers (`signal_input_tests`), the `rtc_session` tests and `stereo_is_signalled_for_audio_only`. CI runs it in the Rust Unit Tests job when anything under `vendor/livekit/` or `Cargo.lock` changes (the `livekitvendor` selection in `scripts/ci-select.mjs`), and every night in `nightly-test-depth.yml`. Run it after re-applying the patch to a new upstream version. CI also covers the behaviour through `session.rs`'s publish-options tests and the native-voice interop case "a native share's audio reaches the browser as stereo with the channels apart".
+
+The crate's own `Cargo.lock` is upstream's, kept verbatim; nothing builds from it. The workspace membership and the three formatting-only edits that keep `cargo fmt --all -- --check` clean (`sanitize_audio_level`, `parse_remote_description`, the subscriber answer in `rtc_session.rs`) are part of the patch.

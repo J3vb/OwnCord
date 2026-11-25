@@ -2616,7 +2616,11 @@ fn sort_by_audio_level<T>(items: &mut [T], level: impl Fn(&T) -> f32) {
 
 // OWNCORD-PATCH (signal input): non-finite levels count as silence.
 fn sanitize_audio_level(level: f32) -> f32 {
-    if level.is_finite() { level } else { 0.0 }
+    if level.is_finite() {
+        level
+    } else {
+        0.0
+    }
 }
 
 fn unpack_stream_id(stream_id: &str) -> Option<(&str, &str)> {
