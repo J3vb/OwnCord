@@ -54,6 +54,7 @@ func main() {
 	useDocker := flag.Bool("docker", false, "rehearse containers on a named volume instead of processes in a temporary directory")
 	phases := flag.String("phases", "", "which drill phases to run — any of R, C, D, S (default: all of them)")
 	dataFS := flag.String("data-fs", "", "the size-limited filesystem phase D fills; without it phase D is skipped")
+	fillerImage := flag.String("filler-image", drillFillerImage, "the image the container leg of phase D fills its tmpfs volume with (the workflow pulls it first)")
 	findings := flag.String("known-findings", "", "comma-separated OPEN OC-* ledger ids a release-path run may downgrade to ::warning::; the ids are validated against the ledger, but no drill failure carries a ledger id yet, so the flag is inert until one does")
 	browserClient := flag.Bool("browser-client", false, "after the restart, boot with the browser client enabled and check the binary serves its bundle (plain standalone mode only)")
 	flag.Usage = usage
@@ -67,7 +68,7 @@ func main() {
 		drills:     *drills,
 		docker:     *useDocker,
 		from:       *from,
-		drillFlags: *phases != "" || *dataFS != "" || *findings != "",
+		drillFlags: *phases != "" || *dataFS != "" || *findings != "" || *fillerImage != drillFillerImage,
 
 		browserClient: *browserClient,
 	}).validate(); err != nil {
@@ -101,7 +102,7 @@ func main() {
 		if err != nil {
 			usageError("%v", err)
 		}
-		action = func() error { return runDrills(args[0], *useDocker, selected, *dataFS, k) }
+		action = func() error { return runDrills(args[0], *useDocker, selected, *dataFS, *fillerImage, k) }
 		// runDrills prints the summary itself: only it knows which phases
 		// skipped, and a skip must not be reported as a pass.
 		summary = ""

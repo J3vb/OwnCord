@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -145,7 +146,7 @@ func quietPaths(log string) []string {
 var errNoSpace = errors.New("the filesystem refused more bytes")
 
 // filler puts junk on the filesystem phase D fills and takes it off again; two implementations because a
-// container's tmpfs is only reachable through docker cp.
+// container's volume is only reachable through a helper container.
 type filler interface {
 	// fill appends up to n bytes and reports how many; a short fill is errNoSpace.
 	fill(n uint64) (uint64, error)
@@ -197,67 +198,134 @@ func (f *dirFiller) fill(n uint64) (uint64, error) {
 
 func (f *dirFiller) release() error { return os.Remove(f.path) }
 
-// dockerFiller fills a container's tmpfs through docker cp. The image is distroless (no shell, no rm), so
-// copying a file in adds bytes and copying a one-byte file over the same path frees them.
-type dockerFiller struct {
+// volumeFiller fills the tmpfs volume through a long-lived helper container that mounts it: the server's
+// image is distroless (no shell, no dd) and docker cp resolves below a mount, so the fill has to be a process
+// inside a container that shares the mount.
+type volumeFiller struct {
 	fillerCount
-	t    *dockerTarget
-	dir  string   // host staging directory, one name per fill
 	junk []string // the names this filler created, in the order it created them
-	// copyIn is a seam so a test can fake the copy; newDockerFiller sets it to t.copyIn.
-	copyIn func(container, dir string) error
+	// exec runs a command inside the helper; newVolumeFiller sets it to docker exec.
+	exec func(args ...string) (string, error)
 }
 
-func newDockerFiller(t *dockerTarget) (*dockerFiller, error) {
-	dir, err := os.MkdirTemp("", "owncord-drill-junk-")
-	if err != nil {
-		return nil, err
+const fillerMount = "/data"
+
+// fillerRunArgs starts the helper: no network, read-only root, no capabilities, the image's user, and a sleep
+// that bounds it if the harness is killed before it can remove it.
+func fillerRunArgs(name, vol, image string) []string {
+	return []string{"run", "-d", "--name", name,
+		"--label", drillLabel,
+		"--user", fmt.Sprintf("%d:%d", containerUser, containerUser),
+		"--network", "none",
+		"--read-only",
+		"--cap-drop=ALL",
+		"--security-opt=no-new-privileges:true",
+		"--mount", "type=volume,src=" + vol + ",dst=" + fillerMount,
+		image, "sleep", "900"}
+}
+
+func fillerName() string { return fmt.Sprintf("owncord-drill-filler-%d", os.Getpid()) }
+
+// newVolumeFiller starts the helper on vol. The volume must already exist.
+func newVolumeFiller(vol, image string) (*volumeFiller, error) {
+	name := fillerName()
+	if _, err := docker(fillerRunArgs(name, vol, image)...); err != nil {
+		return nil, fmt.Errorf("starting the filler container: %w", err)
 	}
-	return &dockerFiller{t: t, dir: dir, copyIn: t.copyIn}, nil
+	return &volumeFiller{exec: func(args ...string) (string, error) {
+		return docker(append([]string{"exec", name}, args...)...)
+	}}, nil
 }
 
-func (f *dockerFiller) fill(n uint64) (uint64, error) {
+// fill writes up to n bytes as one new file and reports the bytes that really landed (stat after the write),
+// so a fill that ran into the wall still counts its partial file.
+func (f *volumeFiller) fill(n uint64) (uint64, error) {
 	name := fmt.Sprintf("%s-%d", drillJunkName, len(f.junk)+1)
-	stage, err := os.MkdirTemp(f.dir, "fill-")
+	path := fillerMount + "/" + name
+	f.junk = append(f.junk, name)
+	const block = 64 << 10
+	_, ddErr := f.exec("dd", "if=/dev/zero", "of="+path, "bs=64k", fmt.Sprintf("count=%d", (n+block-1)/block), "conv=fsync")
+	size, statErr := f.size(path)
+	if statErr != nil && ddErr == nil {
+		return 0, fmt.Errorf("measuring %s after the write: %w", path, statErr)
+	}
+	f.bytes += size
+	switch {
+	case ddErr == nil:
+		return size, nil
+	case isNoSpace(ddErr):
+		return size, errNoSpace
+	default:
+		return size, fmt.Errorf("writing %s in the filler container: %w", path, ddErr)
+	}
+}
+
+func (f *volumeFiller) size(path string) (uint64, error) {
+	out, err := f.exec("stat", "-c", "%s", path)
 	if err != nil {
 		return 0, err
 	}
-	if err := os.WriteFile(filepath.Join(stage, name), make([]byte, n), 0o600); err != nil {
-		return 0, err
+	n, err := strconv.ParseUint(strings.TrimSpace(out), 10, 64)
+	if err != nil {
+		return 0, fmt.Errorf("parsing stat output %q: %w", strings.TrimSpace(out), err)
 	}
-	if err := f.copyIn(f.t.name, stage); err != nil {
-		if isNoSpace(err) {
-			// docker cp may have extracted most of the file before ENOSPC, so release() must still overwrite it;
-			// f.bytes stays put as the partial size is unknown.
-			f.junk = append(f.junk, name)
-			return 0, errNoSpace
-		}
-		// isNoSpace matches the daemon's wording, not an errno; a reworded message lands here with the raw text
-		// printed, so a full tmpfs is not reported as a nameless harness failure.
-		fmt.Printf("%s: the container refused %d bytes with an error matching no known ENOSPC wording (%v) — if the tmpfs is full, the daemon's message has changed and isNoSpace needs the new text\n",
-			f.t.name, n, err)
-		return 0, fmt.Errorf("putting %d bytes into the container: %w", n, err)
-	}
-	f.junk = append(f.junk, name)
-	f.bytes += n
 	return n, nil
 }
 
-func (f *dockerFiller) release() error {
-	stage, err := os.MkdirTemp(f.dir, "release-")
-	if err != nil {
-		return err
+// release removes exactly the files this filler made (no shell, so no glob).
+func (f *volumeFiller) release() error {
+	if len(f.junk) == 0 {
+		return nil
 	}
+	args := []string{"rm", "-f"}
 	for _, name := range f.junk {
-		if err := os.WriteFile(filepath.Join(stage, name), []byte{0}, 0o600); err != nil {
-			return err
-		}
+		args = append(args, fillerMount+"/"+name)
 	}
-	// One copy, one tar: each name is replaced by a one-byte file, freeing the blocks the big ones held.
-	if err := f.copyIn(f.t.name, stage); err != nil {
-		return fmt.Errorf("releasing the container's junk: %w", err)
+	if _, err := f.exec(args...); err != nil {
+		return fmt.Errorf("releasing the filler container's junk: %w", err)
 	}
+	f.junk = nil
 	return nil
+}
+
+// df reports the volume's total and available bytes as the helper sees them.
+func (f *volumeFiller) df() (total, avail uint64, err error) {
+	out, err := f.exec("df", "-P", fillerMount)
+	if err != nil {
+		return 0, 0, err
+	}
+	return parseDF(out)
+}
+
+// free is the bytes still available on the volume.
+func (f *volumeFiller) free() (uint64, error) {
+	_, avail, err := f.df()
+	return avail, err
+}
+
+// removeFiller removes the helper. Errors are dropped: this runs from cleanup paths that have already decided
+// the outcome.
+func removeFiller() { _, _ = docker("rm", "-f", fillerName()) }
+
+// parseDF reads `df -P` (POSIX format, 1024-byte blocks) for one filesystem.
+func parseDF(out string) (total, avail uint64, err error) {
+	lines := strings.Split(strings.TrimSpace(out), "\n")
+	if len(lines) < 2 {
+		return 0, 0, fmt.Errorf("unexpected df output %q", out)
+	}
+	cols := strings.Fields(lines[len(lines)-1])
+	if len(cols) < 4 {
+		return 0, 0, fmt.Errorf("unexpected df row %q", lines[len(lines)-1])
+	}
+	tk, err := strconv.ParseUint(cols[1], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parsing df total %q: %w", cols[1], err)
+	}
+	ak, err := strconv.ParseUint(cols[3], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parsing df available %q: %w", cols[3], err)
+	}
+	return tk << 10, ak << 10, nil
 }
 
 func isNoSpace(err error) bool {

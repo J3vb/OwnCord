@@ -1,12 +1,17 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 )
 
@@ -44,8 +49,7 @@ func (d *drill) dirFiller() (filler, error) {
 	// No -data-fs, or Windows (no tmpfs, and the cap would be 64 MiB written to somebody's real volume).
 	if d.dataFS == "" || runtime.GOOS == "windows" {
 		// So the exit status and later phases do not read as "phase D measured nothing and was fine".
-		d.skipped = append(d.skipped, 'D')
-		fmt.Printf("%s: skipped (no size-limited filesystem)\n", d.phase)
+		d.skipPhase('D', "no size-limited filesystem")
 		return nil, nil
 	}
 	if err := d.boot("D.log", d.diskEnv()...); err != nil {
@@ -70,26 +74,11 @@ func (d *drill) phaseD() error {
 		}
 	}
 	if d.docker {
-		t, err := newDockerTarget(d.bin, d.bin)
-		if err != nil {
+		var finish func()
+		if f, finish, err = d.containerDisk(); err != nil {
 			return err
 		}
-		defer t.cleanup()
-		t.tmpfs = true
-		t.extraEnv = []string{fmt.Sprintf("OWNCORD_SERVER_MIN_FREE_DISK_MB=%d", drillMinFreeDiskMB)}
-		if err := t.start("old"); err != nil {
-			return err
-		}
-		d.container = t
-		if f, err = newDockerFiller(t); err != nil {
-			return err
-		}
-		// Phase D asserts on a filesystem of known size, and docker cp is the only way to put bytes into the
-		// distroless container (no shell, no dd), so first ask whether this harness can reach that filesystem.
-		reachable, err := d.tmpfsReachable(f)
-		if err != nil || !reachable {
-			return err
-		}
+		defer finish()
 	}
 
 	s := &dStage{}
@@ -125,34 +114,101 @@ func (d *drill) phaseD() error {
 	return d.stop()
 }
 
-// tmpfsReachable reports whether this harness can put bytes into the container's tmpfs at all. docker cp
-// resolves its destination in the container's rootfs, below a mount at that path, so bytes copied into a
-// --tmpfs mount point land in the layer underneath while the server's filesystem stays empty: the copy
-// reports success and the tmpfs zero used. The probe copies more than the mount holds; if that succeeds
-// nothing after it would measure disk pressure, so a stage that measured nothing must report only a skip. A
-// false result has already recorded that skip.
-func (d *drill) tmpfsReachable(f filler) (bool, error) {
-	probe := uint64(drillTmpfsBytes + drillFillStep)
-	n, err := f.fill(probe)
-	switch {
-	case err == nil && n == probe:
-		if err := f.release(); err != nil {
-			return false, d.annotate(err)
-		}
-		d.skipped = append(d.skipped, 'D')
-		fmt.Printf("%s: skipped (docker cp put %d MiB into the container's %d MiB tmpfs and the copy succeeded — it writes below the mount, so the filesystem the server writes to never took a byte)\n",
-			d.phase, probe>>20, drillTmpfsBytes>>20)
-		return false, nil
-	case err != nil && !errors.Is(err, errNoSpace):
-		// Neither full nor success: the harness itself failed; keep the raw error to tell that from ENOSPC.
-		return false, d.annotate(err)
-	case errors.Is(err, errNoSpace):
-		// The probe may have left a partial file: free it before setup runs.
-		if err := f.release(); err != nil {
-			return false, d.annotate(err)
-		}
+// errUnmeasured tags a phase D that could not establish the filesystem it asserts on. It is an error, never a
+// skip: a container leg that quietly measured nothing is the failure this drill exists to prevent.
+var errUnmeasured = errors.New("unmeasured")
+
+func unmeasured(format string, args ...any) error {
+	return fmt.Errorf("%w: %s", errUnmeasured, fmt.Sprintf(format, args...))
+}
+
+// containerDisk prepares the container leg's filesystem: sweeps what an interrupted run left, creates the
+// size-limited tmpfs volume, boots the server on it and starts the helper that fills it. The returned
+// function releases everything and must be called exactly once; the same teardown also runs, once, if the
+// process is interrupted.
+func (d *drill) containerDisk() (filler, func(), error) {
+	noop := func() {}
+	if err := sweepDrillLeftovers(); err != nil {
+		return nil, noop, unmeasured("%v", err)
 	}
-	return true, nil
+	t, err := newDockerTarget(d.bin, d.bin)
+	if err != nil {
+		return nil, noop, err
+	}
+	t.vol = fmt.Sprintf("owncord-drill-vol-%d", os.Getpid())
+	t.tmpfsVol = true
+	t.extraEnv = []string{fmt.Sprintf("OWNCORD_SERVER_MIN_FREE_DISK_MB=%d", drillMinFreeDiskMB)}
+
+	var once sync.Once
+	teardown := func() {
+		once.Do(func() {
+			// The helper first: a volume a container still references cannot be removed.
+			removeFiller()
+			t.cleanup()
+		})
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	done := make(chan struct{})
+	go watchInterrupt(ctx, done, teardown)
+	finish := func() {
+		close(done)
+		stop()
+		teardown()
+	}
+
+	if err := createTmpfsVolume(t.vol, drillTmpfsMiB); err != nil {
+		finish()
+		return nil, noop, unmeasured("%v", err)
+	}
+	if err := t.start("old"); err != nil {
+		finish()
+		return nil, noop, err
+	}
+	d.container = t
+	vf, err := newVolumeFiller(t.vol, d.fillerImage)
+	if err != nil {
+		finish()
+		return nil, noop, unmeasured("%v", err)
+	}
+	if err := d.measureTmpfs(vf); err != nil {
+		finish()
+		return nil, noop, err
+	}
+	return vf, finish, nil
+}
+
+// watchInterrupt runs the teardown and exits 130 when ctx is cancelled by a signal; it returns when the phase
+// ends first (done closed before the context is stopped).
+func watchInterrupt(ctx context.Context, done <-chan struct{}, teardown func()) {
+	select {
+	case <-done:
+		return
+	case <-ctx.Done():
+	}
+	select {
+	case <-done:
+		return
+	default:
+	}
+	fmt.Println("interrupted: removing the drill's containers and volume")
+	teardown()
+	os.Exit(130)
+}
+
+// measureTmpfs proves the helper reaches the filesystem the drill asserts on, and that it is the declared
+// size: a fill into a different one (a host disk, a bigger volume) would either measure nothing or fill the
+// wrong thing. docker cp could not answer this; df through the helper can.
+func (d *drill) measureTmpfs(f *volumeFiller) error {
+	total, avail, err := f.df()
+	if err != nil {
+		return unmeasured("the filler container cannot read the volume: %v", err)
+	}
+	const slack = 1 << 20
+	if total+slack < drillTmpfsBytes || total > drillTmpfsBytes+slack {
+		return unmeasured("the volume holds %d bytes, want the %d MiB tmpfs (±1 MiB)", total, drillTmpfsBytes>>20)
+	}
+	fmt.Printf("%s: the filler container sees a %d MiB filesystem with %d MiB free\n", d.phase, total>>20, avail>>20)
+	return nil
 }
 
 // dHeadroom fills until the product's own health report says the disk is under
@@ -247,6 +303,16 @@ func (d *drill) dBackup(s *dStage) ([]failure, error) {
 func (d *drill) dFull(f filler, s *dStage) ([]failure, error) {
 	if err := d.fillToWall(f); err != nil {
 		return nil, err
+	}
+	if vf, ok := f.(*volumeFiller); ok {
+		// ENOSPC with room left means the helper hit some other limit, not the filesystem the server writes to.
+		avail, err := vf.free()
+		if err != nil {
+			return nil, unmeasured("reading the free space after the fill: %v", err)
+		}
+		if avail >= drillFillStep {
+			return nil, unmeasured("the fill was refused with %d MiB still free", avail>>20)
+		}
 	}
 	fmt.Printf("%s: full — %d MiB of junk on the filesystem, which now refuses more\n", d.phase, f.total()>>20)
 	var problems []failure
@@ -350,10 +416,10 @@ func (d *drill) dRecover(f filler, s *dStage) ([]failure, error) {
 	}
 
 	if d.docker {
-		// A container's /app/data is a tmpfs destroyed with the container, so a reboot would measure a fresh
-		// install, not a recovery. Record the skip: a plain print would leave the leg reporting a pass over a step
-		// that never ran.
-		d.skipStep("the durability half is standalone-only — /app/data is a tmpfs, destroyed with the container")
+		// The volume is removed with the container at cleanup and the helper holds no copy of the database, so
+		// a reboot here would be compared with nothing durable. Record the skip: a plain print would leave the
+		// leg reporting a pass over a step that never ran.
+		d.skipStep("the durability half is standalone-only — the tmpfs volume is removed with the run, so no restart is compared")
 		return problems, nil
 	}
 	found, err := d.dRebootCount(s)

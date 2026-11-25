@@ -3,8 +3,10 @@ package main
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -417,33 +419,38 @@ func errorFrame(code string) wsFrame {
 	return wsFrame{Type: "error", Payload: payload}
 }
 
-// A docker cp that hits ENOSPC may already have extracted most of the file, so
-// the filler must still own the name: release() is the only thing that can
-// shrink it again.
-func TestDockerFiller_NoSpaceRecordsPartialName(t *testing.T) {
-	var staged [][]string
-	f := &dockerFiller{t: &dockerTarget{name: "c"}, dir: t.TempDir()}
-	f.copyIn = func(_, dir string) error {
-		entries, err := os.ReadDir(dir)
-		if err != nil {
-			return err
+// fakeExec scripts the helper container: each call is recorded and answered by the first matching rule.
+type fakeExec struct {
+	calls [][]string
+	reply func(args []string) (string, error)
+}
+
+func (e *fakeExec) run(args ...string) (string, error) {
+	e.calls = append(e.calls, args)
+	return e.reply(args)
+}
+
+const dfHeader = "Filesystem     1024-blocks    Used Available Capacity Mounted on\n"
+
+// A dd that hits ENOSPC has already written part of the file, so the filler must count the bytes stat reports,
+// keep the name, and still remove it on release.
+func TestVolumeFiller_NoSpaceRecordsPartialName(t *testing.T) {
+	e := &fakeExec{reply: func(args []string) (string, error) {
+		switch args[0] {
+		case "dd":
+			return "", errors.New("docker exec: exit status 1: dd: error writing '/data/drill-junk-1': No space left on device")
+		case "stat":
+			return "716800\n", nil
 		}
-		var names []string
-		for _, e := range entries {
-			names = append(names, e.Name())
-		}
-		staged = append(staged, names)
-		if len(staged) == 1 {
-			return errors.New("Error response from daemon: no space left on device")
-		}
-		b, err := os.ReadFile(filepath.Join(dir, "drill-junk-1"))
-		if err != nil || len(b) != 1 {
-			t.Errorf("release staged %d bytes (err %v), want 1", len(b), err)
-		}
-		return nil
-	}
-	if _, err := f.fill(1 << 20); !errors.Is(err, errNoSpace) {
+		return "", nil
+	}}
+	f := &volumeFiller{exec: e.run}
+	n, err := f.fill(1 << 20)
+	if !errors.Is(err, errNoSpace) {
 		t.Fatalf("fill err = %v, want errNoSpace", err)
+	}
+	if n != 700<<10 || f.total() != 700<<10 {
+		t.Fatalf("fill reported %d bytes, total %d, want 700 KiB from stat", n, f.total())
 	}
 	if got := strings.Join(f.junk, ","); got != "drill-junk-1" {
 		t.Fatalf("junk = %q, want the partial file recorded", got)
@@ -451,25 +458,192 @@ func TestDockerFiller_NoSpaceRecordsPartialName(t *testing.T) {
 	if err := f.release(); err != nil {
 		t.Fatal(err)
 	}
-	if len(staged) != 2 || len(staged[1]) != 1 || staged[1][0] != "drill-junk-1" {
-		t.Fatalf("release staged %v, want drill-junk-1", staged)
+	last := e.calls[len(e.calls)-1]
+	if strings.Join(last, " ") != "rm -f /data/drill-junk-1" {
+		t.Fatalf("release ran %v, want rm -f of the partial file", last)
 	}
 }
 
-type noSpaceFiller struct{ released int }
-
-func (f *noSpaceFiller) fill(uint64) (uint64, error) { return 0, errNoSpace }
-func (f *noSpaceFiller) release() error              { f.released++; return nil }
-func (f *noSpaceFiller) total() uint64               { return 0 }
-
-func TestTmpfsReachable_ReleasesAfterNoSpace(t *testing.T) {
-	f := &noSpaceFiller{}
-	ok, err := (&drill{}).tmpfsReachable(f)
-	if err != nil || !ok {
-		t.Fatalf("got (%v, %v), want (true, nil)", ok, err)
+func TestVolumeFiller_OtherDDErrorIsNotNoSpace(t *testing.T) {
+	e := &fakeExec{reply: func(args []string) (string, error) {
+		if args[0] == "dd" {
+			return "", errors.New("OCI runtime exec failed: container is not running")
+		}
+		return "0\n", nil
+	}}
+	f := &volumeFiller{exec: e.run}
+	if _, err := f.fill(1 << 20); err == nil || errors.Is(err, errNoSpace) {
+		t.Fatalf("fill err = %v, want a harness error that is not errNoSpace", err)
 	}
-	if f.released != 1 {
-		t.Fatalf("release called %d times, want 1", f.released)
+}
+
+func TestVolumeFiller_ReleaseRemovesOnlyItsNames(t *testing.T) {
+	e := &fakeExec{reply: func(args []string) (string, error) {
+		if args[0] == "stat" {
+			return "1048576\n", nil
+		}
+		return "", nil
+	}}
+	f := &volumeFiller{exec: e.run}
+	for range 2 {
+		if _, err := f.fill(1 << 20); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.release(); err != nil {
+		t.Fatal(err)
+	}
+	got := e.calls[len(e.calls)-1]
+	want := []string{"rm", "-f", "/data/drill-junk-1", "/data/drill-junk-2"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("release ran %v, want exactly %v (no glob)", got, want)
+	}
+}
+
+func dfReply(total, avail uint64) func([]string) (string, error) {
+	return func([]string) (string, error) {
+		return dfHeader + fmt.Sprintf("tmpfs %d 0 %d 0%% /data\n", total>>10, avail>>10), nil
+	}
+}
+
+func TestMeasureTmpfs_AcceptsTheDeclaredSize(t *testing.T) {
+	d := &drill{}
+	e := &fakeExec{reply: dfReply(drillTmpfsBytes, drillTmpfsBytes)}
+	if err := d.measureTmpfs(&volumeFiller{exec: e.run}); err != nil {
+		t.Fatalf("measureTmpfs = %v, want nil for a 24 MiB volume", err)
+	}
+}
+
+func TestMeasureTmpfs_RejectsWrongSize(t *testing.T) {
+	d := &drill{}
+	e := &fakeExec{reply: dfReply(100<<30, 40<<30)}
+	err := d.measureTmpfs(&volumeFiller{exec: e.run})
+	if !errors.Is(err, errUnmeasured) {
+		t.Fatalf("measureTmpfs = %v, want an unmeasured error for a host-sized volume", err)
+	}
+	if len(d.skipped) != 0 {
+		t.Fatalf("skipped = %q, want none: an unmeasured volume is an error, not a skip", d.skipped)
+	}
+}
+
+func TestMeasureTmpfs_HelperUnreachable(t *testing.T) {
+	d := &drill{}
+	e := &fakeExec{reply: func([]string) (string, error) {
+		return "", errors.New("Error response from daemon: container is not running")
+	}}
+	err := d.measureTmpfs(&volumeFiller{exec: e.run})
+	if !errors.Is(err, errUnmeasured) {
+		t.Fatalf("measureTmpfs = %v, want an unmeasured error", err)
+	}
+	if len(d.skipped) != 0 {
+		t.Fatalf("skipped = %q, want none", d.skipped)
+	}
+}
+
+// The container leg exists to fill a real volume: a skipped D there fails the run; standalone the same state is
+// a skip the summary names.
+func TestDockerLegSkippedDIsFailure(t *testing.T) {
+	results := []phaseResult{{phase: phase{'D', "disk"}}}
+	docker := &drill{docker: true, skipped: []byte{'D'}}
+	err := failedPhases(docker.containerLegResults(results))
+	if err == nil || !strings.Contains(err.Error(), "D") {
+		t.Fatalf("failedPhases = %v, want phase D failed in the container leg", err)
+	}
+	if got := docker.containerLegResults(results)[0].err; got == nil || !strings.Contains(got.Error(), "unmeasured") {
+		t.Fatalf("phase D error = %v, want it to say unmeasured", got)
+	}
+	standalone := &drill{skipped: []byte{'D'}}
+	if err := failedPhases(standalone.containerLegResults(results)); err != nil {
+		t.Fatalf("standalone failedPhases = %v, want the skip kept", err)
+	}
+	if got := standalone.summary([]phase{{'D', "disk"}}); !strings.Contains(got, "D skipped — no measurement was made") {
+		t.Fatalf("standalone summary = %q", got)
+	}
+	passed := &drill{docker: true}
+	if err := failedPhases(passed.containerLegResults(results)); err != nil {
+		t.Fatalf("a measured container phase D failed: %v", err)
+	}
+}
+
+func TestTableShowsSkipReason(t *testing.T) {
+	results := []phaseResult{{phase: phase{'D', "disk"}}, {phase: phase{'S', "sfu"}}}
+	d := drill{}
+	d.skipPhase('D', "no size-limited filesystem")
+	d.skipped = append(d.skipped, 'S')
+	table := d.table(results)
+	if !strings.Contains(table, "D      skipped  no size-limited filesystem\n") {
+		t.Errorf("table lacks D's own reason:\n%s", table)
+	}
+	if !strings.Contains(table, "S      skipped  no measurement was made\n") {
+		t.Errorf("table lacks the default reason for S:\n%s", table)
+	}
+	if got := d.summary([]phase{{'D', "disk"}, {'S', "sfu"}}); !strings.Contains(got, "D skipped — no size-limited filesystem") ||
+		!strings.Contains(got, "S skipped — no measurement was made") {
+		t.Errorf("summary = %q, want each phase's reason", got)
+	}
+}
+
+func TestCreateTmpfsVolumeArgs(t *testing.T) {
+	got := strings.Join(tmpfsVolumeArgs("owncord-drill-vol-7", 24), " ")
+	for _, want := range []string{
+		"volume create", "--label owncord.drill=disk", "--opt type=tmpfs", "--opt device=tmpfs",
+		"--opt o=size=24m,uid=65532,gid=65532,mode=0700", "owncord-drill-vol-7",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("volume create args %q lack %q", got, want)
+		}
+	}
+	run := strings.Join(fillerRunArgs("h", "v", "busybox@sha256:x"), " ")
+	for _, want := range []string{
+		"--label owncord.drill=disk", "--user 65532:65532", "--network none", "--read-only", "--cap-drop=ALL",
+		"--mount type=volume,src=v,dst=/data", "busybox@sha256:x sleep 900",
+	} {
+		if !strings.Contains(run, want) {
+			t.Errorf("filler run args %q lack %q", run, want)
+		}
+	}
+}
+
+func TestSweepOrder(t *testing.T) {
+	var calls []string
+	run := func(args ...string) (string, error) {
+		calls = append(calls, strings.Join(args, " "))
+		if args[0] == "ps" {
+			return "c1\nc2\n", nil
+		}
+		if args[0] == "volume" && args[1] == "ls" {
+			return "v1\n", nil
+		}
+		return "", nil
+	}
+	if err := sweepDrillLeftoversWith(run); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{
+		"ps -aq --filter label=owncord.drill=disk",
+		"rm -f c1 c2",
+		"volume ls -q --filter label=owncord.drill=disk",
+		"volume rm -f v1",
+	}
+	if !slices.Equal(calls, want) {
+		t.Fatalf("sweep ran %q, want containers removed before volumes: %q", calls, want)
+	}
+}
+
+// The filler image is the digest compose-smoke.sh pins, and the workflow pulls the same one; a bump in one
+// place must not leave the others behind.
+func TestFillerImagePinMatchesComposeSmoke(t *testing.T) {
+	for _, path := range []string{
+		filepath.Join("..", "..", "scripts", "compose-smoke.sh"),
+		filepath.Join("..", "..", "..", ".github", "workflows", "upgrade-rehearsal.yml"),
+	} {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !strings.Contains(string(data), drillFillerImage) {
+			t.Errorf("%s does not contain %s", path, drillFillerImage)
+		}
 	}
 }
 
