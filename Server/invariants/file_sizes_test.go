@@ -31,8 +31,8 @@ func TestFileSizes_Rule(t *testing.T) {
 		src  string
 		want int
 	}{
-		{"exempt file at its ceiling", "ws/hub.go", build(400), 0},
-		{"exempt file one line over", "ws/hub.go", build(401), 1},
+		{"exempt file at its ceiling", "ws/hub.go", build(250), 0},
+		{"exempt file one line over", "ws/hub.go", build(251), 1},
 		{"unlisted file at the default", "ws/unrelated.go", build(500), 0},
 		{"unlisted file one line over the default", "ws/unrelated.go", build(501), 1},
 		{"unlisted file, arbitrarily long", "ws/unrelated.go", build(5000), 1},
