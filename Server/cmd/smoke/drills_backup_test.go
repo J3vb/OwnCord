@@ -242,7 +242,7 @@ func TestNegativeLegVerdict(t *testing.T) {
 		wantErr                               string
 	}{
 		{"the sign-in still worked", false, true, false, "proves nothing"},
-		{"the boot was refused", true, false, false, ""},
+		{"the boot was refused", true, false, false, "did not boot"},
 		{"verify refused with the decryption line", false, false, true, ""},
 		{"verify refused without the line", false, false, false, "no \"TOTP secret decryption failed\" line"},
 	}

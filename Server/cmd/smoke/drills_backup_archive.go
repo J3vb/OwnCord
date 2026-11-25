@@ -119,7 +119,7 @@ func checkArchiveNames(files []*zip.File) error {
 }
 
 func requireArchiveFiles(files []*zip.File) error {
-	var missing []string
+	missing := make([]string, 0, len(archiveCoreFiles))
 	for _, want := range archiveCoreFiles {
 		if !slices.ContainsFunc(files, func(f *zip.File) bool { return f.Name == want }) {
 			missing = append(missing, want)
@@ -181,7 +181,7 @@ var keyEnvNames = []string{"OWNCORD_TOTP_KEY", "OWNCORD_ERASURE_KEY", "OWNCORD_P
 
 // inheritedKeyEnv names the key variables that are set.
 func inheritedKeyEnv(lookup func(string) (string, bool)) []string {
-	var set []string
+	set := make([]string, 0, len(keyEnvNames))
 	for _, name := range keyEnvNames {
 		if value, ok := lookup(name); ok && value != "" {
 			set = append(set, name)
@@ -191,12 +191,13 @@ func inheritedKeyEnv(lookup func(string) (string, bool)) []string {
 }
 
 // classifyNegativeLeg decides whether the restore without totp.key proved what it is for: the TOTP check must
-// fail, and for the key. A refused boot counts. A refused sign-in counts only with the decryption line in the
-// log, so a replayed code cannot pass for a lost key.
+// fail, and for the key. A missing totp.key never stops a boot (the server makes a new key), so a refused boot
+// is some other fault and fails the leg. A refused sign-in counts only with the decryption line in the log, so
+// a replayed code cannot pass for a lost key.
 func classifyNegativeLeg(bootRefused, signedIn, sawDecryptLine bool) error {
 	switch {
 	case bootRefused:
-		return nil
+		return errors.New("the restore without totp.key did not boot; a missing key never stops a boot, so something else is wrong")
 	case signedIn:
 		return errors.New("the TOTP check passed without totp.key, so it proves nothing")
 	case !sawDecryptLine:

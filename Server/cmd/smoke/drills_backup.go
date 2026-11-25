@@ -61,7 +61,7 @@ func (p *problemList) addf(format string, args ...any) {
 }
 
 // phaseB is the owner's worst day: the server and its folder are gone and only the full archive is left. It
-// seeds an install, takes the full archive through the owner's download route (or, on request, waits for the one the schedule stores), deletes the install, unpacks the archive
+// seeds an install, takes the full archive through the owner's download route (or, in a local run that asks for it, waits for the one the schedule stores), deletes the install, unpacks the archive
 // into a fresh folder, boots it and asks the public API whether the install came back. It then restores the
 // same archive without data/totp.key and requires the same TOTP check to fail, which shows the check can fail.
 func (d *drill) phaseB() error {

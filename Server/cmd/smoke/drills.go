@@ -15,8 +15,8 @@ import (
 )
 
 // phase is one drill phase: the letter -phases selects it by, and what it covers (printed so a green run says
-// what it ran). The phases are R (backup, restore, deletion markers; drills 1, 2), B (the scheduled full
-// archive, restored into a fresh install), C (corrupt operator input; drill 5), D (headroom, full, recovery; drills 3, 4) and S (the SFU; drill 6). Nothing relaunches the
+// what it ran). The phases are R (backup, restore, deletion markers; drills 1, 2), B (a full archive,
+// restored into a fresh install), C (corrupt operator input; drill 5), D (headroom, full, recovery; drills 3, 4) and S (the SFU; drill 6). Nothing relaunches the
 // server: a phase that needs a restart asks for one through the owner's endpoint, so the restart is the
 // behaviour under test.
 type phase struct {

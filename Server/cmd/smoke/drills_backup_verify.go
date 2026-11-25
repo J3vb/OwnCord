@@ -156,9 +156,12 @@ func (d *drill) stepBNegative(b *bState, problems *problemList) error {
 		}
 	}
 	if err := classifyNegativeLeg(bootErr != nil, signedIn, sawLine); err != nil {
+		if bootErr != nil {
+			err = fmt.Errorf("%w: %w", err, bootErr)
+		}
 		problems.addf("without data/totp.key: %v", err)
 		return nil
 	}
-	fmt.Printf("%s: without data/totp.key the TOTP check failed as it must (boot refused: %t)\n", d.phase, bootErr != nil)
+	fmt.Printf("%s: without data/totp.key the TOTP check failed as it must, for the key\n", d.phase)
 	return nil
 }
