@@ -53,10 +53,12 @@ participant it has never seen before. So encryption protects you from an owner
 who only looks at what the server stores, not from one who rewrites the
 server.
 
-**Checking someone's key.** Each person has a key that the app remembers the
-first time it sees it. If it changes later, you get a notice. Compare the
-safety number with that person another way (in person, a call) to be sure.
-Someone with two devices shows up as a key change when they switch.
+**Checking someone's key.** Each device a person uses has its own key. The app
+remembers each key the first time it sees it, up to five per person, and
+trusts all of them. When a person shows up with a key the app has not seen for
+them, you get a notice. A switch back to a key the app already remembers shows
+no notice. Compare the safety number with that person another way (in person,
+a call) to be sure. You can forget a key in the trusted keys panel.
 
 ## The connection
 
@@ -100,7 +102,8 @@ How owners set this up: [TLS and reverse proxies](hosting/tls-and-proxy.md).
 
 - listen to a call from what the server stores or relays
 - see your password or reuse a sign-in token from the database
-- swap the key of someone you already know without a notice
+- give someone you already know a key your app has not seen for them without
+  a notice
 - read your messages on another OwnCord server
 
 **Can, with effort:** someone with full access to the server machine can change
@@ -131,7 +134,16 @@ wipes the free space they used. Restoring an old backup does not bring it back:
 the server deletes it again at start-up, as long as the owner restored the
 whole data folder.
 
-The audit log keeps entries about a deleted account, but without the name.
+Some things stay:
+
+- copies of its messages that other members forwarded, without the name
+- backup files made before the deletion, until they are deleted (a restore of
+  one deletes the account again)
+- link preview cards for links it posted, until no message has used them for
+  a while (30 days by default)
+- server log lines written before the deletion, which can name the account
+  and the addresses it used
+- audit log entries about it, but without the name
 
 ## What OwnCord does not have
 
@@ -140,8 +152,12 @@ The audit log keeps entries about a deleted account, but without the name.
 - **No shared accounts.** The same username on two servers is two different
   people.
 - **No telemetry, no phone-home.** A server on a network without internet
-  works. The few things it connects out for (update checks, the voice server
-  download, the GIF picker, Let's Encrypt) only happen when someone uses them.
+  works. The things it connects out for (update checks, the voice server
+  download, the GIF picker, Let's Encrypt, push notifications) only happen when
+  someone uses them. One is on by default: **link previews**. When a member
+  posts a link, the server fetches that page from its own address to build the
+  preview card, so the linked site sees the server's address. Turn it off with
+  `link_previews.enabled: false`.
 - **No encrypted text chat.** That would cost search, moderation and history.
 
 ## For contributors

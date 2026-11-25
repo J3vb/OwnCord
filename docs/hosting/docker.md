@@ -23,6 +23,15 @@ Both use the same ports: `8443/TCP`, `7881/TCP` and `7882/UDP`.
 ## About the image
 
 - One tag works on both x64 and ARM64 (a Raspberry Pi 4 or 5 too).
+- `latest` moves to each new release, so every `docker compose pull` (or a
+  fresh `docker run`) can update the server. To choose when you upgrade, use a
+  version tag such as `ghcr.io/j3vb/owncord-server:2.10.0` instead, and change
+  it when you upgrade ([Upgrades](upgrades.md)).
+- If the server sees a relay's address instead of each visitor's (a reverse
+  proxy, or a container setup that does not keep the visitor's address), the
+  admin panel's address list lets every visitor through. The server logs a
+  warning at start-up when it detects this. See
+  [TLS and reverse proxies](tls-and-proxy.md).
 - It has no shell and no extra tools, which keeps it small and hard to attack.
   For anything that needs a shell, use a throwaway `alpine` container on the
   same volume.
