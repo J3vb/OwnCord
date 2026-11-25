@@ -338,7 +338,7 @@ function setSettingsChanged(changed){
   if(state.settingsChanged!==changed){state.settingsChanged=changed;renderNav()}
   const s=document.getElementById('settingsSaveState');if(s)s.textContent=changed?'Unsaved changes':'All changes saved';
   const bar=document.getElementById('settingsSaveBar');if(bar)bar.classList.toggle('dirty',changed);
-  ['saveSettingsBtn','discardSettingsBtn'].forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=!changed});
+  ['saveSettingsBtn','discardSettingsBtn'].forEach(id=>{const b=document.getElementById(id);if(b instanceof HTMLButtonElement)b.disabled=!changed});
 }
 
 function markSettingsChanged(){
@@ -350,7 +350,7 @@ function discardSettings(){renderContent()}
 
 async function saveSettings(){
   const btn=document.getElementById('saveSettingsBtn');
-  if(btn){if(btn.disabled)return;btn.disabled=true}
+  if(btn instanceof HTMLButtonElement){if(btn.disabled)return;btn.disabled=true}
   const body=settingsDiff(settingsFormValues(SETTINGS_KEYS));
   if(!Object.keys(body).length){setSettingsChanged(false);showToast('Settings saved');return}
   try{
@@ -359,7 +359,7 @@ async function saveSettings(){
     setSettingsChanged(false);showToast('Settings saved');
   }catch(e){
     showToast(e.message,'error');
-    if(btn)btn.disabled=false;
+    if(btn instanceof HTMLButtonElement)btn.disabled=false;
   }
 }
 
@@ -453,7 +453,7 @@ async function renderRetention(){
    confirmation sends the signed proposal back through the existing routes. */
 function readRetentionDays(id){
   const el=document.getElementById(id);
-  const raw=el?el.value.trim():'';
+  const raw=el instanceof HTMLInputElement?el.value.trim():'';
   const days=Number(raw);
   if(!raw||!Number.isInteger(days)||days<0||days>3650){showToast('Window must be 0 (keep forever) or between 1 and 3650 days','error');return null}
   return days;
@@ -503,7 +503,7 @@ async function applyRetention(){
     state.retentionProposal=null;closeModal();showToast('The window changed. Preview it again before applying.','error');return;
   }
   pending.applying=true;
-  const button=document.getElementById('applyRetentionPreview');if(button)button.disabled=true;
+  const button=document.getElementById('applyRetentionPreview');if(button instanceof HTMLButtonElement)button.disabled=true;
   const change=pending.change;
   const headers={'X-Retention-Preview':pending.preview.token};
   try{
@@ -659,16 +659,16 @@ function backupStatusLine(backups,schedule,signal){
 
 function markBackupPolicyChanged(){
   const b=document.getElementById('saveBackupPolicyBtn');
-  if(b)b.disabled=!Object.keys(settingsDiff(settingsFormValues(BACKUP_KEYS))).length;
+  if(b instanceof HTMLButtonElement)b.disabled=!Object.keys(settingsDiff(settingsFormValues(BACKUP_KEYS))).length;
 }
 
 async function saveBackupPolicy(){
   const btn=document.getElementById('saveBackupPolicyBtn');
-  if(btn){if(btn.disabled)return;btn.disabled=true}
+  if(btn instanceof HTMLButtonElement){if(btn.disabled)return;btn.disabled=true}
   const body=settingsDiff(settingsFormValues(BACKUP_KEYS));
   if(!Object.keys(body).length)return;
   try{state._settings=await api('PATCH','/settings',body);showToast('Backup schedule saved');renderContent()}
-  catch(e){showToast(e.message,'error');if(btn)btn.disabled=false}
+  catch(e){showToast(e.message,'error');if(btn instanceof HTMLButtonElement)btn.disabled=false}
 }
 
 async function createBackup(){
@@ -722,12 +722,14 @@ function openRestoreModal(name,date){
 
 function checkRestoreConfirm(name){
   const b=document.getElementById('restoreConfirmBtn');
-  if(b)b.disabled=(document.getElementById('restoreConfirm')?.value||'').trim()!==name;
+  const box=document.getElementById('restoreConfirm');
+  if(b instanceof HTMLButtonElement)b.disabled=(box instanceof HTMLInputElement?box.value:'').trim()!==name;
 }
 
 async function confirmRestore(name){
-  if((document.getElementById('restoreConfirm')?.value||'').trim()!==name)return;
-  const b=document.getElementById('restoreConfirmBtn');if(b)b.disabled=true;
+  const box=document.getElementById('restoreConfirm');
+  if((box instanceof HTMLInputElement?box.value:'').trim()!==name)return;
+  const b=document.getElementById('restoreConfirmBtn');if(b instanceof HTMLButtonElement)b.disabled=true;
   lockModal(true);
   try{
     await api('POST','/backups/'+encodeURIComponent(name)+'/restore');
@@ -739,7 +741,7 @@ async function confirmRestore(name){
     if(/restarting/i.test(e.message)){setModalHTML(restartingHTML('Restore failed',e.message));waitForRestart('restartWait');return}
     lockModal(false);
     const err=document.getElementById('restoreErr');if(err)err.textContent=e.message;
-    if(b)b.disabled=false;
+    if(b instanceof HTMLButtonElement)b.disabled=false;
   }
 }
 
@@ -819,7 +821,7 @@ async function applyUpdate(){
   let text;
   try{
     const list=await api('GET','/backups');
-    const latest=(list||[]).filter(b=>b.date).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+    const latest=(list||[]).filter(b=>b.date).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime())[0];
     text=latest?'Latest backup: '+new Date(latest.date).toLocaleString()+' ('+latest.name+').':'There are no backups yet.';
   }catch(e){text='The backup list could not be read.'}
   const el=document.getElementById('updateLastBackup');if(el)el.textContent=text;
@@ -827,15 +829,17 @@ async function applyUpdate(){
 
 function syncUpdateConfirm(){
   const b=document.getElementById('updateConfirmBtn');
-  if(b)b.textContent=document.getElementById('updateBackupFirst')?.checked?'Back up and update':'Update without a backup';
+  const backup=document.getElementById('updateBackupFirst');
+  if(b)b.textContent=backup instanceof HTMLInputElement&&backup.checked?'Back up and update':'Update without a backup';
 }
 
 async function confirmApplyUpdate(){
   const btn=document.getElementById('updateConfirmBtn');
-  if(btn){if(btn.disabled)return;btn.disabled=true}
+  if(btn instanceof HTMLButtonElement){if(btn.disabled)return;btn.disabled=true}
   const err=document.getElementById('updateErr');if(err)err.textContent='';
-  const fail=msg=>{if(err)err.textContent=msg;if(btn)btn.disabled=false};
-  if(document.getElementById('updateBackupFirst')?.checked){
+  const fail=msg=>{if(err)err.textContent=msg;if(btn instanceof HTMLButtonElement)btn.disabled=false};
+  const backup=document.getElementById('updateBackupFirst');
+  if(backup instanceof HTMLInputElement&&backup.checked){
     if(btn)btn.textContent='Backing up…';
     try{await api('POST','/backup')}catch(e){syncUpdateConfirm();return fail('The backup failed, so nothing was updated: '+e.message)}
     if(!btn?.isConnected||!document.getElementById('modal').classList.contains('visible')){showToast('Update cancelled. The backup was kept.');return}

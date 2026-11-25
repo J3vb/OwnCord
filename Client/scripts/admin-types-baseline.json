@@ -14,19 +14,6 @@
       "2339:Property 'value' does not exist on type 'HTMLElement | {}'.": 2,
       "2339:Property 'value' does not exist on type 'HTMLElement'.": 19,
       "2363:The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.": 2
-    },
-    "admin/static/js/server.js": {
-      "2339:Property 'checked' does not exist on type 'HTMLElement'.": 2,
-      "2339:Property 'disabled' does not exist on type 'HTMLElement'.": 15,
-      "2339:Property 'value' does not exist on type 'HTMLElement'.": 3,
-      "2362:The left-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.": 1,
-      "2363:The right-hand side of an arithmetic operation must be of type 'any', 'number', 'bigint' or an enum type.": 1
-    },
-    "admin/static/js/setup.js": {
-      "2339:Property 'disabled' does not exist on type 'HTMLElement'.": 8,
-      "2339:Property 'focus' does not exist on type 'Element'.": 1,
-      "2339:Property 'href' does not exist on type 'HTMLElement'.": 1,
-      "2339:Property 'value' does not exist on type 'HTMLElement'.": 9
     }
   }
 }
