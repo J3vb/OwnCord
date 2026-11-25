@@ -4,7 +4,7 @@ import {
   joinRetryInMs,
   noteJoinFailed,
   noteJoinSucceeded,
-} from "./joinBackoff";
+} from "@lib/voice/joinBackoff";
 import { joinBackoffText } from "./joinBackoffText";
 
 beforeEach(() => noteJoinSucceeded());
@@ -59,7 +59,7 @@ describe("joinBackoff", () => {
 describe("joinBackoff on a fresh start", () => {
   it("has no wait armed by a channel switch before any join has failed", async () => {
     vi.resetModules();
-    const fresh = await import("./joinBackoff");
+    const fresh = await import("@lib/voice/joinBackoff");
     expect(fresh.joinBackoffFromSwitch()).toBe(false);
     expect(fresh.joinRetryInMs(0)).toBe(0);
   });

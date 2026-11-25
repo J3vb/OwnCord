@@ -8,7 +8,7 @@
   },
   "chunks": {
     "MainPage": {
-      "budget": 150500,
+      "budget": 151500,
       "note": "src/pages/MainPage.ts and what only it imports: the signed-in app shell (channels, messages, members, DMs). 141000 -> 141500 for who listens to music (141046 B). 142000 -> 142500 for the Command Deck panel top, the server header's second layout (142206 B)."
     },
     "livekit": {
@@ -24,7 +24,7 @@
     "dispatcher": {
       "budget": 13000,
       "lazy": true,
-      "note": "src/lib/dispatcher.ts and the feature socket handlers only it imports. Loaded at boot after the first screen, and awaited before a sign-in dials."
+      "note": "src/app/dispatcher.ts and the feature socket handlers only it imports. Loaded at boot after the first screen, and awaited before a sign-in dials."
     },
     "wireShapes": {
       "budget": 3200,

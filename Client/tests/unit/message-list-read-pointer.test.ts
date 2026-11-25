@@ -20,7 +20,7 @@ import {
   setLiveTailInView,
   setMarkReadSender,
   writeReadPointer,
-} from "@lib/readState";
+} from "../../src/stores/readState";
 import { setMarkUnreadSender } from "../../src/features/messaging/message-list/markUnread";
 import * as dialogOpenModule from "../../src/lib/ui/dialogOpen";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";

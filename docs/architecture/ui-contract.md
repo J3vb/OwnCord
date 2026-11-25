@@ -267,6 +267,15 @@ in it takes focus and it has no live region. Its rules live in
 `styles/app/room-info.css`, held to its own colour policy in
 `tests/unit/deck/room-info-css.test.ts`.
 
+Under Command Deck the member toggle sits at the end of the top bar's
+connection cell, after the connection state. At 900 px wide or more, in a
+connected call while the chat connection is up and the server tabs are not
+folded, the ping sits before the connection state
+(`features/deck/deckPing.ts`). At 1200 px or less the column folds into an
+overlay under the chat header, 280 px wide. It works as Classic's overlay with
+two exceptions: from 900 to 1200 px it has no shadow, and at 600 px or less it
+stays 280 px wide instead of taking the full width.
+
 The server switcher is a third. Classic draws the server rail; Command Deck draws
 a row of server tabs under the top bar's first row, folded into a Servers button
 at most 640 px wide or 499 px tall. Both are drawn from one controller

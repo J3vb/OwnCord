@@ -9,7 +9,7 @@ import * as voiceSession from "../helpers/voiceSessionMock";
 const mockListen = vi.fn();
 const mockMusicVolume = vi.fn((_userId: number) => 70);
 const mockSetMusicVolume = vi.fn();
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     listenToMusic: (userId: number | null) => mockListen(userId),
     getMusicVolume: (userId: number) => mockMusicVolume(userId),

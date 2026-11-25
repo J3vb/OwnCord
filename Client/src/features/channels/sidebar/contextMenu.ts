@@ -19,12 +19,12 @@ import {
   currentUserPermissions,
   canManageChannels,
   canManageInvites,
-} from "@lib/permissions";
+} from "@stores/permissions";
 import { Permission } from "@lib/types";
 import type { ChannelAccess } from "../channelRow.view";
 import { formatChannelLink } from "@lib/nav/deepLink";
-import { navigateToChannel } from "@lib/nav/channelNavigation";
-import { markChannelRead, showsUnreadBadge } from "@lib/readState";
+import { navigateToChannel } from "../../navigation/channelNavigation";
+import { markChannelRead, showsUnreadBadge } from "@stores/readState";
 import {
   getChannelMute,
   muteChannel,

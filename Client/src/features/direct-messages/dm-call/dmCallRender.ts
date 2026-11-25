@@ -11,7 +11,7 @@ import { dmStore, dmDisplayName, type DmChannel } from "@stores/dm.store";
 import { callStatusText, isPhoneCallHold } from "../../voice/voiceStatusText";
 import { voiceText as t } from "../../../i18n/voice";
 import { dmCallText as d } from "../../../i18n/dmCall";
-import { canPublishScreen } from "../../voice/native/platform";
+import { canPublishScreen } from "@lib/hostOs";
 import { createSecuredBadge } from "../../voice/securedBadge";
 import {
   absentMembers,

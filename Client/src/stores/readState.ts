@@ -10,13 +10,13 @@
 
 import { channelsStore, clearUnread, setReadPointer } from "@stores/channels.store";
 import { dmStore, clearDmUnread, setDmReadPointer } from "@stores/dm.store";
-import { readPointerEnabled } from "./net/serverCapabilities";
+import { readPointerEnabled } from "@lib/net/serverCapabilities";
 import { isChannelAway, isChannelCovered, isWindowAway, setTailInView } from "./readStateAway";
-import { announceMarkUnreadFailure, type MarkUnreadNotice } from "./readStateNotices";
-import { cancelPendingMarkAll, queueMarkRead } from "./readStateBulk";
+import { announceMarkUnreadFailure, type MarkUnreadNotice } from "@lib/readStateNotices";
+import { cancelPendingMarkAll, queueMarkRead } from "@lib/readStateBulk";
 
 export { isChannelAway, isChannelCovered } from "./readStateAway";
-export { onMarkUnreadFailed, setMarkUnreadNotice } from "./readStateNotices";
+export { onMarkUnreadFailed, setMarkUnreadNotice } from "@lib/readStateNotices";
 
 /**
  * Record whether the mounted list for a channel shows its live tail. The list

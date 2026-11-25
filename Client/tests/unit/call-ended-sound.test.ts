@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 vi.mock("../../src/platform/desktop", () => ({
   desktop: { nativeVoice: {}, notifier: {} },
 }));
-vi.mock("../../src/features/voice/native/platform", () => ({
+vi.mock("../../src/lib/hostOs", () => ({
   isLinuxDesktop: () => false,
   isWindowsDesktop: () => false,
 }));

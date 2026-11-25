@@ -15,7 +15,7 @@ import { clearReactionUsersCache } from "./reactionUsers";
 import { showToast } from "../../lib/ui/toast";
 import { connectText } from "../../i18n/connect";
 import { readingAnchor } from "./readingAnchor";
-import { activatePendingMessages } from "../../lib/pendingMessages";
+import { activatePendingMessages } from "./pendingMessages";
 import type { DispatchApi, Payload, ReconnectClock } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 

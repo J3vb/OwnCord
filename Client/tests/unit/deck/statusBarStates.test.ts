@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as voiceSession from "../../helpers/voiceSessionMock";
 import * as voiceWidget from "../../helpers/voiceWidgetHarness";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../../src/features/voice/livekitSession", () => voiceSession.defaults());
 vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true));
 
 import { createVoiceWidget } from "../../../src/features/voice/VoiceWidget";

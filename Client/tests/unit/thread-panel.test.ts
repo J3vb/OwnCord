@@ -6,12 +6,12 @@ vi.mock("../../src/features/messaging/content/attachments", async (importOrigina
   fetchImageAsObjectUrl: vi.fn(async () => "blob:sticker"),
 }));
 // The pending-message queue is not activated in a unit test; a sticker send needs its dedup id.
-vi.mock("@lib/pendingMessages", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/pendingMessages")>()),
+vi.mock("../../src/features/messaging/pendingMessages", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/messaging/pendingMessages")>()),
   supportsMessageDeduplication: () => true,
 }));
-vi.mock("@lib/readState", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/readState")>()),
+vi.mock("../../src/stores/readState", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/stores/readState")>()),
   noteMessageSeen: noteSeen,
 }));
 

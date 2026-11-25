@@ -12,7 +12,7 @@ import {
   reapplyAudioProcessing,
   reapplyEnhancedNoiseSuppression,
   setSileroBufferMs,
-} from "@lib/voice/livekitSession";
+} from "../../voice/livekitSession";
 import {
   enhancedNoiseSuppressionEnabled,
   micCaptureOptions,

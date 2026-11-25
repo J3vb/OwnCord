@@ -49,7 +49,7 @@ const LINE_LEAD = /^( *)(?:([-*+>#])|(\d{1,9})([.)]))/;
 /** Stands in for a backtick of a fence while the text is split. */
 const FENCE_MARK = "\uE000";
 const URL_RUN = /https?:\/\/[^\s<>"']+/iy;
-/** lib/text/mentions MENTION_TOKEN_REGEX's token, which Server/service/mentions.go shares. */
+/** features/messaging/mentions MENTION_TOKEN_REGEX's token, which Server/service/mentions.go shares. */
 const MENTION_RUN = /@[\p{L}\p{N}_.-]{1,64}/uy;
 
 interface Piece {

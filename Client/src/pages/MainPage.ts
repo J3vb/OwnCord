@@ -13,7 +13,7 @@ import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { Disposable } from "@lib/disposable";
 import { onAuthCleared } from "@stores/auth.store";
 import { closeSettings, openSettings, uiStore } from "@stores/ui.store";
-import { createPresenceSender } from "@lib/presence/presence";
+import { createPresenceSender } from "../features/presence/presence";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { voiceStore, restoreSavedSelfVoiceState } from "@stores/voice.store";
 import {
@@ -21,12 +21,12 @@ import {
   setWsClient,
   setServerHost as setLiveKitServerHost,
   setOnError as setVoiceOnError,
-} from "@lib/voice/livekitSession";
+} from "../features/voice/livekitSession";
 import { setServerHost } from "../features/messaging/message-list/renderers";
 import { setAttachmentCacheScope } from "../features/messaging/content/attachments";
 import { closeActiveLightbox } from "../features/messaging/content/media";
-import { markAllRead } from "@lib/readState";
-import { onChannelReselect, stepChannel } from "@lib/nav/channelNavigation";
+import { markAllRead } from "@stores/readState";
+import { onChannelReselect, stepChannel } from "../features/navigation/channelNavigation";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { setAudioVolumeHost } from "../features/voice/audioElements";
 import { attachGlobalKeybinds } from "../features/settings/GlobalKeybinds";

@@ -7,7 +7,7 @@ import {
   newClientMessageId,
   PENDING_MESSAGE_MAX_COUNT,
   savePendingText,
-} from "@lib/pendingMessages";
+} from "../../../src/features/messaging/pendingMessages";
 import type { ChannelControllerOptions } from "../../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
 import { setActiveTimeout } from "../../../src/features/safety/store";
@@ -30,7 +30,7 @@ vi.mock("../../../src/features/messaging/MessageList", () => mocks.messageListMo
 vi.mock("../../../src/features/messaging/MessageInput", () => mocks.messageInputMock());
 vi.mock("../../../src/features/content-consent/NsfwGate", () => mocks.nsfwGateMock());
 vi.mock("../../../src/features/messaging/TypingIndicator", () => mocks.typingIndicatorMock());
-vi.mock("@lib/readState", () => mocks.readStateMock());
+vi.mock("../../../src/stores/readState", () => mocks.readStateMock());
 vi.mock("@stores/messages.store", () => mocks.messagesStoreMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
 vi.mock("@stores/auth.store", () => mocks.authStoreMock());

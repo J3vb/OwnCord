@@ -4,7 +4,7 @@ import * as voiceSession from "../helpers/voiceSessionMock";
 import * as voiceWidget from "../helpers/voiceWidgetHarness";
 
 const mockRetryMicPermission = vi.fn().mockResolvedValue(undefined);
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     retryMicPermission: (...args: unknown[]) => mockRetryMicPermission(...args),
   }),

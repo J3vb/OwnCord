@@ -12,7 +12,7 @@
 import type { ApiClient, OwnReportSummary } from "@lib/api";
 import { buildSettingsSection } from "../settings/settingsSection";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
-import { parseTimestamp } from "@lib/text/formatting";
+import { parseTimestamp } from "../messaging/formatting";
 import { formatDate } from "../../i18n/format";
 import { reportsText as t } from "../../i18n/reports";
 

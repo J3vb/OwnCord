@@ -23,9 +23,7 @@ function stubGpu(renderer: string): void {
   );
 }
 
-vi.mock("../../src/features/voice/native/platform", () =>
-  codecMocks.nativePlatformMock(() => isLinuxDesktop()),
-);
+vi.mock("../../src/lib/hostOs", () => codecMocks.nativePlatformMock(() => isLinuxDesktop()));
 vi.mock("../../src/features/voice/native/videoCodecs", () => ({
   nativeVideoCodecs: () => Promise.resolve({ h264: true, vp9: false, decode: [] }),
 }));
@@ -39,7 +37,7 @@ vi.mock("livekit-client", async (importOriginal) => ({
   supportsH265: () => supportsH265(),
 }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => codecMocks.inertPushToTalkMock());
-vi.mock("@lib/voice/livekitSession", () => codecMocks.reapplyAudioSessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => codecMocks.reapplyAudioSessionMock());
 
 import { installFakeAudio } from "../helpers/fakeAudioContext";
 import {

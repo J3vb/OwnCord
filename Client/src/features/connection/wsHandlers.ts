@@ -1,5 +1,5 @@
 // Auth, server-restart and connection-level error handlers — extracted from
-// lib/dispatcher.ts, which keeps every socket subscription and calls these
+// app/dispatcher.ts, which keeps every socket subscription and calls these
 // plain functions.
 import { authStore, setAuth, clearAuth, setUploadFileTypes } from "../../stores/auth.store";
 import {
@@ -17,7 +17,7 @@ import {
   clearPeerWatching,
 } from "../../stores/voice.store";
 import { focusPayload } from "../../lib/prefs/lastChannel";
-import { deleteCredential } from "../../lib/net/credentials";
+import { deleteCredential } from "./credentials";
 import { PROTOCOL_EPOCH, ServerRestartReason } from "../../lib/protocolTypes";
 import type { ServerRestartReasonValue } from "../../lib/protocolTypes";
 import { safetyText } from "../../i18n/safety";

@@ -6,7 +6,7 @@
 // client silently while the server's own contract test stayed green.
 //
 // This file feeds recorded server->client frames through the REAL client
-// dispatcher (lib/dispatcher.ts, wireDispatcher) and asserts the store effect
+// dispatcher (app/dispatcher.ts, wireDispatcher) and asserts the store effect
 // each frame must produce, anchored on the fixture's own content (the literal
 // strings the journey used, "hello epoch one" and so on). A renamed fixture
 // field no longer routes to an assertion, so the test fails.
@@ -33,15 +33,15 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 vi.mock("../../src/features/notifications/notifications", () =>
   dispatcherMocks.notificationsMock(),
 );
-vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
-vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
+vi.mock("../../src/features/connection/identity", () => dispatcherMocks.identityMock());
 vi.mock("../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 
 vi.spyOn(console, "info").mockImplementation(() => {});
 
 import * as dispatcherMocks from "../helpers/dispatcherMocks";
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { wireDispatcher } from "../../src/app/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { expectConsole } from "../helpers/console";
 import {
@@ -90,7 +90,7 @@ import {
 import { safetyStore } from "../../src/features/safety/store";
 import type { ServerMessage } from "../../src/lib/types";
 import { showToast } from "@lib/ui/toast";
-import * as livekitSession from "@lib/voice/livekitSession";
+import * as livekitSession from "../../src/features/voice/livekitSession";
 import { createOutgoingCall, createRingController } from "../../src/lib/voice/callRing";
 
 // Fixture loading and placeholder substitution live in tests/helpers/protocolFixtures.ts.

@@ -131,7 +131,7 @@ export function removeDmChannel(channelId: number): void {
  * Ensure a DM channel exists in channelsStore so ChannelController can switch
  * to it. Moved down from `pages/main-page/SidebarDmHelpers`: it is
  * the only place the DM → channelsStore mirror row is synthesized, and every
- * caller — the sidebar, `lib/nav/channelNavigation`, the DM and message-request
+ * caller — the sidebar, `features/navigation/channelNavigation`, the DM and message-request
  * handlers — needs the same behaviour, so it lives with the store it writes.
  */
 export function addDmToChannelsStore(dmChannel: DmChannel): void {

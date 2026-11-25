@@ -18,7 +18,7 @@ import type { Payload } from "../connection/dispatchContext";
 import { noteJoinSent, resetJoinRequest } from "../voice/joinRequest";
 
 const leaveVoice = vi.fn(async () => {});
-vi.mock("../../lib/voice/livekitSession", () => ({ leaveVoice }));
+vi.mock("../voice/livekitSession", () => ({ leaveVoice }));
 vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 import { showToast } from "../../lib/ui/toast";
 

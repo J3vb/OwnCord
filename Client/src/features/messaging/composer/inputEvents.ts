@@ -3,7 +3,7 @@
  * drops and the caret moves that decide an autocomplete popup's fate.
  */
 import { isImeCommit } from "@lib/text/ime";
-import { isAndroidApp } from "../../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { dialogOpen } from "@lib/ui/dialogOpen";
 import { FORMAT_MARKERS } from "../markdownMarkers";
 import { DROP_SLOTS, CARET_MOVE_KEYS } from "./inputShared";

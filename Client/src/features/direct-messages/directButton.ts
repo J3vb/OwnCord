@@ -12,7 +12,7 @@ import { createElement, setText } from "@lib/dom";
 import { totalDmUnread } from "@lib/dmUnread";
 import { createIcon } from "@lib/icons";
 import { CHANNEL_MUTE_CHANGED } from "@lib/prefs/channelMutes";
-import { formatBadgeCount } from "@lib/text/formatting";
+import { formatBadgeCount } from "../messaging/formatting";
 import { dmStore } from "@stores/dm.store";
 import { serverRailText } from "../../i18n/serverRail";
 import { pendingRequestCount } from "../message-requests/store";

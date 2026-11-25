@@ -25,7 +25,7 @@ import { createLogger } from "../logger";
 import { Disposable } from "../disposable";
 import { desktop } from "../../platform/desktop";
 import type { NativeToneNote } from "../../platform/contracts/nativeVoice";
-import { isLinuxDesktop } from "../../features/voice/native/platform";
+import { isLinuxDesktop } from "../hostOs";
 import { REPEAT_MS, soundSpec, type ToneSpec, type VoiceSound } from "./soundTables";
 
 export type { VoiceSound } from "./soundTables";

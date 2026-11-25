@@ -2,11 +2,11 @@
 import { LogLevel, RoomEvent, setLogExtension, setLogLevel } from "livekit-client";
 import { createLogger } from "@lib/logger";
 import { recordEvent } from "@lib/diagnostics/eventSink";
-import { parseUserId } from "../../features/voice/sessionState";
-import { onRoom } from "../../features/voice/releaseRoom";
+import { parseUserId } from "./sessionState";
+import { onRoom } from "./releaseRoom";
 import { voiceJoinSnapshot } from "@lib/voice/voiceJoinTrace";
 import type { AudioPipeline } from "@lib/voice/audioPipeline";
-import type { AudioElements } from "../../features/voice/audioElements";
+import type { AudioElements } from "./audioElements";
 import { attachVoiceEventLog } from "@lib/voice/voiceEventLog";
 import type { VoiceRoom, VoiceStatsTransport } from "@lib/voice/voiceRoom";
 

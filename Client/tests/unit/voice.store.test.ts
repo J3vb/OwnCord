@@ -37,7 +37,7 @@ import {
 import type { ReadyVoiceState, VoiceStatePayload, VoiceLeavePayload } from "../../src/lib/types";
 import { authStore, clearAuth } from "../../src/stores/auth.store";
 import { resetAuthState, resetVoiceState, signInAs } from "../helpers/storeSeeds";
-import { noteJoinFailed, joinRetryInMs } from "../../src/features/voice/joinBackoff";
+import { noteJoinFailed, joinRetryInMs } from "../../src/lib/voice/joinBackoff";
 // vi.resetModules() below would hand the re-imported module a fresh logger,
 // which re-installs the logger's app-lifetime pref-change listener on every
 // reset. Those tests re-import against this already-loaded instance instead,

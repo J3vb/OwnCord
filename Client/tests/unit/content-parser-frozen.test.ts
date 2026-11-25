@@ -21,7 +21,11 @@ import {
 import { setRoles } from "../../src/stores/channels.store";
 import { seedMembersAndChannels } from "../helpers/contentRenderHarness";
 import { createElement, setText } from "@lib/dom";
-import { navigateToChannel, findChannelByName, findChannelById } from "@lib/nav/channelNavigation";
+import {
+  navigateToChannel,
+  findChannelByName,
+  findChannelById,
+} from "../../src/features/navigation/channelNavigation";
 import { parseInviteLink, parseMessageLink } from "@lib/nav/deepLink";
 import { getChannelMutesHost } from "@lib/prefs/channelMutes";
 import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";
@@ -40,7 +44,7 @@ import {
   isEveryoneToken,
   resolveMentionUserId,
   type MentionInfo,
-} from "@lib/text/mentions";
+} from "../../src/features/messaging/mentions";
 import { isSafeUrl } from "../../src/features/messaging/content/attachments";
 import {
   EMOJI_TOKEN_REGEX,

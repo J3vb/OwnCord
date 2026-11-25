@@ -2,18 +2,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Room } from "livekit-client";
 import { diagnosticServices, platformModuleMock } from "../helpers/diagnosticsServices";
 import { SessionScope } from "@lib/net/sessionScope";
-import { isLinuxDesktop } from "../../src/features/voice/native/platform";
+import { isLinuxDesktop } from "../../src/lib/hostOs";
 import { settingsText as t } from "../../src/i18n/settings";
 import {
   runConnectionDiagnostics,
   type DiagnosticResult,
   type DiagnosticServices,
-} from "@lib/net/connectionDiagnostics";
+} from "../../src/features/connection/connectionDiagnostics";
 
-vi.mock("../../src/features/voice/native/platform", async (importOriginal) =>
-  platformModuleMock(
-    await importOriginal<typeof import("../../src/features/voice/native/platform")>(),
-  ),
+vi.mock("../../src/lib/hostOs", async (importOriginal) =>
+  platformModuleMock(await importOriginal<typeof import("../../src/lib/hostOs")>()),
 );
 
 function deferred<T>() {

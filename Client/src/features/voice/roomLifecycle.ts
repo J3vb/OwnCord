@@ -32,12 +32,12 @@ import {
   stopManualScreenTracks,
   bumpGeneration,
 } from "./screenShare";
-import { attachDiagnosticListeners } from "../../lib/voice/livekitDiagnostics";
+import { attachDiagnosticListeners } from "./livekitDiagnostics";
 import { recordVoiceLeft } from "../../lib/voice/voiceEventLog";
 import { detachRoom, onRoom } from "./releaseRoom";
 import type { RoomEventHandlers } from "../../features/voice/roomEventHandlers";
 import { parseUserId, type SessionState } from "./sessionState";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";
 import { syncShareGrant } from "./mediaControl";
 import { noteVoiceLeave } from "./leaveOwed";

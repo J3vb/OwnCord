@@ -9,7 +9,7 @@ import { createLogger } from "@lib/logger";
 import { shellText } from "../../i18n/shell";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
-import { setChannelWarmHandler } from "@lib/nav/channelNavigation";
+import { setChannelWarmHandler } from "../navigation/channelNavigation";
 import {
   newestSentId,
   pageBackTo,

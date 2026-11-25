@@ -319,7 +319,7 @@ const noIdentityScopeFallback = {
 // ─────────────────────────────────────────────────────────────────────────
 // Rule: no-store-write-in-ws-on
 //
-// Invariant (CLAUDE.md): "src/lib/dispatcher.ts is the single WS-event entry
+// Invariant (CLAUDE.md): "src/app/dispatcher.ts is the single WS-event entry
 // point: server events reach the stores only through a ws.on(...)
 // subscription registered there."
 //

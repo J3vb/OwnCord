@@ -23,7 +23,7 @@
 
 import { createConfirmModal } from "../dialogs/confirmModal";
 import { appendChildren, createElement, setText } from "@lib/dom";
-import { currentUserHasPermission } from "@lib/permissions";
+import { currentUserHasPermission } from "@stores/permissions";
 import { Permission } from "@lib/types";
 import { moderationText as t } from "../../i18n/moderation";
 import { activeTimeoutEnd, type ReportDetail } from "./api";

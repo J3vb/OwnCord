@@ -33,8 +33,8 @@ const mockVoiceState = vi.hoisted(() => ({
   voiceUsers: { get: () => ({ has: () => true, keys: () => [].values() }) },
 }));
 
-vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/voice/native/platform")>()),
+vi.mock("../../src/lib/hostOs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/hostOs")>()),
   isLinuxDesktop: () => true,
 }));
 
@@ -257,7 +257,7 @@ vi.mock("@lib/net/e2eeCrypto", () => ({
   computeKeyFingerprint: vi.fn(async () => "AB12"),
   computeRawKeyFingerprint: vi.fn(async () => "5E55"),
 }));
-vi.mock("@lib/net/identity", () => ({
+vi.mock("../../src/features/connection/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => ({ publicKey: {}, privateKey: {} })),
   getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
   storeIdentityPin: vi.fn(async () => true),
@@ -266,7 +266,7 @@ globalThis.Worker = vi.fn(function () {
   throw new Error("no E2EE web worker on Linux");
 }) as unknown as typeof Worker;
 
-import { LiveKitSession } from "../../src/lib/voice/livekitSession";
+import { LiveKitSession } from "../../src/features/voice/livekitSession";
 import { vadThreshold } from "../../src/lib/voice/gateScale";
 import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";

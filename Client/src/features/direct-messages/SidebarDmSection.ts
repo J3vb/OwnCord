@@ -6,7 +6,7 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { atEachMidnight, formatBadgeCount } from "@lib/text/formatting";
+import { atEachMidnight, formatBadgeCount } from "../messaging/formatting";
 import { reconcileChildren } from "@lib/net/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
 import { dmStore } from "@stores/dm.store";

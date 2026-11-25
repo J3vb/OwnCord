@@ -34,7 +34,7 @@ import {
   publishIdentityKey,
   ensureIdentityKeyPublished,
   getDeviceIdentityPublicKey,
-} from "@lib/net/identity";
+} from "../../src/features/connection/identity";
 import {
   generateIdentityKeyPair,
   exportPublicKey,

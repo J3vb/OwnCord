@@ -9,7 +9,8 @@ import { vi } from "vitest";
 export const mockShowToast = vi.fn();
 
 let lazyVoiceImportsInFlight = 0;
-let sharedVoiceImport: Promise<typeof import("@lib/voice/livekitSession")> | undefined;
+let sharedVoiceImport:
+  Promise<typeof import("../../src/features/voice/livekitSession")> | undefined;
 
 /** Lazy `livekitSession()` imports started and not yet settled. */
 export function getLazyVoiceImportsInFlight(): number {
@@ -82,7 +83,7 @@ export function dispatchContextMock<T extends object>(actual: T): T {
     ...actual,
     livekitSession: () => {
       lazyVoiceImportsInFlight++;
-      sharedVoiceImport ??= import("@lib/voice/livekitSession");
+      sharedVoiceImport ??= import("../../src/features/voice/livekitSession");
       const loading = sharedVoiceImport;
       void loading.then(
         () => {

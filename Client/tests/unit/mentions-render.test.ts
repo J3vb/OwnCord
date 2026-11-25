@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 import { useMountContainer } from "../helpers/mountContainer";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   renderMentionSegment,
@@ -21,7 +21,7 @@ import {
   highlightsCurrentUser,
   mentionsCurrentUser,
   resolveMentionUserId,
-} from "../../src/lib/text/mentions";
+} from "../../src/features/messaging/mentions";
 import { membersStore } from "../../src/stores/members.store";
 import { authStore } from "../../src/stores/auth.store";
 import { channelsStore, setRoles } from "../../src/stores/channels.store";

@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
 import { createMessageList } from "../../src/features/messaging/MessageList";
 import type { MessageListOptions } from "../../src/features/messaging/MessageList";
-import { isChannelAway } from "@lib/readState";
+import { isChannelAway } from "../../src/stores/readState";
 import {
   messagesStore,
   addMessage,

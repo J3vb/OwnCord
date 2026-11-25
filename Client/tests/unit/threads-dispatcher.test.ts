@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { wireDispatcher } from "../../src/app/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { expectConsole } from "../helpers/console";
 import { makeThread } from "../helpers/thread-fixtures";

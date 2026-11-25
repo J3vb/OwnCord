@@ -24,7 +24,7 @@ import { authStore } from "@stores/auth.store";
 
 const mockToast = vi.hoisted(() => vi.fn());
 vi.mock("../../src/lib/ui/toast", () => ({ showToast: mockToast }));
-vi.mock("../../src/lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../src/features/connection/credentials", () => mocks.netCredentialsMock());
 vi.mock("../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 
 describe("checkNewUsername mirrors auth.ValidateNewUsername", () => {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import { Room } from "livekit-client";
-import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
+import { LiveKitSession } from "../../../src/features/voice/livekitSession";
 import { leaveVoiceChannel } from "@stores/voice.store";
 import { ensureLiveKitProxy } from "../../../src/platform/desktop/nativeProxies";
 import {
@@ -19,7 +19,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../../src/features/connection/identity", () => mocks.netIdentityMock());
 
 const { mockVoiceState, mockRoom, mockInvoke } = mocks;
 

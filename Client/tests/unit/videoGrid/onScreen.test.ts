@@ -21,7 +21,7 @@ import {
 const reports = vi.hoisted(() => ({ sent: [] as boolean[] }));
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("../../../src/features/voice/videoOnScreen", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../../src/features/voice/videoOnScreen")>();
   return {

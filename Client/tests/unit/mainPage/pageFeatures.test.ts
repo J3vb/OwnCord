@@ -20,7 +20,7 @@ vi.mock("../../../src/features/voice/uiSounds", () => ({
 
 const { backgroundFeatures } = await import("../../../src/pages/main-page/pageFeatures");
 const { sessionHooks } = await import("../../../src/pages/main-page/sessionHooks");
-const { getActivePresenceSender } = await import("../../../src/lib/presence/presence");
+const { getActivePresenceSender } = await import("../../../src/features/presence/presence");
 const { getScreenSourcePicker } =
   await import("../../../src/features/voice/native/screenPickerSlot");
 const { currentNotesContext } = await import("../../../src/features/profiles/userNotes");

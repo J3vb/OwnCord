@@ -794,10 +794,15 @@ describe("eslint-rules", () => {
           errors: [error("lib/fixture.ts", "stores/voice.store.ts", "lib", "stores")],
         },
         {
-          code: `import { f } from "../features/voice/joinBackoff";`,
+          code: `import { f } from "../features/voice/joinBackoffText";`,
           filename: src("stores/voice.store.ts"),
           errors: [
-            error("stores/voice.store.ts", "features/voice/joinBackoff.ts", "stores", "features"),
+            error(
+              "stores/voice.store.ts",
+              "features/voice/joinBackoffText.ts",
+              "stores",
+              "features",
+            ),
           ],
         },
         {

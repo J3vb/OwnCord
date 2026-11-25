@@ -11,7 +11,7 @@ import { showToast } from "@lib/ui/toast";
 import { installFileDropGuard } from "../features/messaging/fileDropGuard";
 import { desktop } from "../platform/desktop";
 import { connectText } from "../i18n/connect";
-import { isAndroidApp } from "../features/voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 
 const log = createLogger("main");
 

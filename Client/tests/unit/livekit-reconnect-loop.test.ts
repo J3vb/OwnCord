@@ -15,7 +15,7 @@ vi.mock("@stores/voice.store", () => ({ leaveVoiceChannel: mocks.leaveVoiceChann
 vi.mock("../../src/features/voice/roomEventHandlers", () => ({
   setJoinedVoiceStatus: mocks.setJoinedVoiceStatus,
 }));
-vi.mock("@lib/voice/livekitDiagnostics", () => ({
+vi.mock("../../src/features/voice/livekitDiagnostics", () => ({
   logIceConnectionInfo: mocks.logIceConnectionInfo,
 }));
 

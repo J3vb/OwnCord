@@ -8,9 +8,13 @@
 // here runs at import time.
 
 import type { ApiClient } from "@lib/api";
-import { deleteCredential, loginWithSavedPassword, readRelayedLogin } from "@lib/net/credentials";
+import {
+  deleteCredential,
+  loginWithSavedPassword,
+  readRelayedLogin,
+} from "../features/connection/credentials";
 import { createLogger } from "@lib/logger";
-import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { deactivatePendingMessages } from "../features/messaging/pendingMessages";
 import type { ProfileManager } from "@lib/presence/profiles";
 import { safeMount } from "@lib/text/safeRender";
 import type { MountableComponent, RenderRecovery } from "@lib/text/safeRender";

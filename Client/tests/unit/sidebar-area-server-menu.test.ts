@@ -3,7 +3,7 @@ import { useMountContainer } from "../helpers/mountContainer";
 import * as mocks from "../helpers/sidebarAreaMocks";
 import { lightSidebarAreaOpts, resetSidebarStoresAsMember } from "../helpers/sidebarAreaOpts";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.rePinSessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => mocks.rePinSessionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.e2eeCryptoMock());
 vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());
 vi.mock("../../src/features/voice/UserBar", () => mocks.userBarMock());
@@ -25,7 +25,7 @@ import { createSidebarArea, type SidebarAreaOptions } from "../../src/pages/main
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore, closeSettings } from "../../src/stores/ui.store";
-import { setMarkReadSender } from "@lib/readState";
+import { setMarkReadSender } from "../../src/stores/readState";
 import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
 import { Permission, type ReadyChannel } from "../../src/lib/types";
 

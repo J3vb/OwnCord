@@ -4,7 +4,7 @@
 import { leaveVoiceChannel } from "@stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "@lib/logger";
-import { logIceConnectionInfo } from "@lib/voice/livekitDiagnostics";
+import { logIceConnectionInfo } from "./livekitDiagnostics";
 import { setJoinedVoiceStatus } from "./roomEventHandlers";
 import type { ReconnectDeps, ServerMembership } from "./reconnectDeps";
 import { releaseRoom } from "./releaseRoom";

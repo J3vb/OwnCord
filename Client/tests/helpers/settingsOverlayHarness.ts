@@ -3,7 +3,7 @@ import { createSettingsOverlay } from "../../src/features/settings/SettingsOverl
 import type { SettingsOverlayOptions } from "../../src/features/settings/SettingsOverlay";
 import { baseOptions } from "./settingsOverlayOptions";
 import * as attachments from "../../src/features/messaging/content/attachments";
-import * as formatting from "@lib/text/formatting";
+import * as formatting from "../../src/features/messaging/formatting";
 import * as media from "../../src/features/messaging/content/media";
 import * as channelMutes from "@lib/prefs/channelMutes";
 import {
@@ -17,7 +17,7 @@ import {
 // root-relative id works from any test directory.
 export const APP_LIFETIME_MODULES = [
   ["/src/features/messaging/content/attachments", attachments],
-  ["@lib/text/formatting", formatting],
+  ["/src/features/messaging/formatting", formatting],
   ["/src/features/messaging/content/media", media],
   ["@lib/prefs/channelMutes", channelMutes],
 ] as const;

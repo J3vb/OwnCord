@@ -4,7 +4,7 @@
 // holds the session's ephemeral ECDH keypair. E2EEManager decides when the
 // ephemeral keypair is published or cleared; this module is where it lives.
 import { computeKeyFingerprint, exportPublicKey, signEphemeralKey } from "../../lib/net/e2eeCrypto";
-import { getOrCreateIdentityKeyPair } from "../../lib/net/identity";
+import { getOrCreateIdentityKeyPair } from "../connection/identity";
 import { authStore } from "../../stores/auth.store";
 import { createLogger } from "../../lib/logger";
 import { localVideoDecode } from "./decodeCaps";

@@ -11,7 +11,7 @@ import { makeReactionMessage, reactionOptions } from "../helpers/reactionFixture
 import { beforeEach, describe, it, expect, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   refreshReactionLocks,

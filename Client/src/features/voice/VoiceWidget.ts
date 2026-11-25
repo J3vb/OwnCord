@@ -20,13 +20,13 @@ import {
   type ConnectionStatsPoller,
 } from "@lib/voice/connectionStats";
 import { enhancedNoiseSuppressionEnabled } from "@lib/voice/audioPipeline";
-import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "@lib/voice/livekitSession";
+import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "./livekitSession";
 import { writeLiveStats } from "@lib/voice/liveStats";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../../i18n/voice";
 import { callStatusText, isConnecting, isPhoneCallHold } from "./voiceStatusText";
 import { shareBlockReason } from "./shareGate";
-import { canPublishScreen } from "./native/platform";
+import { canPublishScreen } from "@lib/hostOs";
 import { createMusicButton, syncMusicButton, watchMusicSupport } from "./musicControl";
 import { createSecuredBadge, type SecuredBadge } from "./securedBadge";
 import type { StreamCard } from "./voiceWidget/streamCard";

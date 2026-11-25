@@ -24,7 +24,7 @@ vi.mock("../../../src/features/navigation/SearchOverlay", () => mocks.searchOver
 vi.mock("@stores/channels.store", () => mocks.channelsStoreMock());
 vi.mock("@stores/messages.store", () => mocks.messagesStoreMock());
 vi.mock("@stores/auth.store", () => mocks.authStoreMock());
-vi.mock("@lib/permissions", () => mocks.permissionsMock());
+vi.mock("../../../src/stores/permissions", () => mocks.permissionsMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 const mockRequestOpenThread = vi.hoisted(() => vi.fn());
 vi.mock("../../../src/features/threads/threadNavigation", () => ({

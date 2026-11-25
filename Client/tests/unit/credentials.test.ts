@@ -1,5 +1,5 @@
 /**
- * Tests for src/lib/net/credentials.ts.
+ * Tests for src/features/connection/credentials.ts.
  *
  * This module was excluded from coverage in vitest.config.ts and only ever
  * `vi.mock`ed by other suites, so none of it had ever been executed under test.
@@ -40,7 +40,7 @@ const {
   parseRelayedLogin,
   readRelayedLogin,
   loginWithSavedPassword,
-} = await import("@lib/net/credentials");
+} = await import("../../src/features/connection/credentials");
 const { ApiClientError, TransportError, REPLY_SHAPE_CODE } = await import("@lib/api");
 
 // Logger names are taken when the module loads, before the per-test mock clear.
@@ -471,10 +471,12 @@ describe("outside Tauri", () => {
    * The branch matters because the connect screen calls loadCredential
    * unconditionally on mount: it must return null, not reject.
    */
-  async function importWithoutInvoke(): Promise<typeof import("@lib/net/credentials")> {
+  async function importWithoutInvoke(): Promise<
+    typeof import("../../src/features/connection/credentials")
+  > {
     vi.resetModules();
     vi.doMock("@tauri-apps/api/core", () => ({}));
-    return import("@lib/net/credentials");
+    return import("../../src/features/connection/credentials");
   }
 
   afterEach(() => {

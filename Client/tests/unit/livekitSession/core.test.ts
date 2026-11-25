@@ -4,7 +4,7 @@ import {
   parseUserId,
   LiveKitSession,
   getRoomForStats,
-} from "../../../src/lib/voice/livekitSession";
+} from "../../../src/features/voice/livekitSession";
 import {
   setLocalMuted,
   setLocalDeafened,
@@ -23,7 +23,7 @@ import {
   setMuted as boundSetMuted,
   setDeafened as boundSetDeafened,
   cleanupAll as boundCleanupAll,
-} from "../../../src/lib/voice/livekitSession";
+} from "../../../src/features/voice/livekitSession";
 import {
   useLiveKitSessionHarness,
   stubPrefs,
@@ -39,7 +39,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../../src/features/connection/identity", () => mocks.netIdentityMock());
 
 const { mockRoom, mockSavePref } = mocks;
 

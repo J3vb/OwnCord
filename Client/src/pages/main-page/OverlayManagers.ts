@@ -14,7 +14,7 @@ import { showToast } from "@lib/ui/toast";
 import { setActiveChannel, channelsStore } from "@stores/channels.store";
 import { uiStore, setSidebarMode, setActiveDmUser } from "@stores/ui.store";
 import { dmStore, addDmToChannelsStore } from "@stores/dm.store";
-import { navigateToChannel } from "@lib/nav/channelNavigation";
+import { navigateToChannel } from "../../features/navigation/channelNavigation";
 import { nsfwContentBlocked } from "../../features/content-consent/nsfw";
 import { requestOpenThread } from "../../features/threads/threadNavigation";
 import { shellText } from "../../i18n/shell";

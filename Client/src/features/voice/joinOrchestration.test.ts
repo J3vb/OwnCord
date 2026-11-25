@@ -16,7 +16,7 @@ vi.mock("../../lib/logger", () => ({
 import { JoinOrchestration, type JoinHost } from "./joinOrchestration";
 import { onRoom } from "./releaseRoom";
 import { voiceJoinSnapshot } from "../../lib/voice/voiceJoinTrace";
-import { joinRetryInMs, noteJoinFailed, noteJoinSucceeded } from "./joinBackoff";
+import { joinRetryInMs, noteJoinFailed, noteJoinSucceeded } from "@lib/voice/joinBackoff";
 
 function fakeRoom(state = "connected"): Room {
   return {

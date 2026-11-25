@@ -6,7 +6,7 @@
 import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { IconName } from "@lib/icons";
-import { parseTimestamp } from "@lib/text/formatting";
+import { parseTimestamp } from "./formatting";
 import type { ChannelMediaItem, ChannelMediaMonthsResponse, UserStorage } from "@lib/types";
 import { formatDate, formatNumber } from "../../i18n/format";
 import { mediaGalleryText } from "../../i18n/mediaGallery";

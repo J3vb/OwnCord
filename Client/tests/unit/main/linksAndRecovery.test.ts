@@ -4,8 +4,8 @@ import { mockInvoke, emitTauriEvent } from "../helpers/ws-mocks";
 import { expectConsole } from "../../helpers/console";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { ApiClientError } from "@lib/api";
-import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { deleteCredential } from "@lib/net/credentials";
+import { deactivatePendingMessages } from "../../../src/features/messaging/pendingMessages";
+import { deleteCredential } from "../../../src/features/connection/credentials";
 import { uiStore, setUpdateRequiredHost } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
 import { createMainPage } from "@pages/MainPage";
@@ -25,15 +25,17 @@ import {
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
 vi.mock("@lib/prefs/appearance", () => mocks.prefsAppearanceMock());
-vi.mock("@lib/net/connectionDiagnostics", () => mocks.netConnectionDiagnosticsMock());
+vi.mock("../../../src/features/connection/connectionDiagnostics", () =>
+  mocks.netConnectionDiagnosticsMock(),
+);
 vi.mock("@pages/mainPagePrefetch", () => mocks.pagesMainPagePrefetchMock());
-vi.mock("@lib/pendingMessages", () => mocks.pendingMessagesMock());
+vi.mock("../../../src/features/messaging/pendingMessages", () => mocks.pendingMessagesMock());
 vi.mock("../../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
 vi.mock("@lib/logPersistence", () => mocks.logPersistenceMock());
-vi.mock("@lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../../src/features/connection/credentials", () => mocks.netCredentialsMock());
 vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
 vi.mock("../../../src/features/connection/CertMismatchModal", () => mocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mocks.netCertReconnectMock());
@@ -42,7 +44,7 @@ vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());
 vi.mock("@lib/api", (importOriginal) => mocks.apiMock(importOriginal));
 vi.mock("@pages/ConnectPage", () => mocks.pagesConnectPageMock());
 vi.mock("@pages/MainPage", () => mocks.pagesMainPageMock());
-vi.mock("@lib/dispatcher", () => mocks.dispatcherMock());
+vi.mock("../../../src/app/dispatcher", () => mocks.dispatcherMock());
 
 const {
   mockOnOpenUrl,

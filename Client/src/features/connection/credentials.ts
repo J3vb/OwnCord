@@ -4,15 +4,15 @@
  * where their callers already import them.
  */
 
-import { TransportError, httpError } from "../api";
+import { TransportError, httpError } from "@lib/api";
 import { desktop } from "../../platform/desktop";
 import type {
   SavedCredential,
   SavedLoginResponse,
   SavedSessionResume,
 } from "../../platform/contracts/credentials";
-import type { AuthResponse } from "../types";
-import { readReply } from "../apiReply";
+import type { AuthResponse } from "@lib/types";
+import { readReply } from "@lib/apiReply";
 import { authStore } from "@stores/auth.store";
 import { connectText } from "../../i18n/connect";
 

@@ -11,11 +11,12 @@ import { installGlobalErrorHandlers } from "@lib/text/safeRender";
 import { createApiClient } from "@lib/api";
 import { installGlobalGuards } from "./app/globalGuards";
 
-import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { deactivatePendingMessages } from "./features/messaging/pendingMessages";
 import { settleNotificationLevelDefault } from "@lib/prefs/notificationLevel";
 import { createWsClient } from "@lib/ws";
-import { markActiveChannelReadOnUnload } from "@lib/readState";
+import { markActiveChannelReadOnUnload } from "./stores/readState";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
+import { registerVoiceSessionLoader } from "@lib/voice/voiceSessionLoader";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
@@ -44,6 +45,8 @@ applyStoredLogLevel(import.meta.env.DEV ? "debug" : "info");
 const log = createLogger("main");
 
 installGlobalGuards();
+// Logout and push-to-talk reach the (lazy) voice session facade through this.
+registerVoiceSessionLoader(() => import("./features/voice/livekitSession"));
 
 // Install global error handlers first
 installGlobalErrorHandlers();
@@ -87,9 +90,11 @@ const ws = createWsClient();
 // Diagnostics back the lazily loaded Settings > Diagnostics & logs panel, so their engine and
 // text stay out of the startup chunk. The import resolves long before
 // the panel can be opened, and the panel's own module imports the same chunk.
-void import("@lib/net/connectionDiagnostics").then(({ configureConnectionDiagnostics }) => {
-  configureConnectionDiagnostics(api, ws);
-});
+void import("./features/connection/connectionDiagnostics").then(
+  ({ configureConnectionDiagnostics }) => {
+    configureConnectionDiagnostics(api, ws);
+  },
+);
 // App-lifetime hook: main.ts runs once per window. The other per-server resets
 // register themselves from their own modules.
 void registerSessionReset(

@@ -5,7 +5,7 @@ const native = vi.hoisted(() => ({
   cameras: null as { deviceId: string; label: string }[] | null,
 }));
 
-vi.mock("@lib/voice/livekitSession", () => ({ switchVideoDevice }));
+vi.mock("./livekitSession", () => ({ switchVideoDevice }));
 vi.mock("./native/devices", () => ({ nativeCameraDevices: async () => native.cameras }));
 
 import { showCameraMenu } from "./cameraMenu";

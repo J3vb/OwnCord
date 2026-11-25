@@ -15,7 +15,7 @@ The short version:
 - The Go server issues short-lived, scoped LiveKit tokens and relays the E2EE
   key-exchange messages. Media goes between the client and LiveKit; the
   server never has the media key.
-- On the client, everything goes through `src/lib/voice/livekitSession.ts`, a facade
+- On the client, everything goes through `src/features/voice/livekitSession.ts`, a facade
   over the `src/features/voice/` modules.
 - Self-hosted servers often use self-signed certificates. So the LiveKit
   connection goes through a local Rust TLS proxy, pinned to the same TOFU
@@ -146,7 +146,7 @@ Supporting pieces:
   limited to `server.livekit_webhook_allowed_cidrs`, which falls back to
   `server.admin_allowed_cidrs`), `Server/api/livekit_proxy.go` (reverse proxy
   for LiveKit signalling).
-- **Client:** `src/lib/voice/livekitSession.ts` (facade owning the state machine:
+- **Client:** `src/features/voice/livekitSession.ts` (facade owning the state machine:
   idle/connecting/connected/reconnecting), `src/features/voice/`
   (`joinOrchestration.ts` joins with a monotonic `joinGeneration` to discard
   superseded ones; `roomLifecycle.ts` Room + E2EE worker creation and
@@ -159,7 +159,7 @@ Supporting pieces:
   and TOFU pin verification; `e2eeWorker.ts` key provider write queue;
   `e2eeOffer.ts` room-key offers), `src/lib/net/e2eeCrypto.ts` (ECDH
   primitives, safety-number fingerprints, long-term identity keys),
-  `src/lib/net/identity.ts` (OS-keyring identity key + peer identity pins),
+  `src/features/connection/identity.ts` (OS-keyring identity key + peer identity pins),
   `src/lib/voice/audioPipeline.ts` + `src/lib/voice/noiseSuppression.ts` (RNNoise WASM),
   `src/features/voice/screenShare.ts`, `src/features/voice/videoCodec.ts` (the camera and
   screen-share codec: VP8 by default, H.264, VP9, H.265 (hardware encoder, non-Intel GPU) or Auto by choice on Windows;
@@ -197,7 +197,7 @@ device's key. A new client verifies an announce against its
 otherwise. An older client sends no key and its announces carry none.
 
 **Source of truth:** `Server/ws/voice_e2ee.go`, `Server/ws/livekit.go`,
-`Client/src/lib/voice/livekitSession.ts`, `Client/src/features/voice/`,
+`Client/src/features/voice/livekitSession.ts`, `Client/src/features/voice/`,
 `Client/src/features/voice/livekitE2EE.ts`, `Client/src/lib/net/e2eeCrypto.ts`,
 `Client/src-tauri/src/livekit_proxy.rs`.
 
@@ -240,7 +240,7 @@ the subscriber's answer too (`vendor/livekit/OWNCORD-PATCH.md`).
 
 ### Phase 1: audio
 
-**Where the switch is.** `features/voice/native/platform.ts`'s
+**Where the switch is.** `lib/hostOs.ts`'s
 `isLinuxDesktop()` is the only platform check. `RoomLifecycle.createRoom`
 returns a `NativeRoom` (`features/voice/native/nativeRoom.ts`) instead of a
 livekit-client `Room` there, and `E2EEWorker.applyRoomKey` hands the key to the

@@ -13,7 +13,7 @@ import { createElement, setText } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
 import { openAdminPanel } from "@lib/adminPanel";
 import { runningScreenLayout } from "@lib/prefs/screenLayout";
-import { canManageInvites, canModerateMembers, canViewAuditLog } from "@lib/permissions";
+import { canManageInvites, canModerateMembers, canViewAuditLog } from "@stores/permissions";
 import type { ApiClient } from "@lib/api";
 import type { ToastContainer } from "@lib/ui/toastContainer";
 import { authStore } from "@stores/auth.store";

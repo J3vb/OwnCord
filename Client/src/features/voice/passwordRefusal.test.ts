@@ -3,7 +3,7 @@ import { handleVoiceJoinRollback, handleVoicePasswordRefusal } from "./wsHandler
 import { closePasswordPrompt, promptForChannelPassword, sendPasswordJoin } from "./passwordPrompt";
 import { sendUserJoin } from "./joinClick";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
-import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
+import { joinRetryInMs, noteJoinSucceeded } from "@lib/voice/joinBackoff";
 import {
   voiceStore,
   resetVoiceStore,
@@ -14,10 +14,10 @@ import { channelsStore, setChannels } from "../../stores/channels.store";
 import { setConnectionStatus } from "../../stores/ui.store";
 import { authStore } from "../../stores/auth.store";
 import { showToast } from "../../lib/ui/toast";
-import { leaveVoice } from "../../lib/voice/livekitSession";
+import { leaveVoice } from "./livekitSession";
 import type { DispatchWs, Payload } from "../connection/dispatchContext";
 
-vi.mock("../../lib/voice/livekitSession", () => ({
+vi.mock("./livekitSession", () => ({
   leaveVoice: vi.fn(),
   isVoiceSessionActive: vi.fn(() => false),
   failPendingRejoin: vi.fn(),

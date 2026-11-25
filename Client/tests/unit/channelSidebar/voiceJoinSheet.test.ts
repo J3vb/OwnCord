@@ -9,7 +9,7 @@ import { voiceStore, updateVoiceState, removeVoiceUser } from "../../../src/stor
 import { closeBottomSheet } from "../../../src/lib/ui/bottomSheet";
 import { resetStores, addVoiceUser, testChannels } from "../../helpers/channelSidebarHarness";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/net/e2eeCrypto", (importOriginal) => mocks.netE2eeCryptoMock(importOriginal));
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>

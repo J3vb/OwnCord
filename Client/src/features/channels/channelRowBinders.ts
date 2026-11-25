@@ -11,8 +11,8 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { navigateToChannel } from "@lib/nav/channelNavigation";
-import { attachPressWarm } from "@lib/nav/pressWarm";
+import { navigateToChannel } from "../navigation/channelNavigation";
+import { attachPressWarm } from "../navigation/pressWarm";
 import {
   NO_CATEGORY,
   UNCATEGORIZED_VOICE_CATEGORY,

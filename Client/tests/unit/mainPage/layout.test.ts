@@ -27,7 +27,7 @@ vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
 );
 vi.mock("@lib/logger", () => mocks.loggerMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/media/notificationSound", () => mocks.mediaNotificationSoundMock());
 vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messagesCallAlertsMock());
 vi.mock("../../../src/features/updates/UpdateNotifier", () => mocks.updateNotifierMock());
@@ -433,7 +433,7 @@ describe("MainPage — destroy isolates every teardown step", () => {
     const stores = [uiStore, channelsStore, voiceStore, dmStore, membersStore, authStore];
     const originals = stores.map((s) => [s.subscribe, s.subscribeSelector] as const);
     const counts = stores.map((s) => trackSubscriptions(s as never));
-    const lk = await import("@lib/voice/livekitSession");
+    const lk = await import("../../../src/features/voice/livekitSession");
     const page = createMainPage({ ws: fakeWs(), api: fakeApi() });
     try {
       page.mount(container);

@@ -10,7 +10,7 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import type { WsClient } from "@lib/ws";
 import { type ApiClient } from "@lib/api";
 import type { RateLimiterSet } from "@lib/net/rateLimiter";
-import type { PresenceSender } from "@lib/presence/presence";
+import type { PresenceSender } from "../../features/presence/presence";
 import type { ToastContainer } from "@lib/ui/toastContainer";
 import { createCategoryDialogs } from "./categoryDialogs";
 import { logout } from "../../features/connection/logout";
@@ -41,7 +41,7 @@ export interface SidebarAreaOptions {
   /** MainPage's single shared presence sender — threaded to UserBar so its
    *  status picker shares the same limiter budget and retry as auto-idle
    *  and the settings Account tab instead of sending straight through `ws`
-   *  (see @lib/presence/presence). */
+   *  (see features/presence/presence). */
   readonly presenceSender: PresenceSender;
   readonly getRoot: () => HTMLDivElement | null;
   readonly getToast: () => ToastContainer | null;

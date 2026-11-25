@@ -1,5 +1,5 @@
 // Game activity and presence handlers, split out of wsHandlers.ts. Plain
-// functions; wsHandlers.ts re-exports them for lib/dispatcher.ts.
+// functions; wsHandlers.ts re-exports them for app/dispatcher.ts.
 import {
   updatePresence,
   applyPresenceBatch,

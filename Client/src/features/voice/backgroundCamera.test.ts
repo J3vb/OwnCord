@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const session = vi.hoisted(() => ({ enableCamera: vi.fn(), disableCamera: vi.fn() }));
-vi.mock("../../lib/voice/livekitSession", () => session);
+vi.mock("./livekitSession", () => session);
 
 import { startBackgroundCamera } from "./backgroundCamera";
 import { resetVoiceStore, voiceStore, type VoiceStatus } from "../../stores/voice.store";

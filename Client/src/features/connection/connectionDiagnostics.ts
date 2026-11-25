@@ -3,9 +3,9 @@ import type { ApiClient } from "@lib/api";
 import type { WsClient } from "@lib/ws";
 import { loadPref } from "@lib/prefs/preferences";
 import { isMissingDeviceError } from "@lib/voice/audioPipeline";
-import { nativeAudioDevices, type AudioDevice } from "../../features/voice/native/devices";
-import { probeNativeMicrophone, type NativeMicProbe } from "../../features/voice/native/micProbe";
-import { isLinuxDesktop } from "../../features/voice/native/platform";
+import { nativeAudioDevices, type AudioDevice } from "../voice/native/devices";
+import { probeNativeMicrophone, type NativeMicProbe } from "../voice/native/micProbe";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { settingsText as t } from "../../i18n/settings";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
@@ -66,7 +66,7 @@ export function configureConnectionDiagnostics(api: ApiClient, ws: WsClient): vo
   configured = {
     api,
     ws,
-    getRoom: async () => (await import("@lib/voice/livekitSession")).getRoomForStats(),
+    getRoom: async () => (await import("../voice/livekitSession")).getRoomForStats(),
     getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
     listNativeInputs: () => nativeAudioDevices("audioinput"),
     probeNativeInput: probeNativeMicrophone,

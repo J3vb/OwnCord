@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 
 /**
- * Module factory bodies for `vi.mock("@lib/voice/livekitSession", ...)`.
+ * Module factory bodies for `vi.mock("../../src/features/voice/livekitSession", ...)`.
  *
  * `defaults()` covers every export the suites mock, each as a spy with the
  * behaviour most suites want. `withOverrides(partial)` changes single members
@@ -9,7 +9,7 @@ import { vi } from "vitest";
  * namespace import placed before the module under test:
  *
  *   import * as voiceSession from "../helpers/voiceSessionMock";
- *   vi.mock("@lib/voice/livekitSession", () => voiceSession.withOverrides({ ... }));
+ *   vi.mock("../../src/features/voice/livekitSession", () => voiceSession.withOverrides({ ... }));
  */
 
 export function defaults() {

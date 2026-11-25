@@ -1,12 +1,12 @@
 // LiveKit Session — lifecycle orchestrator for voice chat via LiveKit
 import { voiceStore, setVoiceStatus, onPttPollingLiveChange } from "@stores/voice.store";
-import { installLivekitLogging } from "@lib/voice/livekitDiagnostics";
-import { LiveKitSession } from "../../features/voice/voiceSession";
+import { installLivekitLogging } from "./livekitDiagnostics";
+import { LiveKitSession } from "./voiceSession";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";
-export { LiveKitSession } from "../../features/voice/voiceSession";
+export { LiveKitSession } from "./voiceSession";
 
 // Re-export StreamQuality so existing consumers don't break
-export type { StreamQuality } from "../../features/voice/screenShare";
+export type { StreamQuality } from "./screenShare";
 
 // --- Push-to-talk liveness (cross-module signal, no instance state) ---
 
@@ -17,11 +17,8 @@ export { setPttPollingLive } from "@stores/voice.store";
 
 // --- Session state types + pure helpers (leaf module) ---
 
-export { parseUserId } from "../../features/voice/sessionState";
-export type {
-  RemoteVideoCallback,
-  RemoteVideoRemovedCallback,
-} from "../../features/voice/sessionState";
+export { parseUserId } from "./sessionState";
+export type { RemoteVideoCallback, RemoteVideoRemovedCallback } from "./sessionState";
 
 // --- Singleton instance + re-exported bound methods ---
 

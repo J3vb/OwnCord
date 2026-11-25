@@ -15,7 +15,7 @@ import { Disposable } from "@lib/disposable";
 import { channelsStore } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
 import type { ChannelReorderData } from "../channelSidebarTypes";
-import { canManageChannels } from "@lib/permissions";
+import { canManageChannels } from "@stores/permissions";
 import {
   CONTAINER_SELECTOR,
   findCategoryTarget,

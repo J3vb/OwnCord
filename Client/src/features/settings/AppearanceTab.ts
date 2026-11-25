@@ -5,7 +5,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { buildSettingsSection } from "./settingsSection";
 import { loadPref, savePref, createToggle, platformText } from "./helpers";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { readStored } from "@lib/prefs/preferences";
 import {
   THEMES,

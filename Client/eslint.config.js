@@ -89,7 +89,7 @@ export default tseslint.config(
     // livekitSession.ts — the supersession invariant travelled with them, so
     // the rule must cover every file or those paths go unguarded.
     files: [
-      "src/lib/voice/livekitSession.ts",
+      "src/features/voice/livekitSession.ts",
       "src/features/voice/livekitReconnect.ts",
       "src/features/voice/joinOrchestration.ts",
     ],
@@ -119,7 +119,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/lib/net/identity.ts"],
+    files: ["src/features/connection/identity.ts"],
     plugins: { local: localRules },
     rules: {
       "local/no-identity-scope-fallback": "error",
@@ -128,7 +128,7 @@ export default tseslint.config(
   {
     // dispatcher.ts IS the allowed entry point, so it is exempt from its own rule.
     files: ["src/**/*.ts"],
-    ignores: ["src/lib/dispatcher.ts"],
+    ignores: ["src/app/dispatcher.ts"],
     plugins: { local: localRules },
     rules: {
       "local/no-store-write-in-ws-on": "error",
@@ -239,8 +239,8 @@ export default tseslint.config(
                 "**/features/*/store",
                 "./store",
                 "**/store",
-                "@lib/voice/livekitSession",
-                "**/lib/voice/livekitSession",
+                "**/livekitSession",
+                "**/voiceSessionLoader",
               ],
               message:
                 "A *.view.ts draws from its row model and imports no store or voice session; build the model in the caller (5.4e).",
@@ -257,7 +257,7 @@ export default tseslint.config(
         },
         {
           selector:
-            "ImportExpression[source.value=/(^@stores\\/|\\/stores\\/|(^|\\/)store$|livekitSession$)/]",
+            "ImportExpression[source.value=/(^@stores\\/|\\/stores\\/|(^|\\/)store$|livekitSession$|voiceSessionLoader$)/]",
           message:
             "A *.view.ts draws from its row model and imports no store or voice session; build the model in the caller (5.4e).",
         },

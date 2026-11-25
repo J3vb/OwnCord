@@ -81,7 +81,7 @@ source of truth in `ui.store.connectionStatus`
 
 > **✓ Implemented (2026-07).** `ui.store.connectionStatus` is now the single
 > source of truth: `app/session.ts` calls `wireConnectionStatus(ws)` once, on
-> the first load of `lib/dispatcher.ts` (before the first dial), whose writer
+> the first load of `app/dispatcher.ts` (before the first dial), whose writer
 > lives there
 > (`ws.onStateChange` → `toConnectionStatus` → `setConnectionStatus`), mapping
 > the internal 5-state machine onto the 3-state status (`connecting` /
@@ -117,7 +117,7 @@ source of truth in `ui.store.connectionStatus`
 
 ## 4. Global event → reaction map
 
-The dispatcher (`src/lib/dispatcher.ts`) is the single fan-in from the socket to
+The dispatcher (`src/app/dispatcher.ts`) is the single fan-in from the socket to
 the stores: it holds every `ws.on(...)` registration, and the handler bodies it
 calls live in `src/features/*/wsHandlers.ts`. Target: **every** inbound message type produces a defined store
 mutation _and_, where user-visible, a defined UI reaction. The per-flow docs

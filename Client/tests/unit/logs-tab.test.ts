@@ -26,7 +26,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 const { mockGetVersion } = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -52,13 +52,13 @@ const { mockExportSupportBundle } = vi.hoisted(() => ({
   mockExportSupportBundle: vi.fn<any>(),
 }));
 const linuxDesktop = vi.hoisted(() => ({ on: false }));
-vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/voice/native/platform")>()),
+vi.mock("../../src/lib/hostOs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/hostOs")>()),
   isLinuxDesktop: () => linuxDesktop.on,
 }));
 vi.mock("@lib/supportBundle", () => ({ exportSupportBundle: mockExportSupportBundle }));
 
-import { getSessionDebugInfo, getShareDiagnostics } from "@lib/voice/livekitSession";
+import { getSessionDebugInfo, getShareDiagnostics } from "../../src/features/voice/livekitSession";
 import { createLogsTab } from "../../src/features/settings/LogsTab";
 import type { TabName } from "../../src/features/settings/SettingsOverlay";
 

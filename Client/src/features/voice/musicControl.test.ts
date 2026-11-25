@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const mocks = vi.hoisted(() => ({ support: vi.fn() }));
 vi.mock("../../platform/desktop", () => ({ desktop: { musicAudio: { support: mocks.support } } }));
 vi.mock("./MusicPicker", () => ({ showMusicPicker: vi.fn() }));
-vi.mock("@lib/voice/livekitSession", () => ({ startMusic: vi.fn(), stopMusic: vi.fn() }));
+vi.mock("./livekitSession", () => ({ startMusic: vi.fn(), stopMusic: vi.fn() }));
 
 import {
   cachedMusicSupport,

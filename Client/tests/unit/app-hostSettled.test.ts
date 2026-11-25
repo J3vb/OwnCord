@@ -22,10 +22,14 @@ const { mockOnOpenUrl } = vi.hoisted(() => ({
 // CSS imports are handled natively by vite/vitest — no mock needed.
 
 vi.mock("@lib/prefs/appearance", () => ({ applyStoredAppearance: vi.fn() }));
-vi.mock("@lib/net/connectionDiagnostics", () => ({ configureConnectionDiagnostics: vi.fn() }));
+vi.mock("../../src/features/connection/connectionDiagnostics", () => ({
+  configureConnectionDiagnostics: vi.fn(),
+}));
 const { mockPrefetchMainPage } = vi.hoisted(() => ({ mockPrefetchMainPage: vi.fn() }));
 vi.mock("@pages/mainPagePrefetch", () => ({ prefetchMainPage: mockPrefetchMainPage }));
-vi.mock("@lib/pendingMessages", () => ({ deactivatePendingMessages: vi.fn() }));
+vi.mock("../../src/features/messaging/pendingMessages", () => ({
+  deactivatePendingMessages: vi.fn(),
+}));
 vi.mock("../../src/platform/desktop/pushToTalk", () => ({
   pushToTalk: { init: vi.fn().mockResolvedValue(undefined) },
 }));
@@ -33,7 +37,7 @@ vi.mock("@lib/logPersistence", () => ({
   initLogPersistence: vi.fn().mockResolvedValue(undefined),
   flushLogs: vi.fn().mockResolvedValue(undefined),
 }));
-vi.mock("@lib/net/credentials", () => ({
+vi.mock("../../src/features/connection/credentials", () => ({
   saveCredential: vi.fn().mockResolvedValue(true),
   loadCredential: vi.fn().mockResolvedValue(null),
   resumeSavedSession: vi.fn().mockResolvedValue(null),
@@ -122,7 +126,7 @@ vi.mock("@pages/ConnectPage", () => ({
   }),
 }));
 vi.mock("@pages/MainPage", () => ({ createMainPage: vi.fn() }));
-vi.mock("@lib/dispatcher", () => ({
+vi.mock("../../src/app/dispatcher", () => ({
   wireDispatcher: vi.fn(() => () => {}),
   wireConnectionStatus: vi.fn(() => () => {}),
 }));

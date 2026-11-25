@@ -25,7 +25,7 @@ vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
 );
 vi.mock("@lib/logger", () => mocks.loggerMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/media/notificationSound", () => mocks.mediaNotificationSoundMock());
 vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messagesCallAlertsMock());
 vi.mock("../../../src/features/updates/UpdateNotifier", () => mocks.updateNotifierMock());
@@ -344,7 +344,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("stops your screen share from the grid's self-preview cover, and names remote tiles for their controls", async () => {
-    const { disableScreenshare } = await import("@lib/voice/livekitSession");
+    const { disableScreenshare } = await import("../../../src/features/voice/livekitSession");
     m.page = mountPage(m.container);
     const grid = capturedChatAreaRef.current!.videoGrid;
     const cbs = grid.setCallbacks.mock.calls.at(-1)![0] as { onStopSharing: () => void };
@@ -379,7 +379,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     connectedDm(50);
     m.page = await mountSettled(m.container, ws);
-    const lk = await import("@lib/voice/livekitSession");
+    const lk = await import("../../../src/features/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
     chatAreaProps().onStartVideoCall();
@@ -405,7 +405,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     connectedDm(50);
     m.page = await mountSettled(m.container, ws);
-    const lk = await import("@lib/voice/livekitSession");
+    const lk = await import("../../../src/features/voice/livekitSession");
     voiceStore.setState((prev) => ({
       ...prev,
       currentChannelId: 50,
@@ -425,9 +425,9 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     connectedDm(50);
     m.page = await mountSettled(m.container, ws);
-    const lk = await import("@lib/voice/livekitSession");
+    const lk = await import("../../../src/features/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
-    const { noteJoinFailed } = await import("../../../src/features/voice/joinBackoff");
+    const { noteJoinFailed } = await import("../../../src/lib/voice/joinBackoff");
     noteJoinFailed(Date.now(), true);
     noteJoinFailed(Date.now(), true);
     noteJoinFailed(Date.now(), true);
@@ -439,7 +439,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
 
     expect(lk.enableCamera).not.toHaveBeenCalled();
     m.page.destroy?.();
-    const { noteJoinSucceeded } = await import("../../../src/features/voice/joinBackoff");
+    const { noteJoinSucceeded } = await import("../../../src/lib/voice/joinBackoff");
     noteJoinSucceeded();
   });
 
@@ -447,7 +447,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
     const ws = fakeWs();
     connectedDm(50);
     m.page = await mountSettled(m.container, ws);
-    const lk = await import("@lib/voice/livekitSession");
+    const lk = await import("../../../src/features/voice/livekitSession");
     vi.mocked(lk.enableCamera).mockClear();
 
     startCall();

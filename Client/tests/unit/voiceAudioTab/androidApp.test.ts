@@ -6,7 +6,7 @@ import { stubNavigator } from "../../helpers/voiceAudioTabHarness";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
 
 vi.mock("../../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 const INPUT_MODE_KEY = "owncord:settings:inputMode";
 

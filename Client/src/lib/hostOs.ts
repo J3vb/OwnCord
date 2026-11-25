@@ -4,7 +4,7 @@
 // imported statically from the voice chunk, so it must stay dependency-free
 // (its one import is itself a leaf).
 
-import { isAndroidHost } from "../../../lib/hostPlatform";
+import { isAndroidHost } from "./hostPlatform";
 
 /** Chromium's (so WebView2's) `NotAllowedError` message for a screen picker
  *  the user dismissed. Any other `NotAllowedError` is a real refusal (the OS,

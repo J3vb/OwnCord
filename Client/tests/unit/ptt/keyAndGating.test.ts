@@ -18,7 +18,7 @@ vi.mock("@tauri-apps/api/event", () => ptt.tauriEventMock());
 vi.mock("@lib/prefs/preferences", () => ptt.preferencesMock());
 vi.mock("@stores/voice.store", () => ptt.voiceStoreMock());
 vi.mock("@lib/logger", () => loggerMock());
-vi.mock("../../../src/lib/voice/livekitSession", () => ptt.livekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => ptt.livekitSessionMock());
 
 const {
   mockInvoke,

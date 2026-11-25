@@ -1,7 +1,7 @@
 /** Real categories, client half (WP 6.5b): grouping and order, collapse by id, the header menu, reorder. */
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 
-vi.mock("@lib/voice/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
+vi.mock("../../src/features/voice/livekitSession", () => ({ rePinPeerIdentity: vi.fn() }));
 vi.mock("@lib/net/e2eeCrypto", () => ({
   importIdentityPublicKey: vi.fn(),
   computeKeyFingerprint: vi.fn(),
@@ -28,7 +28,7 @@ import {
 } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { channelGroups } from "../../src/features/channels/channelRowModel";
-import { visibleCategories } from "../../src/lib/permissions";
+import { visibleCategories } from "../../src/stores/permissions";
 import { migrateCollapsedToCategoryIds } from "../../src/features/channels/collapsedMigration";
 import {
   CATEGORY_LIST_STALE,

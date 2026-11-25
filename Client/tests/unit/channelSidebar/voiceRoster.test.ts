@@ -21,7 +21,7 @@ import {
   setMusicSharer,
 } from "../../../src/stores/voice.store";
 import { membersStore } from "../../../src/stores/members.store";
-import { noteJoinFailed, noteJoinSucceeded } from "../../../src/features/voice/joinBackoff";
+import { noteJoinFailed, noteJoinSucceeded } from "../../../src/lib/voice/joinBackoff";
 import {
   useSidebarFixture,
   addVoiceUser,
@@ -34,7 +34,7 @@ import {
 } from "../../helpers/channelSidebarHarness";
 import { signInAs } from "../../helpers/storeSeeds";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/net/e2eeCrypto", (importOriginal) => mocks.netE2eeCryptoMock(importOriginal));
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>

@@ -4,7 +4,7 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import type { MentionInfo } from "@lib/text/mentions";
+import type { MentionInfo } from "../mentions";
 import { copyThenRelabel } from "@lib/ui/clipboard";
 import { messagingText } from "../../../i18n/messaging";
 import { appendInline } from "./contentInline";

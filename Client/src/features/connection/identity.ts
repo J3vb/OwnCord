@@ -12,16 +12,16 @@
  *     peers' pinned identity PUBLIC keys (base64), for TOFU verification.
  */
 
-import { createLogger } from "../logger";
+import { createLogger } from "@lib/logger";
 import { desktop } from "../../platform/desktop";
 import type { StoreIdentityPinResult } from "../../platform/contracts/identityStore";
-import { decodePinSlot, encodePinSlot, withPin, withoutPin } from "./identityPins";
+import { decodePinSlot, encodePinSlot, withPin, withoutPin } from "@lib/net/identityPins";
 import {
   exportIdentityKeyPair,
   exportPublicKey,
   generateIdentityKeyPair,
   importIdentityKeyPair,
-} from "./e2eeCrypto";
+} from "@lib/net/e2eeCrypto";
 import { authStore } from "@stores/auth.store";
 
 const log = createLogger("identity");
