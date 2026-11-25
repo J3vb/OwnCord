@@ -322,7 +322,7 @@ export function mountLayout(st: PageState, pg: PageApi, ms: MountScope): void {
   // the one layout-change handler, so the order is decided here: the
   // outgoing host destroys its panel before the incoming host builds one.
   // The column's own listener ignores the layout key.
-  void import("./MemberColumn").then(({ createMemberColumn }) => {
+  void import("../../features/members/memberColumn").then(({ createMemberColumn }) => {
     if (st.tornDown) return;
     st.memberColumn = createMemberColumn({
       column: ms.memberColumnEl,
