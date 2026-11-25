@@ -19,7 +19,7 @@ import {
 } from "../../src/stores/messages.store";
 import { setThreadResume } from "../../src/stores/threadsLoader";
 import { resumeThreadFocus } from "../../src/features/messaging/threadResume";
-import { claimForwardRequest } from "../../src/features/messaging/forwardRequests";
+import { claimRequest } from "../../src/lib/net/requestClaims";
 import { ApiClientError } from "../../src/lib/api";
 import type { WsClient } from "../../src/lib/ws";
 import type { ChatMessagePayload, MessageResponse } from "../../src/lib/types";
@@ -144,7 +144,7 @@ describe("thread frames through the dispatcher", () => {
   });
 
   it("skips the generic error toast for a claimed thread_create", () => {
-    claimForwardRequest("req-1");
+    claimRequest("req-1");
     ws.simulateMessage("error", { code: "FORBIDDEN", message: "no" }, "req-1");
     expect(showToast).not.toHaveBeenCalled();
     ws.simulateMessage("error", { code: "FORBIDDEN", message: "no" }, "req-2");

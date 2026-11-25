@@ -1,0 +1,75 @@
+{
+  "call": {
+    "color-contrast": 3
+  },
+  "create-channel": {
+    "color-contrast": 5
+  },
+  "invite": {
+    "color-contrast": 5
+  },
+  "main": {
+    "color-contrast": 5
+  },
+  "settings/About": {
+    "aria-required-children": 1,
+    "button-name": 1,
+    "color-contrast": 5
+  },
+  "settings/Accessibility": {
+    "aria-required-children": 1,
+    "button-name": 1,
+    "color-contrast": 5
+  },
+  "settings/Account": {
+    "aria-required-children": 1,
+    "button-name": 1,
+    "color-contrast": 5
+  },
+  "settings/Advanced": {
+    "aria-required-children": 1,
+    "aria-valid-attr-value": 1,
+    "button-name": 1,
+    "color-contrast": 5
+  },
+  "settings/Appearance": {
+    "aria-required-children": 1,
+    "button-name": 1,
+    "color-contrast": 5
+  },
+  "settings/Diagnostics & logs": {
+    "aria-required-children": 1,
+    "button-name": 1,
+    "color-contrast": 5
+  },
+  "settings/Keybinds": {
+    "aria-required-children": 1,
+    "button-name": 1,
+    "color-contrast": 6
+  },
+  "settings/My uploads": {
+    "aria-required-children": 1,
+    "button-name": 1,
+    "color-contrast": 5
+  },
+  "settings/Notifications": {
+    "aria-required-children": 1,
+    "button-name": 1,
+    "color-contrast": 5
+  },
+  "settings/Privacy & safety": {
+    "aria-required-children": 1,
+    "button-name": 1,
+    "color-contrast": 5
+  },
+  "settings/Text & images": {
+    "aria-required-children": 1,
+    "button-name": 1,
+    "color-contrast": 5
+  },
+  "settings/Voice & video": {
+    "aria-required-children": 1,
+    "button-name": 1,
+    "color-contrast": 5
+  }
+}

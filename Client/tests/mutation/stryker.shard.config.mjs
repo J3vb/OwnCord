@@ -643,7 +643,7 @@ export const shards = {
     "src/lib/net/wireCheck.ts",
   ],
   "lib-rest-33": [
-    "src/features/messaging/forwardRequests.ts",
+    "src/lib/net/requestClaims.ts",
     "src/lib/prefs/notificationLevel.ts",
     "src/lib/presence/profiles.ts",
     "src/lib/readStateAway.ts",
@@ -911,6 +911,12 @@ if (!Object.hasOwn(shards, shard) && !Object.hasOwn(legacy, shard)) {
     `Unknown STRYKER_SHARD "${shard}"; expected one of: ` + Object.keys(shards).join(", "),
   );
 }
+
+// Stryker reprints every file it mutates, even one with no mutants left after
+// ignoreStatic: such a file carries no instrumentation marker, but its comments
+// can move to another line. Tests that read source as text use this list to
+// leave the shard's files alone (Client/tests/helpers/instrumented.ts).
+process.env.OC_MUTATED_FILES = (shards[shard] ?? legacy[shard]).join("\n");
 
 // Base imported so OC_ALLOW_UNPINNED_TZ survives: Stryker's vitest runner forces
 // pool "threads", and the TZ-pinned blocks abort without that opt-out.

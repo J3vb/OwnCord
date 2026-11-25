@@ -51,9 +51,14 @@ object SaveTarget {
 // has no such door, so there the file goes to the share sheet instead, where
 // the user can pick Files or Drive.
 @TauriPlugin
-class FilesPlugin(private val activity: Activity) : Plugin(activity) {
+class FilesPlugin internal constructor(
+  private val activity: Activity,
   // MediaStore copies can be large: off the main thread, one at a time.
-  private val io = RetirableWorker()
+  private val io: RetirableWorker,
+) : Plugin(activity) {
+  // The one Tauri calls; a test passes its own worker to the other.
+  constructor(activity: Activity) : this(activity, RetirableWorker())
+
   // Storage work holds this, not the activity, so a queued save cannot keep a
   // retired screen alive.
   private val appContext = activity.applicationContext

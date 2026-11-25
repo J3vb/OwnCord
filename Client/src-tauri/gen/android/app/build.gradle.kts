@@ -105,6 +105,10 @@ dependencies {
     // distributor); no Google service. Apache-2.0.
     implementation("org.unifiedpush.android:connector:3.0.10")
     testImplementation("junit:junit:4.13.2")
+    // Builds a real activity and plugin in a JVM test (its SDK is set in robolectric.properties).
+    testImplementation("org.robolectric:robolectric:4.17")
+    // Invoke takes a Jackson mapper; tauri-android keeps it off our compile path.
+    testImplementation("com.fasterxml.jackson.core:jackson-databind:2.15.3")
     androidTestImplementation("androidx.test.ext:junit:1.1.4")
     androidTestImplementation("androidx.test.espresso:espresso-core:3.5.0")
 }
