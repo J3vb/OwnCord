@@ -400,20 +400,31 @@ export function scanSource(file, source) {
 const INSTRUMENTED = /\bstryMutAct_[0-9a-f]+\(/;
 
 /**
+ * The files the current mutation shard rewrites. Stryker also reprints a file
+ * it found no mutant in, without the marker above, and the reprint can move a
+ * trailing `// i18n-exempt` comment to the next line.
+ */
+function mutatedFiles() {
+  return new Set((process.env.OC_MUTATED_FILES ?? "").split("\n").filter(Boolean));
+}
+
+/**
  * Scan src/. Returns { files: { [file]: finding[] }, errors, instrumented }.
  * Inside a Stryker sandbox the mutated files are rewritten, which moves their
- * literals into new syntax positions; they are listed in `instrumented` and
- * left out, since only the original source says what the UI shows.
+ * literals into new syntax positions; they (and every other file the shard
+ * names in OC_MUTATED_FILES) are listed in `instrumented` and left out, since
+ * only the original source says what the UI shows.
  */
 export function scanTree() {
   const files = {};
   const errors = [];
   const instrumented = [];
+  const mutated = mutatedFiles();
   for (const path of walk(SRC).sort()) {
     const file = posix(relative(CLIENT, path));
     if (excludedReason(file) !== null) continue;
     const source = readFileSync(path, "utf8");
-    if (INSTRUMENTED.test(source)) {
+    if (INSTRUMENTED.test(source) || mutated.has(file)) {
       instrumented.push(file);
       continue;
     }

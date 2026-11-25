@@ -181,3 +181,19 @@ describe("the baseline ratchet", () => {
     });
   });
 });
+
+describe("a mutation run", () => {
+  it("leaves out every file the shard rewrites, marker or not", () => {
+    const file = "src/lib/diagnostics/eventCodesMedia.ts";
+    const before = process.env.OC_MUTATED_FILES;
+    process.env.OC_MUTATED_FILES = file;
+    try {
+      const scan = scanTree();
+      expect(scan.instrumented).toContain(file);
+      expect(Object.keys(scan.files)).not.toContain(file);
+    } finally {
+      if (before === undefined) delete process.env.OC_MUTATED_FILES;
+      else process.env.OC_MUTATED_FILES = before;
+    }
+  });
+});

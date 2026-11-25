@@ -71,7 +71,9 @@ func FuzzValidateAvatarURL(f *testing.F) {
 // FuzzValidateDisplayName checks validateDisplayName against the rule its
 // doc comment states: no control characters and no invisible (Cf) formatting
 // characters, since a display name renders wherever a username does and a
-// bidi override or control character there is a spoofing vector.
+// bidi override or control character there is a spoofing vector. The one Cf
+// rune it lets through is a zero width joiner between two symbols, so emoji
+// sequences such as a family or heart + fire survive.
 func FuzzValidateDisplayName(f *testing.F) {
 	seeds := []string{
 		"",
@@ -87,6 +89,9 @@ func FuzzValidateDisplayName(f *testing.F) {
 		strings.Repeat("a", 1000),
 		"\u200bname\u200b",
 		"\u202eevil\u202c",
+		"\U0001F468\u200d\U0001F469\u200d\U0001F467",
+		"\u2764\ufe0f\u200d\U0001F525",
+		"a\u200db",
 	}
 	for _, s := range seeds {
 		f.Add(s)
@@ -97,13 +102,31 @@ func FuzzValidateDisplayName(f *testing.F) {
 		if err != nil {
 			return
 		}
-		for _, r := range name {
+		runes := []rune(name)
+		for i, r := range runes {
 			if unicode.IsControl(r) {
 				t.Fatalf("validateDisplayName(%q) = nil, but contains control rune %q", name, r)
+			}
+			if r == '\u200d' && joinsSymbols(runes, i) {
+				continue
 			}
 			if unicode.In(r, unicode.Cf) {
 				t.Fatalf("validateDisplayName(%q) = nil, but contains invisible (Cf) rune %q", name, r)
 			}
 		}
 	})
+}
+
+// joinsSymbols reports whether runes[i] sits between two symbols (So/Sk),
+// skipping variation selectors after the left-hand one.
+func joinsSymbols(runes []rune, i int) bool {
+	j := i - 1
+	for j >= 0 && (runes[j] == '\ufe0e' || runes[j] == '\ufe0f') {
+		j--
+	}
+	if j < 0 || i+1 >= len(runes) {
+		return false
+	}
+	isSym := func(r rune) bool { return unicode.In(r, unicode.So, unicode.Sk) }
+	return isSym(runes[j]) && isSym(runes[i+1])
 }
