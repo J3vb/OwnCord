@@ -22,7 +22,7 @@
 // `npm run check` could not run until `npm install` had.
 
 import { spawnSync } from "node:child_process";
-import { existsSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -394,7 +394,45 @@ function onPath(cmd) {
   return dirs.some((dir) => dir && exts.some((ext) => existsSync(join(dir, cmd + ext))));
 }
 
-function runTask(name) {
+const STRICT_DEFAULT_TASKS = new Set(["release:preflight"]);
+const STRICT_EXIT = 3;
+
+/**
+ * Whether skipped optional tools should fail `name`. --no-strict wins over
+ * everything, then --strict and OWNCORD_STRICT=1, then the per-task default.
+ */
+export function resolveStrict(name, { strict = false, noStrict = false, env = process.env } = {}) {
+  if (noStrict) return false;
+  return strict || env.OWNCORD_STRICT === "1" || STRICT_DEFAULT_TASKS.has(name);
+}
+
+/** The closing report of a task whose steps all passed. `skipped` lists the
+ *  probes of optional steps that did not run. Pure: returns what to print. */
+export function summarise(name, skipped, { strict = false, noStrict = false } = {}) {
+  const missing = [...new Set(skipped)];
+  if (missing.length === 0) return { code: 0, stdout: `\n${name}: passed`, stderr: "" };
+  if (strict) {
+    return {
+      code: STRICT_EXIT,
+      stdout: "",
+      stderr: `\n${name}: INCOMPLETE, ${missing.join(", ")} not installed. Install them, or CI is the only place these checks run.`,
+    };
+  }
+  if (noStrict && STRICT_DEFAULT_TASKS.has(name)) {
+    return {
+      code: 0,
+      stdout: `\n${name}: passed, but INCOMPLETE (--no-strict): ${missing.join(", ")} skipped. Do not release on this result.`,
+      stderr: "",
+    };
+  }
+  return {
+    code: 0,
+    stdout: `\n${name}: passed, with ${missing.join(", ")} skipped (not installed). CI runs them.`,
+    stderr: "",
+  };
+}
+
+function runTask(name, options = {}) {
   const steps = TASKS[name];
   const describe = (s) => (s.label ? `${s.cmd} ${s.label}` : `${s.cmd} ${s.args.join(" ")}`);
   const skipped = [];
@@ -438,23 +476,32 @@ function runTask(name) {
       return r.status ?? 1;
     }
   }
-  if (skipped.length) {
-    console.log(
-      `\n${name}: passed, with ${[...new Set(skipped)].join(", ")} skipped (not installed). CI runs them.`,
-    );
-  } else {
-    console.log(`\n${name}: passed`);
-  }
-  return 0;
+  const report = summarise(name, skipped, options);
+  if (report.stdout) console.log(report.stdout);
+  if (report.stderr) console.error(report.stderr);
+  return report.code;
 }
 
 // Return an exit code so piped stdout/stderr can drain before Node exits.
-function main(argv) {
+function main(rawArgv) {
+  let argv = rawArgv;
+  let strict = false;
+  let noStrict = false;
+  const head = rawArgv[0];
+  if (head !== "--help" && head !== "-h" && head !== "--list") {
+    argv = rawArgv.filter((a) => a !== "--strict" && a !== "--no-strict");
+    strict = rawArgv.includes("--strict");
+    noStrict = rawArgv.includes("--no-strict");
+  }
   const arg = argv[0];
   const usage =
     "usage: node scripts/run.mjs --list [task] [--json]\n" +
-    "       node scripts/run.mjs <task>\n" +
+    "       node scripts/run.mjs <task> [--strict | --no-strict]\n" +
     "       node scripts/run.mjs --help";
+  const strictHelp =
+    "\n\n--strict (or OWNCORD_STRICT=1): a task that skipped an optional tool exits 3 with\n" +
+    "  '<task>: INCOMPLETE' instead of passing. release:preflight is strict by default;\n" +
+    "  --no-strict opts out and prints a loud incomplete-result line.";
   function usageError() {
     console.error(usage);
     return 2;
@@ -468,7 +515,7 @@ function main(argv) {
   }
   if (arg === "--help" || arg === "-h") {
     if (argv.length !== 1) return usageError();
-    console.log(`${usage}\n\nTasks: ${Object.keys(TASKS).join(", ")}`);
+    console.log(`${usage}${strictHelp}\n\nTasks: ${Object.keys(TASKS).join(", ")}`);
     return 0;
   }
   if (!arg || arg === "--list") {
@@ -495,13 +542,27 @@ function main(argv) {
     console.log("");
     return 0;
   }
-  if (argv.length !== 1 || arg.startsWith("-")) return usageError();
+  if (argv.length !== 1 || arg.startsWith("-") || (strict && noStrict)) return usageError();
   if (!requireTask(arg)) return 2;
   if (!existsSync(join(ROOT, "Server")) || !existsSync(join(ROOT, "Client"))) {
     console.error("run this from the repository root");
     return 2;
   }
-  return runTask(arg);
+  return runTask(arg, { strict: resolveStrict(arg, { strict, noStrict }), noStrict });
 }
 
-process.exitCode = main(process.argv.slice(2));
+// Run only as the entry point, so tests can import the helpers. Real paths, and
+// no case on Windows, so a symlinked checkout or a lower-case drive letter
+// still runs instead of exiting 0 having done nothing.
+function isEntryPoint() {
+  if (!process.argv[1]) return false;
+  const norm = (p) => {
+    const real = realpathSync(resolve(p));
+    return process.platform === "win32" ? real.toLowerCase() : real;
+  };
+  return norm(process.argv[1]) === norm(fileURLToPath(import.meta.url));
+}
+
+if (isEntryPoint()) {
+  process.exitCode = main(process.argv.slice(2));
+}
