@@ -365,6 +365,8 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 		"registration_mode",
 		"backup_schedule",
 		"backup_retention",
+		"backup_scope",
+		"backup_disk_ack",
 	}
 
 	// Boolean-typed settings require valid boolean values; others accept any
@@ -374,6 +376,7 @@ func TestAdminAPI_PatchSettings_AcceptsAllWhitelistedKeys(t *testing.T) {
 		"registration_mode": "closed",
 		"backup_schedule":   "daily",
 		"backup_retention":  "30",
+		"backup_scope":      "everything",
 	}
 
 	for _, key := range whitelistedKeys {

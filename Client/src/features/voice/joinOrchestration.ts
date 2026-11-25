@@ -11,8 +11,8 @@ import { voiceStore, setVoiceStatus } from "../../stores/voice.store";
 import { loadPref } from "@lib/prefs/preferences";
 import { createLogger } from "../../lib/logger";
 import type { AudioPipeline } from "../../lib/voice/audioPipeline";
-import type { DeviceManager } from "../../lib/voice/deviceManager";
-import type { E2EEManager } from "../../lib/voice/livekitE2EE";
+import type { DeviceManager } from "../../features/voice/deviceManager";
+import type { E2EEManager } from "../../features/voice/livekitE2EE";
 import { ROOM_CONNECT_OPTIONS, type SessionState } from "./sessionState";
 import { detachRoom } from "./releaseRoom";
 import {

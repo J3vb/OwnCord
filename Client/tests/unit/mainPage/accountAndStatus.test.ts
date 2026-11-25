@@ -39,7 +39,7 @@ vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/media/notificationSound", () => mocks.mediaNotificationSoundMock());
 vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messagesCallAlertsMock());
 vi.mock("../../../src/features/updates/UpdateNotifier", () => mocks.updateNotifierMock());
-vi.mock("@lib/voice/audioElements", () => mocks.voiceAudioElementsMock());
+vi.mock("../../../src/features/voice/audioElements", () => mocks.voiceAudioElementsMock());
 vi.mock("@lib/presence/autoIdle", () => mocks.presenceAutoIdleMock());
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),

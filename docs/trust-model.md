@@ -118,7 +118,9 @@ encryption, as explained above.
 
 ## Several devices
 
-You can be signed in on up to 25 devices. You can see and sign out each one in
+You can be signed in on up to 25 devices (sessions) at once, and up to 10 of
+them can be connected live at the same time. Past either limit the oldest one
+is dropped. You can see and sign out each one in
 **Settings**, or sign out everywhere. Changing your password signs out every
 other device.
 

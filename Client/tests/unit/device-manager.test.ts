@@ -48,7 +48,7 @@ vi.mock("../../src/features/voice/native/devices", () => ({
   onNativeDevicesChanged: () => null,
 }));
 
-import { DeviceManager, isMicPolicyGated } from "../../src/lib/voice/deviceManager";
+import { DeviceManager, isMicPolicyGated } from "../../src/features/voice/deviceManager";
 
 /** Fires the registered devicechange listener and lets its debounce elapse. */
 async function triggerDeviceChange(): Promise<void> {

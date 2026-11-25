@@ -27,12 +27,6 @@
       "features/content-consent/nsfw.ts": 1,
       "stores/channels.store.ts": 1
     },
-    "lib/voice/audioElements.ts": {
-      "features/voice/mediaEncryption.ts": 1,
-      "features/voice/releaseRoom.ts": 1,
-      "features/voice/sessionState.ts": 1,
-      "stores/voice.store.ts": 1
-    },
     "lib/nav/channelNavigation.ts": {
       "stores/channels.store.ts": 1,
       "stores/dm.store.ts": 1,
@@ -45,10 +39,6 @@
     },
     "lib/net/credentials.ts": {
       "stores/auth.store.ts": 1
-    },
-    "lib/voice/deviceManager.ts": {
-      "features/voice/native/devices.ts": 1,
-      "stores/voice.store.ts": 1
     },
     "lib/dispatcher.ts": {
       "stores/channels.store.ts": 1,
@@ -64,20 +54,6 @@
     "lib/voice/livekitDiagnostics.ts": {
       "features/voice/releaseRoom.ts": 1,
       "features/voice/sessionState.ts": 1
-    },
-    "lib/voice/livekitE2EE.ts": {
-      "features/voice/e2eeEpoch.ts": 1,
-      "features/voice/e2eeFlows.ts": 1,
-      "features/voice/e2eeIdentity.ts": 1,
-      "features/voice/e2eeOffer.ts": 1,
-      "features/voice/e2eePeerState.ts": 1,
-      "features/voice/e2eeWorker.ts": 1,
-      "stores/voice.store.ts": 1
-    },
-    "lib/voice/livekitReconnect.ts": {
-      "features/voice/releaseRoom.ts": 1,
-      "features/voice/sessionState.ts": 1,
-      "stores/voice.store.ts": 1
     },
     "lib/voice/livekitSession.ts": {
       "features/voice/sessionState.ts": 1,
@@ -109,12 +85,6 @@
     "lib/readStateAway.ts": {
       "stores/messages.store.ts": 1,
       "stores/ui.store.ts": 1
-    },
-    "lib/voice/roomEventHandlers.ts": {
-      "features/voice/mediaEncryption.ts": 1,
-      "features/voice/releaseRoom.ts": 1,
-      "features/voice/sessionState.ts": 1,
-      "stores/voice.store.ts": 1
     },
     "lib/presence/statusTimer.ts": {
       "stores/auth.store.ts": 1,

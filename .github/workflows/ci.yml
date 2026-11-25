@@ -65,6 +65,7 @@ jobs:
       server: ${{ steps.select.outputs.server }}
       client: ${{ steps.select.outputs.client }}
       rust: ${{ steps.select.outputs.rust }}
+      livekitvendor: ${{ steps.select.outputs.livekitvendor }}
       browser: ${{ steps.select.outputs.browser }}
       integration: ${{ steps.select.outputs.integration }}
       webclient: ${{ steps.select.outputs.webclient }}
@@ -542,7 +543,8 @@ jobs:
         if: matrix.os != 'ubuntu-latest' && env.RUN_SERVER != 'false'
         shell: bash
         run: |
-          set -uo pipefail
+          # The runner's bash has -e on: turn it off so a failing run still prints its log below.
+          set +e -uo pipefail
           mapfile -t race_pkgs < <(go list ./... | grep -vE '/Server/(db|service|api)$')
           if [ "${#race_pkgs[@]}" -lt 10 ]; then
             echo "::error::go list returned ${#race_pkgs[@]} packages for the race run"
@@ -1027,6 +1029,11 @@ jobs:
 
       - name: Comment ids must not grow
         run: node scripts/checks/check-comment-ids.mjs
+
+      # Every OWNCORD-PATCH marker in the vendored livekit crate has an entry in
+      # its OWNCORD-PATCH.md, and every entry still has a marker.
+      - name: Vendored livekit patches are documented
+        run: node --test scripts/checks/check-vendor-patches.test.mjs
 
       - name: Ledger schema is valid
         run: node .superpowers/render-ledger.mjs --check
@@ -1523,6 +1530,14 @@ jobs:
 
       - name: Rust unit tests
         run: cargo test --lib
+
+      # The patched livekit crate's own tests (signal-input helpers, rtc_session
+      # parsing, stereo signalling); `--lib` above covers the root package only.
+      # Run through the root workspace so they use the root Cargo.lock and the
+      # pinned libwebrtc, never the vendored crate's upstream lockfile.
+      - name: Vendored livekit patch tests
+        if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.livekitvendor == 'true') }}
+        run: cargo test -p livekit --lib -- signal_input stereo rtc_session
 
       # The pure parsers crate: its own lints plus the property tests in its
       # tests/ folder, which `--lib` above does not run.

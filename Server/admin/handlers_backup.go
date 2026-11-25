@@ -84,10 +84,18 @@ func handleBackup(database *db.DB, paths backupPaths, gate *backupGate, attentio
 	})
 }
 
+// Backup kinds a listing entry can carry.
+const (
+	backupKindDatabase = "database"
+	backupKindFull     = "full"
+)
+
 type backupEntry struct {
 	Name string `json:"name"`
 	Size int64  `json:"size"`
 	Date string `json:"date"`
+	// Kind is "database" for a .db copy and "full" for a scheduled full archive (.zip).
+	Kind string `json:"kind"`
 }
 
 func handleListBackups(paths backupPaths) http.HandlerFunc {
@@ -105,8 +113,13 @@ func handleListBackups(paths backupPaths) http.HandlerFunc {
 
 		var backups []backupEntry
 		for _, e := range entries {
-			if e.IsDir() || filepath.Ext(e.Name()) != ".db" ||
-				isLiveDatabaseFile(filepath.Join(backupDir, e.Name()), paths.dbFile) {
+			kind := backupKindDatabase
+			switch {
+			case e.IsDir():
+				continue
+			case isScheduledArchiveName(e.Name()):
+				kind = backupKindFull
+			case filepath.Ext(e.Name()) != ".db" || isLiveDatabaseFile(filepath.Join(backupDir, e.Name()), paths.dbFile):
 				continue
 			}
 			info, err := e.Info()
@@ -117,6 +130,7 @@ func handleListBackups(paths backupPaths) http.HandlerFunc {
 				Name: e.Name(),
 				Size: info.Size(),
 				Date: info.ModTime().UTC().Format(time.RFC3339),
+				Kind: kind,
 			})
 		}
 		if backups == nil {
@@ -205,6 +219,10 @@ func verifyRestoreSource(w http.ResponseWriter, r *http.Request, name, target st
 // restoreCarryTimeout bounds the live seq floor read in a restore request.
 const restoreCarryTimeout = 10 * time.Second
 
+// ArchiveRestoreHelp is what a restore of a full archive (.zip) is refused with: the panel and
+// `chatserver restore` restore a database copy only, and an archive goes back by hand.
+const ArchiveRestoreHelp = "A full archive (.zip) cannot be restored here. Stop the server, remove the data folder (do not unpack on top of it), put the archive's data folder and config.yaml in its place, and start the server again. The steps are in docs/hosting/backups.md under \"Restore from a full archive\"."
+
 // handleRestoreBackup verifies a backup and stages it for the next boot. It never writes over the open
 // database: the staged copy and a marker (written last) are applied by db.ApplyStagedRestore before the
 // database reopens, and the restart goes through normal shutdown.
@@ -212,6 +230,10 @@ func handleRestoreBackup(database *db.DB, paths backupPaths, gate *backupGate) h
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		name, target, ok := resolveBackupName(w, r, paths.dir, paths.dbFile)
 		if !ok {
+			return
+		}
+		if strings.EqualFold(filepath.Ext(name), ".zip") {
+			writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, ArchiveRestoreHelp)
 			return
 		}
 

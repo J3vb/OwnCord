@@ -228,6 +228,8 @@ const CHECK_DOCS = [
   // "Comments". Node with no dependencies, so it sits with the other matchers.
   step("node", ["--test", "scripts/checks/check-comment-ids.test.mjs"], "."),
   step("node", ["scripts/checks/check-comment-ids.mjs"], "."),
+  // The vendored LiveKit patch doc lists every OWNCORD-PATCH marker in the crate.
+  step("node", ["--test", "scripts/checks/check-vendor-patches.test.mjs"], "."),
   ...LEDGER_VERIFY,
 ];
 

@@ -75,7 +75,7 @@ vi.mock("@lib/voice/voiceJoinTrace", async (importOriginal) => ({
   markJoinMilestone: vi.fn(),
 }));
 
-import { E2EEManager } from "../../src/lib/voice/livekitE2EE";
+import { E2EEManager } from "../../src/features/voice/livekitE2EE";
 import { markJoinMilestone } from "@lib/voice/voiceJoinTrace";
 import { clearPeerVerification, clearPeerVerifications } from "@stores/voice.store";
 import {

@@ -6,7 +6,7 @@ import { parseUserId } from "../../features/voice/sessionState";
 import { onRoom } from "../../features/voice/releaseRoom";
 import { voiceJoinSnapshot } from "@lib/voice/voiceJoinTrace";
 import type { AudioPipeline } from "@lib/voice/audioPipeline";
-import type { AudioElements } from "@lib/voice/audioElements";
+import type { AudioElements } from "../../features/voice/audioElements";
 import { attachVoiceEventLog } from "@lib/voice/voiceEventLog";
 import type { VoiceRoom, VoiceStatsTransport } from "@lib/voice/voiceRoom";
 

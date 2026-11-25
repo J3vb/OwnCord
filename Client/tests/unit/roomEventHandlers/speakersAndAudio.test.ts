@@ -1,4 +1,4 @@
-// Tests for src/lib/voice/roomEventHandlers.ts, continued from tracks.test.ts.
+// Tests for src/features/voice/roomEventHandlers.ts, continued from tracks.test.ts.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as mocks from "../../helpers/roomEventHandlersMocks";

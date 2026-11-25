@@ -126,6 +126,23 @@ var archiveBeforeSnapshotHook func()
 // snapshot it refuses with errArchiveNoSpace if the build would take the backup volume below
 // server.min_free_disk_mb; the plan is then retaken so the zip follows the snapshot.
 func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths backupPaths, work string) (string, error) {
+	return buildArchiveWith(ctx, database, opts, paths, work, archiveBuildOptions{})
+}
+
+// archiveBuildOptions tunes buildArchive for the scheduled job, which keeps its archive: the snapshot is
+// checked before it is zipped, the file is flushed to disk, and the build leaves extra room on the volume.
+type archiveBuildOptions struct {
+	// headroomPercent is free space kept above server.min_free_disk_mb, as a percent of the build's size.
+	headroomPercent uint64
+	// durable checks the snapshot and syncs the finished zip.
+	durable bool
+}
+
+// archiveOutWrapper, when set, wraps the zip's output; tests use it to fail a write part way, as a disk that
+// fills does.
+var archiveOutWrapper func(io.Writer) io.Writer
+
+func buildArchiveWith(ctx context.Context, database *db.DB, opts SetupOptions, paths backupPaths, work string, bo archiveBuildOptions) (string, error) {
 	cfg := opts.RunningCfg
 	snapshot := filepath.Join(work, "snapshot.db")
 	plan := func() (*archiveTree, error) {
@@ -135,7 +152,8 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths
 	if err != nil {
 		return "", err
 	}
-	if err := checkArchiveSpace(work, t.need(), cfg.Server.MinFreeDiskBytes()); err != nil {
+	need := t.need()
+	if err := checkArchiveSpace(work, need, cfg.Server.MinFreeDiskBytes()+need/100*bo.headroomPercent); err != nil {
 		return "", err
 	}
 	if archiveBeforeSnapshotHook != nil {
@@ -147,6 +165,11 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths
 	if err := os.Chmod(snapshot, 0o600); err != nil {
 		return "", fmt.Errorf("restricting snapshot: %w", err)
 	}
+	if bo.durable {
+		if err := db.CheckBackupIntegrity(ctx, snapshot); err != nil {
+			return "", fmt.Errorf("snapshot failed verification: %w", err)
+		}
+	}
 	// Write from a plan taken after the snapshot: an upload lands its file before its row, so every file a
 	// snapshotted row names is on disk now, while the first plan may predate it.
 	if t, err = plan(); err != nil {
@@ -154,12 +177,16 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths
 	}
 
 	outPath := filepath.Join(work, archiveName)
-	out, err := os.Create(outPath) //nolint:gosec // G304: our own temp path
+	out, err := os.OpenFile(outPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0o600) //nolint:gosec // G304: our own temp path
 	if err != nil {
 		return "", fmt.Errorf("creating archive: %w", err)
 	}
 	defer out.Close() //nolint:errcheck
-	zw := zip.NewWriter(out)
+	var sink io.Writer = out
+	if archiveOutWrapper != nil {
+		sink = archiveOutWrapper(out)
+	}
+	zw := zip.NewWriter(sink)
 
 	if err := t.write(zw); err != nil {
 		_ = zw.Close()
@@ -171,6 +198,11 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths
 	}
 	if err := zw.Close(); err != nil {
 		return "", fmt.Errorf("finalizing archive: %w", err)
+	}
+	if bo.durable {
+		if err := out.Sync(); err != nil {
+			return "", fmt.Errorf("flushing archive: %w", err)
+		}
 	}
 	if err := out.Close(); err != nil {
 		return "", fmt.Errorf("closing archive: %w", err)

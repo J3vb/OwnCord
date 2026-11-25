@@ -22,7 +22,7 @@ export const shards = {
     "src/features/voice/cameraSwitch.ts",
     "src/features/voice/e2eeWorker.ts",
     "src/features/voice/videoGrid/gridCards.ts",
-    "src/lib/voice/livekitReconnect.ts",
+    "src/features/voice/livekitReconnect.ts",
     "src/lib/voice/videoSurface.ts",
   ],
   "livekit-4": [
@@ -151,7 +151,7 @@ export const shards = {
     "src/features/voice/connectionSounds.ts",
     "src/features/voice/e2eeSetup.ts",
     "src/lib/voice/appAudioTrack.ts",
-    "src/lib/voice/livekitE2EE.ts",
+    "src/features/voice/livekitE2EE.ts",
     "src/lib/voice/watchRequest.ts",
   ],
   "livekit-20": [
@@ -210,7 +210,7 @@ export const shards = {
     "src/features/members/scrollReport.ts",
     "src/features/voice-messages/wav.ts",
     "src/lib/ui/savedNotice.ts",
-    "src/lib/voice/audioElements.ts",
+    "src/features/voice/audioElements.ts",
   ],
   "audio-media-5": [
     "src/features/members/memberMenuGates.ts",
@@ -222,7 +222,7 @@ export const shards = {
     "src/features/members/listeningCard.ts",
     "src/features/members/memberListModel.ts",
     "src/features/voice-messages/recorderDevices.ts",
-    "src/lib/voice/deviceManager.ts",
+    "src/features/voice/deviceManager.ts",
   ],
   "audio-media-7": [
     "src/features/channels/voiceRow.view.ts",
@@ -301,7 +301,7 @@ export const shards = {
     "src/lib/net/keyPlacement.ts",
     "src/lib/net/serverClock.ts",
     "src/lib/net/ws/wsLiveness.ts",
-    "src/lib/voice/roomEventHandlers.ts",
+    "src/features/voice/roomEventHandlers.ts",
   ],
   "transport-auth-4": [
     "src/features/channels/wsHandlers.ts",

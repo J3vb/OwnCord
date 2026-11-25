@@ -35,7 +35,7 @@ vi.mock("../../lib/prefs/preferences", () => ({
 vi.mock("../../lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("../../lib/voice/deviceManager", () => ({ isMicPolicyGated: () => false }));
+vi.mock("../../features/voice/deviceManager", () => ({ isMicPolicyGated: () => false }));
 vi.mock("../../lib/voice/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
 vi.mock("./videoCapFollow", () => ({
   VideoCapFollower: vi.fn(function () {

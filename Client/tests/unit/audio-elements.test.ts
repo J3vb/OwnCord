@@ -52,7 +52,7 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-import { AudioElements, setAudioVolumeHost } from "../../src/lib/voice/audioElements";
+import { AudioElements, setAudioVolumeHost } from "../../src/features/voice/audioElements";
 
 function createMockTrack(kind: string, sid: string | undefined) {
   const audioEl = document.createElement("audio");

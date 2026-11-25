@@ -30,7 +30,7 @@ expect_used = "deny"
 # and fuzzed on its own). The fuzz crate has its own lock file and nightly
 # toolchain, so it stays out.
 [workspace]
-members = [".", "crates/owncord-parse"]
+members = [".", "crates/owncord-parse", "vendor/livekit"]
 exclude = ["crates/owncord-parse/fuzz"]
 
 [lib]
