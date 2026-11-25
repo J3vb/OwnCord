@@ -147,7 +147,7 @@ export const moderationText = defineCatalog("moderation", {
   "banDialog.thirtyDays": "30 days",
   "banDialog.title": "Ban {name}?",
   "banDialog.body": "They are disconnected now and can't sign in until the ban ends or is lifted.",
-  "banDialog.reasonLabel": "Reason (optional, the member can read it once the ban ends)",
+  "banDialog.reasonLabel": "Reason (optional, they see it once the ban ends)",
   "banDialog.durationLabel": "Ban length",
   "banDialog.deleteLabel": "Also delete their recent messages (can't be undone)",
   "banDialog.delete.none": "Don't delete any",
