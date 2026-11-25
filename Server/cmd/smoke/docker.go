@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -45,9 +46,9 @@ type dockerTarget struct {
 	version string // "old" | "new"
 	running bool
 	runs    int // one container name per launch, so a stale one cannot be reused
-	// tmpfs mounts a size-limited tmpfs at containerData instead of the named volume, so phase D can fill a
-	// filesystem without filling the runner's disk.
-	tmpfs bool
+	// tmpfsVol says vol is a size-limited tmpfs volume the caller created (createTmpfsVolume): phase D can fill a
+	// filesystem without filling the runner's disk, and the filler container shares the very same mount.
+	tmpfsVol bool
 	// extraEnv is appended as -e pairs, the container half of start()'s extraEnv.
 	extraEnv []string
 }
@@ -123,14 +124,8 @@ func (t *dockerTarget) start(version string) error {
 	t.name = fmt.Sprintf("owncord-upgrade-%d-%d-%s", os.Getpid(), t.runs, version)
 	// The flags are docker-smoke.sh's start() plus the published port and LiveKit override; more would test a
 	// posture no owner runs.
-	data := []string{"-v", t.vol + ":" + containerData}
-	if t.tmpfs {
-		// The tmpfs the standalone leg mounts (24 MiB), owned by the image's user so the server can write its
-		// database.
-		data = []string{"--tmpfs", containerData + ":size=24m,uid=" + strconv.Itoa(containerUser) + ",gid=" + strconv.Itoa(containerUser)}
-	}
 	args := []string{"run", "-d", "--name", t.name}
-	args = append(args, data...)
+	args = append(args, t.dataMountArgs()...)
 	args = append(args,
 		"-v", filepath.ToSlash(t.configPath())+":"+containerConfig,
 		"-p", containerPublish,
@@ -332,6 +327,74 @@ func (t *dockerTarget) cleanup() {
 	if t.dir != "" {
 		_ = os.RemoveAll(t.dir)
 	}
+}
+
+// dataMountArgs mounts the data directory. For the disk drill's tmpfs volume it uses --mount, not -v: -v on a
+// name that does not exist silently makes a disk-backed volume, and a fill on that would write the runner's
+// disk. The server then also carries the drill label, so a run killed before teardown leaves nothing the next
+// run's sweep cannot find: a volume a stopped container still references cannot be removed.
+func (t *dockerTarget) dataMountArgs() []string {
+	if !t.tmpfsVol {
+		return []string{"-v", t.vol + ":" + containerData}
+	}
+	return []string{"--label", drillLabel, "--mount", "type=volume,src=" + t.vol + ",dst=" + containerData}
+}
+
+// Labels and names that mark everything the disk drill creates, so a run killed before its cleanup is found and
+// swept by the next one.
+const (
+	drillLabel = "owncord.drill=disk"
+	// drillTmpfsMiB is the size of the volume phase D fills.
+	drillTmpfsMiB = 24
+)
+
+// tmpfsVolumeArgs is the docker volume create invocation for a size-limited tmpfs volume owned by the image's
+// user, so the server can write its database into it.
+func tmpfsVolumeArgs(name string, sizeMiB int) []string {
+	uid := strconv.Itoa(containerUser)
+	return []string{"volume", "create",
+		"--label", drillLabel,
+		"--driver", "local",
+		"--opt", "type=tmpfs",
+		"--opt", "device=tmpfs",
+		"--opt", fmt.Sprintf("o=size=%dm,uid=%s,gid=%s,mode=0700", sizeMiB, uid, uid),
+		name}
+}
+
+// createTmpfsVolume makes the volume the server and the filler container both mount. It is created before
+// either, never implicitly by a mount.
+func createTmpfsVolume(name string, sizeMiB int) error {
+	if _, err := docker(tmpfsVolumeArgs(name, sizeMiB)...); err != nil {
+		return fmt.Errorf("creating the %d MiB tmpfs volume: %w", sizeMiB, err)
+	}
+	return nil
+}
+
+// sweepDrillLeftovers removes what an interrupted earlier run left: containers first, since a volume a
+// container references cannot be removed.
+func sweepDrillLeftovers() error { return sweepDrillLeftoversWith(docker) }
+
+func sweepDrillLeftoversWith(run func(args ...string) (string, error)) error {
+	for _, kind := range []struct {
+		list []string
+		rm   []string
+	}{
+		{[]string{"ps", "-aq", "--filter", "label=" + drillLabel}, []string{"rm", "-f"}},
+		{[]string{"volume", "ls", "-q", "--filter", "label=" + drillLabel}, []string{"volume", "rm", "-f"}},
+	} {
+		out, err := run(kind.list...)
+		if err != nil {
+			return fmt.Errorf("listing leftovers of an earlier drill: %w", err)
+		}
+		ids := strings.Fields(out)
+		if len(ids) == 0 {
+			continue
+		}
+		if _, err := run(append(slices.Clone(kind.rm), ids...)...); err != nil {
+			return fmt.Errorf("removing leftovers of an earlier drill: %w", err)
+		}
+	}
+	return nil
 }
 
 // copyOut streams a container path into dstDir; the tar is rooted at the source's base name (/app/data yields

@@ -20,9 +20,8 @@ func (d *drill) phaseS() error {
 	bin, ok := livekitBinary()
 	if !ok {
 		// A skip, printed, never a pass.
-		d.skipped = append(d.skipped, 'S')
-		fmt.Printf("%s: skipped (no livekit-server binary: set %s, or put one at %s)\n",
-			d.phase, livekitBinaryEnv, filepath.Join("tools", "livekit-server"))
+		d.skipPhase('S', fmt.Sprintf("no livekit-server binary: set %s, or put one at %s",
+			livekitBinaryEnv, filepath.Join("tools", "livekit-server")))
 		return nil
 	}
 	if err := d.boot("S.log", "OWNCORD_VOICE_LIVEKIT_BINARY="+bin); err != nil {
