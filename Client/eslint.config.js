@@ -119,7 +119,7 @@ export default tseslint.config(
     },
   },
   {
-    files: ["src/lib/net/identity.ts"],
+    files: ["src/features/connection/identity.ts"],
     plugins: { local: localRules },
     rules: {
       "local/no-identity-scope-fallback": "error",

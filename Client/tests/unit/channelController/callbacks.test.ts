@@ -7,7 +7,7 @@ import {
   newClientMessageId,
   PENDING_MESSAGE_MAX_COUNT,
   savePendingText,
-} from "@lib/pendingMessages";
+} from "../../../src/features/messaging/pendingMessages";
 import type { ChannelControllerOptions } from "../../../src/pages/main-page/ChannelController";
 import { setConnectionStatus } from "@stores/ui.store";
 import { setActiveTimeout } from "../../../src/features/safety/store";

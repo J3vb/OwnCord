@@ -7,7 +7,7 @@ import { stickerReplyPreview, stickerReplyText } from "./sticker";
 import { type Message } from "@stores/messages.store";
 import { messagingText } from "../../../i18n/messaging";
 import type { ImportedAuthor } from "../../../lib/types";
-import { resolveAuthor, userRoleColorVar } from "@lib/text/formatting";
+import { resolveAuthor, userRoleColorVar } from "../formatting";
 import { createAvatarElement, pickAvatarColor } from "../../profiles/avatar";
 import { importedAuthorKey } from "../importedAuthor";
 import { createImportedAvatar, createImportedName, createImportedTag } from "./importedAuthor";

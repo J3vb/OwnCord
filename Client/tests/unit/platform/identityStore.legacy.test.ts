@@ -1,4 +1,4 @@
-// Legacy binding for the IdentityStore suite: today's `lib/net/identity.ts`
+// Legacy binding for the IdentityStore suite: today's `features/connection/identity.ts`
 // exports, wrapped with no cast against the contract. B7-4 re-runs
 // `identityStore.suite.ts` against `platform/desktop` instead of this file.
 import { vi } from "vitest";
@@ -19,7 +19,7 @@ vi.mock("@stores/auth.store", () => ({
 }));
 vi.mock("@lib/logger", () => lm.loggerMock());
 
-const mod = await import("../../../src/lib/net/identity");
+const mod = await import("../../../src/features/connection/identity");
 const legacy: IdentityStore = {
   saveKey: mod.saveIdentityKey,
   loadKey: mod.loadIdentityKey,

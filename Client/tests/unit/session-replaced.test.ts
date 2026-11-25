@@ -22,7 +22,9 @@ vi.mock("@tauri-apps/api/event", async () => ({
 }));
 vi.mock("@lib/voice/livekitSession", () => ({ leaveVoice: vi.fn() }));
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
-vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
+vi.mock("../../src/features/connection/identity", () => ({
+  ensureIdentityKeyPublished: vi.fn(async () => true),
+}));
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient } from "../../src/lib/ws";

@@ -224,19 +224,19 @@
       "reason": "Listeners removed by the disposer each subscriber holds"
     },
     {
-      "file": "lib/text/formatting.ts",
+      "file": "features/messaging/formatting.ts",
       "binding": "parsedTimestampCache",
       "category": "pure-cache",
       "reason": "Parse result keyed by the timestamp string itself"
     },
     {
-      "file": "lib/net/identity.ts",
+      "file": "features/connection/identity.ts",
       "binding": "identityKeyPairCache",
       "category": "host-keyed",
       "reason": "Keyed by host and user, so a second server never reads the first's pair"
     },
     {
-      "file": "lib/net/identity.ts",
+      "file": "features/connection/identity.ts",
       "binding": "pinWrites",
       "category": "host-keyed",
       "reason": "In-flight pin writes keyed by host and user; each entry removes itself when its write settles"

@@ -43,7 +43,11 @@ vi.mock("@lib/voice/livekitSession", () => ({
   disableScreenshare: vi.fn(async () => {}),
 }));
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
+// Mocked at both paths: releases before the move keep it in lib/net/.
 vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
+vi.mock("../../src/features/connection/identity", () => ({
+  ensureIdentityKeyPublished: vi.fn(async () => true),
+}));
 vi.mock("../../src/features/voice/screenShare", () => ({
   rollbackPendingVideo: vi.fn(() => undefined),
 }));

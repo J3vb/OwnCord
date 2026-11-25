@@ -10,7 +10,7 @@ import { createMessageList } from "../../src/features/messaging/MessageList";
 import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
 import { groupRowText } from "../../src/features/messaging/message-list/groupRows";
-import { shouldGroup } from "@lib/text/formatting";
+import { shouldGroup } from "../../src/features/messaging/formatting";
 import { isServerRowKind } from "@lib/text/messageKind";
 import { dmStore } from "@stores/dm.store";
 import { membersStore } from "@stores/members.store";

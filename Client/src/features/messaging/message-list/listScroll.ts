@@ -9,7 +9,7 @@ import {
   isWindowDetached,
   type Message,
 } from "@stores/messages.store";
-import { formatBadgeCount } from "@lib/text/formatting";
+import { formatBadgeCount } from "../formatting";
 import { messagingText } from "../../../i18n/messaging";
 import { setLiveTailInView } from "@stores/readState";
 import {

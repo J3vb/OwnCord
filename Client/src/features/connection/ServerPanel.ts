@@ -5,7 +5,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { Compatibility, HealthStatus, ServerProfile } from "@lib/presence/profiles";
-import { loadCredential } from "@lib/net/credentials";
+import { loadCredential } from "./credentials";
 import { createLogger } from "@lib/logger";
 import { connectText } from "../../i18n/connect";
 import {

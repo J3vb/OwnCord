@@ -27,7 +27,7 @@ import { invalidateReactionUsers } from "./reactionUsers";
 import { handleThreadDeleted, handleThreadFollow, handleThreadState } from "./threadFrames";
 import { loadedThreadsStore } from "../../stores/threadsLoader";
 import { isChannelAway } from "@stores/readState";
-import { acknowledgePendingMessage } from "../../lib/pendingMessages";
+import { acknowledgePendingMessage } from "./pendingMessages";
 import type { DispatchApi, Payload, ReconnectClock, WsRoute } from "../connection/dispatchContext";
 import { log, route } from "../connection/dispatchContext";
 import { ServerMessageType as S } from "@lib/protocolTypes";

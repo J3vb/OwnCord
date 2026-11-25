@@ -4,7 +4,7 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import type { MentionInfo } from "@lib/text/mentions";
+import type { MentionInfo } from "../mentions";
 import { formatDiscordTimestamp } from "@lib/text/discordTimestamp";
 import { parseInline, type InlineNode, type InlineStyle } from "@lib/text/markdown";
 import { isSafeUrl } from "./attachments";

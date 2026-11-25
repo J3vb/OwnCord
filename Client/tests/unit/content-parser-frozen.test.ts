@@ -44,7 +44,7 @@ import {
   isEveryoneToken,
   resolveMentionUserId,
   type MentionInfo,
-} from "@lib/text/mentions";
+} from "../../src/features/messaging/mentions";
 import { isSafeUrl } from "../../src/features/messaging/content/attachments";
 import {
   EMOJI_TOKEN_REGEX,

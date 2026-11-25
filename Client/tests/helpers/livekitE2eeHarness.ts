@@ -2,7 +2,7 @@ import { beforeEach, vi } from "vitest";
 import { mockSelf } from "./livekitE2eeMocks";
 import { E2EEManager } from "../../src/features/voice/livekitE2EE";
 import { importPublicKey, exportPublicKey, wrapRoomKey } from "@lib/net/e2eeCrypto";
-import { getIdentityPin } from "@lib/net/identity";
+import { getIdentityPin } from "../../src/features/connection/identity";
 
 export const PEER_ID = 42;
 

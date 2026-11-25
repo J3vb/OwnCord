@@ -78,7 +78,7 @@ import {
 import { setAuth } from "@stores/auth.store";
 import { channelsStore, setActiveChannel, setChannels, setRoles } from "@stores/channels.store";
 import { setConnectionStatus } from "@stores/ui.store";
-import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { deactivatePendingMessages } from "../../src/features/messaging/pendingMessages";
 import { failPendingOnDisconnect } from "../../src/features/messaging/wsHandlers";
 import { ATTACHMENT_TTL_MS } from "../../src/features/messaging/attachmentTtl";
 import { messagingText } from "../../src/i18n/messaging";

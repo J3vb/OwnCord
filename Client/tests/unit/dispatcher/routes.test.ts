@@ -11,7 +11,7 @@ vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notif
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
-vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
+vi.mock("../../../src/features/connection/identity", () => dispatcherMocks.identityMock());
 
 /** Events whose handlers run in a set order across features, written out in the dispatcher. */
 const orderedEvents = ["auth_ok", "ready", "error"];

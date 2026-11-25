@@ -18,7 +18,7 @@ import {
 } from "../helpers/connectPageHarness";
 
 const { mockLoadCredential } = mocks;
-vi.mock("../../src/lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../src/features/connection/credentials", () => mocks.netCredentialsMock());
 vi.mock("../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 
 const BUSY_MESSAGE = "too many authentication attempts in progress, try again later";

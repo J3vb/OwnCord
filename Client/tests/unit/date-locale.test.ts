@@ -3,7 +3,7 @@ import {
   formatDmRowTime,
   formatFullDate,
   formatMessageTimestamp,
-} from "../../src/lib/text/formatting";
+} from "../../src/features/messaging/formatting";
 import { formatFullDateTime } from "../../src/lib/text/discordTimestamp";
 import {
   dateLocale,

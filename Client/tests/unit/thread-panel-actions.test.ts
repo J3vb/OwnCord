@@ -22,8 +22,8 @@ vi.mock("../../src/features/messaging/MessageList", () => ({
     return fakeList;
   },
 }));
-vi.mock("@lib/pendingMessages", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("@lib/pendingMessages")>()),
+vi.mock("../../src/features/messaging/pendingMessages", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/features/messaging/pendingMessages")>()),
   supportsMessageDeduplication: () => true,
 }));
 

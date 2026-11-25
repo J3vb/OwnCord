@@ -25,7 +25,7 @@ vi.mock("@lib/voice/appAudioTrack", () => ({
 }));
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../../src/features/connection/identity", () => mocks.netIdentityMock());
 
 const { mockVoiceState, mockRoom, mockShowActionToast } = mocks;
 

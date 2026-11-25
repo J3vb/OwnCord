@@ -8,7 +8,7 @@ import { authorAvatarKey, fullDateTimeTitle, messageHeaderTime } from "./rendere
 import { createAvatarElement, pickAvatarColor } from "../../profiles/avatar";
 import { withInlineEdit } from "../inlineEditLoader";
 import { relabelInlineTimestamps, resyncMentions } from "../content/contentParser";
-import { highlightsCurrentUser } from "@lib/text/mentions";
+import { highlightsCurrentUser } from "../mentions";
 import { applyPickedMentions, tokensToPickedText } from "@lib/text/pickedMentions";
 import { readableRoleColor } from "@lib/prefs/themes";
 import { resolveDisplayName } from "@lib/ui/avatar";
@@ -19,7 +19,7 @@ import {
   formatMessageTimestamp,
   resolveAuthor,
   userRoleColorVar,
-} from "@lib/text/formatting";
+} from "../formatting";
 import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import { carryActionsBar } from "./messageActionBar";
 import type { ListState, ListApi } from "./listState";

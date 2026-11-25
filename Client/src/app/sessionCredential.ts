@@ -2,7 +2,7 @@
 // the stored sign-in according to the user's remember choices. Moved out of
 // startSession (session.ts) with its order and ownership checks unchanged.
 
-import { saveCredential, deleteCredential } from "@lib/net/credentials";
+import { saveCredential, deleteCredential } from "../features/connection/credentials";
 import { createLogger } from "@lib/logger";
 import type { SessionScope } from "@lib/net/sessionScope";
 import { setTransientError } from "@stores/ui.store";

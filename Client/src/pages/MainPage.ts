@@ -13,7 +13,7 @@ import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { Disposable } from "@lib/disposable";
 import { onAuthCleared } from "@stores/auth.store";
 import { closeSettings, openSettings, uiStore } from "@stores/ui.store";
-import { createPresenceSender } from "@lib/presence/presence";
+import { createPresenceSender } from "../features/presence/presence";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { voiceStore, restoreSavedSelfVoiceState } from "@stores/voice.store";
 import {

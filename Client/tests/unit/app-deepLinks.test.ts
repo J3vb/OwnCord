@@ -38,7 +38,7 @@ const { events } = hoisted;
 vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: hoisted.warn, error: vi.fn() }),
 }));
-vi.mock("@lib/pendingMessages", () => ({
+vi.mock("../../src/features/messaging/pendingMessages", () => ({
   deactivatePendingMessages: hoisted.deactivatePendingMessages,
 }));
 vi.mock("@lib/notificationDelivery", () => ({ openMessageTarget: hoisted.openMessageTarget }));

@@ -1,6 +1,6 @@
 // Desktop binding for the PendingMessageStore suite: `platform/desktop`'s
 // pending-message store. B7-4 ran the same suite file against the in-place
-// seam in `lib/pendingMessages.ts` first (proving it could fail and pinning
+// seam in `features/messaging/pendingMessages.ts` first (proving it could fail and pinning
 // today's behaviour), then re-bound it here. The legacy binding is deleted
 // with this commit: its export is now internal, so it would assert nothing
 // the desktop binding does not.

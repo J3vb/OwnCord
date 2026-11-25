@@ -49,7 +49,7 @@ vi.mock("../../src/features/voice/screenShare", () => ({
 vi.mock("@lib/ui/toast", () => ({
   showToast: vi.fn(),
 }));
-vi.mock("@lib/net/identity", () => ({
+vi.mock("../../src/features/connection/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
 }));
 // The media layer is out of scope for a connection model (it needs a real

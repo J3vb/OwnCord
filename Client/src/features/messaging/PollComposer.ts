@@ -17,7 +17,7 @@ import { Disposable } from "@lib/disposable";
 import { appendChildren, clearChildren, createElement, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
-import { newClientMessageId, pendingMessageSessionFloor } from "@lib/pendingMessages";
+import { newClientMessageId, pendingMessageSessionFloor } from "./pendingMessages";
 import { listCustomEmoji } from "@stores/emoji.store";
 import {
   POLL_ANSWER_MAX,

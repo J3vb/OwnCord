@@ -11,7 +11,7 @@ import { installGlobalErrorHandlers } from "@lib/text/safeRender";
 import { createApiClient } from "@lib/api";
 import { installGlobalGuards } from "./app/globalGuards";
 
-import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { deactivatePendingMessages } from "./features/messaging/pendingMessages";
 import { settleNotificationLevelDefault } from "@lib/prefs/notificationLevel";
 import { createWsClient } from "@lib/ws";
 import { markActiveChannelReadOnUnload } from "./stores/readState";

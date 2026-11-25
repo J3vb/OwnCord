@@ -9,7 +9,7 @@ vi.mock("../../stores/members.store", () => ({
 }));
 vi.mock("../../stores/voice.store", () => ({ setPeerVerification: vi.fn() }));
 vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
-vi.mock("../../lib/net/identity", () => ({
+vi.mock("../connection/identity", () => ({
   getIdentityPin: vi.fn(),
   storeIdentityPin: vi.fn(),
 }));
@@ -35,7 +35,7 @@ vi.mock("../../lib/logger", () => ({
 
 import { setPeerVerification } from "../../stores/voice.store";
 import { showToast } from "../../lib/ui/toast";
-import { getIdentityPin, storeIdentityPin } from "../../lib/net/identity";
+import { getIdentityPin, storeIdentityPin } from "../connection/identity";
 import { verifyEphemeralKeySignature } from "../../lib/net/e2eeCrypto";
 import { E2EEPeerState } from "./e2eePeerState";
 
@@ -335,7 +335,7 @@ describe("verifyPeerAnnounce (F3 TOFU)", () => {
   });
 });
 
-/** A pin store that behaves like lib/net/identity: keys are added, never replaced. */
+/** A pin store that behaves like features/connection/identity: keys are added, never replaced. */
 function statefulPins(initial: string[] = []) {
   const keys = [...initial];
   vi.mocked(getIdentityPin).mockImplementation(async () => {

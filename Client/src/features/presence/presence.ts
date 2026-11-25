@@ -18,9 +18,9 @@
  * reaction/voice producers.
  */
 
-import type { WsClient } from "../ws";
-import type { RateLimiter } from "../net/rateLimiter";
-import type { UserStatus } from "../types";
+import type { WsClient } from "@lib/ws";
+import type { RateLimiter } from "@lib/net/rateLimiter";
+import type { UserStatus } from "@lib/types";
 import { updatePresence, membersStore } from "@stores/members.store";
 import { authStore, updateUser } from "@stores/auth.store";
 import {
@@ -29,8 +29,8 @@ import {
   saveCustomStatus,
   saveUserStatus,
   type StatusOrigin,
-} from "./userStatus";
-import { ServerMessageType as S } from "../protocolTypes";
+} from "@lib/presence/userStatus";
+import { ServerMessageType as S } from "@lib/protocolTypes";
 import { WsErrorCode } from "@lib/protocolTypes";
 
 export interface PresenceSender {

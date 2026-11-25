@@ -9,7 +9,7 @@ import { getChannelMessages } from "@stores/messages.store";
 import { getCurrentUser } from "@stores/auth.store";
 import { currentUserHasPermission } from "@stores/permissions";
 import { Permission } from "@lib/types";
-import { EVERYONE_TOKEN, HERE_TOKEN, isEveryoneToken } from "@lib/text/mentions";
+import { EVERYONE_TOKEN, HERE_TOKEN, isEveryoneToken } from "../mentions";
 import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import { channelsStore } from "@stores/channels.store";
 import { createAvatarElement, pickAvatarColor } from "../../profiles/avatar";

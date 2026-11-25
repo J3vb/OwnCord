@@ -501,7 +501,7 @@ the same signal in future.
 `src/features/messaging/MessageController.ts`, `src/features/messaging/ReactionController.ts`,
 `src/stores/messages.store.ts` (+ its reducers in `src/features/messaging/`), `src/app/dispatcher.ts`, `src/features/messaging/wsHandlers.ts`, `src/lib/ws.ts`,
 `src/features/navigation/SearchOverlay.ts`, `src/features/messaging/PinnedMessages.ts`,
-`src/features/messaging/composer/MentionAutocomplete.ts`, `src/lib/text/mentions.ts`,
+`src/features/messaging/composer/MentionAutocomplete.ts`, `src/features/messaging/mentions.ts`,
 `src/features/messaging/content/contentParser.ts` (+ `syntax-highlight.ts`),
 `src/lib/text/markdown.ts`, `src/features/navigation/channelNavigation.ts`, `src/features/notifications/notifications.ts`;
 server `Server/service/message.go`, `Server/service/mentions.go`,

@@ -3,7 +3,7 @@
 import type { SessionInfo } from "@lib/api";
 import { createIcon } from "@lib/icons";
 import { deviceLabel } from "@lib/net/deviceLabel";
-import { formatMessageTimestamp } from "@lib/text/formatting";
+import { formatMessageTimestamp } from "../messaging/formatting";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { showActionToast } from "@lib/ui/toast";
 import { openSettings } from "@stores/ui.store";

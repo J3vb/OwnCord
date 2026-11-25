@@ -4,7 +4,7 @@ const auth = vi.hoisted((): { user: { id: number } | null } => ({ user: { id: 7 
 vi.mock("../../stores/auth.store", () => ({
   authStore: { getState: () => auth },
 }));
-vi.mock("../../lib/net/identity", () => ({ getOrCreateIdentityKeyPair: vi.fn() }));
+vi.mock("../connection/identity", () => ({ getOrCreateIdentityKeyPair: vi.fn() }));
 vi.mock("../../lib/net/e2eeCrypto", () => ({
   signEphemeralKey: vi.fn(),
   exportPublicKey: vi.fn(),
@@ -26,7 +26,7 @@ vi.mock("../../lib/logger", () => ({
   },
 }));
 
-import { getOrCreateIdentityKeyPair } from "../../lib/net/identity";
+import { getOrCreateIdentityKeyPair } from "../connection/identity";
 import { computeKeyFingerprint, exportPublicKey, signEphemeralKey } from "../../lib/net/e2eeCrypto";
 import { E2EEIdentity, rawFromBase64 } from "./e2eeIdentity";
 

@@ -6,7 +6,7 @@ import {
   newClientMessageId,
   savePendingText,
   type PendingMessageOwner,
-} from "@lib/pendingMessages";
+} from "../../src/features/messaging/pendingMessages";
 import { runSessionResets } from "@lib/net/sessionRegistry";
 import type { ApiClient } from "@lib/api";
 import { authStore } from "@stores/auth.store";

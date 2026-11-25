@@ -31,7 +31,7 @@ import { leaveVoiceChannel } from "@stores/voice.store";
 import { createConnectedOverlay } from "../features/connection/ConnectedOverlay";
 import type { ConnectedOverlayControl } from "../features/connection/ConnectedOverlay";
 import { createLogger } from "@lib/logger";
-import { deleteCredential, createUserUpdateCredentialSaver } from "@lib/net/credentials";
+import * as credentials from "../features/connection/credentials";
 import { connectText } from "../i18n/connect";
 import { persistSessionCredential } from "./sessionCredential";
 import type { PageId } from "./context";
@@ -184,7 +184,7 @@ export function startSession(
   // Lazy: the identity module pulls in the E2EE crypto layer, which the
   // session shell must not load just to dial.
   setIdentityKeyProvider(async (identityHost) =>
-    (await import("@lib/net/identity")).getDeviceIdentityPublicKey(identityHost),
+    (await import("../features/connection/identity")).getDeviceIdentityPublicKey(identityHost),
   );
   owner.addCleanup(() => setIdentityKeyProvider(null));
   // The dispatcher is wired at the end; its teardown keeps this cleanup slot.
@@ -298,12 +298,12 @@ export function startSession(
     ws.on(
       "user_update",
       __OWNCORD_WEB__
-        ? createUserUpdateCredentialSaver(host, keepToken, () => {
+        ? credentials.createUserUpdateCredentialSaver(host, keepToken, () => {
             if (!owner.isCurrent()) return;
             log.warn("Credential re-save failed — auto-login will not work for this server");
             setTransientError(connectText("session.credentialsSaveFailed"));
           })
-        : createUserUpdateCredentialSaver(host, keepToken),
+        : credentials.createUserUpdateCredentialSaver(host, keepToken),
     ),
   );
 
@@ -486,8 +486,8 @@ export function installLogoutTeardown(): void {
             reason !== "server_switch" &&
             reason !== "unreadable_reply"
           ) {
-            if (__OWNCORD_WEB__) void deleteCredential(host, sessionToken || undefined);
-            else void deleteCredential(host);
+            if (__OWNCORD_WEB__) void credentials.deleteCredential(host, sessionToken || undefined);
+            else void credentials.deleteCredential(host);
           }
           // Whenever this session must not turn around and auto-login with the
           // credential (removed, or just refused), say so.

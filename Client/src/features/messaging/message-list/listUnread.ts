@@ -6,7 +6,7 @@
 import { isWindowDetached } from "@stores/messages.store";
 import { isReadSurface } from "@stores/threads.store";
 import { channelsStore } from "@stores/channels.store";
-import { UNREAD_COUNT_CAP, formatBadgeCount, formatMessageTimestamp } from "@lib/text/formatting";
+import { UNREAD_COUNT_CAP, formatBadgeCount, formatMessageTimestamp } from "../formatting";
 import { messagingText } from "../../../i18n/messaging";
 import {
   markChannelRead,

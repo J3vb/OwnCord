@@ -7,7 +7,7 @@
 // where this code used to be inline. Only main.ts imports this module.
 
 import type { ApiClient } from "@lib/api";
-import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { deactivatePendingMessages } from "../features/messaging/pendingMessages";
 import { openMessageTarget } from "@lib/notificationDelivery";
 import { setInviteJoinHandler } from "@lib/nav/inviteNavigation";
 import { createLogger } from "@lib/logger";

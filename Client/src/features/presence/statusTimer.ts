@@ -24,9 +24,9 @@
  *    it can never override a newer manual choice it has not heard about yet.
  */
 
-import { Disposable } from "../disposable";
-import { setOwnedTimeout } from "../dom";
-import type { UserStatus } from "../types";
+import { Disposable } from "@lib/disposable";
+import { setOwnedTimeout } from "@lib/dom";
+import type { UserStatus } from "@lib/types";
 import {
   clearStatusTimer,
   loadStatusTimer,
@@ -35,7 +35,7 @@ import {
   onUserStatusChange,
   saveUserStatus,
   type StatusTimer,
-} from "./userStatus";
+} from "@lib/presence/userStatus";
 import { authStore } from "@stores/auth.store";
 import { membersStore } from "@stores/members.store";
 

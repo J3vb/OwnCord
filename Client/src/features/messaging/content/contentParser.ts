@@ -13,7 +13,7 @@
  * (parsed form and its cache) and contentBlocks.
  */
 
-import type { MentionInfo } from "@lib/text/mentions";
+import type { MentionInfo } from "../mentions";
 import { formatDiscordTimestamp, type TimestampStyle } from "@lib/text/discordTimestamp";
 import { createElement } from "@lib/dom";
 import { isEmojiOnlyMessage } from "./customEmoji";

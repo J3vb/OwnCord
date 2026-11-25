@@ -11,7 +11,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import type { createMemberList } from "./MemberList";
 import type { buildVoiceModOptions, VoiceModerationCallbacks } from "../channels/ChannelSidebar";
-import { parseTimestamp } from "@lib/text/formatting";
+import { parseTimestamp } from "../messaging/formatting";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";

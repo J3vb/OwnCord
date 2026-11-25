@@ -30,7 +30,7 @@ import { setMarkReadSender } from "../../src/stores/readState";
 import { closeSettings, openSettings } from "@stores/ui.store";
 import { handleChatMessage } from "../../src/features/messaging/wsHandlers";
 import { createReconnectClock } from "../../src/features/connection/dispatchContext";
-import { formatMessageTimestamp } from "@lib/text/formatting";
+import { formatMessageTimestamp } from "../../src/features/messaging/formatting";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";
 import "../helpers/resizeObserverStub";
 import { resetChannelsState } from "../helpers/storeSeeds";

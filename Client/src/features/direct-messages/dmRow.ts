@@ -5,7 +5,7 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
+import { formatBadgeCount, formatDmRowTime } from "../messaging/formatting";
 import { createIcon } from "@lib/icons";
 import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { attachPressWarm } from "../navigation/pressWarm";

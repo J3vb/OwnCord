@@ -37,10 +37,10 @@ vi.mock("@tauri-apps/api/event", () => wsMocks.tauriEventMock());
 
 vi.mock("@lib/prefs/appearance", () => mainMocks.prefsAppearanceMock());
 vi.mock("@lib/net/connectionDiagnostics", () => mainMocks.netConnectionDiagnosticsMock());
-vi.mock("@lib/pendingMessages", () => mainMocks.pendingMessagesMock());
+vi.mock("../../src/features/messaging/pendingMessages", () => mainMocks.pendingMessagesMock());
 vi.mock("../../src/platform/desktop/pushToTalk", () => mainMocks.desktopPushToTalkMock());
 vi.mock("@lib/logPersistence", () => mainMocks.logPersistenceMock());
-vi.mock("@lib/net/credentials", () => mainMocks.netCredentialsMock());
+vi.mock("../../src/features/connection/credentials", () => mainMocks.netCredentialsMock());
 vi.mock("@lib/prefs/windowState", () => mainMocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => ({
   register: vi.fn().mockResolvedValue(undefined),
@@ -214,7 +214,7 @@ import { cleanupNotificationAudio } from "@lib/media/notificationSound";
 // The app loads this with the dispatcher chunk (mocked here); it registers the audio reset.
 import "../../src/features/notifications/notifications";
 import { leaveVoice } from "@lib/voice/livekitSession";
-import { deleteCredential, resumeSavedSession } from "@lib/net/credentials";
+import { deleteCredential, resumeSavedSession } from "../../src/features/connection/credentials";
 import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { createProfileManager } from "@lib/presence/profiles";
 import { createConnectPage } from "@pages/ConnectPage";

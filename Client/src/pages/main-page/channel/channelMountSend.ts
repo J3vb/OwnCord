@@ -28,7 +28,10 @@ import { channelsStore, setNsfwAcknowledged } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { markChannelRead, markChannelReadSeen } from "@stores/readState";
 import { readPointerEnabled } from "@lib/net/serverCapabilities";
-import { recoveredPendingText, acknowledgePendingMessage } from "@lib/pendingMessages";
+import {
+  recoveredPendingText,
+  acknowledgePendingMessage,
+} from "../../../features/messaging/pendingMessages";
 import { log, currentMessageUser, abortQueued } from "./channelShared";
 import type { ChannelState, ChannelApi, MountScope } from "./channelState";
 

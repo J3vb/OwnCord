@@ -10,7 +10,7 @@ import { takeReadingPosition } from "./message-list/readingPositions";
 import { preloadInlineEdit } from "./inlineEditLoader";
 import { clearContentParseCache } from "./content/contentParser";
 import { getPointerOnOpen, getUnreadOnOpen } from "@stores/channels.store";
-import { UNREAD_COUNT_CAP } from "@lib/text/formatting";
+import { UNREAD_COUNT_CAP } from "./formatting";
 import { setLiveTailInView } from "@stores/readState";
 import { readPointerEnabled } from "@lib/net/serverCapabilities";
 import { blockedUsers } from "./message-list/listShared";

@@ -23,7 +23,7 @@ import { dmStore, setDmChannels, updateDmLastMessage } from "../../stores/dm.sto
 import { channelsStore } from "../../stores/channels.store";
 import { authStore } from "../../stores/auth.store";
 import { setMembers, setTyping, getTypingUsers } from "../../stores/members.store";
-import { activatePendingMessages, deactivatePendingMessages } from "../../lib/pendingMessages";
+import { activatePendingMessages, deactivatePendingMessages } from "./pendingMessages";
 import { createReconnectClock } from "../connection/dispatchContext";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import type { DmChannelsResponse } from "../../lib/types";

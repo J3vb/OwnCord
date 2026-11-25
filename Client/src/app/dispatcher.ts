@@ -10,7 +10,7 @@
 
 import type { ConnectionState, WsClient } from "@lib/ws";
 import { toConnectionStatus, setActiveChannelProvider } from "@lib/ws";
-import { getActivePresenceSender } from "@lib/presence/presence";
+import { getActivePresenceSender } from "../features/presence/presence";
 import { handleActivityRefusal } from "@lib/presence/gameActivityBridge";
 import { setConnectionStatus } from "@stores/ui.store";
 import { channelsStore } from "@stores/channels.store";

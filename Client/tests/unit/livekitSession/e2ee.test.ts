@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
 import { setPeerVerification, setEncryptionDegraded } from "@stores/voice.store";
-import { getIdentityPin, storeIdentityPin } from "@lib/net/identity";
+import { getIdentityPin, storeIdentityPin } from "../../../src/features/connection/identity";
 import { verifyEphemeralKeySignature } from "@lib/net/e2eeCrypto";
 import { setMembers } from "@stores/members.store";
 import { authStore } from "@stores/auth.store";
@@ -17,7 +17,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../../src/features/connection/identity", () => mocks.netIdentityMock());
 
 const { mockVoiceState, mockRoom } = mocks;
 

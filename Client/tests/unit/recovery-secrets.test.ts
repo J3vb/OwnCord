@@ -17,7 +17,7 @@ vi.mock("../../src/lib/net/httpProxy", () => ({
   ensureHttpProxy: (host: string) => Promise.resolve(`https://${host}`),
   stopHttpProxy: () => Promise.resolve(),
 }));
-vi.mock("../../src/lib/net/credentials", () => ({
+vi.mock("../../src/features/connection/credentials", () => ({
   loadCredential: vi.fn().mockResolvedValue(null),
   resumeSavedSession: vi.fn().mockResolvedValue(null),
 }));

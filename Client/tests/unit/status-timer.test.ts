@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, type Mock } from "vite
 import type { UserStatus } from "@lib/types";
 import { authStore } from "@stores/auth.store";
 import { addMember, membersStore, setMembers, updatePresence } from "@stores/members.store";
-import { startStatusTimerWatcher } from "@lib/presence/statusTimer";
+import { startStatusTimerWatcher } from "../../src/features/presence/statusTimer";
 import { clampExpiresIn, clearAfterSeconds, type ClearAfterId } from "@lib/text/statusChoices";
 import {
   clearStatusTimer,

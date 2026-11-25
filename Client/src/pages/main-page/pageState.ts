@@ -8,7 +8,7 @@ import type { ToastContainer } from "@lib/ui/toastContainer";
 import type { AutoIdleController } from "@lib/presence/autoIdle";
 import type { GameActivityLoop } from "@lib/presence/gameActivity";
 import type { MusicActivityLoop } from "@lib/presence/musicActivity";
-import type { StatusTimerWatcher } from "@lib/presence/statusTimer";
+import type { StatusTimerWatcher } from "../../features/presence/statusTimer";
 import type { CallChat } from "../../features/voice/callChat";
 import type { MessageController } from "../../features/messaging/MessageController";
 import type { ReactionController } from "../../features/messaging/ReactionController";
@@ -40,7 +40,7 @@ export interface PageState {
   readonly cacheScope: string | null;
   readonly unsubCacheScope: () => void;
   readonly limiters: import("@lib/net/rateLimiter").RateLimiterSet;
-  readonly presenceSender: import("@lib/presence/presence").PresenceSender;
+  readonly presenceSender: import("../../features/presence/presence").PresenceSender;
   container: Element | null;
   root: HTMLDivElement | null;
   /** Set by destroy(), so a lazily-loaded controller that resolves after the

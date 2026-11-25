@@ -127,7 +127,7 @@ tests:
 | A remote track the media server reports as unencrypted is never subscribed or played, and the call shows "Unsecured" | `Client/src/features/voice/mediaEncryption.ts` `isUnencryptedPublication`, applied in `Client/src/features/voice/roomEventHandlers.ts` (`refuseUnencrypted`), `features/voice/remoteTracks.ts` `watch` and `features/voice/audioElements.ts` `applyRemoteAudioSubscriptionState`                                                 | `media.spec.ts` "media published without end-to-end encryption is never played"; `roomEventHandlers/encryptionAndConnection.test.ts` "remote publications without end-to-end encryption" |
 | The server relays wrapped keys as opaque bytes; it checks size and encoding, never decodes                           | `Server/ws/voice_e2ee.go:182-193`, `:225` (copied verbatim), `:239` (delivered only to a member of that voice channel)                                                                                                                                                                                                           | `TestE2EE_Offer_KeyHolderCanSend`, `TestE2EE_Offer_RejectsNonKeyHolder`, `TestE2EE_Offer_TargetChannelCheckAtomicWithLookup`                                                             |
 | The server holds no room key                                                                                         | Absence: the only E2EE state on the server is each client's stored public key and `hubVoice.keyHolders` (`voice_e2ee.go` `updateKeyHolder` `:47`, `IsVoiceKeyHolder` `:77`, `getClientE2EEPubKey` `:278`); no decrypt path exists                                                                                                | Pinned by the relay tests above; there is no positive "no key" assertion because there is nothing to assert on                                                                           |
-| Each user has a long-lived identity key; peers pin it on first sight (TOFU) and notify on a change                   | `Client/src/lib/net/identity.ts` `storeIdentityPin` (`:68`), `getIdentityPin` (`:87`); decision in `features/voice/e2eePeerState.ts` `verifyPeerAnnounce` (a changed key that signed the announce is re-pinned with a persistent notice; a pinned peer whose key is missing is blocked; first sight pins via `storeIdentityPin`) | `identity.test.ts` "getIdentityPin reports a store error as 'unavailable', never 'unpinned'"; `livekit-e2ee.test.ts` "marks a first-sight peer 'unverified'…"                            |
+| Each user has a long-lived identity key; peers pin it on first sight (TOFU) and notify on a change                   | `Client/src/features/connection/identity.ts` `storeIdentityPin` (`:68`), `getIdentityPin` (`:87`); decision in `features/voice/e2eePeerState.ts` `verifyPeerAnnounce` (a changed key that signed the announce is re-pinned with a persistent notice; a pinned peer whose key is missing is blocked; first sight pins via `storeIdentityPin`) | `identity.test.ts` "getIdentityPin reports a store error as 'unavailable', never 'unpinned'"; `livekit-e2ee.test.ts` "marks a first-sight peer 'unverified'…"                            |
 | Accepting a new key re-pins the key the human saw, not a fresh read the server could have swapped                    | `livekitE2EE.ts` `rePinPeerIdentity(userId, verifiedKey)` (`:558`)                                                                                                                                                                                                                                                               | `livekitSession/e2ee.test.ts` "re-pins the verified key, not a store re-read a malicious server mutated (TOCTOU)"                                                                        |
 | When someone leaves, the key holder rotates the key, so the leaver cannot decrypt what comes next                    | `livekitE2EE.ts` `handleParticipantLeft` (`:809`), `e2eeEpoch.ts` `rotateRoomKey` (`:116`)                                                                                                                                                                                                                                       | `livekitSession/e2ee.test.ts` "rotates the room key when a keyed peer leaves while I stay key holder (forward secrecy)"                                                                  |
 | The key also rotates on a timer while the call runs                                                                  | `features/voice/e2eeEpoch.ts` `rotateKeyPeriodically` (`:146`)                                                                                                                                                                                                                                                                   | `livekit-e2ee.test.ts` "arms the periodic rotation timer for the key holder…"                                                                                                            |
@@ -140,7 +140,7 @@ when, for how long, and who is muted or deafened. Those are server state.
 The identity-key store is the trust root. On the desktop the private key
 lives beside the session token in the OS keychain, one slot per account per
 server — keychain account `identity:{userId}@{host}`
-(`Client/src/lib/net/identity.ts:7`, `Client/src-tauri/src/credentials.rs` `save_identity_key`;
+(`Client/src/features/connection/identity.ts:7`, `Client/src-tauri/src/credentials.rs` `save_identity_key`;
 `identity:{host}` is the legacy slot that entry was migrated from). Its
 protection is **trust on first use**, and that is the
 limit: the first time your client meets a peer it has no pin, so it accepts
@@ -156,7 +156,7 @@ so an unexpected notice is the cue to compare safety numbers out of band. To clo
 compare identity-key fingerprints out of band (the verification surface in
 [architecture/ux/voice-and-e2ee.md](ux/voice-and-e2ee.md) §7
 shows them). Pins are **one per account**, keyed `{host}:{userId}`
-(`Client/src/lib/net/identity.ts:11-12`; `features/voice/e2eePeerState.ts:158`, `:258`), while
+(`Client/src/features/connection/identity.ts:11-12`; `features/voice/e2eePeerState.ts:158`, `:258`), while
 identity keys are per install — so a peer's second device shows up as a
 key change of the same account and overwrites the pin, and their first
 device then does the same in turn. Until a stable device identifier exists,
@@ -385,7 +385,7 @@ SEC-03 row (B5-12, 2026-09-05); tracked as C-09 in
 | Desktop session + identity | OS keychain via the `keyring` crate: Windows Credential Manager, macOS Keychain, Secret Service | Every write is read back and verified (`Client/src-tauri/src/secret_store.rs:93`). If the keychain fails the round trip, a sealed file (DPAPI on Windows, ChaCha20-Poly1305 elsewhere) takes over until it works again — [credential-storage.md](../credential-storage.md) |
 | Desktop certificate pins   | `certs.json` in the app data dir (`Client/src-tauri/src/constants.rs:2`)                        | Plain file; a user who can edit it can re-pin, which is the same user who can click "trust"                                                                                                                                                                                |
 | Desktop web-PKI record     | `cert_web_pki.json` in the app data dir (`Client/src-tauri/src/constants.rs:7`)                 | Plain file; editing it can only let a certificate that is itself publicly valid for the host replace the pin. Losing it means the next renewal prompts                                                                                                                     |
-| Desktop identity pins      | `identity_pins.json` (`Client/src/lib/net/identity.ts:11-12`)                                   | Plain file; same reasoning. The identity _private_ key is in the keychain, not here                                                                                                                                                                                        |
+| Desktop identity pins      | `identity_pins.json` (`Client/src/features/connection/identity.ts:11-12`)                       | Plain file; same reasoning. The identity _private_ key is in the keychain, not here                                                                                                                                                                                        |
 
 ## What the operator can and cannot do
 
@@ -502,7 +502,7 @@ does not claim").
 - Admin force-logout revokes all of a user's sessions
   (`Server/admin/api.go:114`; test `TestForceLogout_AuthorizationMatrix`).
 - Voice E2EE identity is per install, but peers keep **one pin per account**
-  (`{host}:{userId}`, `Client/src/lib/net/identity.ts:11-12`): your second device
+  (`{host}:{userId}`, `Client/src/features/connection/identity.ts:11-12`): your second device
   appears to them as a key change that replaces the pin (with a notice), and
   your first device then does the same. Not per-device pinning.
 
@@ -574,7 +574,7 @@ BPR-083):
   (`users`, `Server/migrations/001_initial_schema.sql`). The same username on
   two servers is two unrelated people; nothing links them, and a ban, a role or
   a friend on one means nothing on the other. Even the voice E2EE identity is
-  pinned per host (`Client/src/lib/net/identity.ts:11-12`, key `{host}:{userId}`).
+  pinned per host (`Client/src/features/connection/identity.ts:11-12`, key `{host}:{userId}`).
 - **No required external service.** A server on a LAN with no internet works.
   Every outbound connection it can make is in the next table, each with the
   condition that triggers it and the control where one exists. Two rows have
