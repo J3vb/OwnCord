@@ -643,7 +643,7 @@ export const shards = {
     "src/lib/net/wireCheck.ts",
   ],
   "lib-rest-33": [
-    "src/features/messaging/forwardRequests.ts",
+    "src/lib/net/requestClaims.ts",
     "src/lib/prefs/notificationLevel.ts",
     "src/lib/presence/profiles.ts",
     "src/lib/readStateAway.ts",

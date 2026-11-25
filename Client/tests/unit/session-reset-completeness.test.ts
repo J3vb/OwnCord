@@ -13,10 +13,7 @@ import {
   rememberReadingPosition,
   takeReadingPosition,
 } from "../../src/features/messaging/message-list/readingPositions";
-import {
-  claimForwardRequest,
-  isForwardRequest,
-} from "../../src/features/messaging/forwardRequests";
+import { claimRequest, isClaimedRequest } from "../../src/lib/net/requestClaims";
 import { claimPollRequest, isPollRequest } from "../../src/features/messaging/pollRequests";
 import { pollCardState } from "../../src/features/messaging/message-list/pollCard";
 import { createThreadSender, holdsThreadDrafts } from "../../src/features/threads/threadSender";
@@ -607,9 +604,9 @@ const PROBES: readonly Probe[] = [
     isInitial: () => Math.abs(serverNow() - Date.now()) < 1000,
   },
   {
-    name: "messaging:forwardRequests",
-    mutate: () => claimForwardRequest("fwd-probe"),
-    isInitial: () => !isForwardRequest("fwd-probe"),
+    name: "net:requestClaims",
+    mutate: () => claimRequest("fwd-probe"),
+    isInitial: () => !isClaimedRequest("fwd-probe"),
   },
   {
     name: "messaging:pollRequests",

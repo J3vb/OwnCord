@@ -6,7 +6,7 @@
  * `thread_create_ok` opens the thread; `THREAD_EXISTS` (someone else started
  * one on this message first) opens the one that won; any other refusal is a
  * line in the dialog, so the dispatcher's generic toast is told to skip this id
- * (forwardRequests, the claim the Forward picker uses). Loaded on first use, never at startup.
+ * (lib/net/requestClaims). Loaded on first use, never at startup.
  */
 
 import { createElement, setOwnedTimeout } from "@lib/dom";
@@ -15,7 +15,7 @@ import { createModal } from "@lib/ui/modalFactory";
 import type { WsClient } from "@lib/ws";
 import type { ThreadAutoArchiveMinutes, ThreadInfo } from "@lib/types";
 import { getChannelMessages } from "@stores/messages.store";
-import { claimForwardRequest, releaseForwardRequest } from "../messaging/forwardRequests";
+import { claimRequest, releaseRequest } from "@lib/net/requestClaims";
 import {
   AUTO_ARCHIVE_CHOICES,
   DEFAULT_AUTO_ARCHIVE,
@@ -152,7 +152,7 @@ export function openCreateThreadDialog(options: CreateThreadDialogOptions): void
   function settle(): void {
     stopWaiting?.();
     stopWaiting = null;
-    if (requestId !== null) releaseForwardRequest(requestId);
+    if (requestId !== null) releaseRequest(requestId);
     requestId = null;
     submit.disabled = false;
     submit.textContent = threadsText("create.submit");
@@ -190,7 +190,7 @@ export function openCreateThreadDialog(options: CreateThreadDialogOptions): void
         },
       });
       requestId = id;
-      claimForwardRequest(id);
+      claimRequest(id);
       submit.disabled = true;
       submit.textContent = threadsText("create.sending");
 
@@ -229,7 +229,7 @@ export function openCreateThreadDialog(options: CreateThreadDialogOptions): void
   );
   owner.addCleanup(() => {
     stopWaiting?.();
-    if (requestId !== null) releaseForwardRequest(requestId);
+    if (requestId !== null) releaseRequest(requestId);
   });
 
   nameInput.focus();
