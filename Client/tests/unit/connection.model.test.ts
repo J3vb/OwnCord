@@ -39,7 +39,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
 
-vi.mock("@lib/notifications", () => ({
+vi.mock("../../src/features/notifications/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));

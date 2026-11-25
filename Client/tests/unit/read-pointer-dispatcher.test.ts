@@ -36,7 +36,9 @@ import { resetMessagesState } from "../helpers/storeResets";
 import { resetChannelsState } from "../helpers/storeSeeds";
 import { makeDmRow, pointerMessage, seedLoadedMessages } from "../helpers/readPointerFixtures";
 
-vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
+vi.mock("../../src/features/notifications/notifications", () =>
+  dispatcherMocks.notificationsMock(),
+);
 vi.mock("@lib/voice/livekitSession", () =>
   voiceSession.withOverrides({
     disableCamera: vi.fn(async () => {}),

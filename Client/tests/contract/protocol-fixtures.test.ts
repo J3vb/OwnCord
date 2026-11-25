@@ -30,7 +30,9 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 // The dispatcher pulls in notifications; the voice handlers reach LiveKit and
 // the identity publisher. None is under test here, so each is stubbed the way
 // the unit dispatcher tests stub it.
-vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
+vi.mock("../../src/features/notifications/notifications", () =>
+  dispatcherMocks.notificationsMock(),
+);
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());

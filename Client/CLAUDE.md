@@ -19,7 +19,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `voiceModel`/`voiceRoster`/`voicePeers`/`voiceSelfPrefs`), which stay in
   `src/stores/` so the store adds no upward import to `scripts/layer-baseline.json`,
   and the pieces of a `lib/` module that other `lib/` or `stores/` code still
-  imports (`lib/text/markdownScan.ts`, since `lib/notifications.ts` imports the
+  imports (`lib/text/markdownScan.ts`, since `lib/notificationDelivery.ts` imports the
   markdown facade), which stay in `src/lib/` for the same reason
 - `src/app/` is the composition layer above `pages/` (`main.ts`'s siblings, the
   only code besides `main.ts` that may import `pages/`; enforced from 7.4b:
@@ -111,8 +111,8 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   runs at `--max-warnings=0`, so a new cycle fails `npm run lint`. When a
   lower-level module has to trigger a higher one, invert the edge rather than
   import upward: `stores/auth.store.ts` imports neither `voice.store` nor
-  `lib/notifications` — `voice.store.ts` registers its logout teardown through
-  `registerVoiceLogoutTeardown` at load, and `lib/notifications.ts` registers the
+  `features/notifications/notifications` — `voice.store.ts` registers its logout teardown through
+  `registerVoiceLogoutTeardown` at load, and `features/notifications/notifications.ts` registers the
   notification-audio cleanup through `registerSessionReset`
   (`lib/net/sessionRegistry.ts`, the leaf every per-server reset registers with). In
   `features/messaging/content/`, `attachments.ts` is the leaf every renderer

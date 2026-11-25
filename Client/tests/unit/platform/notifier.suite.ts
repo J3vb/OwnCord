@@ -1,6 +1,6 @@
 // Behaviour suite for the `Notifier` contract
 // (`src/platform/contracts/notifications.ts`). Written in B7-5 against the
-// in-place seam in `lib/notifications.ts` before the move, so it pins today's
+// in-place seam in `features/notifications/notifications.ts` before the move, so it pins today's
 // behaviour rather than the moved code's. Which notification fires, and the
 // Web Notification fallback, are the caller's — `tests/unit/notifications/`
 // covers those.

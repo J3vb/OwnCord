@@ -1,7 +1,7 @@
 // Mention alert timing for the channel handlers: a mention_count rise waits a
 // moment for a channel_activity entry that carries the mention. Owns the
 // pending alerts, their session reset, and nothing that subscribes to the socket.
-import { notifyMention, type ThreadNotifyContext } from "../../lib/notifications";
+import { notifyMention, type ThreadNotifyContext } from "../notifications/notifications";
 import { loadedThreadsStore } from "../../stores/threadsLoader";
 import { registerSessionReset } from "../../lib/net/sessionRegistry";
 

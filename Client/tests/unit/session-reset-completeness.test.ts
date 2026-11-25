@@ -87,7 +87,7 @@ import type { DmChannel } from "../../src/stores/dm.store";
 import { safetyStore, setReadyNotices } from "../../src/features/safety/store";
 import { memberTimeoutsStore, setMemberTimeouts } from "../../src/features/moderation/store";
 // Loaded for its registrations: the two notification resets.
-import "../../src/lib/notifications";
+import "../../src/features/notifications/notifications";
 import {
   getCachedReactionUsers,
   loadReactionUsers,

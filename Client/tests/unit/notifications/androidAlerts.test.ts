@@ -33,7 +33,7 @@ vi.mock("../../../src/lib/voice/livekitSession", () => mocks.voiceLivekitSession
 
 await import("../../../src/lib/text/markdown");
 const { notifyIncomingMessage, notifyChannelActivity } =
-  await import("../../../src/lib/notifications");
+  await import("../../../src/features/notifications/notifications");
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 40));
 

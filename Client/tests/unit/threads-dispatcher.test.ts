@@ -24,7 +24,7 @@ import { ApiClientError } from "../../src/lib/api";
 import type { WsClient } from "../../src/lib/ws";
 import type { ChatMessagePayload, MessageResponse } from "../../src/lib/types";
 
-vi.mock("@lib/notifications", () => ({
+vi.mock("../../src/features/notifications/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
   notifyMention: vi.fn(),
   notifyChannelActivity: vi.fn(),
@@ -116,7 +116,8 @@ describe("thread frames through the dispatcher", () => {
   });
 
   it("judges a reply in a watched thread by its parent channel for notifications", async () => {
-    const { notifyIncomingMessage } = await import("@lib/notifications");
+    const { notifyIncomingMessage } =
+      await import("../../src/features/notifications/notifications");
     const notify = vi.mocked(notifyIncomingMessage);
     notify.mockClear();
     ws.simulateMessage("thread_changed", { thread: makeThread({ id: 91, parent_id: 4 }) });

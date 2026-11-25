@@ -534,7 +534,7 @@ export const shards = {
   "lib-rest-21": [
     "src/features/messaging/emojiSheets.ts",
     "src/features/messaging/pickerLazyGrids.ts",
-    "src/lib/notifications.ts",
+    "src/features/notifications/notifications.ts",
     "src/lib/pollState.ts",
     "src/lib/ui/avatar.ts",
     "src/lib/ui/imageCrop.ts",

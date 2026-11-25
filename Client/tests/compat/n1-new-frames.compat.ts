@@ -18,7 +18,14 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+// Mocked at both paths: releases before the move keep it in lib/.
 vi.mock("@lib/notifications", () => ({
+  notifyIncomingMessage: vi.fn(),
+  notifyMention: vi.fn(),
+  notifyChannelActivity: vi.fn(),
+  cleanupNotificationAudio: vi.fn(),
+}));
+vi.mock("../../src/features/notifications/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
   notifyMention: vi.fn(),
   notifyChannelActivity: vi.fn(),

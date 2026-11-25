@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/notificationsMocks";
-import { notifyIncomingMessage } from "../../../src/lib/notifications";
+import { notifyIncomingMessage } from "../../../src/features/notifications/notifications";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { messagesStore } from "../../../src/stores/messages.store";
 import { setLogLevel } from "../../../src/lib/logger";

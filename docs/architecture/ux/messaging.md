@@ -503,6 +503,6 @@ the same signal in future.
 `src/features/navigation/SearchOverlay.ts`, `src/features/messaging/PinnedMessages.ts`,
 `src/features/messaging/composer/MentionAutocomplete.ts`, `src/lib/text/mentions.ts`,
 `src/features/messaging/content/contentParser.ts` (+ `syntax-highlight.ts`),
-`src/lib/text/markdown.ts`, `src/lib/nav/channelNavigation.ts`, `src/lib/notifications.ts`;
+`src/lib/text/markdown.ts`, `src/lib/nav/channelNavigation.ts`, `src/features/notifications/notifications.ts`;
 server `Server/service/message.go`, `Server/service/mentions.go`,
 `Server/ws/handlers_chat.go`.

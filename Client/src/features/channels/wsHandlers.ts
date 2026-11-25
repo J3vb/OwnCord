@@ -36,7 +36,7 @@ import {
 } from "../../lib/readState";
 import { hasReceivedReady } from "../../lib/net/serverCapabilities";
 import { showToast } from "../../lib/ui/toast";
-import { notifyChannelActivity } from "../../lib/notifications";
+import { notifyChannelActivity } from "../notifications/notifications";
 import {
   loadedThreadsStore,
   threadsStoreInUse,
