@@ -165,7 +165,7 @@ export const shards = {
   ],
   "livekit-21": [
     "src/features/voice/decodeCaps.ts",
-    "src/features/voice/joinBackoff.ts",
+    "src/lib/voice/joinBackoff.ts",
     "src/features/voice/mediaLostNotice.ts",
     "src/features/voice/releaseRoom.ts",
     "src/features/voice/sessionReconnect.ts",
@@ -833,6 +833,7 @@ export const shards = {
     "src/features/moderation/api.ts",
     "src/features/safety/signInNotice.ts",
     "src/features/safety/store.ts",
+    "src/features/safety/timeText.ts",
     "src/features/settings/themePreview.ts",
   ],
   "safety-moderation-11": [

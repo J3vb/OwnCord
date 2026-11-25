@@ -8,7 +8,7 @@ import { setJoinedVoiceStatus } from "../../features/voice/roomEventHandlers";
 import { voiceText } from "../../i18n/voice";
 import { releaseRoom } from "./releaseRoom";
 import { advanceJoinStage, failJoinAttempt, redactTunnelUrl } from "../../lib/voice/voiceJoinTrace";
-import { noteJoinFailed } from "./joinBackoff";
+import { noteJoinFailed } from "@lib/voice/joinBackoff";
 import type { JoinHost } from "./joinHost";
 import {
   dropSuperseded,

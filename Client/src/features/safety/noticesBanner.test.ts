@@ -5,7 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@stores/ui.store", () => ({ openSettings: vi.fn() }));
 
 import { ApiClientError } from "../../lib/api";
-import { formatWhen } from "../../i18n/safety";
+import { formatWhen } from "./timeText";
 import { openSettings } from "@stores/ui.store";
 import { createNoticesBanner } from "./Notices";
 import { removeNotice, resetSafetyStore, safetyStore, setReadyNotices } from "./store";

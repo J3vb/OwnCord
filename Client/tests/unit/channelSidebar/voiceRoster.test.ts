@@ -21,7 +21,7 @@ import {
   setMusicSharer,
 } from "../../../src/stores/voice.store";
 import { membersStore } from "../../../src/stores/members.store";
-import { noteJoinFailed, noteJoinSucceeded } from "../../../src/features/voice/joinBackoff";
+import { noteJoinFailed, noteJoinSucceeded } from "../../../src/lib/voice/joinBackoff";
 import {
   useSidebarFixture,
   addVoiceUser,

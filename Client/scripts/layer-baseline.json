@@ -9,9 +9,6 @@
     }
   },
   "debt": {
-    "i18n/safety.ts": {
-      "features/safety/store.ts": 1
-    },
     "lib/api.ts": {
       "features/content-consent/nsfw.ts": 1,
       "stores/channels.store.ts": 1
@@ -35,9 +32,6 @@
     },
     "platform/desktop/pushToTalkService.ts": {
       "stores/voice.store.ts": 1
-    },
-    "stores/voice.store.ts": {
-      "features/voice/joinBackoff.ts": 1
     }
   }
 }

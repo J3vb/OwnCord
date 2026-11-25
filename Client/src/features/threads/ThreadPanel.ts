@@ -36,7 +36,8 @@ import {
 import { getThread, threadsStore } from "@stores/threads.store";
 import { createConfirmModal } from "../dialogs/confirmModal";
 import { safetyStore } from "../safety/store";
-import { formatUntil, safetyText } from "../../i18n/safety";
+import { safetyText } from "../../i18n/safety";
+import { formatUntil } from "../safety/timeText";
 import { threadComposerReason } from "./threadCommands";
 import { createMessageList, type MessageListComponent } from "../messaging/MessageList";
 import { createMessageInput, type MessageInputComponent } from "../messaging/MessageInput";

@@ -31,7 +31,7 @@ import { authStore } from "../../stores/auth.store";
 import { channelsStore } from "../../stores/channels.store";
 import { noteWatchSent, resetWatchRequest } from "../../lib/voice/watchRequest";
 import { clearAfkMove } from "./moveHint";
-import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
+import { joinRetryInMs, noteJoinSucceeded } from "@lib/voice/joinBackoff";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
 import type { Payload, ReconnectClock } from "../connection/dispatchContext";
 

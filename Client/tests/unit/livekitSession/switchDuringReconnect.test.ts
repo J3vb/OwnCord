@@ -16,7 +16,7 @@ import {
 } from "../../../src/features/voice/wsHandlers";
 import { joinAnswerWaitFor } from "../../../src/features/voice/wsErrors";
 import { noteJoinSent, setJoinAnswerWait } from "../../../src/features/voice/joinRequest";
-import { noteJoinSucceeded } from "../../../src/features/voice/joinBackoff";
+import { noteJoinSucceeded } from "../../../src/lib/voice/joinBackoff";
 import {
   createSidebarVoiceCallbacks,
   createVoiceWidgetCallbacks,

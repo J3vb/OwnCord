@@ -18,7 +18,8 @@ import type { PeerVerification, VoiceState, VoiceUser } from "../../stores/voice
 import type { SafetyState } from "../safety/store";
 import { resolveDisplayName } from "../../lib/ui/avatar";
 import { shellText } from "../../i18n/shell";
-import { formatUntil, safetyText } from "../../i18n/safety";
+import { safetyText } from "../../i18n/safety";
+import { formatUntil } from "../safety/timeText";
 import { rowActivity } from "../members/listeningLine";
 import { ownIdentityTitle, verifyPresentation } from "../voice/peerVerification";
 import type { VoiceChannelChromeModel } from "./voiceRow.view";

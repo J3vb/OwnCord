@@ -23,7 +23,8 @@ import { uiStore } from "@stores/ui.store";
 import { safetyStore } from "../../../features/safety/store";
 import { messagingText } from "../../../i18n/messaging";
 import { shellText } from "../../../i18n/shell";
-import { formatUntil, safetyText } from "../../../i18n/safety";
+import { safetyText } from "../../../i18n/safety";
+import { formatUntil } from "../../../features/safety/timeText";
 import { WsErrorCode } from "@lib/protocolTypes";
 import { log } from "./channelShared";
 import {

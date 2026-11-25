@@ -31,7 +31,7 @@ vi.mock("../../lib/voice/livekitDiagnostics", async (importOriginal) => ({
 import { JoinOrchestration, type JoinHost } from "./joinOrchestration";
 import { onRoom } from "./releaseRoom";
 import { voiceJoinSnapshot } from "../../lib/voice/voiceJoinTrace";
-import { joinRetryInMs, noteJoinSucceeded } from "./joinBackoff";
+import { joinRetryInMs, noteJoinSucceeded } from "@lib/voice/joinBackoff";
 import { leaveVoiceChannel, setVoiceStatus, voiceStore } from "../../stores/voice.store";
 import { logIceConnectionInfo } from "../../lib/voice/livekitDiagnostics";
 import { voiceText } from "../../i18n/voice";
