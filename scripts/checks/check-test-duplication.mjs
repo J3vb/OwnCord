@@ -1,18 +1,31 @@
 #!/usr/bin/env node
 // Copy-pasted code is held as a shrink-only share of duplicated lines per
-// target: Client/tests, the Go test files under Server/, the colocated
-// Client/src tests, and the production code of the client, the server and the
-// Tauri Rust shell (generated files left out). The percentage jscpd reports for a target
-// may not rise above the one stored in its baseline file. A change that
-// removes duplication lowers the stored number with --update, which refuses
-// to raise it. --target <name> limits a run to one target.
+// target. The percentage jscpd reports for a target may not rise above the one
+// stored in its baseline file. A change that removes duplication lowers the
+// stored number with --update, which refuses to raise it. --target <name>
+// limits a run to one target.
+//
+//   target            scan root              files counted   left out
+//   client            Client/tests           every format    nothing
+//   server            Server                 *_test.go       t.Parallel() lines
+//   client-colocated  Client/src             *.test.ts       nothing
+//   client-src        Client/src             *.ts            tests, protocolTypes.ts,
+//                                                            wireShapes.ts, restShapes.ts
+//   server-src        Server                 *.go            tests, db/dbgen/,
+//                                                            message_types.go, codes.go
+//   rust              Client/src-tauri/src   *.rs            tests.rs, tests/, *_tests.rs
+//
+// Each target is measured on its own: a clone between two targets (a client
+// test copying production code, say) is outside the metric, and so are the
+// client's CSS and the admin panel's JavaScript. check-test-duplication.test.mjs plants
+// a clone in every target's language to prove each one still sees it.
 //
 // jscpd is a pinned root devDependency, so `npm ci` at the repository root
 // is all the script needs (the Repository Hygiene job runs it there). It can
 // also read a report that is already on disk with
 // --target <name> --report <jscpd-report.json>.
 //
-// The settings below are the ones both baselines were measured with: a
+// The settings below are the ones the baselines were measured with: a
 // 50-token minimum, and a line and size limit high enough that no file is
 // skipped (jscpd skips files over 1,000 lines by default, which hides the
 // biggest tests from the count).
@@ -124,12 +137,13 @@ export function nextBaseline(current, baseline) {
   return current;
 }
 
-function runJscpd(target) {
+/** Runs jscpd with a target's settings on its scan root, or on `scan` when given. */
+export function runJscpd(target, scan = target.scan) {
   const out = mkdtempSync(path.join(tmpdir(), "jscpd-tests-"));
   try {
     execFileSync(
       process.execPath,
-      [JSCPD_BIN, ...JSCPD_ARGS, ...target.extraArgs, "--output", out, target.scan],
+      [JSCPD_BIN, ...JSCPD_ARGS, ...target.extraArgs, "--output", out, scan],
       { cwd: ROOT, stdio: ["ignore", "ignore", "inherit"] },
     );
     return JSON.parse(readFileSync(path.join(out, "jscpd-report.json"), "utf8"));
