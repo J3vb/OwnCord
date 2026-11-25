@@ -1,11 +1,11 @@
 {
   // Type checks the admin panel (Server/admin/static/js), which is Server-owned
   // and therefore absent from every other tsconfig here. It is compiled with a
-  // deliberately loose, non-strict program: turning strict on today would bury
-  // the signal in ~200 DOM-typing errors. `checkJs` catches the real class —
-  // an undefined global (TS2304/TS2552, pinned at zero) — while the existing DOM
-  // errors are held flat by scripts/admin-types-baseline.json's shrink-only
-  // ratchet. Driven by scripts/check-admin-types.mjs, not a bare `tsc -p`.
+  // deliberately loose, non-strict program: turning strict on would bury the
+  // signal in DOM-typing noise. The panel is clean under it: the shrink-only
+  // scripts/admin-types-baseline.json is empty, so any checkJs error fails, and
+  // an undefined global (TS2304/TS2552) fails whatever the baseline says.
+  // Driven by scripts/check-admin-types.mjs, not a bare `tsc -p`.
   //
   // Not an extension of tsconfig.json: the panel is classic scripts sharing one
   // global scope, has no src/ paths, and must not inherit `strict`,

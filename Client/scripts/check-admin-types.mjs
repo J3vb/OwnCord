@@ -9,8 +9,8 @@
 // build step) has no type check of its own: it is Server-owned, so tsc never
 // sees it. This script compiles it with `checkJs` under a non-strict,
 // deliberately loose program (Client/tsconfig.admin.json) and fails when the
-// error set grows. It is the verification floor the AO-1..AO-8 panel rebuild
-// works over, not a claim the panel is type-clean.
+// error set grows. The baseline is empty today, so under this loose program
+// the panel is type-clean and any new checkJs error fails.
 //
 // The baseline (scripts/admin-types-baseline.json) is keyed by
 // file + diagnostic code + normalised message, never by line, so an edit above
@@ -23,9 +23,9 @@
 // same ratchet scripts/check-ui-strings.mjs enforces over UI text.
 //
 // Limits, stated so a green run is not read as more than it is: this proves
-// nothing about runtime behaviour, the two TS2362/TS2363 arithmetic errors are
-// noise from untyped DOM reads, and 0 TS2304/TS2552 (cannot find name) is the
-// signal worth keeping — it stays at zero, so a typo'd global is caught.
+// nothing about runtime behaviour, and the program is non-strict, so a
+// possibly-null DOM read is not an error. 0 TS2304/TS2552 (cannot find name)
+// is the signal worth keeping — it stays at zero, so a typo'd global is caught.
 // compare() fails every TS2304 and TS2552 whatever the baseline says.
 //
 // Reseeding: a TypeScript or lib.dom bump can still reword a message, which
