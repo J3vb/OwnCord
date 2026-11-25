@@ -98,7 +98,9 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   count. Two kinds of upward edge are sanctioned on purpose: `messages.store`
   over its reducer modules, and `lib/api.ts` reading the NSFW consent gate
   (`features/content-consent/nsfw.ts`, `channels.store`) so every channel-content
-  call passes it. The other imports that predate the rule are listed in
+  call passes it, and the native push-to-talk service
+  (`platform/desktop/pushToTalkService.ts`) reading `voice.store`, because its
+  key-edge generation checks run against the live call state. The other imports that predate the rule are listed in
   `scripts/layer-baseline.json`, which only shrinks
   (`tests/unit/layer-baseline.test.ts` fails on a stale entry): when you remove
   one, delete its entry and lower the cap in that test. The rank list and the
