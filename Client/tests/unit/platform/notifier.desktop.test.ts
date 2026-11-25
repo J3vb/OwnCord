@@ -1,5 +1,5 @@
 // Desktop binding for the Notifier suite: `platform/desktop`'s notifier. B7-5
-// ran the same suite file against the in-place seam in `lib/notifications.ts`
+// ran the same suite file against the in-place seam in `features/notifications/notifications.ts`
 // first (proving it could fail and pinning today's behaviour), then re-bound
 // it here. The legacy binding is deleted with this commit: its export is gone.
 import { describe, expect, it, vi } from "vitest";

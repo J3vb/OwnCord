@@ -76,7 +76,7 @@ const entry: ChannelActivityEntry = {
 };
 
 function lib() {
-  return import("../../src/lib/notifications");
+  return import("../../src/features/notifications/notifications");
 }
 
 async function settle(): Promise<void> {

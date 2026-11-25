@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/notificationsMocks";
-import { notifyIncomingMessage, resetNotificationCoalescing } from "../../../src/lib/notifications";
+import {
+  notifyIncomingMessage,
+  resetNotificationCoalescing,
+} from "../../../src/features/notifications/notifications";
 import { authStore } from "../../../src/stores/auth.store";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { dmStore } from "../../../src/stores/dm.store";

@@ -81,6 +81,10 @@ env:
   # load-baseline.yml's: phase S kills what the product would have started, so
   # measuring a different SFU release would measure something no owner runs.
   LIVEKIT_VERSION: "1.13.11"
+  # The busybox Server/scripts/compose-smoke.sh already pins by digest (a Go
+  # test holds the two equal). The container disk drill fills its tmpfs volume
+  # through it, so the runner pulls it here and the drill needs no network.
+  DRILL_FILLER_IMAGE: "busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
 
 jobs:
   upgrade-rehearsal:
@@ -112,9 +116,11 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
           echo "event=$EVENT ref=$REF"
           git rev-parse HEAD
+          echo "Tested \`$(git rev-parse HEAD)\` with the workflow file from \`$WORKFLOW_SHA\` ($EVENT)." >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
@@ -276,13 +282,19 @@ jobs:
         run: go run ./cmd/smoke -drills -data-fs "$RUNNER_TEMP/drill-fs" "$HEAD_BINARY"
 
       # Disk pressure only, and only in the container: that is the shape an
-      # owner deploys, and its /app/data is a 24 MB tmpfs the harness mounts
-      # itself, so this leg needs no host mount. R, C and S are properties of
-      # the process and the standalone leg above already measured them.
+      # owner deploys. The harness creates a 24 MiB tmpfs volume, mounts it at
+      # /app/data and fills it through a pinned busybox helper, so this leg
+      # needs no host mount. R, C and S are properties of the process and the
+      # standalone leg above already measured them. A skipped phase D here
+      # fails the step: this leg exists to fill a real volume.
+      - name: Pull the disk drill's filler image
+        if: ${{ !inputs.release }}
+        run: docker pull "$DRILL_FILLER_IMAGE"
+
       - name: Failure and recovery drills (container, disk pressure only)
         if: ${{ !inputs.release }}
         working-directory: Server
-        run: go run ./cmd/smoke -drills -docker -phases D owncord-rehearsal:head
+        run: go run ./cmd/smoke -drills -docker -phases D -filler-image "$DRILL_FILLER_IMAGE" owncord-rehearsal:head
 
       # A hosted runner is discarded with its images; a self-hosted one is not,
       # and would accumulate two rehearsal images per run. `always()` so a

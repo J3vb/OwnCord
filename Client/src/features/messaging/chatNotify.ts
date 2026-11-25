@@ -3,7 +3,7 @@ import { noteChannelMessage } from "../../stores/channels.store";
 import { updateDmLastMessage, updateDmLastMessagePreview } from "../../stores/dm.store";
 import { blocksStore } from "../../stores/blocks.store";
 import { parseTimestamp } from "@lib/text/formatting";
-import { notifyIncomingMessage } from "../../lib/notifications";
+import { notifyIncomingMessage } from "../notifications/notifications";
 import { mentionsCurrentUser } from "../../lib/text/mentions";
 import { loadedThreadsStore } from "../../stores/threadsLoader";
 import { noteAwayUnread } from "@lib/readState";

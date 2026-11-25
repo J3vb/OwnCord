@@ -3,34 +3,34 @@
  * and plays sounds for incoming messages based on user preferences.
  */
 
-import { loadPref } from "./prefs/preferences";
-import { notificationAllowed } from "./prefs/channelMutes";
-import { channelNotificationLevel, shouldNotifyForLevel } from "./prefs/notificationLevel";
-import { loadUserStatus } from "./presence/userStatus";
+import { loadPref } from "@lib/prefs/preferences";
+import { notificationAllowed } from "@lib/prefs/channelMutes";
+import { channelNotificationLevel, shouldNotifyForLevel } from "@lib/prefs/notificationLevel";
+import { loadUserStatus } from "@lib/presence/userStatus";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { isWindowDetached } from "@stores/messages.store";
 import { membersStore } from "@stores/members.store";
 import { blocksStore } from "@stores/blocks.store";
-import type { ChannelActivityEntry, ChatMessagePayload } from "./types";
-import { isServerRowKind } from "./text/messageKind";
-import { mentionsCurrentUser } from "./text/mentions";
-import { registerSessionReset } from "./net/sessionRegistry";
-import { cleanupNotificationAudio, playNotificationSound } from "./media/notificationSound";
-import { soundSwitchOn } from "./prefs/soundPrefs";
+import type { ChannelActivityEntry, ChatMessagePayload } from "@lib/types";
+import { isServerRowKind } from "@lib/text/messageKind";
+import { mentionsCurrentUser } from "@lib/text/mentions";
+import { registerSessionReset } from "@lib/net/sessionRegistry";
+import { cleanupNotificationAudio, playNotificationSound } from "@lib/media/notificationSound";
+import { soundSwitchOn } from "@lib/prefs/soundPrefs";
 import { resolveAuthor } from "@lib/text/formatting";
 import { resolveDisplayName } from "@lib/ui/avatar";
-import { connectText } from "../i18n/connect";
-import { isAndroidHost } from "./hostPlatform";
+import { connectText } from "../../i18n/connect";
+import { isAndroidHost } from "@lib/hostPlatform";
 import {
   fireDesktopNotification,
   flashTaskbar,
   sanitizeNotif,
   currentHost,
-} from "./notificationDelivery";
+} from "@lib/notificationDelivery";
 
-export { openMessageTarget } from "./notificationDelivery";
+export { openMessageTarget } from "@lib/notificationDelivery";
 
 /** Check if the app window is currently focused. */
 function isWindowFocused(): boolean {

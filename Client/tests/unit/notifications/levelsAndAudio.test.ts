@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach, beforeEach } from "vitest";
 import * as mocks from "../../helpers/notificationsMocks";
-import { notifyIncomingMessage } from "../../../src/lib/notifications";
+import { notifyIncomingMessage } from "../../../src/features/notifications/notifications";
 import { cleanupNotificationAudio } from "../../../src/lib/media/notificationSound";
 import { channelsStore } from "../../../src/stores/channels.store";
 import type { ChatMessagePayload } from "../../../src/lib/types";

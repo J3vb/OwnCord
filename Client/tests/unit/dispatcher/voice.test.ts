@@ -32,7 +32,7 @@ import {
 import { signInAs } from "../../helpers/storeSeeds";
 import { onVideoBitrateCap, videoBitrateCap } from "../../../src/features/voice/videoBitrateCap";
 
-vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
+vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notificationsMock());
 vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());

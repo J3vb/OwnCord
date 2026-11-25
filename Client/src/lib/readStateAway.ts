@@ -25,7 +25,7 @@ export function isWindowAway(channelId: number): boolean {
  * not focused. "Active" only means "the reader is watching" when this
  * is false, so a message landing while away counts as unread and a `ready`
  * resync must not mark the channel read. The focus source is
- * `document.hasFocus()`, as in `lib/notifications.ts`.
+ * `document.hasFocus()`, as in `features/notifications/notifications.ts`.
  */
 export function isChannelAway(channelId: number): boolean {
   return isWindowAway(channelId) || liveTailOutOfView.has(channelId);

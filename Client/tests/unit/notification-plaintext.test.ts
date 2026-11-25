@@ -10,7 +10,10 @@ import { testPrefs } from "../helpers/notificationsMocks";
 import { makePayload, seedGeneralChannel } from "../helpers/notificationsHarness";
 
 import { markdownToPlainText } from "../../src/lib/text/markdown";
-import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
+import {
+  notifyIncomingMessage,
+  resetNotificationCoalescing,
+} from "../../src/features/notifications/notifications";
 import { dmStore } from "../../src/stores/dm.store";
 import { signInAs } from "../helpers/storeSeeds";
 import type { ChatMessagePayload } from "../../src/lib/types";

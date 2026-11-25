@@ -12,7 +12,7 @@ import {
   notifyChannelActivity,
   notifyIncomingMessage,
   notifyMention,
-} from "../../src/lib/notifications";
+} from "../../src/features/notifications/notifications";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { messagesStore } from "../../src/stores/messages.store";

@@ -39,6 +39,10 @@
      changed lines with no logic. New files, new goroutines, handlers, middleware, Rust or
      call/voice lifecycle code, and anything touching server/ws, db or auth are never low-risk.
      Keep this section even in batch PRs. -->
+- Reviewed at: <!-- the commit the review read, e.g. `a1b2c3d`. If commits land after it on a
+     server/ws, db, auth, voice, migration or crypto PR, the same reviewer reads
+     `git diff <reviewed>..HEAD` before merge and this line moves to the new head. -->
+- Accepted risks: <!-- none, or each one: what, why, accepted by @J3vb -->
 
 ## Test Plan
 

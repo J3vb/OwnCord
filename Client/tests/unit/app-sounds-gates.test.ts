@@ -31,7 +31,7 @@ import {
   notifyIncomingMessage,
   notifyMention,
   resetNotificationCoalescing,
-} from "../../src/lib/notifications";
+} from "../../src/features/notifications/notifications";
 import { setGlobalNotificationLevel } from "../../src/lib/prefs/notificationLevel";
 import { savePref } from "../../src/lib/prefs/preferences";
 import type { ChannelActivityEntry, VoiceStatePayload } from "../../src/lib/types";

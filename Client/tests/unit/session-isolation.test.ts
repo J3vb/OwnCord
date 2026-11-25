@@ -212,7 +212,7 @@ import { voiceStore } from "@stores/voice.store";
 import { currentUserPermissions } from "@lib/permissions";
 import { cleanupNotificationAudio } from "@lib/media/notificationSound";
 // The app loads this with the dispatcher chunk (mocked here); it registers the audio reset.
-import "@lib/notifications";
+import "../../src/features/notifications/notifications";
 import { leaveVoice } from "@lib/voice/livekitSession";
 import { deleteCredential, resumeSavedSession } from "@lib/net/credentials";
 import { PREAUTH_BUSY_CAP_MS, PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
