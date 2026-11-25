@@ -6,7 +6,7 @@
  *
  * Screenshots for the hand check: buddies-1333x934.png (all five groups and a
  * voice icon), buddies-1333x934-20px.png (the same at 20 px text) and
- * buddies-940x500.png (the column at 940x500).
+ * buddies-1333x934-beside.png (the column beside the chat).
  */
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { test, expect } from "./fixtures";
@@ -97,7 +97,7 @@ async function bootBuddies(page: Page, options: SceneOptions & { fontSize?: numb
     }, options.fontSize);
   }
   await startDeckScene(page, { theme: "gunmetal", members: ROSTER, ...options });
-  // Below 900 px the column is an overlay, opened by the chat header's toggle.
+  // At 1200 px or less the column is an overlay, opened by the top bar's toggle.
   if (!(await column(page).isVisible())) await page.getByTestId("member-list-toggle").click();
   await expect(column(page)).toBeVisible();
   await expect(groups(page).first()).toBeVisible();
@@ -262,18 +262,14 @@ test.describe("Command Deck Buddies", () => {
     await expectReachable(page.locator(".server-tree [role=treeitem]"), { skipHidden: true });
   });
 
-  // Until the fold: at 1200 px or less a later layout folds the column behind a
-  // top-bar toggle, and this check then expects the overlay.
-  test("at 940x500 the column sits beside the chat (until the fold)", async ({
-    page,
-  }, testInfo) => {
-    await bootBuddies(page, { viewport: { width: 940, height: 500 } });
+  test("at 1333x934 the column sits beside the chat", async ({ page }, testInfo) => {
+    await bootBuddies(page);
     await withGames(page);
     const chat = (await page.getByTestId("chat-area").boundingBox())!;
     const side = (await column(page).boundingBox())!;
     expect(await column(page).evaluate((el) => getComputedStyle(el).position)).not.toBe("fixed");
     expect(side.x).toBeGreaterThanOrEqual(chat.x + chat.width - 0.5);
-    await shot(page, testInfo, "buddies-940x500.png");
+    await shot(page, testInfo, "buddies-1333x934-beside.png");
   });
 
   test("the overlay at 640x400 reflows no worse than dev's member list", async ({ page }) => {

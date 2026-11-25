@@ -693,6 +693,7 @@ export const shards = {
     "src/features/members/memberGroupHeader.ts",
   ],
   "lib-rest-38": [
+    "src/features/deck/deckPing.ts",
     "src/features/deck/roomInfoModel.ts",
     "src/features/deck/roomInfoPanel.ts",
     "src/features/members/memberColumn.ts",
