@@ -276,10 +276,10 @@ function showToast(msg,type='success'){
      copy): long enough to read, closable, and never left on screen. */
   t.innerHTML=(type==='error'?I.ban:type==='warning'?I.triangleAlert:I.check)+'<span>'+esc(msg)+'</span>'
     +(type==='error'||type==='warning'?'<button class="toast-close" aria-label="Dismiss notification" data-action="dismissToast">&times;</button>':'');
-  clearTimeout(window._tt);
-  if(type!=='error')window._tt=setTimeout(()=>t.classList.remove('visible'),type==='warning'?TOAST_WARNING_MS:3000);
+  clearTimeout(toastTimer);
+  if(type!=='error')toastTimer=setTimeout(()=>t.classList.remove('visible'),type==='warning'?TOAST_WARNING_MS:3000);
 }
-function dismissToast(){clearTimeout(window._tt);document.getElementById('toast').classList.remove('visible')}
+function dismissToast(){clearTimeout(toastTimer);document.getElementById('toast').classList.remove('visible')}
 
 /* U6: every .toggle is a role=switch button; this keeps its visual class and
    its aria-checked state in step in one place. A toggle inside a dialog is an
@@ -289,6 +289,10 @@ function toggleSwitch(el){el.classList.toggle('on');el.setAttribute('aria-checke
 /* U5: the reused dialog moves focus in, traps Tab, and restores it on close.
    One modal exists at a time, so a module-level opener is enough. */
 let modalOpener=null;
+/* Bumped by every openModal and closeModal so a stale deferred focus is dropped. */
+let modalSeq=0;
+/* Pending toast auto-hide timer. */
+let toastTimer=0;
 const MODAL_FOCUSABLE='a[href],button:not([disabled]),textarea:not([disabled]),input:not([disabled]),select:not([disabled]),[tabindex]:not([tabindex="-1"])';
 /* Writes dialog content and gives the reused wrapper its accessible name from
    the first heading, so role=dialog is never unnamed (U5). */
@@ -332,9 +336,9 @@ function openModal(html){
   o.classList.add('visible');o.setAttribute('aria-hidden','false');
   /* A later openModal replaces the content; an earlier one's deferred focus
      must not steal it. */
-  const seq=(openModal._seq=(openModal._seq||0)+1);
+  const seq=++modalSeq;
   setTimeout(()=>{
-    if(seq!==openModal._seq)return;
+    if(seq!==modalSeq)return;
     focusModalStart(inner);
   },0);
 }
@@ -365,7 +369,7 @@ function closeModal(){
   state.retentionProposal=null;
   const o=document.getElementById('modal');
   o.classList.remove('visible');o.setAttribute('aria-hidden','true');
-  openModal._seq=(openModal._seq||0)+1;
+  modalSeq++;
   if(modalOpener instanceof HTMLElement)modalOpener.focus();
   modalOpener=null;
 }
@@ -395,8 +399,8 @@ document.getElementById('modal').addEventListener('keydown',e=>{
   const focusables=Array.from(inner.querySelectorAll(MODAL_FOCUSABLE));
   if(!focusables.length)return;
   const first=focusables[0],last=focusables[focusables.length-1];
-  if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus()}
-  else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus()}
+  if(e.shiftKey&&document.activeElement===first){e.preventDefault();if(last instanceof HTMLElement)last.focus()}
+  else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();if(first instanceof HTMLElement)first.focus()}
 });
 
 /* ═══ Letter avatars ═══ */
@@ -424,7 +428,7 @@ function showOverlay(id){hideAll();if(id==='loginOverlay')resetLoginSteps();docu
    its message before calling showOverlay. */
 function resetLoginSteps(){
   state.partialToken='';
-  const t=document.getElementById('loginTotp');if(t)t.value='';
+  const t=document.getElementById('loginTotp');if(t instanceof HTMLInputElement)t.value='';
   const s1=document.getElementById('loginStep1');if(s1)s1.classList.remove('hidden');
   const s2=document.getElementById('loginTotpStep');if(s2)s2.classList.add('hidden');
 }
@@ -542,7 +546,7 @@ function renderNav(){
     const unsaved=n.unsaved&&n.unsaved()?'<span class="unsaved-dot" aria-hidden="true"></span><span class="sr-only"> (unsaved changes)</span>':'';
     return'<button class="nav-item'+(active?' active':'')+'"'+(active?' aria-current="page"':'')+' data-action="navigateTo" data-args="'+actArgs(n.id)+'">'+n.icon+'<span class="nav-label">'+esc(n.label)+'</span>'+unsaved+navBadge(n)+'</button>';
   }).join('');
-  if(focused!==null)[...nav.querySelectorAll('.nav-item')].find(b=>b.getAttribute('data-args')===focused)?.focus();
+  if(focused!==null){const b=[...nav.querySelectorAll('.nav-item')].find(b=>b.getAttribute('data-args')===focused);if(b instanceof HTMLElement)b.focus()}
 }
 
 /* ═══ Top bar ═══ */
@@ -563,7 +567,7 @@ function isUserMenuOpen(){return !document.getElementById('userMenu').classList.
 function openUserMenu(){
   document.getElementById('userMenu').classList.remove('hidden');
   document.getElementById('userMenuBtn').setAttribute('aria-expanded','true');
-  document.querySelector('#userMenu button').focus();
+  const first=document.querySelector('#userMenu button');if(first instanceof HTMLElement)first.focus();
 }
 function closeUserMenu(restoreFocus){
   document.getElementById('userMenu').classList.add('hidden');
@@ -575,7 +579,7 @@ document.addEventListener('click',e=>{
   if(isUserMenuOpen()&&!(e.target instanceof Element&&e.target.closest('.user-menu-wrap')))closeUserMenu(false);
 });
 document.querySelector('.user-menu-wrap').addEventListener('focusout',e=>{
-  if(isUserMenuOpen()&&!(e.relatedTarget instanceof Node&&e.currentTarget.contains(e.relatedTarget)))closeUserMenu(false);
+  if(isUserMenuOpen()&&!(e instanceof FocusEvent&&e.relatedTarget instanceof Node&&e.currentTarget instanceof Node&&e.currentTarget.contains(e.relatedTarget)))closeUserMenu(false);
 });
 
 /* ═══ Nav drawer (below 900px) ═══ */
@@ -587,15 +591,15 @@ document.querySelector('.user-menu-wrap').addEventListener('focusout',e=>{
 function isNavOpen(){return document.getElementById('adminShell').classList.contains('nav-open')}
 function openNav(){
   document.getElementById('adminShell').classList.add('nav-open');
-  document.querySelector('#adminShell .main').inert=true;
+  const main=document.querySelector('#adminShell .main');if(main instanceof HTMLElement)main.inert=true;
   document.getElementById('navToggle').setAttribute('aria-expanded','true');
   const target=document.querySelector('#sidebarNav .nav-item.active')||document.getElementById('navClose');
-  target.focus();
+  if(target instanceof HTMLElement)target.focus();
 }
 function closeNav(restoreFocus=true){
   if(!isNavOpen())return;
   document.getElementById('adminShell').classList.remove('nav-open');
-  document.querySelector('#adminShell .main').inert=false;
+  const main=document.querySelector('#adminShell .main');if(main instanceof HTMLElement)main.inert=false;
   const t=document.getElementById('navToggle');t.setAttribute('aria-expanded','false');
   if(restoreFocus)t.focus();
 }
