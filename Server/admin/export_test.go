@@ -3,6 +3,7 @@ package admin
 import (
 	"context"
 	"github.com/J3vb/OwnCord/Server/updater"
+	"io"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -207,4 +208,29 @@ func FreeBackupPathForTest(dir, base string) (string, error) { return freeBackup
 // name of its gate.
 func GatedRoutesForTest(api *AdminAPI) []GatedRoute {
 	return api.gatedRoutes()
+}
+
+// SetArchiveOutWrapper wraps the zip output of every archive build, so a test can fail a write part way as a
+// full disk does.
+func SetArchiveOutWrapper(w func(io.Writer) io.Writer) (restore func()) {
+	prev := archiveOutWrapper
+	archiveOutWrapper = w
+	return func() { archiveOutWrapper = prev }
+}
+
+// ResetScheduledArchive clears what the scheduled archive job remembers (back-off and the last failure), and
+// waits for a running job, so one test does not inherit another's state.
+func ResetScheduledArchive() {
+	_ = WaitScheduledArchives(context.Background())
+	scheduledArchives = &scheduledArchiveState{}
+}
+
+// ArchiveBusyForTest reports whether an archive build holds the single-flight flag.
+func ArchiveBusyForTest() bool { return archiveBusy.Load() }
+
+// ResetScheduledArchiveBackoff lets the next pass try the archive again at once, as an hour passing would.
+func ResetScheduledArchiveBackoff() {
+	scheduledArchives.mu.Lock()
+	scheduledArchives.nextTry = time.Time{}
+	scheduledArchives.mu.Unlock()
 }

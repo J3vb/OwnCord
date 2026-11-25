@@ -352,7 +352,7 @@ func mountBackupRoutes(r chi.Router, gates *gateRegistry, backups *backupGate, d
 	gates.route(r, gateRestoreBackups, http.MethodPost, "/backups/{name}/restore", handleRestoreBackup(database, paths, backups))
 	gates.route(r, gateManageBackups, http.MethodPost, "/backups/{name}/link", handleBackupLink(database, paths))
 	gates.route(r, gateRestoreBackups, http.MethodGet, "/archive", handleArchive(database, setupOpts, paths))
-	gates.route(r, gateRestoreBackups, http.MethodPost, "/archive/link", handleArchiveLink(database))
+	gates.route(r, gateRestoreBackups, http.MethodPost, "/archive/link", handleArchiveLink(database, paths))
 }
 
 // registerConfigOverrideRoutes mounts config-overrides.json read/write and restart: changing a server-wide

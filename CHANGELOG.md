@@ -100,6 +100,14 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Added
+
+**Accounts & admin**
+
+- Automatic backups can include everything. On Backups & restore, "What to back up" has a new choice, Everything: next to each database copy the server keeps a full archive with uploads, keys and settings. The newest 3 archives are kept. New servers start on Everything. Servers that already ran keep database only, and the page asks the owner to choose.
+- The Dashboard warns when your backups may be on the same disk as your server. If it is a false alarm, the owner can press "This is another disk".
+- A full archive can be downloaded or deleted from the backup list by the owner or a member with Restore Backups. It is restored by hand, not from the panel: see the backups guide.
+
 ### Changed
 
 **Voice**

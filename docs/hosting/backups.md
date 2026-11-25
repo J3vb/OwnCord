@@ -2,24 +2,62 @@
 
 ## The one rule
 
-**Copy the whole `data/` folder plus `config.yaml`, regularly, to another
-disk.** The admin panel's **Download full archive** button gives you exactly
-that in one zip.
+**Turn on Everything, and keep your backups on another disk.** Both are
+settings on the **Backups & restore** page. Then the server saves the database
+and a full archive for you, and one broken disk cannot take both the server and
+its backups.
 
-The automatic backup on its own covers the **database only**. It does not
+Without Everything, the automatic backup is the **database only**. It does not
 include uploads or the key files, and some of those cannot be replaced (see
-[Files you cannot lose](#files-you-cannot-lose)).
+[Files you cannot lose](#files-you-cannot-lose)). You can still copy the whole
+`data/` folder plus `config.yaml` yourself, or press **Download full archive**.
 
 ## Automatic backups
 
 In the admin panel, open **Backups & restore**. Only the Owner sees it.
 
 - **Automatic backups:** off, daily or weekly.
+- **What to back up:** **Database only**, or **Everything** (database, uploads,
+  keys and settings).
 - **Keep backups for (days):** `0` keeps them forever, or 7 to 3650 days. The
   newest backup is always kept.
 
+New servers start on **Everything**. A server that was already running before
+this setting existed keeps taking the database only, and shows a hint until the
+Owner picks one. Pick either choice and the hint goes away.
+
 The server also takes a database backup **before every upgrade** that changes
 the database, and before every restore. It keeps the newest three of each.
+
+### What Everything does
+
+Each time a backup is due, the server saves two files in the backup folder:
+
+- `scheduled_<time>.db` is the database copy. **Restore** in the panel works
+  with this one.
+- `scheduled_<time>.zip` is the full archive. It is your copy if the whole disk
+  is lost. It is not restored from the panel (see
+  [Restore from a full archive](#restore-from-a-full-archive)).
+
+Good to know:
+
+- The archive is built in the background and kept as one file once it is
+  complete. If the disk fills or the build fails, no half file is left, the
+  last good archive stays, and the server tries again an hour later.
+- It needs free space of about the data folder's size, plus
+  `server.min_free_disk_mb`, plus 10 percent. A build that would not leave that
+  much is refused.
+- **At most 3 archives are kept**, newest first, even when **Keep backups for**
+  is `0`. Uploads can be big. The days setting also applies: older archives go,
+  but the newest always stays.
+- If a manual **Download full archive** is running when the archive is due, the
+  scheduled one waits for the next round.
+- The Dashboard warns when the archive is out of date, and says why when it
+  knows.
+- **Create backup now** takes the database only. It is the quick one.
+- The archive holds password hashes and keys. The file is private to the
+  server's user. Only the Owner, or a member with **Restore Backups**, can
+  download or delete one.
 
 ### Keep them off the server's disk
 
@@ -35,6 +73,21 @@ On a Linux service, also add that folder to `ReadWritePaths`
 ([how](../deployment.md#running-as-a-linux-service-systemd)), or every backup
 fails.
 
+The Dashboard warns **"Your backups may be on the same disk as your server"**
+when the backup folder looks to be on the same disk as the data folder, the
+database folder or the uploads folder. This is a guess, not proof:
+
+- It can miss a shared disk. A Docker overlay, a btrfs or ZFS share on one pool,
+  or a network mount can look separate and still sit on the same disk.
+- It can warn when the disks are different. Unraid's `/mnt/user` is one
+  example. If you know the folder is on another disk, press **This is another
+  disk** on the Backups page. The server remembers it for that folder. If you
+  change `backup.dir`, it asks again.
+- No warning does **not** mean your backups are safe. Check it yourself.
+
+In Docker and Unraid, mount a second volume or share from another disk, and set
+`backup.dir` to a path on it.
+
 ## The full archive
 
 **Download full archive** on the **Backups & restore** page gives one zip
@@ -42,7 +95,8 @@ with the database, the whole data folder (uploads and key files) and
 `config.yaml`. Keep it off the server.
 
 - It needs free space on the backup disk of about the data folder's size.
-- Only the Owner can download it, because it holds password hashes and keys.
+- Only the Owner, or a member with **Restore Backups**, can download it,
+  because it holds password hashes and keys.
 - The download link works once and only for a minute; the download itself
   must finish within 2 hours.
 
@@ -134,10 +188,22 @@ docker compose up -d
 
 It takes a safety copy first and refuses a backup made by a newer version.
 
-If uploads, keys or `config.yaml` changed too, restore your **archive**
-instead: stop the server, **remove** the live `data/` folder (do not copy on
-top of it), put the archive's `data/` and `config.yaml` back, and start the
-server.
+`chatserver restore` only takes a database file. It refuses a `.zip`. If
+uploads, keys or `config.yaml` changed too, restore your **archive** as below.
+
+### Restore from a full archive
+
+The panel and `chatserver restore` do not restore a `.zip`. Do it by hand:
+
+1. Stop the server.
+2. **Remove** the live `data/` folder (do not copy on top of it).
+3. Unpack the archive. Put its `data/` folder and `config.yaml` where the old
+   ones were.
+4. Start the server.
+
+Download the archive from the **Backups & restore** page, or take it from the
+backup folder. Check that `data/chatserver.db`, `data/totp.key` and
+`data/erasure.key` are in the unpacked `data/` folder before you start.
 
 What happens step by step during a restore, and the edge cases, is in the
 [reference](reference.md#how-a-restore-works).

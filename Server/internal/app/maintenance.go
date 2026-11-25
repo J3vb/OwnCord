@@ -25,6 +25,8 @@ type maintenance struct {
 	uploads    *service.UploadService
 	reports    *service.ReportService
 	moderation *service.ModerationService
+	// cfg is the running configuration the scheduled full archive is built from.
+	cfg *config.Config
 	// backupDir is backup.dir as configured (empty = data/backups).
 	backupDir           string
 	dbFile              string
@@ -61,7 +63,7 @@ type maintenanceStep struct {
 // every service-backed step.
 func newMaintenance(log *slog.Logger, cfg *config.Config, database *db.DB, svc *service.Services, files *storage.Storage) *maintenance {
 	m := &maintenance{
-		log: log, database: database,
+		log: log, database: database, cfg: cfg,
 		backupDir:           cfg.Backup.Dir,
 		dbFile:              cfg.Database.Path,
 		reportRetentionDays: cfg.Moderation.ReportRetentionDays,
@@ -133,6 +135,13 @@ func runMaintenanceLoop(bgCtx context.Context, log *slog.Logger, m *maintenance)
 		case <-maintenanceDone:
 		case <-time.After(5 * time.Second):
 			log.Warn("maintenance loop did not exit before shutdown timeout")
+		}
+		// A scheduled archive runs on its own goroutine under the loop's context, which is cancelled now; give
+		// it the same bounded wait so the database is not closed under a build.
+		waitCtx, cancelWait := context.WithTimeout(context.WithoutCancel(bgCtx), 5*time.Second)
+		defer cancelWait()
+		if err := admin.WaitScheduledArchives(waitCtx); err != nil {
+			log.Warn("scheduled archive did not stop before the shutdown timeout", "error", err)
 		}
 	}
 }
@@ -271,7 +280,12 @@ func (m *maintenance) maintainBackups(ctx context.Context) error {
 	if m.settings == nil {
 		return nil
 	}
-	return admin.MaintainBackups(ctx, m.database, m.settings, admin.ResolveBackupDir(m.backupDir), m.dbFile)
+	var opts []admin.BackupOption
+	if m.cfg != nil {
+		// The same inputs the admin API builds a manual archive from.
+		opts = append(opts, admin.WithScheduledArchive(admin.SetupOptions{ConfigPath: config.DefaultPath, RunningCfg: m.cfg}))
+	}
+	return admin.MaintainBackups(ctx, m.database, m.settings, admin.ResolveBackupDir(m.backupDir), m.dbFile, opts...)
 }
 
 // deletedAttachmentGrace is how long a deleted message's files stay on disk
