@@ -4,7 +4,7 @@ import { openNewPostDialog, postErrorText } from "../../src/features/forums/NewP
 import { resetChannelsStore } from "@stores/channels.store";
 import { resetThreadsStore } from "@stores/threads.store";
 import { setConnectionStatus } from "@stores/ui.store";
-import { isForwardRequest } from "../../src/features/messaging/forwardRequests";
+import { isClaimedRequest } from "../../src/lib/net/requestClaims";
 import type { ApiClient } from "@lib/api";
 import { initToast, teardownToast } from "@lib/ui/toast";
 import type { ToastContainer } from "@lib/ui/toastContainer";
@@ -88,7 +88,7 @@ describe("New Post dialog", () => {
     expect(String(sent()[0]!.payload["client_message_id"])).toMatch(/^\d+:[0-9a-f-]{36}$/);
     expect(byId<HTMLButtonElement>("forum-post-submit").disabled).toBe(true);
     // The generic error toast is told to leave this request's refusal to the dialog.
-    expect(isForwardRequest(sent()[0]!.id)).toBe(true);
+    expect(isClaimedRequest(sent()[0]!.id)).toBe(true);
   });
 
   it("requires a title, a message or file, and (when the forum asks) a tag", () => {

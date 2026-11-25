@@ -9,7 +9,7 @@ import { dmStore } from "../../stores/dm.store";
 import { setUserBlockedByThem } from "../../stores/blocks.store";
 import { showToast } from "../../lib/ui/toast";
 import { connectText } from "../../i18n/connect";
-import { isForwardRequest } from "./forwardRequests";
+import { isClaimedRequest } from "@lib/net/requestClaims";
 import { isPollRequest } from "./pollRequests";
 import { pendingMessageBeforeRestore } from "../../lib/pendingMessages";
 import type { Payload } from "../connection/dispatchContext";
@@ -63,8 +63,8 @@ function failPendingSend(payload: Payload<"error">, id: string): void {
  * the frame answered one of them and the error chain must stop.
  */
 export function handleMessagingError(payload: Payload<"error">, id: string | undefined): boolean {
-  // A refused Forward is shown on its picker row; no toast on top.
-  if (isForwardRequest(id)) return true;
+  // A claimed request (Forward, Create Thread, New Post) shows its own refusal.
+  if (isClaimedRequest(id)) return true;
   // A refused poll create, vote or end is shown on its dialog or card.
   if (isPollRequest(id)) return true;
   // 2A-3: a files-only send none of whose files could be attached stored

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createMockWsClient, type MockWsClient } from "../../../tests/helpers/mock-ws";
 import { activatePendingMessages, deactivatePendingMessages } from "../../lib/pendingMessages";
-import { isForwardRequest } from "./forwardRequests";
+import { isClaimedRequest } from "@lib/net/requestClaims";
 import {
   FORWARD_REPLY_TIMEOUT_MS,
   createForwardSession,
@@ -97,11 +97,11 @@ describe("forwardSend", () => {
     const done = session.start();
     await flush();
     const frame = sent()[0]!;
-    expect(isForwardRequest(frame.id)).toBe(true);
+    expect(isClaimedRequest(frame.id)).toBe(true);
     ackForward(frame);
     await done;
     await flush();
-    expect(isForwardRequest(frame.id)).toBe(false);
+    expect(isClaimedRequest(frame.id)).toBe(false);
   });
 
   it("retry resends only the failed target with the same client_message_id", async () => {
@@ -195,14 +195,14 @@ describe("forwardSend", () => {
       await done;
       const id = sent()[0]!.id;
       await vi.advanceTimersByTimeAsync(0);
-      expect(isForwardRequest(id)).toBe(true);
+      expect(isClaimedRequest(id)).toBe(true);
       refuse(sent()[0]!, "FORBIDDEN");
       await vi.advanceTimersByTimeAsync(0);
-      expect(isForwardRequest(id)).toBe(true);
+      expect(isClaimedRequest(id)).toBe(true);
       expect(session.results()[0]).toMatchObject({ status: "failed", reason: "UNCONFIRMED" });
       abort.abort();
       await vi.advanceTimersByTimeAsync(0);
-      expect(isForwardRequest(id)).toBe(false);
+      expect(isClaimedRequest(id)).toBe(false);
     } finally {
       vi.useRealTimers();
     }

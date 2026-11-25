@@ -3,7 +3,7 @@ import {
   createErrorText,
   openCreateThreadDialog,
 } from "../../src/features/threads/CreateThreadDialog";
-import { isForwardRequest } from "../../src/features/messaging/forwardRequests";
+import { isClaimedRequest } from "../../src/lib/net/requestClaims";
 import { createThreadList } from "../../src/features/threads/ThreadList";
 import { resetMessagesStore } from "@stores/messages.store";
 import { resetThreadsStore, threadsStore } from "@stores/threads.store";
@@ -139,7 +139,7 @@ describe("CreateThreadDialog", () => {
     expect(errorEl().textContent).toBe(createErrorText("UNCONFIRMED"));
     expect(submitBtn().disabled).toBe(false);
     await Promise.resolve();
-    expect(isForwardRequest(id)).toBe(false);
+    expect(isClaimedRequest(id)).toBe(false);
 
     ws.simulateMessage("thread_create_ok", { thread: makeThread({ id: 7 }) }, id);
     expect(onCreated).not.toHaveBeenCalled();
@@ -164,11 +164,11 @@ describe("CreateThreadDialog", () => {
     name.value = "Plan";
     submit();
     const id = sentOf(ws)[0]!.id;
-    expect(isForwardRequest(id)).toBe(true);
+    expect(isClaimedRequest(id)).toBe(true);
     document.querySelector<HTMLButtonElement>('[data-testid="create-thread-cancel"]')!.click();
     expect(dialog()).toBeNull();
     await Promise.resolve();
-    expect(isForwardRequest(id)).toBe(false);
+    expect(isClaimedRequest(id)).toBe(false);
 
     ws.simulateMessage("thread_create_ok", { thread: makeThread({ id: 7 }) }, id);
     ws.simulateMessage("error", { code: "THREAD_EXISTS", message: "exists", thread_id: 42 }, id);
