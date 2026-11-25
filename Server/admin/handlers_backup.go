@@ -221,7 +221,7 @@ const restoreCarryTimeout = 10 * time.Second
 
 // ArchiveRestoreHelp is what a restore of a full archive (.zip) is refused with: the panel and
 // `chatserver restore` restore a database copy only, and an archive goes back by hand.
-const ArchiveRestoreHelp = "A full archive (.zip) cannot be restored here. Stop the server, unpack the archive over the data folder, and start the server again. The steps are in docs/hosting/backups.md under \"Restore from a full archive\"."
+const ArchiveRestoreHelp = "A full archive (.zip) cannot be restored here. Stop the server, remove the data folder (do not unpack on top of it), put the archive's data folder and config.yaml in its place, and start the server again. The steps are in docs/hosting/backups.md under \"Restore from a full archive\"."
 
 // handleRestoreBackup verifies a backup and stages it for the next boot. It never writes over the open
 // database: the staged copy and a marker (written last) are applied by db.ApplyStagedRestore before the

@@ -138,7 +138,7 @@ func runMaintenanceLoop(bgCtx context.Context, log *slog.Logger, m *maintenance)
 		}
 		// A scheduled archive runs on its own goroutine under the loop's context, which is cancelled now; give
 		// it the same bounded wait so the database is not closed under a build.
-		waitCtx, cancelWait := context.WithTimeout(context.Background(), 5*time.Second)
+		waitCtx, cancelWait := context.WithTimeout(context.WithoutCancel(bgCtx), 5*time.Second)
 		defer cancelWait()
 		if err := admin.WaitScheduledArchives(waitCtx); err != nil {
 			log.Warn("scheduled archive did not stop before the shutdown timeout", "error", err)

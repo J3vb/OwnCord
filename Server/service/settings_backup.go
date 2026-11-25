@@ -38,9 +38,18 @@ const BackupDiskAckKey = "backup_disk_ack"
 // maxBackupDiskAckLen bounds the stored path.
 const maxBackupDiskAckLen = 4096
 
-// normalizeBackupSetting validates a PATCH value for backup_scope (database or everything; "unset" is the
-// migration's own and cannot be written back) or backup_disk_ack (a folder path, or blank to clear it).
+// normalizeBackupSetting validates a PATCH value for backup_schedule (off, daily, weekly), backup_scope
+// (database or everything; "unset" is the migration's own and cannot be written back) or backup_disk_ack (a
+// folder path, or blank to clear it).
 func normalizeBackupSetting(key, value string) (string, error) {
+	if key == "backup_schedule" {
+		schedule := strings.ToLower(strings.TrimSpace(value))
+		switch schedule {
+		case "off", "daily", "weekly":
+			return schedule, nil
+		}
+		return "", fmt.Errorf("%s: must be one of off, daily, weekly", key)
+	}
 	if key == BackupScopeKey {
 		scope := strings.ToLower(strings.TrimSpace(value))
 		if scope != BackupScopeDatabase && scope != BackupScopeEverything {

@@ -25,6 +25,8 @@ const (
 	// scheduledArchivesKept caps the stored full archives, whatever backup_retention says: each one holds
 	// uploads, so they are the files that fill a disk.
 	scheduledArchivesKept = 3
+	// archiveDueSlack is one maintenance tick: an archive counts as due this much before a full interval.
+	archiveDueSlack = 15 * time.Minute
 	// scheduledArchiveRetry is the least wait before a failed archive is tried again.
 	scheduledArchiveRetry = time.Hour
 	// scheduledArchiveHeadroomPercent is free space a scheduled build leaves above server.min_free_disk_mb, as
@@ -133,8 +135,13 @@ func startScheduledArchive(ctx context.Context, database *db.DB, settings *servi
 	if err != nil {
 		return err
 	}
-	if !newest.IsZero() && time.Since(newest) < interval {
+	// newest is when the last build ended, a tick or more after it became due: allow one tick of slack so the
+	// archive does not slip later every interval.
+	if !newest.IsZero() && time.Since(newest) < interval-archiveDueSlack {
 		return nil
+	}
+	if ctx.Err() != nil {
+		return nil // shutting down: start nothing the shutdown join has already passed
 	}
 	st := scheduledArchives
 	st.mu.Lock()
@@ -163,8 +170,9 @@ func (st *scheduledArchiveState) run(ctx context.Context, done chan struct{}, da
 	runCtx, cancel := context.WithTimeout(ctx, archiveMaxLifetime)
 	defer cancel()
 
-	// Older archives go first, so the build has the room they held.
-	pruneArchivesFor(runCtx, database, settings, paths.dir)
+	// Older archives go first, down to one fewer than the cap, so the build has the room they held and the
+	// folder never holds more than the cap. The newest always stays, so a failed build never leaves none.
+	pruneArchivesFor(runCtx, database, settings, paths.dir, scheduledArchivesKept-1)
 	name, size, err := storeScheduledArchive(runCtx, database, opts, paths)
 	if err != nil {
 		if ctx.Err() != nil {
@@ -177,7 +185,7 @@ func (st *scheduledArchiveState) run(ctx context.Context, done chan struct{}, da
 	slog.Info("scheduled archive created", "name", name, "bytes", size)
 	// Actor 0 = system, as the .db backup writes.
 	db.WriteAudit(runCtx, database, 0, "backup_create", "server", 0, "scheduled full archive saved: "+name)
-	pruneArchivesFor(runCtx, database, settings, paths.dir)
+	pruneArchivesFor(runCtx, database, settings, paths.dir, scheduledArchivesKept)
 }
 
 func (st *scheduledArchiveState) recordFailure(err error, backupDir string) {
@@ -264,19 +272,19 @@ func syncDir(dir string) {
 	_ = d.Close()
 }
 
-// pruneArchivesFor removes stored archives past the cap and the backup_retention window.
-func pruneArchivesFor(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir string) {
+// pruneArchivesFor removes stored archives past keep and the backup_retention window.
+func pruneArchivesFor(ctx context.Context, database *db.DB, settings *service.SettingsService, backupDir string, keep int) {
 	days, err := retentionDays(ctx, settings)
 	if err != nil {
 		slog.Warn("scheduled archive retention: could not read backup_retention", "error", err)
 		days = 0
 	}
-	pruneArchives(ctx, database, backupDir, days)
+	pruneArchives(ctx, database, backupDir, days, keep)
 }
 
-// pruneArchives keeps the newest scheduledArchivesKept archives at most, drops any older than days (when
-// days > 0) beyond the newest, and never removes the newest. The cap holds when days is 0.
-func pruneArchives(ctx context.Context, database *db.DB, backupDir string, days int) {
+// pruneArchives keeps the newest keep archives at most, drops any older than days (when days > 0) beyond the
+// newest, and never removes the newest. The cap holds when days is 0.
+func pruneArchives(ctx context.Context, database *db.DB, backupDir string, days, keep int) {
 	_, files, err := scanArchives(backupDir)
 	if err != nil || len(files) == 0 {
 		return
@@ -290,7 +298,7 @@ func pruneArchives(ctx context.Context, database *db.DB, backupDir string, days 
 	cutoff := time.Now().Add(-time.Duration(days) * 24 * time.Hour)
 	pruned := 0
 	for i, f := range files {
-		if i == 0 || (i < scheduledArchivesKept && (days <= 0 || !f.mtime.Before(cutoff))) {
+		if i == 0 || (i < keep && (days <= 0 || !f.mtime.Before(cutoff))) {
 			continue
 		}
 		if rmErr := os.Remove(f.path); rmErr != nil {
@@ -300,7 +308,7 @@ func pruneArchives(ctx context.Context, database *db.DB, backupDir string, days 
 		pruned++
 	}
 	if pruned > 0 {
-		slog.Info("scheduled archive retention: pruned archives", "count", pruned, "kept_at_most", scheduledArchivesKept)
+		slog.Info("scheduled archive retention: pruned archives", "count", pruned, "kept_at_most", keep)
 		db.WriteAudit(ctx, database, 0, "backup_delete", "server", 0,
 			fmt.Sprintf("retention pruned %d full archive(s)", pruned))
 	}

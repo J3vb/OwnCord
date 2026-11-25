@@ -2,12 +2,14 @@ package admin_test
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
 	"runtime"
+	"slices"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -131,12 +133,12 @@ func TestScheduledArchive_EverythingKeepsDatabaseAndArchive(t *testing.T) {
 		t.Fatalf("stored archive does not open: %v", err)
 	}
 	defer zr.Close() //nolint:errcheck
-	var names []string
+	names := make([]string, 0, len(zr.File))
 	for _, f := range zr.File {
 		names = append(names, f.Name)
 	}
 	for _, want := range []string{"data/chatserver.db", "data/totp.key", "data/uploads/hello.bin", "config.yaml"} {
-		if !containsString(names, want) {
+		if !slices.Contains(names, want) {
 			t.Errorf("archive has no %s; entries: %v", want, names)
 		}
 	}
@@ -154,15 +156,6 @@ func TestScheduledArchive_EverythingKeepsDatabaseAndArchive(t *testing.T) {
 	if got := s.names(t, ".zip"); len(got) != 1 {
 		t.Errorf("archives after an in-interval pass = %v, want still one", got)
 	}
-}
-
-func containsString(list []string, want string) bool {
-	for _, s := range list {
-		if s == want {
-			return true
-		}
-	}
-	return false
 }
 
 func TestScheduledArchive_FileModeIsOwnerOnly(t *testing.T) {
@@ -504,7 +497,7 @@ func writeStoredArchives(t *testing.T, dir string, ages ...time.Duration) []stri
 	if err := os.MkdirAll(dir, 0o750); err != nil {
 		t.Fatal(err)
 	}
-	var names []string
+	names := make([]string, 0, len(ages))
 	for i, age := range ages {
 		name := "scheduled_20260101_0000" + string(rune('0'+i/10)) + string(rune('0'+i%10)) + ".zip"
 		path := filepath.Join(dir, name)
@@ -540,7 +533,7 @@ func TestScheduledArchive_RetentionCapsCountAndDays(t *testing.T) {
 			if err := s.tick(t); err != nil {
 				t.Fatal(err)
 			}
-			var want []string
+			want := make([]string, 0, len(tc.keep))
 			for _, i := range tc.keep {
 				want = append(want, names[i])
 			}
@@ -549,7 +542,7 @@ func TestScheduledArchive_RetentionCapsCountAndDays(t *testing.T) {
 				t.Fatalf("archives kept = %v, want %v", got, want)
 			}
 			for _, w := range want {
-				if !containsString(got, w) {
+				if !slices.Contains(got, w) {
 					t.Errorf("archives kept = %v, want %s among them", got, w)
 				}
 			}
@@ -606,7 +599,8 @@ func TestRestore_RefusesAFullArchive(t *testing.T) {
 	names := writeStoredArchives(t, s.backups, day)
 	w := doRequest(t, s.handler, http.MethodPost, "/backups/"+names[0]+"/restore", s.token, map[string]any{})
 	requireStatus(t, w, http.StatusBadRequest)
-	if !strings.Contains(w.Body.String(), "full archive") || !strings.Contains(w.Body.String(), "docs/hosting/backups.md") {
+	if !strings.Contains(w.Body.String(), "full archive") || !strings.Contains(w.Body.String(), "docs/hosting/backups.md") ||
+		!strings.Contains(w.Body.String(), "remove the data folder") || !strings.Contains(w.Body.String(), "config.yaml") {
 		t.Errorf("restore refusal does not point at the manual steps: %s", w.Body.String())
 	}
 	if _, err := os.Stat(filepath.Join(s.backups, names[0])); err != nil {
@@ -651,7 +645,7 @@ func TestStoredArchive_DownloadsThroughTheArchiveLink(t *testing.T) {
 	if !strings.Contains(dl.Header().Get("Content-Disposition"), name) {
 		t.Errorf("Content-Disposition = %q, want the file's name", dl.Header().Get("Content-Disposition"))
 	}
-	if got := dl.Body.Bytes(); string(got) != string(want) {
+	if got := dl.Body.Bytes(); !bytes.Equal(got, want) {
 		t.Errorf("downloaded %d bytes, stored file is %d: the link built a new archive instead of serving the stored one", len(got), len(want))
 	}
 	if again := getRawLink(t, s.archiveFixture, resp.Path); again.Code == http.StatusOK {
@@ -696,5 +690,31 @@ func TestStoredArchive_NeedsRestoreBackups(t *testing.T) {
 	_ = uid
 	if dl := getRawLink(t, s.archiveFixture, resp.Path); dl.Code != http.StatusForbidden {
 		t.Errorf("link after losing RESTORE_BACKUPS = %d, want 403", dl.Code)
+	}
+}
+
+func TestScheduledArchive_BuildNeverHoldsMoreThanTheCap(t *testing.T) {
+	s := newSchedFixture(t, "everything", "0")
+	old := writeStoredArchives(t, s.backups, 2*day, 3*day, 4*day)
+	during := -1
+	restore := admin.SetArchiveOutWrapper(func(w io.Writer) io.Writer {
+		during = len(s.names(t, ".zip"))
+		return w
+	})
+	defer restore()
+	if err := s.tick(t); err != nil {
+		t.Fatalf("MaintainBackups: %v", err)
+	}
+	if during != 2 {
+		t.Errorf("stored archives while the build ran = %d, want 2 (one fewer than the cap)", during)
+	}
+	got := s.names(t, ".zip")
+	if len(got) != 3 {
+		t.Fatalf("archives after the build = %v, want three", got)
+	}
+	for _, n := range old[2:] {
+		if slices.Contains(got, n) {
+			t.Errorf("oldest archive %s kept; it should have made room for the build", n)
+		}
 	}
 }

@@ -182,6 +182,24 @@ func BackupScheduleInterval(schedule string) time.Duration {
 	return 0
 }
 
+// backupFreshness is the time the backup signal ages from, and whether that is the full archive's. With
+// Everything, the backup is only as fresh as the older of its two copies. An archive that does not exist yet
+// has aged since its first failed run, or counts as the database copy until one fails.
+func backupFreshness(r attentionReadings, interval time.Duration) (time.Time, bool) {
+	last := r.lastBackup
+	if interval <= 0 || last.IsZero() || r.archive == nil || BackupScope(r.archive.Scope) != BackupScopeEverything {
+		return last, false
+	}
+	ref := r.archive.Newest
+	if ref.IsZero() {
+		ref = r.archive.FailingSince
+	}
+	if ref.IsZero() || !ref.Before(last) {
+		return last, false
+	}
+	return ref, true
+}
+
 func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 	sig := AttentionSignal{ID: attentionBackupSignal, Label: "Last successful backup", ObservedAt: now}
 	title := "Backups are out of date"
@@ -192,21 +210,7 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 		return
 	}
 	interval := BackupScheduleInterval(r.schedule)
-	last, archiveStale := r.lastBackup, false
-	if interval > 0 && !last.IsZero() && r.archive != nil && BackupScope(r.archive.Scope) == BackupScopeEverything {
-		// With Everything, the backup is only as fresh as the older of its two copies. An archive that does not
-		// exist yet has aged since its first failed run, or counts as the database copy until one fails.
-		ref := r.archive.Newest
-		if ref.IsZero() {
-			ref = r.archive.FailingSince
-		}
-		if ref.IsZero() {
-			ref = last
-		}
-		if ref.Before(last) {
-			last, archiveStale = ref, true
-		}
-	}
+	last, archiveStale := backupFreshness(r, interval)
 	if !last.IsZero() {
 		sig.Value = last.UTC().Format("2006-01-02 15:04 UTC")
 	}

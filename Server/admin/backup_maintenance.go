@@ -57,7 +57,7 @@ func MaintainBackups(ctx context.Context, database *db.DB, settings *service.Set
 		}
 	}
 	// Archives that earlier runs stored age out even when the scope has since gone back to the database only.
-	pruneArchivesFor(ctx, database, settings, backupDir)
+	pruneArchivesFor(ctx, database, settings, backupDir, scheduledArchivesKept)
 	// A failed or refused archive is kept for the attention panel and retried later: it is not this tick's
 	// error, so the loop's circuit breaker is left alone.
 	if interval > 0 && bo.archive != nil {

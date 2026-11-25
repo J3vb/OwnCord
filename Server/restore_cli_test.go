@@ -167,7 +167,8 @@ func TestRestoreCLI_RefusesAFullArchive(t *testing.T) {
 		t.Fatal(err)
 	}
 	err := checkRestoreSource(archive, dbPath)
-	if err == nil || !strings.Contains(err.Error(), "full archive") || !strings.Contains(err.Error(), "docs/hosting/backups.md") {
+	if err == nil || !strings.Contains(err.Error(), "full archive") || !strings.Contains(err.Error(), "docs/hosting/backups.md") ||
+		!strings.Contains(err.Error(), "remove the data folder") || !strings.Contains(err.Error(), "config.yaml") {
 		t.Fatalf("checkRestoreSource(.zip) = %v, want a refusal that names the manual steps", err)
 	}
 	for _, args := range [][]string{{archive}, {"--force", archive}} {

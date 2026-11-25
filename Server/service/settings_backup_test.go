@@ -73,10 +73,11 @@ func TestSettings_BackupKeysAreOwnerOnly(t *testing.T) {
 
 func TestBackupScope_ReadsStoredValues(t *testing.T) {
 	t.Parallel()
-	for stored, want := range map[string]string{
-		"database": BackupScopeDatabase, "everything": BackupScopeEverything, " Everything ": BackupScopeEverything,
-		"unset": BackupScopeUnset, "": BackupScopeUnset, "junk": BackupScopeUnset,
+	for _, tc := range []struct{ stored, want string }{
+		{"database", BackupScopeDatabase}, {"everything", BackupScopeEverything}, {" Everything ", BackupScopeEverything},
+		{"unset", BackupScopeUnset}, {"", BackupScopeUnset}, {"junk", BackupScopeUnset},
 	} {
+		stored, want := tc.stored, tc.want
 		if got := BackupScope(stored); got != want {
 			t.Errorf("BackupScope(%q) = %q, want %q", stored, got, want)
 		}

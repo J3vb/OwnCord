@@ -4,7 +4,6 @@ package diskutil
 
 import (
 	"fmt"
-	"strconv"
 	"syscall"
 )
 
@@ -14,5 +13,5 @@ func volumeID(path string) (string, error) {
 	if err := syscall.Stat(path, &st); err != nil {
 		return "", fmt.Errorf("stat %s: %w", path, err)
 	}
-	return strconv.FormatUint(uint64(st.Dev), 10), nil //nolint:gosec // G115: a device number is never negative
+	return fmt.Sprintf("%d", st.Dev), nil
 }

@@ -668,7 +668,8 @@ function backupStatusLine(backups,schedule,signal,scope){
   else{tone='warning';title='No backups yet'}
   if(alarm)tone=signal.status;
   const parts=[];
-  if(latest)parts.push(backups.length+(backups.length===1?' backup kept':' backups kept'));
+  const dbCount=backups.filter(b=>b.kind!=='full').length;
+  if(latest)parts.push(dbCount+(dbCount===1?' backup kept':' backups kept'));
   if(latestFull)parts.push('Full archive '+relTime(new Date(latestFull.date)));
   else if(scope==='everything'&&schedule&&schedule!=='off')parts.push('No full archive yet');
   if(auto)parts.push(auto);
