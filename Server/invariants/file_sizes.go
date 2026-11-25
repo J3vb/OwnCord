@@ -30,8 +30,8 @@ const (
 	// architecture plan set these for the ws coordination hotspots
 	// (docs/archive/plans/b3-server-architecture-guardrails-2026-08-29.md, exit criteria)
 	// and recorded them met at 361/424/183. hub_broadcast.go and serve.go are
-	// no longer listed — the default covers them now; only hub.go's 400 still
-	// bites.
+	// no longer listed — the default covers them now; hub.go is held at 250,
+	// its size rounded up to the next 50.
 	classB3ExitTarget = "b3-exit-target"
 
 	// classRegistrationPoint: a wiring file every feature used to edit, now
@@ -53,7 +53,7 @@ type FileSizeOverride struct {
 // it used to be skipped, and its largest file grew to six times the limit.
 var FileSizeOverrides = map[string]FileSizeOverride{
 	"ws/hub.go": {
-		Ceiling: 400,
+		Ceiling: 250,
 		Class:   classB3ExitTarget,
 		Note:    "hub: client registry, broadcast fan-out, replay",
 	},
