@@ -47,7 +47,8 @@ describe("applyStoredAppearance", () => {
 
   it.each([
     ["deck with Developer mode on", '"deck"', "true", true],
-    ["deck with Developer mode off", '"deck"', "false", false],
+    ["deck with Developer mode off", '"deck"', "false", true],
+    ["deck with Developer mode never set", '"deck"', null, true],
     ["classic with Developer mode on", '"classic"', "true", false],
     ["nothing stored", null, null, false],
   ])("marks layout-deck only when Command Deck runs: %s", (_name, stored, dev, deck) => {
@@ -70,7 +71,7 @@ describe("applyStoredAppearance", () => {
     try {
       applyStoredAppearance();
       expect(document.documentElement.classList.contains("layout-deck")).toBe(true);
-      localStorage.setItem("owncord:settings:developerMode", "false");
+      localStorage.setItem("owncord:settings:screenLayout", '"classic"');
       applyStoredAppearance();
       expect(document.documentElement.classList.contains("layout-deck")).toBe(false);
       expect(runningScreenLayout()).toBe("classic");

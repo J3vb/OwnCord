@@ -102,6 +102,11 @@ release changes the database, and anything an operator must do first.)
 
 ### Added
 
+**Appearance & layout**
+
+- A new screen layout, Command Deck: your servers in tabs across the top, your channels, voice rooms and direct messages in one list on the left, Buddies on the right grouped by what people are doing, and an Info block for the voice room you are in. Pick it in Settings > Appearance > Screen layout, on desktop and in the browser. The Android app and phone-sized screens run Classic. Applies the next time OwnCord starts or reloads; Restart now applies it at once.
+- The Gunmetal theme, with blue-grey surfaces and an orange accent, in both layouts.
+
 **Accounts & admin**
 
 - Automatic backups can include everything. On Backups & restore, "What to back up" has a new choice, Everything: next to each database copy the server keeps a full archive with uploads, keys and settings. The newest 3 archives are kept. New servers start on Everything. Servers that already ran keep database only, and the page asks the owner to choose.
@@ -128,6 +133,10 @@ release changes the database, and anything an operator must do first.)
 - Warnings and timeouts are limited to 10 each per moderator per minute; blocking, the age-restricted content setting and closing DMs to 20 per account per minute.
 - Thread and forum post titles follow the display name text rules (single line, no invisible characters); existing titles are unchanged.
 - A connection that sends far more messages than any app does is answered "rate limited" and then closed.
+
+**Settings**
+
+- Clear all cache & restart keeps your screen layout and folded Buddies groups.
 
 ### Fixed
 

@@ -46,7 +46,7 @@ const storedLayout = (page: Page): Promise<unknown> =>
   page.evaluate((key) => JSON.parse(localStorage.getItem(key) ?? "null") as unknown, LAYOUT_KEY);
 
 test.describe("Screen layout", () => {
-  test("runs Command Deck at load when it is stored and Developer mode is on", async ({ page }) => {
+  test("runs Command Deck at load when it is stored", async ({ page }) => {
     await page.addInitScript(
       ([dev, layout]) => {
         localStorage.setItem(dev, JSON.stringify(true));
@@ -55,6 +55,70 @@ test.describe("Screen layout", () => {
       [DEV_KEY, LAYOUT_KEY] as const,
     );
     await startFullSession(page);
+    await expect(page.locator("html")).toHaveClass(/layout-deck/);
+  });
+
+  test("runs Command Deck at load with Developer mode never set", async ({ page }) => {
+    await page.addInitScript(
+      (layout) => localStorage.setItem(layout, JSON.stringify("deck")),
+      LAYOUT_KEY,
+    );
+    await startFullSession(page);
+    await expect(page.locator("html")).toHaveClass(/layout-deck/);
+    expect(await page.evaluate((key) => localStorage.getItem(key), DEV_KEY)).toBeNull();
+  });
+
+  test("the row shows with Developer mode off", async ({ page }) => {
+    await startFullSession(page);
+    await openSettings(page);
+    await switchSettingsTab(page, "Appearance");
+    await expect(page.locator("[data-testid='screen-layout']")).toBeVisible();
+    await expect(page.locator("[data-testid='screen-layout-deck']")).toHaveText("Command Deck");
+    await expect(page.locator("[data-testid='screen-layout-restart']")).toHaveCount(0);
+  });
+
+  test("Restart now relaunches and Command Deck runs after the reload", async ({ page }) => {
+    await startFullSession(page);
+    await openSettings(page);
+    await switchSettingsTab(page, "Appearance");
+    await page.locator("[data-testid='screen-layout-deck']").click();
+
+    const restart = page.locator("[data-testid='screen-layout-restart']");
+    await expect(restart).toHaveText("Restart now");
+    await restart.click();
+    await page.waitForFunction(() =>
+      (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.some(
+        (e) => e.cmd === "plugin:process|restart",
+      ),
+    );
+
+    await page.reload();
+    await expect(page.locator("html")).toHaveClass(/layout-deck/);
+  });
+
+  test("Clear all cache & restart keeps Command Deck", async ({ page }) => {
+    await startFullSession(page);
+    await openSettings(page);
+    await switchSettingsTab(page, "Appearance");
+    await page.locator("[data-testid='screen-layout-deck']").click();
+    await page.reload();
+    await expect(page.locator("html")).toHaveClass(/layout-deck/);
+
+    await openSettings(page);
+    await switchSettingsTab(page, "Advanced");
+    const btn = page
+      .locator(".setting-row", { hasText: "Clear all cache & restart" })
+      .locator("button.ac-btn");
+    await btn.click();
+    await btn.click();
+    await page.waitForFunction(() =>
+      (window as unknown as { __invokeLog: Array<{ cmd: string }> }).__invokeLog.some(
+        (e) => e.cmd === "plugin:process|restart",
+      ),
+    );
+    expect(await storedLayout(page)).toBe("deck");
+
+    await page.reload();
     await expect(page.locator("html")).toHaveClass(/layout-deck/);
   });
 

@@ -191,11 +191,13 @@ the Audit Log button handler in `createSidebarArea()`, `pages/main-page/SidebarA
 
 ## 4. Appearance & theming
 
-Themes are CSS custom properties (`styles/tokens.css`), 4 built-ins
-(`dark | neon-glow | midnight | light`) plus custom overrides. **Target:** theme
+Themes are CSS custom properties (`styles/tokens.css`), 5 built-ins
+(`dark | neon-glow | midnight | gunmetal | light`) plus custom overrides. **Target:** theme
 changes apply **live** — `ui.setTheme` + the `owncord:pref-change` event re-skin
 open views without reload. Appearance is editable pre-login (on the connect page)
 so the app respects the user's theme before they authenticate.
+
+**Screen layout.** Settings > Appearance offers Command Deck and Classic on desktop and in the browser. The Android app and phone-sized screens run Classic. A change applies the next time OwnCord starts or reloads; Restart now applies it at once (in a call it asks first). Clear all cache & restart keeps the screen layout and the folded Buddies groups.
 
 **Custom themes** (Appearance > Custom themes, `features/custom-themes/`): a saved
 list of the user's own CSS, per device (`owncord:theme:custom:list` and

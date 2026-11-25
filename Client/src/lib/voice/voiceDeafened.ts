@@ -28,6 +28,14 @@ export function setVoiceInSession(value: boolean): void {
   inVoiceSession = value;
 }
 
+/**
+ * Whether the local user is in a voice channel, as the voice store last mirrored it.
+ * The mirror follows store notifications, so it lags a voice-store change by one microtask.
+ */
+export function isInVoiceSession(): boolean {
+  return inVoiceSession;
+}
+
 /** Whether every non-ring sound must stay silent. */
 export function isVoiceDeafened(): boolean {
   return deafened && inVoiceSession;

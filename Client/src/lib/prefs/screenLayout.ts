@@ -1,13 +1,12 @@
 /**
- * The Screen layout preference (Command Deck preview).
+ * The Screen layout preference (Command Deck or Classic).
  *
  * Two values are in play. The STORED value is what the user picked and what
  * the Appearance row shows. The RUNNING value is what `applyStoredAppearance()`
  * computed at load and what the rest of the app obeys until the next reload,
  * so a pick never changes the layout under a live session.
  *
- * `lib/` cannot import `features/developer-mode` or `features/voice/native`,
- * so the Developer mode pref is read directly and Android is detected through
+ * `lib/` cannot import `features/voice/native`, so Android is detected through
  * `hostPlatform`.
  */
 
@@ -19,14 +18,14 @@ export type ScreenLayout = "classic" | "deck";
 
 export const SCREEN_LAYOUT_PREF = "screenLayout";
 
-/** Whether the preview can run here: Developer mode on, and neither the Android
- *  app nor a phone-sized touch screen (which has its own layout). */
+/** Whether Command Deck can run here: neither the Android app nor a phone-sized
+ *  touch screen (which has its own layout). */
 export function screenLayoutAvailable(): boolean {
-  return loadPref<boolean>("developerMode", false) && !isAndroidHost() && !isPhoneLayout();
+  return !isAndroidHost() && !isPhoneLayout();
 }
 
 /** The stored choice, as the row shows it: `"deck"` only when stored as such,
- *  whatever Developer mode or the platform say. Never rewrites the stored value. */
+ *  whatever the platform says. Never rewrites the stored value. */
 export function loadStoredScreenLayout(): ScreenLayout {
   return loadPref<string>(SCREEN_LAYOUT_PREF, "classic") === "deck" ? "deck" : "classic";
 }

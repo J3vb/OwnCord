@@ -76,8 +76,7 @@ Security is reviewed in regular passes. Each review is a dated audit, listed in
   can download and run for you. Calls are end-to-end encrypted. Screen
   sharing, music sharing from one app, a call layout you can pin and resize,
   noise suppression, and optional passwords on voice channels.
-- **Several servers.** A server rail like Discord's, with Home for your direct
-  messages, and an icon for each server.
+- **Several servers.** Server tabs across the top in Command Deck, or a server rail with Home for your direct messages in Classic.
 - **Bring your Discord history.** The admin panel imports a Discord channel
   export, with the original authors on each message.
 - **Files and links.** Uploads with inline images and video, a Media panel per

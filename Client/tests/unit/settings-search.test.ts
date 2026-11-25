@@ -73,6 +73,7 @@ import {
 } from "../../src/features/settings/settingsSearch";
 import { settingsText } from "../../src/i18n/settings";
 import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
+import { PHONE_LAYOUT_QUERY } from "../../src/lib/ui/phoneLayout";
 import { whatsNewText } from "../../src/i18n/whatsNew";
 import { gameActivityText } from "../../src/i18n/gameActivity";
 import { listeningDetailsText } from "../../src/i18n/listeningDetails";
@@ -265,15 +266,21 @@ describe("settings search", () => {
       const devOn = (): void => localStorage.setItem("owncord:settings:developerMode", "true");
       afterEach(() => setRunningScreenLayout("classic"));
 
-      it("are absent with Developer mode off, and the on-screen row agrees", () => {
-        expect(appearance()).not.toContain(rowText);
-        expect(openAppearance()).not.toContain(rowText);
+      it("are present with Developer mode off, and the on-screen row agrees", () => {
+        expect(appearance()).toContain(rowText);
+        expect(openAppearance()).toContain(rowText);
       });
 
-      it("are present with Developer mode on, and match the screen and the index", () => {
-        // The cached index must not hand back the Developer-mode-off answer.
+      it("are present once the phone check lifts, and match the screen and the index", () => {
+        // The cached index must not hand back the phone-sized answer.
+        vi.stubGlobal("matchMedia", (media: string) => ({
+          matches: media === PHONE_LAYOUT_QUERY,
+          media,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }));
         expect(appearance()).not.toContain(rowText);
-        devOn();
+        vi.unstubAllGlobals();
         expect(appearance()).toContain(rowText);
         expect(appearance()).toContain(settingsText("appearance.screenLayout.desc"));
         const shown = openAppearance();
