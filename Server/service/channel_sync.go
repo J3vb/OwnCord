@@ -37,13 +37,16 @@ func planRows(p db.ChannelSyncPlan) []db.OverrideRow {
 // the hierarchy rules, and returns the guard for inside the transaction. The guard does no
 // store reads (the writer connection is held): it verifies the shown rows were checked
 // and runs the escalation guard over their union; a refusal is also recorded in *refused.
-func (s *channelOverrides) prepareSync(ctx context.Context, actorRole *db.Role, channelID, categoryID int64, refused *error) (db.ChannelSyncGuard, error) {
+func (s *channelOverrides) prepareSync(ctx context.Context, actorID int64, actorRole *db.Role, channelID, categoryID int64, refused *error) (db.ChannelSyncGuard, error) {
 	cp, err := s.catPermStore()
 	if err != nil {
 		return nil, err
 	}
 	if actorRole == nil {
 		return nil, fmt.Errorf("not authenticated%.0w", ErrForbidden)
+	}
+	if err := s.requireOverrideView(ctx, actorID, actorRole, channelID); err != nil {
+		return nil, err
 	}
 	preview, err := cp.PreviewChannelSync(ctx, channelID, categoryID)
 	if err != nil {
@@ -131,7 +134,7 @@ func (s *channelOverrides) SyncChannelPermissions(ctx context.Context, actorID i
 		return PermEffect{}, fmt.Errorf("channel has no category to sync with%.0w", ErrBadRequest)
 	}
 	var refused error
-	guard, err := s.prepareSync(ctx, actorRole, ch.ID, ch.CategoryID, &refused)
+	guard, err := s.prepareSync(ctx, actorID, actorRole, ch.ID, ch.CategoryID, &refused)
 	if err != nil {
 		return PermEffect{}, err
 	}
@@ -212,14 +215,14 @@ func (s *ChannelService) AdminListChannelsSynced(ctx context.Context) ([]AdminCh
 	return out, nil
 }
 
-func (s *channelOverrides) prepareUpdateSync(ctx context.Context, req AdminChannelUpdate, channelID, categoryID int64, update *db.ChannelUpdate, refused *error) error {
+func (s *channelOverrides) prepareUpdateSync(ctx context.Context, actorID int64, req AdminChannelUpdate, channelID, categoryID int64, update *db.ChannelUpdate, refused *error) error {
 	if !req.SyncPermissions {
 		return nil
 	}
 	if categoryID == 0 {
 		return fmt.Errorf("sync_permissions needs an existing category%.0w", ErrBadRequest)
 	}
-	guard, err := s.prepareSync(ctx, req.ActorRole, channelID, categoryID, refused)
+	guard, err := s.prepareSync(ctx, actorID, req.ActorRole, channelID, categoryID, refused)
 	if err != nil {
 		return err
 	}

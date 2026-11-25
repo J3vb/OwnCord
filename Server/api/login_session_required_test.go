@@ -81,6 +81,9 @@ func TestAccountSecurityRoutes_RequireLoginSession(t *testing.T) {
 		// A device key is refused even beside an ordinary profile field, and
 		// the field is not applied either.
 		{http.MethodPatch, "/api/v1/users/me", map[string]string{"username": "token-holder", "display_name": "Half Applied", "identity_public_key": deviceKey}},
+		// A new sign-in name is refused, with or without other fields, and nothing is applied.
+		{http.MethodPatch, "/api/v1/users/me", map[string]string{"username": "token-renamed"}},
+		{http.MethodPatch, "/api/v1/users/me", map[string]string{"username": "Token-Holder", "display_name": "Half Applied"}},
 	}
 	for _, tc := range refused {
 		t.Run("refused "+tc.method+" "+tc.path, func(t *testing.T) {
@@ -93,6 +96,9 @@ func TestAccountSecurityRoutes_RequireLoginSession(t *testing.T) {
 	user, err := database.GetUserByID(ctx, uid)
 	if err != nil || user == nil {
 		t.Fatalf("account gone after refused calls: %v", err)
+	}
+	if user.Username != "token-holder" {
+		t.Errorf("sign-in name changed through an API token to %q", user.Username)
 	}
 	if user.PasswordHash != hash {
 		t.Error("password changed through an API token")

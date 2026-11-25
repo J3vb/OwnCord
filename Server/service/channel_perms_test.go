@@ -28,6 +28,9 @@ func seedOverrideFixture(t *testing.T) (*ChannelService, *db.DB, *db.Role, *db.R
 	low := &db.Role{ID: 22, Name: "chan-low", Position: 10, Permissions: permissions.ReadMessages}
 	seedRole(t, database, mod)
 	seedRole(t, database, low)
+	// The tests act as user 7, who holds mod: an override edit also needs the
+	// editor's own read access to the channel.
+	seedUserRole(t, database, 7, mod.ID)
 	return svc, database, mod, low, ch
 }
 

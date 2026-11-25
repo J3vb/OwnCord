@@ -1223,7 +1223,9 @@ manages LiveKit like this:
 
 1. **It writes the config.** OwnCord generates `data/livekit.yaml` with:
    - the API key and secret
-   - port 7880
+   - port 7880, listening on the local machine only (`bind_addresses`) when
+     `voice.livekit_url` is a loopback address such as the default
+     `localhost`; the media ports still listen on every interface
    - the UDP range `50000-60000`, or your single `voice.udp_port`
    - an `audio:` block that tunes speaker detection, so the speaking ring
      lights up promptly (copy it from `livekit.yaml.example` into a file you

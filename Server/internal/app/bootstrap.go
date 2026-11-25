@@ -69,10 +69,11 @@ func LoadConfig(log *slog.Logger, levelVar *slog.LevelVar, rc *RestartCoordinato
 	return cfg, base, nil
 }
 
-// prepareDataDir creates the data directory and warns when the volumes the
-// server writes to are low on free space.
+// prepareDataDir creates the data directory (owner-only when new; an existing
+// one keeps its mode) and warns when the volumes the server writes to are low on
+// free space.
 func prepareDataDir(log *slog.Logger, cfg *config.Config) error {
-	if mkdirErr := os.MkdirAll(cfg.Server.DataDir, 0o750); mkdirErr != nil {
+	if mkdirErr := os.MkdirAll(cfg.Server.DataDir, 0o700); mkdirErr != nil {
 		return fmt.Errorf("creating data dir %s: %w", cfg.Server.DataDir, mkdirErr)
 	}
 

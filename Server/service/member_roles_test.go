@@ -20,6 +20,10 @@ const memberRolesHelperID = int64(7)
 func newMemberRolesFixture(t *testing.T) (*ModerationService, *db.DB) {
 	t.Helper()
 	svc, database := newTestRoleService(t)
+	// mod also holds READ_MESSAGES here: assigning a role is limited to the bits the
+	// assigner holds, and these tests are about rank.
+	seedRole(t, database, &db.Role{ID: 3, Name: "mod",
+		Permissions: permissions.ManageRoles | permissions.KickMembers | permissions.ReadMessages, Position: 60})
 	seedRole(t, database, &db.Role{ID: memberRolesHelperID, Name: "helper", Position: 50, Permissions: permissions.ReadMessages})
 	return svc, database
 }

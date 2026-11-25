@@ -224,6 +224,11 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	validateName := auth.ValidateNewUsername
 	if req.Username == currentUsername {
 		validateName = auth.ValidateUsername
+	} else if p, _ := principal(r); p.Session == nil {
+		// The sign-in name is a credential, so changing it needs a login session like the password does;
+		// an API token may still edit the rest of the profile while resending the current name.
+		writeLoginSessionRequired(w)
+		return req, false
 	}
 	if err := validateName(req.Username); err != nil {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())

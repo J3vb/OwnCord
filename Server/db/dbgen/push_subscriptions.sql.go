@@ -54,6 +54,21 @@ func (q *Queries) DeletePushSubscriptionByID(ctx context.Context, id int64) (int
 	return result.RowsAffected()
 }
 
+const deleteUserPushSubscriptions = `-- name: DeleteUserPushSubscriptions :execrows
+DELETE FROM push_subscriptions WHERE user_id = ?
+`
+
+// Every subscription of one account, inside the ban transaction
+// (DB.BanUserWithAction): a banned account gets no wake-ups. The app
+// registers again on its next ready after an unban.
+func (q *Queries) DeleteUserPushSubscriptions(ctx context.Context, userID int64) (int64, error) {
+	result, err := q.db.ExecContext(ctx, deleteUserPushSubscriptions, userID)
+	if err != nil {
+		return 0, err
+	}
+	return result.RowsAffected()
+}
+
 const listPushSubscriptionIDsNewestFirst = `-- name: ListPushSubscriptionIDsNewestFirst :many
 SELECT id FROM push_subscriptions WHERE user_id = ? ORDER BY last_seen_at DESC, id DESC
 `
