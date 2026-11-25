@@ -10,8 +10,8 @@ func TestCleanThreadName_SingleLineVisibleText(t *testing.T) {
 	t.Parallel()
 	refused := map[string]string{
 		"line break":         "release\nnotes",
-		"direction override": "abc‮txt.exe",
-		"zero width":         "a​b",
+		"direction override": "abc\u202etxt.exe",
+		"zero width":         "a\u200bb",
 		"control":            "bell\x07",
 	}
 	for name, in := range refused {

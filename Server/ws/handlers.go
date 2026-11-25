@@ -56,20 +56,10 @@ func (h *Hub) handleMessage(c *Client, raw []byte) {
 		h.touchSession(fctx, c)
 	}
 
-	ctor, ok := getCommandConstructor(env.Type)
+	cmd, ok := h.handleMessageCommand(c, env, msgType, reqID)
 	if !ok {
-		c.sendMsg(buildErrorMsg(ErrCodeUnknownType, fmt.Sprintf("unknown message type: %s", msgType)))
-		h.strikeFrame(c, strikeUnknownType, "msg_type", msgType, "req_id", reqID)
 		return
 	}
-
-	cmd, parseErr := ctor(c.userID, env.ID, env.Payload)
-	if parseErr != nil {
-		c.sendMsg(buildErrorMsgWithID(ErrCodeBadRequest, "invalid payload", env.ID))
-		h.strikeFrame(c, strikeBadPayload, "msg_type", msgType, "req_id", reqID, "err", parseErr)
-		return
-	}
-	clearFrameStrikes(c)
 
 	var username string
 	var avatar, displayName *string
@@ -228,6 +218,27 @@ func (h *Hub) handleMessageDecode(c *Client, raw []byte) (envelope, string, stri
 	slog.Debug("ws ← client message", "user_id", c.userID, "msg_type", msgType, "req_id", reqID)
 
 	return env, msgType, reqID, true
+}
+
+// handleMessageCommand builds the command for a decoded frame. An unknown type
+// or a payload that does not parse is answered and logged (strikeFrame) and
+// returns false; a frame that builds resets the strike count.
+func (h *Hub) handleMessageCommand(c *Client, env envelope, msgType, reqID string) (Command, bool) {
+	ctor, ok := getCommandConstructor(env.Type)
+	if !ok {
+		c.sendMsg(buildErrorMsg(ErrCodeUnknownType, fmt.Sprintf("unknown message type: %s", msgType)))
+		h.strikeFrame(c, strikeUnknownType, "msg_type", msgType, "req_id", reqID)
+		return nil, false
+	}
+
+	cmd, parseErr := ctor(c.userID, env.ID, env.Payload)
+	if parseErr != nil {
+		c.sendMsg(buildErrorMsgWithID(ErrCodeBadRequest, "invalid payload", env.ID))
+		h.strikeFrame(c, strikeBadPayload, "msg_type", msgType, "req_id", reqID, "err", parseErr)
+		return nil, false
+	}
+	clearFrameStrikes(c)
+	return cmd, true
 }
 
 // handleMessageApply applies the state changes a successful Result asks for.

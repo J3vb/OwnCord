@@ -45,6 +45,7 @@ func TestFreshConnectFallback_ChannelOverridePreRegister_RevalidatesTopics(t *te
 			return
 		}
 		// The walk runs now, before this socket is registered, so it cannot reach it.
+		//nolint:contextcheck // RefreshChannelVisibility takes no context by design.
 		hub.RefreshChannelVisibility(ch)
 	}
 	defer func() { freshConnectPreRegisterRaceHook = nil }()

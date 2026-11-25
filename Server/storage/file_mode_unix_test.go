@@ -17,7 +17,7 @@ func TestSave_NewFilesAndFolderAreOwnerOnly(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	png := append([]byte("\x89PNG\r\n\x1a\n"), bytes.Repeat([]byte{0}, 32)...)
+	png := append([]byte("\x89PNG\r\n\x1a\n"), make([]byte, 32)...)
 	const name = "0f8fad5b-d9cb-469f-a165-70867728950e"
 	if _, err := s.Save(name, bytes.NewReader(png)); err != nil {
 		t.Fatalf("Save: %v", err)

@@ -283,8 +283,8 @@ func CanManageChannels(s Subject) error {
 	return missing(ManageChannels)
 }
 
-// CanEditAnyChannelOverrides: the owner or an Administrator saves overrides on
-// any channel, whatever its own access there.
+// CanEditAnyChannelOverrides reports whether the subject is the owner or an
+// Administrator, who save overrides on any channel whatever their own access there.
 func CanEditAnyChannelOverrides(rolePerms, topRoleID int64, topRolePosition int) bool {
 	return IsOwner(topRoleID, topRolePosition) || HasAdmin(rolePerms)
 }
