@@ -5,7 +5,7 @@ import {
   notifyIncomingMessage,
   notifyMention,
   openMessageTarget,
-} from "../../../src/lib/notifications";
+} from "../../../src/features/notifications/notifications";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { setBlockedByMe } from "../../../src/stores/blocks.store";
 import type { ChannelActivityEntry } from "../../../src/lib/types";

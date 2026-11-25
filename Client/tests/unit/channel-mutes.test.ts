@@ -211,7 +211,7 @@ describe("notifyIncomingMessage respects mutes", () => {
     vi.resetModules();
     for (const [id, mod] of APP_LIFETIME_MODULES) vi.doMock(id, () => mod);
     try {
-      return await import("@lib/notifications");
+      return await import("../../src/features/notifications/notifications");
     } finally {
       for (const [id] of APP_LIFETIME_MODULES) vi.doUnmock(id);
     }

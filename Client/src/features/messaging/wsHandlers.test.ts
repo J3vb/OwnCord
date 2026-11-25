@@ -28,8 +28,8 @@ import { createReconnectClock } from "../connection/dispatchContext";
 import type { DispatchApi, Payload } from "../connection/dispatchContext";
 import type { DmChannelsResponse } from "../../lib/types";
 
-vi.mock("../../lib/notifications", () => ({ notifyIncomingMessage: vi.fn() }));
-import { notifyIncomingMessage } from "../../lib/notifications";
+vi.mock("../notifications/notifications", () => ({ notifyIncomingMessage: vi.fn() }));
+import { notifyIncomingMessage } from "../notifications/notifications";
 vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 import { showToast } from "../../lib/ui/toast";
 import { setLiveTailInView } from "../../lib/readState";
@@ -564,7 +564,7 @@ describe("DM preview follows an edit or delete of its last message", () => {
 // P4-03: "active" used to mean "the reader is watching", but a minimised or
 // unfocused window shows nothing, so a message landing in the active channel
 // then must count like one in any other channel (badge, taskbar, divider).
-// The focus source is document.hasFocus(), as in lib/notifications.ts.
+// The focus source is document.hasFocus(), as in features/notifications/notifications.ts.
 function seedActiveChannel(lastMessageId: number | null = null): void {
   channelsStore.setState(() => ({
     categories: [],

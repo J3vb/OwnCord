@@ -18,12 +18,15 @@ import { readFileSync, readdirSync } from "node:fs";
 import path from "node:path";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
-vi.mock("@lib/notifications", () => ({
+// Mocked at both paths: releases before the move keep it in lib/.
+const notificationsMock = vi.hoisted(() => () => ({
   notifyIncomingMessage: vi.fn(),
   notifyMention: vi.fn(),
   notifyChannelActivity: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
+vi.mock("@lib/notifications", notificationsMock);
+vi.mock("../../src/features/notifications/notifications", notificationsMock);
 vi.mock("@lib/voice/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
   handleParticipantLeft: vi.fn(async () => {}),

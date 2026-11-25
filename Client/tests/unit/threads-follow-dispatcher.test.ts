@@ -17,7 +17,7 @@ import type { ReadyChannel, ReadyPayload, ReadyThread } from "../../src/lib/type
 
 const notifyMention = vi.hoisted(() => vi.fn());
 const notifyChannelActivity = vi.hoisted(() => vi.fn());
-vi.mock("@lib/notifications", () => ({
+vi.mock("../../src/features/notifications/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
   notifyMention,
   notifyChannelActivity,

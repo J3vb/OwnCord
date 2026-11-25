@@ -20,7 +20,7 @@ import { resetMessagesStore } from "../../stores/messages.store";
 import { dmRecipient, makeDm } from "../../../tests/helpers/dmHarness";
 import { signInAs } from "../../../tests/helpers/storeSeeds";
 
-vi.mock("../../lib/notifications", () => ({ notifyIncomingMessage: vi.fn() }));
+vi.mock("../notifications/notifications", () => ({ notifyIncomingMessage: vi.fn() }));
 
 const DM = 100;
 

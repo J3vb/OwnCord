@@ -1,5 +1,8 @@
 import { vi, beforeEach, expect } from "vitest";
-import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
+import {
+  notifyIncomingMessage,
+  resetNotificationCoalescing,
+} from "../../src/features/notifications/notifications";
 import { channelsStore } from "../../src/stores/channels.store";
 import { dmStore } from "../../src/stores/dm.store";
 import { membersStore } from "../../src/stores/members.store";
