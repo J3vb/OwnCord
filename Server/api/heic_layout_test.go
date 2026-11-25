@@ -274,18 +274,23 @@ func TestHEICLayout_PlainStillAndGridConvert(t *testing.T) {
 			return l.build()
 		}(),
 	} {
-		t.Run(name, func(t *testing.T) {
-			database := newUploadTestDB(t)
-			router := buildUploadRouter(database, newUploadTestStorage(t), nil)
-			token := uploadCreateToken(t, database, "heicok", 4)
-			id, mime, w, h := uploadFull(t, router, token, "x.heic", content)
-			if mime != "image/heic" || w == 0 || h == 0 {
-				t.Fatalf("upload: %s %dx%d", mime, w, h)
-			}
-			rr := doServeThumb(t, router, id, token)
-			assertPreviewJPEG(t, rr, w, h)
-		})
+		t.Run(name, func(t *testing.T) { heicConverts(t, content) })
 	}
+}
+
+// heicConverts uploads content and asserts that it is stored with its
+// dimensions and that its preview is a JPEG of that size.
+func heicConverts(t *testing.T, content []byte) {
+	t.Helper()
+	database := newUploadTestDB(t)
+	router := buildUploadRouter(database, newUploadTestStorage(t), nil)
+	token := uploadCreateToken(t, database, "heicok", 4)
+	id, mime, w, h := uploadFull(t, router, token, "x.heic", content)
+	if mime != "image/heic" || w == 0 || h == 0 {
+		t.Fatalf("upload: %s %dx%d", mime, w, h)
+	}
+	rr := doServeThumb(t, router, id, token)
+	assertPreviewJPEG(t, rr, w, h)
 }
 
 func testHEICTiled(t *testing.T, w, h int) []byte {
@@ -500,6 +505,12 @@ func FuzzValidateHEIC(f *testing.F) {
 	f.Add(testHEIC(t, 16, 16))
 	f.Add(sequenceOnlyHEIC(t, 2))
 	f.Add([]byte("\x00\x00\x00\x18ftypheic\x00\x00\x00\x00mif1heic"))
+	for _, l := range alphaLayouts(t) {
+		f.Add(l.build())
+	}
+	for _, build := range alphaRefusals(t) {
+		f.Add(build())
+	}
 	f.Fuzz(func(t *testing.T, data []byte) {
 		var before, after runtime.MemStats
 		runtime.ReadMemStats(&before)
