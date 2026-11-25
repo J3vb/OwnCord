@@ -1030,6 +1030,11 @@ jobs:
       - name: Comment ids must not grow
         run: node scripts/checks/check-comment-ids.mjs
 
+      # Every OWNCORD-PATCH marker in the vendored livekit crate has an entry in
+      # its OWNCORD-PATCH.md, and every entry still has a marker.
+      - name: Vendored livekit patches are documented
+        run: node --test scripts/checks/check-vendor-patches.test.mjs
+
       - name: Ledger schema is valid
         run: node .superpowers/render-ledger.mjs --check
 
