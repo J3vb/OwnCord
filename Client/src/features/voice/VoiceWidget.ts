@@ -21,6 +21,7 @@ import {
 } from "@lib/voice/connectionStats";
 import { enhancedNoiseSuppressionEnabled } from "@lib/voice/audioPipeline";
 import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "@lib/voice/livekitSession";
+import { writeLiveStats } from "@lib/voice/liveStats";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../../i18n/voice";
 import { callStatusText, isConnecting, isPhoneCallHold } from "./voiceStatusText";
@@ -103,6 +104,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   const unsubs: Array<() => void> = [];
 
   function updateSignalIcon(stats: ConnectionStats): void {
+    writeLiveStats(stats, voiceStore.getState().voiceStatus === "connected");
     if (signalBtn === null || statsPane === null) return;
     signalBtn.draw(stats);
     statsPane.update(stats);

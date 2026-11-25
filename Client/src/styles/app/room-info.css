@@ -1,0 +1,173 @@
+/* ═══ Command Deck: the room Info block under Buddies ═══ */
+/* Every selector starts with `html.layout-deck`. Colours read only
+   --bg-secondary, --border, --text-normal and --text-muted, with --green,
+   --yellow and --red as fills of the dot and the light only, never as text.
+   No transition, animation or outline: nothing in Info takes focus.
+   tests/unit/deck/room-info-css.test.ts enforces these rules.
+
+   Heights are fixed, so a value that changes never resizes the Buddies
+   scroller above: the header strip in px, each row and the summary line from
+   the text size. A value that does not fit is cut, detail first; the word
+   never is, and the label column gives way instead. */
+
+html.layout-deck .room-info {
+  flex: none;
+  border-top: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-normal);
+}
+html.layout-deck .room-info[hidden],
+html.layout-deck .room-info.room-info--aside {
+  display: none;
+}
+
+/* The header strip: the status light and "INFO · SQUAD ROOM". */
+html.layout-deck .room-info-head {
+  height: 32px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+}
+html.layout-deck .room-info-light {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+html.layout-deck .room-info-title {
+  margin: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* The five rows: a label column that gives way, then the values. */
+html.layout-deck .room-info-rows {
+  display: grid;
+  grid-template-columns: minmax(0, calc(var(--font-size-xs) * 5.5)) minmax(min-content, 1fr);
+  column-gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-1) var(--space-3);
+}
+html.layout-deck .room-info-row {
+  display: contents;
+}
+html.layout-deck .room-info-row > dt,
+html.layout-deck .room-info-row > dd {
+  height: max(22px, calc(var(--font-size, 16px) * 1.375));
+  display: flex;
+  align-items: center;
+  margin: 0;
+  overflow: hidden;
+  white-space: nowrap;
+  min-width: 0;
+}
+html.layout-deck .room-info-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+html.layout-deck .room-info-row > dd {
+  gap: var(--space-1);
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+}
+
+/* The value parts: a dot, a word that is never cut, a detail cut first. */
+html.layout-deck .room-info-dot {
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+}
+html.layout-deck .room-info-word {
+  flex: none;
+}
+html.layout-deck .room-info-detail {
+  flex: 1 1 0;
+  width: 0;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+html.layout-deck .room-info-muted {
+  color: var(--text-muted);
+}
+
+/* The level fills: green, yellow, red, and grey for no level. */
+html.layout-deck .room-info-dot[data-level="ok"],
+html.layout-deck .room-info-light[data-level="ok"] {
+  background: var(--green);
+}
+html.layout-deck .room-info-dot[data-level="warn"],
+html.layout-deck .room-info-light[data-level="warn"] {
+  background: var(--yellow);
+}
+html.layout-deck .room-info-dot[data-level="bad"],
+html.layout-deck .room-info-light[data-level="bad"] {
+  background: var(--red);
+}
+html.layout-deck .room-info-dot[data-level="none"],
+html.layout-deck .room-info-light[data-level="none"] {
+  background: var(--text-muted);
+}
+
+/* The summary line ("4/8 · Secured · 18 ms") shows only in a short window. */
+html.layout-deck .room-info-summary {
+  display: none;
+  margin: 0;
+}
+html.layout-deck .room-info-sum-users,
+html.layout-deck .room-info-sum-security,
+html.layout-deck .room-info-sep {
+  flex: none;
+}
+html.layout-deck .room-info-sum-security {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+html.layout-deck .room-info-sum-ping {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 600 px tall or less: the header and one summary line; the title shows the room name. */
+@media (max-height: 600px) {
+  html.layout-deck .room-info-rows {
+    display: none;
+  }
+  /* Hidden from sight only, so the region keeps its name, "Info · Lounge":
+     out of flow and clipped to nothing, at its own size, so nothing in it
+     overflows its box. */
+  html.layout-deck .room-info-prefix {
+    position: absolute;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+  }
+  html.layout-deck .room-info-summary {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    height: calc(max(22px, calc(var(--font-size, 16px) * 1.375)) + 2 * var(--space-1));
+    padding: var(--space-1) var(--space-3);
+    overflow: hidden;
+    white-space: nowrap;
+    color: var(--text-normal);
+    font-size: var(--font-size-sm);
+  }
+}

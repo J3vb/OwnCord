@@ -502,6 +502,26 @@ at warn, and a warning toast naming the peer stays until dismissed
 for the rest of the call. `mismatch` is now only a pinned peer whose key is no
 longer delivered, or an announce that fails verification.
 
+Command Deck's room Info block (`features/deck/roomInfoModel.ts`) sums these
+up in one Security value for the server voice room you are in. It never says
+"verified" and never shows a peer as verified: "Secured" means the call's
+encryption is running and no key notice is in the room; it says nothing about
+who a person is. Before the call is connected it names the call's state
+("Connecting…", "Securing…", "Reconnecting…"), and "Unsecured" (red) while
+`encryptionDegraded` holds. Once connected, the most serious notice among the
+others in the room (never you) replaces "Secured", with its count:
+
+| Info word | Counts                   | Dot    | Meaning                                                                                                                          |
+| --------- | ------------------------ | ------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| Blocked   | `mismatch` and `unknown` | red    | The peer is excluded from E2EE: its key does not match, or your key store could not be read. The spoken text keeps the two apart |
+| New key   | `changed`                | yellow | A key you had not seen for that person, accepted and re-pinned automatically                                                     |
+| No key    | `unverified`             | grey   | The peer published no identity key                                                                                               |
+
+`verified`, and a peer with no entry yet, count nowhere. The spoken text names
+the word and then one sentence per notice type ("Blocked. 1 participant: key
+does not match. 2 participants with a new key."). The status bar's Secured chip
+is unchanged: it reports encryption only, and Info adds the key notices.
+
 The mismatch modal (`createIdentityMismatchModal()`, `features/voice/IdentityMismatchModal.ts`;
 opened from `openIdentityMismatchModal()` in `features/voice/peerVerification.ts`, shared with `DmCallPanel`) shows the **new key's fingerprint** so
 the user can verify it out-of-band before trusting. "Trust this key as well" re-pins
