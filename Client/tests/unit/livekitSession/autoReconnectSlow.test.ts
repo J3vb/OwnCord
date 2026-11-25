@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
-import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
-import * as voice from "../../../src/lib/voice/livekitSession";
+import { LiveKitSession } from "../../../src/features/voice/livekitSession";
+import * as voice from "../../../src/features/voice/livekitSession";
 import { handleVoiceJoinRollback } from "../../../src/features/voice/wsHandlers";
 import { leaveVoiceChannel, setVoiceStatus } from "@stores/voice.store";
 import { channelsStore, resetChannelsStore } from "@stores/channels.store";

@@ -12,7 +12,7 @@ import {
 } from "@lib/logger";
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "./SettingsOverlay";
-import { getSessionDebugInfo, getShareDiagnostics } from "@lib/voice/livekitSession";
+import { getSessionDebugInfo, getShareDiagnostics } from "../voice/livekitSession";
 import { savePref, readMigratedStringPref, appendToggleRows } from "./helpers";
 import {
   SHARE_DIAGNOSTICS_KEY,

@@ -21,7 +21,7 @@ import type { ChatMessagePayload } from "../../src/lib/types";
 vi.mock("../../src/lib/prefs/preferences", (importOriginal) =>
   mocks.prefsPreferencesMock(importOriginal),
 );
-vi.mock("../../src/lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@tauri-apps/plugin-notification", () => mocks.pluginNotificationMock());
 
 // The native path shows a message notification through the host's

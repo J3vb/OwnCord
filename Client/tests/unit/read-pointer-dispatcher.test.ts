@@ -39,7 +39,7 @@ import { makeDmRow, pointerMessage, seedLoadedMessages } from "../helpers/readPo
 vi.mock("../../src/features/notifications/notifications", () =>
   dispatcherMocks.notificationsMock(),
 );
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     disableCamera: vi.fn(async () => {}),
     disableScreenshare: vi.fn(async () => {}),

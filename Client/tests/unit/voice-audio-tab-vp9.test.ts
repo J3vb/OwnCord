@@ -18,7 +18,7 @@ vi.mock("livekit-client", async (importOriginal) => ({
   supportsVP9: () => supportsVP9(),
 }));
 vi.mock("../../src/platform/desktop/pushToTalk", () => codecMocks.inertPushToTalkMock());
-vi.mock("@lib/voice/livekitSession", () => codecMocks.reapplyAudioSessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => codecMocks.reapplyAudioSessionMock());
 
 import { installFakeAudio } from "../helpers/fakeAudioContext";
 import { codecOptions, expectCodecsEventually, shownCodecFor } from "../helpers/voiceCodecTab";

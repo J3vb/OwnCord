@@ -206,7 +206,7 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/layer-direction",
     shape: "dynamic import",
-    filePath: "src/lib/voice/livekitSession.ts",
+    filePath: "src/features/voice/livekitSession.ts",
     code: `async function f() { return import("@pages/MainPage"); }`,
     messageId: "upwardImport",
     hasOptions: true,
@@ -301,9 +301,9 @@ describe("view-file store ban", () => {
     expect(await restricted(`import { x } from "../../stores/ui.store";`, VIEW)).toContain(
       "no-restricted-imports",
     );
-    expect(await restricted(`import { x } from "@lib/voice/livekitSession";`, VIEW)).toContain(
-      "no-restricted-imports",
-    );
+    expect(
+      await restricted(`import { x } from "../../src/features/voice/livekitSession";`, VIEW),
+    ).toContain("no-restricted-imports");
     expect(await restricted(`import { x } from "../safety/store";`, VIEW)).toContain(
       "no-restricted-imports",
     );
@@ -317,7 +317,10 @@ describe("view-file store ban", () => {
       await restricted(`export const f = () => import("../moderation/store");`, VIEW),
     ).toContain("no-restricted-syntax");
     expect(
-      await restricted(`export const f = () => import("@lib/voice/livekitSession");`, VIEW),
+      await restricted(
+        `export const f = () => import("../../src/features/voice/livekitSession");`,
+        VIEW,
+      ),
     ).toContain("no-restricted-syntax");
   }, 60_000);
 

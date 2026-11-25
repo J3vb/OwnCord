@@ -19,7 +19,7 @@ vi.mock("@stores/ui.store", () => ({
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
 
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 // Start with totp_enabled = false for enrollment tests
 let mockTotpEnabled = false;

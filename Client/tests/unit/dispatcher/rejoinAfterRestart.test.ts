@@ -4,7 +4,7 @@ import { expectConsole } from "../../helpers/console";
 import { authStore } from "../../../src/stores/auth.store";
 import { voiceStore } from "../../../src/stores/voice.store";
 import { uiStore, setTransientError } from "../../../src/stores/ui.store";
-import { leaveVoice as mockLeaveVoice } from "@lib/voice/livekitSession";
+import { leaveVoice as mockLeaveVoice } from "../../../src/features/voice/livekitSession";
 import { takeJoinRefusal } from "../../../src/features/voice/joinRequest";
 import {
   useDispatcherHarness,
@@ -17,7 +17,7 @@ import {
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notificationsMock());
-vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
 vi.mock("../../../src/features/connection/identity", () => dispatcherMocks.identityMock());

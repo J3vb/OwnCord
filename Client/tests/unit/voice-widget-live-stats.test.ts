@@ -9,7 +9,7 @@ const pollers = vi.hoisted(() => ({
   created: 0,
 }));
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockImplementation(() => {

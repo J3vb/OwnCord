@@ -4,7 +4,7 @@
 // production code.
 import { vi } from "vitest";
 import * as mocks from "./livekitSessionMocks";
-import * as voice from "../../src/lib/voice/livekitSession";
+import * as voice from "../../src/features/voice/livekitSession";
 import { handleVoiceState, handleVoiceTokenFrame } from "../../src/features/voice/wsHandlers";
 import type {
   DispatchWs,

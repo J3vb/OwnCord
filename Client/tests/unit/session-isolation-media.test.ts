@@ -56,7 +56,7 @@ import {
   isVoiceSessionActive,
   setServerHost,
   setWsClient,
-} from "../../src/lib/voice/livekitSession";
+} from "../../src/features/voice/livekitSession";
 
 /** Rooms built and not yet disconnected. */
 function liveRooms(): number {

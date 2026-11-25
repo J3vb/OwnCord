@@ -66,7 +66,7 @@ export function configureConnectionDiagnostics(api: ApiClient, ws: WsClient): vo
   configured = {
     api,
     ws,
-    getRoom: async () => (await import("@lib/voice/livekitSession")).getRoomForStats(),
+    getRoom: async () => (await import("../voice/livekitSession")).getRoomForStats(),
     getUserMedia: (constraints) => navigator.mediaDevices.getUserMedia(constraints),
     listNativeInputs: () => nativeAudioDevices("audioinput"),
     probeNativeInput: probeNativeMicrophone,

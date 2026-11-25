@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   createMentionAutocomplete,

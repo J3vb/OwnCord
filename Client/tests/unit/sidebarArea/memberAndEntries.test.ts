@@ -37,7 +37,7 @@ import {
   useSidebarAreaHarness,
 } from "../../helpers/sidebarAreaHarness";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/presence/profiles", () => mocks.presenceProfilesMock());

@@ -7,7 +7,7 @@
 import { describe, it, expect, beforeAll, beforeEach, afterEach, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 const { fetchImageAsObjectUrlMock } = vi.hoisted(() => ({
   fetchImageAsObjectUrlMock: vi.fn(() => Promise.resolve("data:image/png;base64,AAAA")),

@@ -14,7 +14,7 @@ import { reconcileModels, sameModel } from "@lib/net/reconcile";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createLazyScreen } from "../../lib/ui/lazyScreen";
-import { getUserLocalMute, getUserVolume, listenToMusic } from "@lib/voice/livekitSession";
+import { getUserLocalMute, getUserVolume, listenToMusic } from "../voice/livekitSession";
 import { loadPref } from "@lib/prefs/preferences";
 import { userMusicMuteKey, userMusicVolumeKey } from "@lib/voice/audioVolumePrefs";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";

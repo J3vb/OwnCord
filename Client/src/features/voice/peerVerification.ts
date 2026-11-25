@@ -13,7 +13,7 @@ import {
   peerAnnouncedIdentityKey,
   trustedPeerKeys,
   forgetPeerKey,
-} from "../../lib/voice/livekitSession";
+} from "./livekitSession";
 import { showToast } from "../../lib/ui/toast";
 import { createLogger } from "../../lib/logger";
 import { membersStore } from "../../stores/members.store";

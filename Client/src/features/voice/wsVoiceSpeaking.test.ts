@@ -4,8 +4,8 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Payload } from "../connection/dispatchContext";
 import { handleVoiceSpeaking, wsRoutes } from "./wsHandlers";
 
-vi.mock("../../lib/voice/livekitSession", () => ({ handleRingAnnounced: vi.fn() }));
-import { handleRingAnnounced } from "../../lib/voice/livekitSession";
+vi.mock("./livekitSession", () => ({ handleRingAnnounced: vi.fn() }));
+import { handleRingAnnounced } from "./livekitSession";
 
 describe("handleVoiceSpeaking", () => {
   beforeEach(() => {

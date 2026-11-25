@@ -48,7 +48,7 @@ export const shards = {
     "src/features/voice/native/nativeRoom.ts",
     "src/features/voice/securedBadge.ts",
     "src/features/voice/videoGrid/gridConstants.ts",
-    "src/lib/voice/livekitSession.ts",
+    "src/features/voice/livekitSession.ts",
   ],
   "livekit-7": [
     "src/features/voice/MusicPicker.ts",
@@ -238,6 +238,7 @@ export const shards = {
     "src/lib/media/notificationSound.ts",
     "src/lib/voice/micProcessor.ts",
     "src/lib/voice/ptt.ts",
+    "src/lib/voice/voiceSessionLoader.ts",
   ],
   "audio-media-9": [
     "src/features/members/memberRowMenu.ts",
@@ -865,7 +866,7 @@ export const shards = {
     "src/features/navigation/destinations.ts",
     "src/features/reports/reportDialog.ts",
     "src/features/settings/settingRow.ts",
-    "src/lib/voice/livekitDiagnostics.ts",
+    "src/features/voice/livekitDiagnostics.ts",
   ],
   "safety-moderation-15": [
     "src/features/moderation/History.ts",

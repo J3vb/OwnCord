@@ -27,7 +27,7 @@ const notificationsMock = vi.hoisted(() => () => ({
 }));
 vi.mock("@lib/notifications", notificationsMock);
 vi.mock("../../src/features/notifications/notifications", notificationsMock);
-vi.mock("@lib/voice/livekitSession", () => ({
+vi.mock("../../src/features/voice/livekitSession", () => ({
   handleVoiceToken: vi.fn(async () => {}),
   handleParticipantLeft: vi.fn(async () => {}),
   handleE2EEAnnounce: vi.fn(async () => {}),

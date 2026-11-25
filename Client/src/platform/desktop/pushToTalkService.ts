@@ -39,6 +39,7 @@ import {
 } from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { vkName, pttReleaseDelayMs } from "@lib/voice/ptt";
+import { loadVoiceSession } from "@lib/voice/voiceSessionLoader";
 import { inputMode } from "@lib/ui/inputMode";
 import { invokeOrThrow } from "./nativeInvoke";
 import type { PushToTalk } from "../contracts/pushToTalk";
@@ -124,7 +125,7 @@ function ungateMic(): void {
   if (voiceStore.getState().pttGated !== true && !isPttClosePending()) return;
   const version = generation;
   const { currentChannelId, joinedAt } = voiceStore.getState();
-  void import("@lib/voice/livekitSession")
+  void loadVoiceSession()
     .then(({ setPttGated }) => {
       const state = voiceStore.getState();
       if (
@@ -211,7 +212,7 @@ function onPttState(attempt: PttBinding, supported: boolean, pressed: boolean): 
   // loaded lazily so it stays out of the startup path. In a voice channel
   // the module is necessarily already loaded, so this import resolves
   // from the module cache in a microtask.
-  void import("@lib/voice/livekitSession")
+  void loadVoiceSession()
     .then(({ setPttGated }) => applyEdge(edgeInfo, setPttGated))
     .catch((e) => log.warn("Failed to apply PTT gate", e));
 }
@@ -386,7 +387,7 @@ async function gateBoundMic(attempt: PttBinding): Promise<void> {
   const version = attempt.generation;
   const currentEdge = edge;
   try {
-    const { setPttGated } = await import("@lib/voice/livekitSession");
+    const { setPttGated } = await loadVoiceSession();
     const state = voiceStore.getState();
     if (
       !isCurrent(attempt, version) ||

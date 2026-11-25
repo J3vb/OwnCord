@@ -21,7 +21,7 @@ import {
   setWsClient,
   setServerHost as setLiveKitServerHost,
   setOnError as setVoiceOnError,
-} from "@lib/voice/livekitSession";
+} from "../features/voice/livekitSession";
 import { setServerHost } from "../features/messaging/message-list/renderers";
 import { setAttachmentCacheScope } from "../features/messaging/content/attachments";
 import { closeActiveLightbox } from "../features/messaging/content/media";

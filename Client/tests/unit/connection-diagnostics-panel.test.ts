@@ -5,7 +5,7 @@ import { SessionScope } from "@lib/net/sessionScope";
 import { configureConnectionDiagnostics } from "../../src/features/connection/connectionDiagnostics";
 import { createConnectionDiagnosticsPanel } from "../../src/features/settings/ConnectionDiagnosticsPanel";
 
-vi.mock("@lib/voice/livekitSession", () => ({ getRoomForStats: () => null }));
+vi.mock("../../src/features/voice/livekitSession", () => ({ getRoomForStats: () => null }));
 
 describe("connection diagnostics session ownership in settings", () => {
   let scope: SessionScope;

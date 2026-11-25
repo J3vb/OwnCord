@@ -7,7 +7,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
 
 - `src/stores/` observable stores · `src/lib/` protocol, WS, voice, E2EE ·
   `src/pages/` wiring only (screens live in `src/features/`, shared UI in `src/lib/ui/`; there is no `components/`) · `src/features/voice/` modules
-  extracted from `lib/voice/livekitSession.ts` and `features/voice/livekitE2EE.ts` (the
+  extracted from `features/voice/livekitSession.ts` and `features/voice/livekitE2EE.ts` (the
   facades; the `e2ee*.ts` files are `E2EEManager`'s), with colocated
   `*.test.ts`; `src/features/{connection,direct-messages,message-requests,channels,messaging,voice,safety,moderation}/wsHandlers.ts`
   hold the WebSocket handler bodies extracted from `app/dispatcher.ts`;
@@ -117,7 +117,11 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `features/notifications/notifications` — `voice.store.ts` registers its logout teardown through
   `registerVoiceLogoutTeardown` at load, and `features/notifications/notifications.ts` registers the
   notification-audio cleanup through `registerSessionReset`
-  (`lib/net/sessionRegistry.ts`, the leaf every per-server reset registers with). In
+  (`lib/net/sessionRegistry.ts`, the leaf every per-server reset registers with).
+  `auth.store` and the desktop push-to-talk service reach the voice session
+  facade (`features/voice/livekitSession.ts`) only through
+  `lib/voice/voiceSessionLoader.ts`, whose lazy loader `main.ts` registers at
+  boot (a test that resets modules registers it again). In
   `features/messaging/content/`, `attachments.ts` is the leaf every renderer
   imports (it also owns the image lightbox, which `media.ts` re-exports), so it
   must not import a sibling renderer. `madge` still lists cycles that close only

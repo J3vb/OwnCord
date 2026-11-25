@@ -114,7 +114,7 @@ function syncHold(held: boolean): void {
   if (!inCall(voiceStore.getState())) return;
   // In a call the session module is loaded already; importing it lazily keeps
   // the voice SDK out of this module, which starts with the app.
-  void import("@lib/voice/livekitSession")
+  void import("./livekitSession")
     .then((session) => session.syncMicrophoneGate())
     .catch((err: unknown) => log.warn("The hold did not reach the microphone", err));
 }

@@ -307,10 +307,10 @@ twice across two starts.
 
 ### `ice`
 
-| Code        | Label                          | Fields                                                                                                                                                    | Emitted by                            |
-| ----------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------- |
-| `ice.state` | Media connection state changed | `transport` (publisher / subscriber)<br>`state` (new / checking / connected / completed / failed / disconnected / closed)                                 | `src/lib/voice/livekitDiagnostics.ts` |
-| `ice.route` | Media route chosen             | `local_type` (host / srflx / prflx / relay / unknown)<br>`remote_type` (host / srflx / prflx / relay / unknown)<br>`protocol` (udp / tcp / tls / unknown) | `src/lib/voice/livekitDiagnostics.ts` |
+| Code        | Label                          | Fields                                                                                                                                                    | Emitted by                                 |
+| ----------- | ------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
+| `ice.state` | Media connection state changed | `transport` (publisher / subscriber)<br>`state` (new / checking / connected / completed / failed / disconnected / closed)                                 | `src/features/voice/livekitDiagnostics.ts` |
+| `ice.route` | Media route chosen             | `local_type` (host / srflx / prflx / relay / unknown)<br>`remote_type` (host / srflx / prflx / relay / unknown)<br>`protocol` (udp / tcp / tls / unknown) | `src/features/voice/livekitDiagnostics.ts` |
 
 ### `ws`
 

@@ -19,7 +19,7 @@ import {
 vi.mock("../../../src/features/whats-new/appVersion", () => mocks.newAppVersionMock());
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@stores/ui.store", () => mocks.uiStoreMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@stores/auth.store", () => mocks.authStoreMock());
 
 const { mockAppVersion } = mocks;

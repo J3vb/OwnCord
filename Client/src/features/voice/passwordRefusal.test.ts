@@ -14,10 +14,10 @@ import { channelsStore, setChannels } from "../../stores/channels.store";
 import { setConnectionStatus } from "../../stores/ui.store";
 import { authStore } from "../../stores/auth.store";
 import { showToast } from "../../lib/ui/toast";
-import { leaveVoice } from "../../lib/voice/livekitSession";
+import { leaveVoice } from "./livekitSession";
 import type { DispatchWs, Payload } from "../connection/dispatchContext";
 
-vi.mock("../../lib/voice/livekitSession", () => ({
+vi.mock("./livekitSession", () => ({
   leaveVoice: vi.fn(),
   isVoiceSessionActive: vi.fn(() => false),
   failPendingRejoin: vi.fn(),

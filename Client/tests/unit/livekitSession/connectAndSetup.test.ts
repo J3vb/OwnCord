@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import { Room } from "livekit-client";
-import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
+import { LiveKitSession } from "../../../src/features/voice/livekitSession";
 import { leaveVoiceChannel } from "@stores/voice.store";
 import { ensureLiveKitProxy } from "../../../src/platform/desktop/nativeProxies";
 import {

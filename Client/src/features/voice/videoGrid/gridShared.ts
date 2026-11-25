@@ -12,7 +12,7 @@ import {
   setScreenshareAudioVolume,
   setUserLocalMute,
   setUserVolume,
-} from "@lib/voice/livekitSession";
+} from "../livekitSession";
 import { videoSurfaceOf } from "@lib/voice/videoSurface";
 import type { ZoomPan } from "@lib/ui/zoomPan";
 import { voiceText } from "../../../i18n/voice";

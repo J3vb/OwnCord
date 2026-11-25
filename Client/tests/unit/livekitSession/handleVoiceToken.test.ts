@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
-import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
+import { LiveKitSession } from "../../../src/features/voice/livekitSession";
 import { setListeningTo } from "@stores/voiceListening";
 import {
   setLocalMuted,

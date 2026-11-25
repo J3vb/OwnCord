@@ -16,7 +16,7 @@ import {
   getMusicVolume,
   setMusicMuted,
   getMusicMuted,
-} from "@lib/voice/livekitSession";
+} from "../../voice/livekitSession";
 import { voiceStore } from "@stores/voice.store";
 import { voiceText as t } from "../../../i18n/voice";
 import { shellText } from "../../../i18n/shell";

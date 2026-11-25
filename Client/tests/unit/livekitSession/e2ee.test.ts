@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
-import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
+import { LiveKitSession } from "../../../src/features/voice/livekitSession";
 import { setPeerVerification, setEncryptionDegraded } from "@stores/voice.store";
 import { getIdentityPin, storeIdentityPin } from "../../../src/features/connection/identity";
 import { verifyEphemeralKeySignature } from "@lib/net/e2eeCrypto";

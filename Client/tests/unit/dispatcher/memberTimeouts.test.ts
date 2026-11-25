@@ -5,7 +5,7 @@ import { voiceStore } from "../../../src/stores/voice.store";
 import {
   setMuted as mockSetMuted,
   setDeafened as mockSetDeafened,
-} from "@lib/voice/livekitSession";
+} from "../../../src/features/voice/livekitSession";
 import {
   useDispatcherHarness,
   setMeUser,
@@ -17,7 +17,7 @@ import {
 } from "../../helpers/dispatcherHarness";
 
 vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notificationsMock());
-vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
 vi.mock("../../../src/features/connection/identity", () => dispatcherMocks.identityMock());

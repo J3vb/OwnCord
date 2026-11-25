@@ -12,7 +12,7 @@ import {
   handleParticipantLeft as mockHandleParticipantLeft,
   isAutoReconnecting as mockIsAutoReconnecting,
   failPendingRejoin as mockFailPendingRejoin,
-} from "@lib/voice/livekitSession";
+} from "../../../src/features/voice/livekitSession";
 import { rollbackPendingVideo as mockRollbackPendingVideo } from "../../../src/features/voice/screenShare";
 import { takeVoiceMoved } from "../../../src/features/voice/moveHint";
 import {
@@ -33,7 +33,7 @@ import { signInAs } from "../../helpers/storeSeeds";
 import { onVideoBitrateCap, videoBitrateCap } from "../../../src/features/voice/videoBitrateCap";
 
 vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notificationsMock());
-vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
 vi.mock("../../../src/features/connection/identity", () => dispatcherMocks.identityMock());
@@ -406,7 +406,7 @@ describe("WS Dispatcher", () => {
   });
 
   it("wires voice_token to handleVoiceToken", async () => {
-    const { handleVoiceToken } = await import("@lib/voice/livekitSession");
+    const { handleVoiceToken } = await import("../../../src/features/voice/livekitSession");
 
     mock.dispatch("voice_token", {
       token: "lk-token",
@@ -478,7 +478,7 @@ describe("WS Dispatcher", () => {
   it("ready hands the server's camera and share flags to the live voice session", async () => {
     patchVoice({ voiceStatus: "connected", currentChannelId: 10 });
     signInVoiceUser(42, "active");
-    const { reconcileVideoFlags } = await import("@lib/voice/livekitSession");
+    const { reconcileVideoFlags } = await import("../../../src/features/voice/livekitSession");
     vi.mocked(reconcileVideoFlags).mockClear();
 
     readyWithVoiceUser(42, { screenshare: true });

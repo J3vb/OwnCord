@@ -56,7 +56,7 @@ vi.mock("../../src/features/connection/identity", () => ({
 // LiveKit room and WebCrypto), but handleParticipantLeft's store-visible
 // effect is not: livekitE2EE.ts drops a departed peer's verification, and the
 // verification invariant below has to be able to observe that happening.
-vi.mock("@lib/voice/livekitSession", async () => {
+vi.mock("../../src/features/voice/livekitSession", async () => {
   const { clearPeerVerification, clearPeerVerifications } = await import("@stores/voice.store");
   return {
     ...(await import("../helpers/dispatcherMocks")).livekitSessionMock(),

@@ -7,7 +7,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import * as mocks from "../helpers/sidebarStubMocks";
 import * as stubs from "../helpers/sidebarStubs";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.rePinOnlySessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => mocks.rePinOnlySessionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.inertE2eeCryptoMock());
 
 import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";

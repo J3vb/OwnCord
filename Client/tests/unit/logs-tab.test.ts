@@ -26,7 +26,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 const { mockGetVersion } = vi.hoisted(() => ({
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -58,7 +58,7 @@ vi.mock("../../src/lib/hostOs", async (importOriginal) => ({
 }));
 vi.mock("@lib/supportBundle", () => ({ exportSupportBundle: mockExportSupportBundle }));
 
-import { getSessionDebugInfo, getShareDiagnostics } from "@lib/voice/livekitSession";
+import { getSessionDebugInfo, getShareDiagnostics } from "../../src/features/voice/livekitSession";
 import { createLogsTab } from "../../src/features/settings/LogsTab";
 import type { TabName } from "../../src/features/settings/SettingsOverlay";
 

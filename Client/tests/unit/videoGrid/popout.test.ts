@@ -24,7 +24,7 @@ import {
 } from "../../helpers/videoGridHarness";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 const mockToggleMusicShare = vi.fn(() => Promise.resolve());
 vi.mock("../../../src/features/voice/musicControl", async (importOriginal) => ({
   ...(await importOriginal<typeof import("../../../src/features/voice/musicControl")>()),

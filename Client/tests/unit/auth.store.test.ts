@@ -15,7 +15,7 @@ import {
   joinVoiceChannel,
   setVoiceStatus,
 } from "../../src/stores/voice.store";
-import { leaveVoice } from "@lib/voice/livekitSession";
+import { leaveVoice } from "../../src/features/voice/livekitSession";
 import { setMessages, isChannelLoaded, getChannelMessages } from "../../src/stores/messages.store";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
 import type { ReadyChannel } from "../../src/lib/types";
@@ -24,10 +24,14 @@ import { addLogListener, type LogEntry } from "@lib/logger";
 import type { UserWithRole, MessageResponse, MessageUser } from "../../src/lib/types";
 import { uiStore, setSidebarMode, setActiveDmUser } from "../../src/stores/ui.store";
 import { expectConsole } from "../helpers/console";
+import {
+  registerVoiceSessionLoader,
+  type VoiceSessionControls,
+} from "../../src/lib/voice/voiceSessionLoader";
 
 // Mock the lazily-imported voice SDK module so we can assert clearAuth() only
 // pulls it in (loading the ~1.3 MB LiveKit chunk) when a voice session exists.
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 const flushMicrotasks = () => new Promise((resolve) => setTimeout(resolve, 0));
 
@@ -344,6 +348,30 @@ describe("auth store", () => {
       clearAuth();
       await flushMicrotasks();
       expect(leaveVoice).not.toHaveBeenCalled();
+    });
+
+    it("a logout racing a join leaves that join exactly once, while the facade is still loading", async () => {
+      let finishLoad!: () => void;
+      registerVoiceSessionLoader(
+        () =>
+          new Promise<VoiceSessionControls>((resolve) => {
+            finishLoad = () => resolve(import("../../src/features/voice/livekitSession"));
+          }),
+      );
+      try {
+        joinVoiceChannel(7); // still "joining": no room yet
+        clearAuth();
+        clearAuth(); // a 401 landing on top of the user's logout
+        expect(voiceStore.getState().currentChannelId).toBeNull();
+        await flushMicrotasks();
+        expect(leaveVoice).not.toHaveBeenCalled();
+        finishLoad();
+        await flushMicrotasks();
+        expect(leaveVoice).toHaveBeenCalledTimes(1);
+        expect(leaveVoice).toHaveBeenCalledWith(false);
+      } finally {
+        registerVoiceSessionLoader(() => import("../../src/features/voice/livekitSession"));
+      }
     });
 
     it("logs a warning tagged with this module's component name when leaveVoice rejects", async () => {

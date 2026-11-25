@@ -7,7 +7,7 @@
 // a call the user is still in.
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
-import * as voice from "../../../src/lib/voice/livekitSession";
+import * as voice from "../../../src/features/voice/livekitSession";
 import {
   handleVoiceJoinRollback,
   handleVoiceLeave,

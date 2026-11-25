@@ -8,7 +8,7 @@ import { nativeLevelListener } from "../../helpers/voiceAudioTabMocks";
 import { VOLUME_SLIDERS } from "../../helpers/voiceAudioTabHarness";
 
 vi.mock("../../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 const {
   mockSetVoiceSensitivity,

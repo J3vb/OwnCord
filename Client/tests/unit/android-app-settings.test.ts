@@ -23,7 +23,7 @@ vi.mock("../../src/platform/desktop", async (importOriginal) => {
   };
 });
 vi.mock("../../src/features/whats-new/changelogSource", () => ({ loadChangelog: mockLoad }));
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 vi.mock("@stores/ui.store", () => ({ setTheme: vi.fn() }));
 
 import { buildAboutTab } from "../../src/features/settings/AboutTab";

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     switchInputDevice: vi.fn().mockResolvedValue(undefined),
     switchOutputDevice: vi.fn().mockResolvedValue(undefined),

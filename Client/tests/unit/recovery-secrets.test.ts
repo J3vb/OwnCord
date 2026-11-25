@@ -32,7 +32,7 @@ vi.mock("@stores/ui.store", () => ({
   setTransientError: vi.fn(),
   setTheme: vi.fn(),
 }));
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     switchInputDevice: vi.fn().mockResolvedValue(undefined),
     switchOutputDevice: vi.fn().mockResolvedValue(undefined),

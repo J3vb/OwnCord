@@ -56,7 +56,7 @@ vi.mock("../../src/features/connection/credentials", () => ({
 }));
 vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
 vi.mock("../../src/features/connection/CertMismatchModal", () => mocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mocks.netCertReconnectMock());

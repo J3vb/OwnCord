@@ -42,7 +42,7 @@ vi.mock("@stores/voice.store", () => ({
   },
 }));
 
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     parseUserId: (identity: string) => {
       const match = identity.match(/^user-(\d+)$/);

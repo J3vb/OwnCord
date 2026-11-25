@@ -35,7 +35,7 @@ import { joinRetryInMs, noteJoinSucceeded } from "@lib/voice/joinBackoff";
 import { noteJoinSent, resetJoinRequest } from "./joinRequest";
 import type { Payload, ReconnectClock } from "../connection/dispatchContext";
 
-vi.mock("../../lib/voice/livekitSession", () => ({
+vi.mock("./livekitSession", () => ({
   setMuted: vi.fn(),
   setDeafened: vi.fn(),
   leaveVoice: vi.fn(),
@@ -70,7 +70,7 @@ import {
   reconcileVideoFlags,
   resendWatching,
   retryWatching,
-} from "../../lib/voice/livekitSession";
+} from "./livekitSession";
 import { rollbackPendingVideo } from "./screenShare";
 import { expectConsole } from "../../../tests/helpers/console";
 import { captureLogs } from "../../../tests/helpers/log-capture";
