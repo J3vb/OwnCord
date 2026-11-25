@@ -229,12 +229,7 @@ func (s *MessageService) forumPostReplay(ctx context.Context, userID, messageID 
 }
 
 func (s *MessageService) canViewForum(ctx context.Context, userID, forumID int64) bool {
-	forum, err := s.st.GetChannel(ctx, forumID)
-	if err != nil || forum == nil {
-		return false
-	}
-	sub, err := channelSubject(ctx, s.st, s.perms, userID, forum, false)
-	return err == nil && permissions.CanViewChannel(sub) == nil
+	return canReadMessageChannel(ctx, s.st, s.perms, userID, forumID)
 }
 
 func (s *MessageService) forumPostResult(ctx context.Context, sp SendMessageParams, saved *db.MessageDelivery, content string, mentions mentionSet) *ForumPostResult {

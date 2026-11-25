@@ -98,20 +98,27 @@ func wizardValidateIdentity(wr *setupWizardRequest) error {
 		*wr.RegistrationMode = string(mode)
 	}
 	// Limits are the settings PATCH's too; only the sanitizer is the wizard's own.
-	if wr.ServerName != nil {
-		name, err := service.NormalizeServerName(service.SanitizeText(*wr.ServerName))
-		if err != nil {
-			return err
-		}
-		*wr.ServerName = name
+	if err := wizardCleanText(wr.ServerName, "server_name", service.NormalizeServerName); err != nil {
+		return err
 	}
-	if wr.Motd != nil {
-		motd, err := service.NormalizeMotd(service.SanitizeText(*wr.Motd))
-		if err != nil {
-			return err
-		}
-		*wr.Motd = motd
+	return wizardCleanText(wr.Motd, "motd", service.NormalizeMotd)
+}
+
+// wizardCleanText sanitizes a present field in place and applies the settings PATCH's normaliser to it; nil
+// is left alone.
+func wizardCleanText(v *string, field string, normalize func(string) (string, error)) error {
+	if v == nil {
+		return nil
 	}
+	clean, err := service.SanitizeText(*v)
+	if err != nil {
+		return fmt.Errorf("%s has too many layers of markup or entities", field)
+	}
+	out, err := normalize(clean)
+	if err != nil {
+		return err
+	}
+	*v = out
 	return nil
 }
 

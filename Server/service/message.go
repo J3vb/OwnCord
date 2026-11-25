@@ -233,36 +233,57 @@ func sanitizePass(s string) string {
 //     one unescape turns into a literal "</script>", inert now but a real end tag if
 //     sanitized again.
 //
-// A fixpoint makes the output stable, so re-sanitizing on edit is a no-op. It terminates
-// (output length is non-increasing); the iteration bound is a backstop.
-func sanitizeToFixpoint(raw string) string {
+// A fixpoint makes the output stable, so re-sanitizing on edit is a no-op. The number of
+// passes is capped at maxSanitizePasses: text that is still changing on the last pass is
+// refused with errTextUnsettled, never returned part-way, so every string this returns
+// without an error is stable under another pass.
+func sanitizeToFixpoint(raw string) (string, error) {
 	s := raw
-	for i := 0; i <= len(raw); i++ {
-		next := sanitizePass(s)
+	for range maxSanitizePasses {
+		next := sanitizePassFn(s)
 		if next == s {
-			return next
+			return next, nil
 		}
 		s = next
 	}
-	return s
+	return "", errTextUnsettled
 }
+
+// maxSanitizePasses is how many passes sanitizeToFixpoint may run, the last of which only
+// confirms nothing changed. Typed text settles on the first pass, entity-encoded markup on
+// the second or third, and text encoded ten layers deep within the cap; more than that is
+// not something a person types.
+const maxSanitizePasses = 6
+
+// errTextUnsettled is sanitizeToFixpoint's refusal for text that did not settle within
+// maxSanitizePasses.
+var errTextUnsettled = fmt.Errorf("%w: text has too many layers of markup or entities", ErrBadRequest)
+
+// sanitizePassFn is the pass sanitizeToFixpoint repeats; a variable only so tests can count
+// passes.
+var sanitizePassFn = sanitizePass
 
 // SanitizeText runs raw through the message-content pipeline: strips HTML but leaves
 // survivors as typed, not as &#39;/&gt;/&amp; entities. Exported for callers such as
-// registration's username, which must canonicalize as lookups do.
-func SanitizeText(raw string) string {
+// registration's username, which must canonicalize as lookups do. Text that does not
+// settle within the pass cap returns an error wrapping ErrBadRequest and no text.
+func SanitizeText(raw string) (string, error) {
 	return sanitizeToFixpoint(raw)
 }
 
 // SanitizeImportedContent applies a sent message's sanitizer and length limit, cutting over-long text with an
-// ellipsis.
+// ellipsis. An import cannot refuse one message, so text the sanitizer refuses is stored empty.
 func SanitizeImportedContent(raw string) string {
-	// The raw-byte guard in front of the quadratic sanitizer: cut first.
+	// The raw-byte guard in front of the sanitizer, whose passes cost time in proportion to their input:
+	// cut first.
 	cut := len(raw) > maxMessageLen*4
 	if cut {
 		raw = strings.ToValidUTF8(raw[:maxMessageLen*4], "")
 	}
-	content := sanitizeToFixpoint(raw)
+	content, err := sanitizeToFixpoint(raw)
+	if err != nil {
+		return ""
+	}
 	if n := utf8.RuneCountInString(content); n > maxMessageLen {
 		content = string([]rune(content)[:maxMessageLen-1]) + "…"
 	} else if cut && n > 0 {
@@ -275,7 +296,10 @@ func sanitizeContent(raw string, allowEmpty bool) (string, error) {
 	if len(raw) > maxMessageLen*4 {
 		return "", fmt.Errorf("%w: message content exceeds maximum length", ErrBadRequest)
 	}
-	content := sanitizeToFixpoint(raw)
+	content, err := sanitizeToFixpoint(raw)
+	if err != nil {
+		return "", fmt.Errorf("message content: %w", err)
+	}
 	if content == "" && !allowEmpty {
 		return "", fmt.Errorf("%w: message content cannot be empty", ErrBadRequest)
 	}

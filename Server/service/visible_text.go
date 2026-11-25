@@ -16,8 +16,12 @@ func cleanVisibleBounded(v string, maxRunes int, fieldName string) (string, erro
 	if len(v) > maxRunes*4 {
 		return "", fmt.Errorf("%w: %s must be at most %d characters", ErrBadRequest, fieldName, maxRunes)
 	}
-	collapsed := auth.CollapseSpaces(cleanText(v))
-	if err := auth.ValidateVisibleText(collapsed); err != nil {
+	cleaned, err := cleanText(v)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", fieldName, err)
+	}
+	collapsed := auth.CollapseSpaces(cleaned)
+	if err = auth.ValidateVisibleText(collapsed); err != nil {
 		return "", fmt.Errorf("%w: %s %w", ErrBadRequest, fieldName, err)
 	}
 	if utf8.RuneCountInString(collapsed) > maxRunes {
