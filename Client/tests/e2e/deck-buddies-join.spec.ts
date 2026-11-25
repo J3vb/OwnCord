@@ -10,6 +10,7 @@
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { joinVoiceChannelByName, openContextMenuOn } from "./helpers";
+import { findUnnamedControls, focusIndicator, Q1, textContrast } from "./support/accessibility";
 import { startDeckScene, type SceneOptions } from "./support/deckTreeScene";
 import { sentFrames } from "./support/invokeLog";
 
@@ -70,6 +71,23 @@ test.describe("Command Deck Buddies: Join in the row menu", () => {
     await expect(focused).toHaveText("Join Lounge");
     await page.keyboard.press("Enter");
     await expectOneJoinOfLounge(page);
+  });
+
+  test("the focused Join row is named, shows its focus ring and meets contrast", async ({
+    page,
+  }) => {
+    await bootJoin(page);
+    await rin(page).focus();
+    await page.keyboard.press("Shift+F10");
+    const menu = page.locator(".context-menu").first();
+    const focused = menu.locator("[role='menuitem']:focus");
+    for (let step = 0; step < 6 && (await focused.textContent()) !== "Join Lounge"; step++) {
+      await page.keyboard.press("ArrowDown");
+    }
+    await expect(focused).toHaveText("Join Lounge");
+    expect(await findUnnamedControls(menu)).toEqual([]);
+    expect((await focusIndicator(page)).problems).toEqual([]);
+    expect((await textContrast(joinRow(menu))).ratio).toBeGreaterThanOrEqual(Q1.text);
   });
 
   test("a full Lounge offers no Join, unless the viewer may bypass its limit", async ({ page }) => {
