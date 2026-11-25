@@ -132,8 +132,10 @@ quiet frame. From there a soft "hmm" clears the bar while a key, a click or a
 thump stays under it. A skipped frame starts both models over. If the worker
 cannot start, a model file does not load within six seconds, or a score is
 not a number, the worker is stopped and the gate takes RNNoise's speech
-probability instead. The Linux native gate has no speech model: its rule is
-under "Audio parity: RNNoise and the capture path".
+probability instead. The Linux native gate never runs the Silero models, with
+Enhanced Noise Suppression on or off: it always uses RNNoise's probability, as
+the web path does only with Enhanced Noise Suppression off. Its rule is under
+"Audio parity: RNNoise and the capture path".
 
 Supporting pieces:
 
@@ -992,8 +994,9 @@ speech the hysteresis and hold would keep it open through them; the verdict
 closes on both. A running RNNoise never reports exactly
 0, so a silent probability input (RNNoise not started, or stopped by a
 processor error) puts the detector back on its level alone rather than
-leaving the gate shut. The native gate follows the same rule with `speech`
-on the command: its probability is the return of `nnnoiseless`'s
+leaving the gate shut. That rule is the web path's with Enhanced Noise
+Suppression off (with it on, the Silero models decide, above); the native gate
+uses it in both cases, with `speech` on the command: its probability is the return of `nnnoiseless`'s
 `process_frame`, the processor runs RNNoise for the verdict alone while
 Enhanced Noise Suppression is off, and the audio goes out undenoised. The
 capture shares the

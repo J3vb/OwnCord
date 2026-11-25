@@ -485,6 +485,8 @@ documents. Any disagreement is a bug in this page.
 - `require_2fa` needs every user to have 2FA turned on, and needs
   `registration_mode` to be `closed`. While it is on, registration cannot be
   reopened.
+- **Per-account limits:** up to 25 sessions (sign-ins) and 10 live WebSocket
+  connections per account. Past either limit the oldest is evicted.
 - **Session expiry:**
   - A session expires 30 days after it was last used.
   - An authenticated REST request, the WebSocket handshake and the WebSocket

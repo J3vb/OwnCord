@@ -211,6 +211,16 @@ describe("buildSupportBundle", () => {
     expect(settings.settings).toEqual({ softSpeech: false });
   });
 
+  it("keeps the speech gate lookahead setting", () => {
+    const entries = readZip(
+      buildSupportBundle(
+        sources({ storage: storageWith({ "owncord:settings:sileroBufferMs": "120" }) }),
+      ),
+    );
+    const settings = JSON.parse(text(entries.find((e) => e.name === "settings.json")!.data));
+    expect(settings.settings).toEqual({ sileroBufferMs: 120 });
+  });
+
   it("keeps the folded Buddies groups", () => {
     const folded = JSON.stringify(["a:offline"]);
     const entries = readZip(

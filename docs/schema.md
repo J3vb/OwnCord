@@ -344,8 +344,11 @@ CREATE TABLE roles (
 ```
 
 Migration 067 set `hoist = 1` on every role that existed then (each was a
-member-list group); roles created afterwards start at 0. Neither flag is read
-by any behaviour yet.
+member-list group); roles created afterwards start at 0. Both flags are read:
+the member list shows a hoisted role as its own group (the client treats a role
+without the flag as hoisted), and a `<@&id>` ping passes the role-mention gate
+when the role is `mentionable` or the sender holds `MENTION_EVERYONE`
+(`permissions.CanMentionRole`).
 
 `user_roles` (migration 067) holds every role a member has:
 
