@@ -662,6 +662,7 @@ export const shards = {
     "src/features/channels/channelRow.view.ts",
     "src/features/developer-mode/developerTools.ts",
     "src/features/dialogs/confirmModal.ts",
+    "src/features/members/memberListScroll.ts",
     "src/features/members/memberRowRenderer.ts",
     "src/features/messaging/trackedActions.ts",
     "src/lib/diagnostics/sha256.ts",

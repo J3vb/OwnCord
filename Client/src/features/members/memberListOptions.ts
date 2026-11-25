@@ -4,7 +4,8 @@
 
 import type { VoiceUser } from "@stores/voice.store";
 import type { VoiceModMenuOptions } from "../channels/sidebar/volumeMenu";
-import type { MemberRowRenderer } from "./memberRowRenderer";
+import type { ListItem, MemberModel } from "./memberModel";
+import type { MemberRowRenderer, MemberRows } from "./memberRowRenderer";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
@@ -47,6 +48,16 @@ export interface MemberListOptions {
     channelId: number,
     user: VoiceUser,
   ) => VoiceModMenuOptions | string | undefined;
-  /** How a row is drawn. Absent: the Classic rows. */
+  /** How a row is drawn, for a renderer that needs no row context: the
+   *  no-context form of `view`. Absent: the Classic rows. */
   readonly rows?: MemberRowRenderer;
+  /** How a row is drawn, with the row context it reads. Wins over `rows`. */
+  readonly view?: MemberRows;
+  /** The role model and the search text as list items; `collapsed` holds the
+   *  keys of the groups shown folded. Absent: Classic's role groups. */
+  readonly flatten?: (
+    model: MemberModel,
+    query: string,
+    collapsed: ReadonlySet<string>,
+  ) => ListItem[];
 }

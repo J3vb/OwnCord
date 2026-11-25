@@ -58,6 +58,48 @@ export type MemberItemModel = MemberRowModel | MemberHeaderModel | MemberEmptyMo
 /** The fields `patchMemberItem` changes in place. */
 export const MEMBER_PATCH_FIELDS = ["status", "mobile", "away", "text"] as const;
 
+/** The avatar with its status dot, `#mi-status-<id>`, inside it. */
+export function drawAvatarWithDot(
+  model: Pick<
+    MemberRowModel,
+    "id" | "avatarName" | "avatarColor" | "avatarUrl" | "status" | "mobile"
+  >,
+  createAvatar: CreateAvatar,
+): HTMLElement {
+  const avatar = createAvatar(
+    { username: model.avatarName, avatar: model.avatarUrl },
+    {
+      className: "mi-avatar",
+      background: model.avatarColor,
+      deferUntilVisible: true,
+    },
+  );
+
+  // Set through the style object, as the patch does, so both serialise alike.
+  const dot = createElement("div", { class: "mi-status", id: `mi-status-${model.id}` });
+  dot.setAttribute("aria-label", applyStatusIndicator(dot, model.status, model.mobile));
+  avatar.appendChild(dot);
+  return avatar;
+}
+
+/** The name in its role colour, kept so a theme change can re-clamp it. */
+export function drawMemberName(name: string, colorVar: string): HTMLElement {
+  const el = createElement("span", {
+    class: "mi-name",
+    style: `color: ${readableRoleColor(colorVar)}`,
+    "data-role-color": colorVar,
+  });
+  setText(el, name);
+  return el;
+}
+
+/** The list's empty state: no members, or no search match. */
+export function drawEmptyState(text: string): HTMLElement {
+  const emptyState = createElement("div", { class: "member-list-empty" });
+  emptyState.appendChild(createElement("p", { class: "member-list-empty-text" }, text));
+  return emptyState;
+}
+
 function drawRow(model: MemberRowModel, createAvatar: CreateAvatar): HTMLDivElement {
   const item = createElement("div", {
     class: model.away ? "member-item offline" : "member-item",
@@ -69,31 +111,12 @@ function drawRow(model: MemberRowModel, createAvatar: CreateAvatar): HTMLDivElem
   });
   const statusId = `mi-status-${model.id}`;
   const customId = `mi-custom-status-${model.id}`;
-
-  const avatar = createAvatar(
-    { username: model.avatarName, avatar: model.avatarUrl },
-    {
-      className: "mi-avatar",
-      background: model.avatarColor,
-      deferUntilVisible: true,
-    },
-  );
-
-  // Set through the style object, as the patch does, so both serialise alike.
-  const dot = createElement("div", { class: "mi-status", id: statusId });
-  dot.setAttribute("aria-label", applyStatusIndicator(dot, model.status, model.mobile));
-  avatar.appendChild(dot);
+  const avatar = drawAvatarWithDot(model, createAvatar);
 
   // Name + custom status stack. The custom status is only rendered when there
   // is one, so a member without it keeps the single-line row it always had.
   const nameWrap = createElement("div", { class: "mi-text" });
-  const name = createElement("span", {
-    class: "mi-name",
-    style: `color: ${readableRoleColor(model.colorVar)}`,
-    "data-role-color": model.colorVar,
-  });
-  setText(name, model.name);
-  nameWrap.appendChild(name);
+  nameWrap.appendChild(drawMemberName(model.name, model.colorVar));
   if (model.customStatus !== null) {
     const customEl = createElement("span", {
       class: "mi-custom-status",
@@ -140,11 +163,8 @@ export function drawMemberItem(model: MemberItemModel, createAvatar: CreateAvata
         },
         model.text,
       );
-    default: {
-      const emptyState = createElement("div", { class: "member-list-empty" });
-      emptyState.appendChild(createElement("p", { class: "member-list-empty-text" }, model.text));
-      return emptyState;
-    }
+    default:
+      return drawEmptyState(model.text);
   }
 }
 
