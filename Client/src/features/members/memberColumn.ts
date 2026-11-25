@@ -17,6 +17,9 @@
  * column steps aside so the call or the posts get the width: the toggle opens
  * it for the moment (never saved), and leaving puts the saved choice back.
  *
+ * Under Command Deck the column also holds the room Info block, after the
+ * scroller, built with the panel once per show and hidden during the call view.
+ *
  * On a phone the overlay claims the Back button while it is up, so Back closes
  * it before it does anything else.
  *
@@ -29,6 +32,8 @@ import { Disposable } from "@lib/disposable";
 import { claimBack, type BackClaim } from "@lib/ui/backHistory";
 import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
+import { runningScreenLayout } from "@lib/prefs/screenLayout";
+import { createLogger } from "@lib/logger";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import type { MemberPanel } from "../../features/members/memberPanel";
@@ -42,6 +47,9 @@ import {
   MEMBER_WIDTH_PREF,
 } from "../../features/members/memberLayout";
 import { shellText } from "../../i18n/shell";
+import { createRoomInfoPanel, type RoomInfoPanel } from "../deck/roomInfoPanel";
+
+const log = createLogger("member-column");
 
 /**
  * Below this the column is an overlay, and so it is on a phone on its side
@@ -92,6 +100,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   const { column, body, button } = opts;
   const owner = new Disposable();
   let panel: MemberPanel | null = null;
+  let info: RoomInfoPanel | null = null;
   let destroyed = false;
   // jsdom has no matchMedia; without one the column is never an overlay.
   const narrow = typeof window.matchMedia === "function" ? window.matchMedia(NARROW_QUERY) : null;
@@ -198,11 +207,29 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     return stepsAside() ? asideOpen : loadPref<boolean>(MEMBER_OPEN_PREF, true);
   }
 
+  /** Command Deck's room Info, after the scroller; a failure leaves Buddies alone. */
+  function buildInfo(): void {
+    try {
+      info = createRoomInfoPanel();
+      body.after(info.element);
+    } catch (err) {
+      log.error("room info failed to build", err);
+    }
+  }
+
+  function dropInfo(): void {
+    info?.destroy();
+    info?.element.remove();
+    info = null;
+  }
+
   function showPanel(): void {
     if (panel === null) {
       panel = opts.buildPanel();
       body.appendChild(panel.element);
+      if (runningScreenLayout() === "deck") buildInfo();
     }
+    info?.element.classList.toggle("room-info--aside", callView);
     column.hidden = false;
   }
 
@@ -212,6 +239,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
       return;
     }
     const focusInside = column.contains(document.activeElement);
+    dropInfo();
     panel.destroy();
     panel.element.remove();
     panel = null;
@@ -335,6 +363,7 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     destroy(): void {
       if (destroyed) return;
       destroyed = true;
+      dropInfo();
       panel?.destroy();
       panel?.element.remove();
       panel = null;

@@ -255,6 +255,18 @@ opening the sidebar drawer first at 800px and below. Its rules live in
 `styles/app/server-tabs.css`, held to its own colour policy in
 `tests/unit/deck/server-tabs-css.test.ts`.
 
+The room Info block is Command Deck only. While you are in a server voice room
+(not a DM call), the member column shows it after the Buddies scroller
+(`features/deck/roomInfoPanel.ts`, `data-testid="room-info"`): a header with the
+room name and a status light, then Users, Audio, Security, Quality and Streams.
+It is built and torn down with the column's panel, so it hides whenever the
+column does, and the column also hides it while the call view is up, even when
+the toggle opens the column there. At 600 px tall or less it shrinks to its
+header and one summary line ("4/8 · Secured · 18 ms"). It is read-only: nothing
+in it takes focus and it has no live region. Its rules live in
+`styles/app/room-info.css`, held to its own colour policy in
+`tests/unit/deck/room-info-css.test.ts`.
+
 The server switcher is a third. Classic draws the server rail; Command Deck draws
 a row of server tabs under the top bar's first row, folded into a Servers button
 at most 640 px wide or 499 px tall. Both are drawn from one controller

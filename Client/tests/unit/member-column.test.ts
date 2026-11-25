@@ -10,6 +10,15 @@ import {
   MEMBER_WIDTH_PREF,
 } from "../../src/features/members/memberLayout";
 import { guarded, settle } from "../helpers/backNav";
+import { createRoomInfoPanel } from "../../src/features/deck/roomInfoPanel";
+import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
+import { addLogListener, type LogEntry } from "../../src/lib/logger";
+import { expectConsole } from "../helpers/console";
+
+vi.mock("../../src/features/deck/roomInfoPanel", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../src/features/deck/roomInfoPanel")>();
+  return { ...real, createRoomInfoPanel: vi.fn(real.createRoomInfoPanel) };
+});
 
 /** A controllable `(max-width: 899px)` media query: jsdom has no matchMedia. */
 class FakeMediaQueryList extends EventTarget {
@@ -713,6 +722,112 @@ describe("MemberColumn", () => {
       expect(signal?.aborted).toBe(true);
       mq.set(false);
       expect(buildPanel).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("room Info under Command Deck", () => {
+    const info = (): HTMLElement | null => column.querySelector('[data-testid="room-info"]');
+
+    /** Run `fn` with the page running Command Deck, then put Classic back. */
+    function underDeck(fn: () => void): void {
+      setRunningScreenLayout("deck");
+      try {
+        fn();
+      } finally {
+        setRunningScreenLayout("classic");
+      }
+    }
+
+    it("appends Info directly after the scroller when the column shows, and removes it when it hides", () => {
+      underDeck(() => {
+        ctrl = make();
+        ctrl.sync();
+        expect(column.hidden).toBe(false);
+        const el = info();
+        expect(el).not.toBeNull();
+        expect(body.nextElementSibling).toBe(el);
+        expect(body.contains(el)).toBe(false);
+        expect(el!.classList.contains("room-info--aside")).toBe(false);
+
+        savePref(MEMBER_OPEN_PREF, false);
+        expect(column.hidden).toBe(true);
+        expect(info()).toBeNull();
+
+        savePref(MEMBER_OPEN_PREF, true);
+        expect(info()).not.toBeNull();
+        expect(info()).not.toBe(el);
+      });
+    });
+
+    it("destroy removes Info", () => {
+      underDeck(() => {
+        ctrl = make();
+        ctrl.sync();
+        expect(info()).not.toBeNull();
+        ctrl.destroy();
+        expect(info()).toBeNull();
+      });
+    });
+
+    it("under Classic the column never builds Info", () => {
+      ctrl = make();
+      ctrl.sync();
+      expect(column.hidden).toBe(false);
+      expect(info()).toBeNull();
+      expect(vi.mocked(createRoomInfoPanel)).not.toHaveBeenCalled();
+    });
+
+    it("hides Info with room-info--aside during the call view, even when the toggle opens the column", () => {
+      underDeck(() => {
+        ctrl = make();
+        ctrl.sync();
+        ctrl.setCallView(true);
+        expect(column.hidden).toBe(true);
+
+        ctrl.toggle();
+        expect(column.hidden).toBe(false);
+        expect(panels.at(-1)!.element.isConnected).toBe(true);
+        const el = info();
+        expect(el!.classList.contains("room-info--aside")).toBe(true);
+
+        ctrl.setCallView(false);
+        expect(column.hidden).toBe(false);
+        expect(info()).toBe(el);
+        expect(el!.classList.contains("room-info--aside")).toBe(false);
+
+        ctrl.setCallView(true);
+        ctrl.toggle();
+        expect(info()!.classList.contains("room-info--aside")).toBe(true);
+      });
+    });
+
+    it("a throwing Info build logs one error, keeps Buddies, and the next show builds Info", () => {
+      const errors: LogEntry[] = [];
+      const stop = addLogListener((e) => {
+        if (e.component === "member-column" && e.level === "error") errors.push(e);
+      });
+      try {
+        underDeck(() => {
+          vi.mocked(createRoomInfoPanel).mockImplementationOnce(() => {
+            throw new Error("boom");
+          });
+          ctrl = make();
+          ctrl.sync();
+          ctrl.sync();
+          expect(errors).toHaveLength(1);
+          expectConsole("error", /room info failed to build/);
+          expect(column.hidden).toBe(false);
+          expect(body.querySelector('[data-testid="member-list"]')).not.toBeNull();
+          expect(info()).toBeNull();
+
+          savePref(MEMBER_OPEN_PREF, false);
+          savePref(MEMBER_OPEN_PREF, true);
+          expect(info()).not.toBeNull();
+          expect(errors).toHaveLength(1);
+        });
+      } finally {
+        stop();
+      }
     });
   });
 });

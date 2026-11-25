@@ -380,6 +380,12 @@
       "reason": "Join diagnostics, exempt in the 5.2 design note"
     },
     {
+      "file": "lib/voice/liveStats.ts",
+      "binding": "liveStatsStore",
+      "category": "transient",
+      "reason": "Last connection sample of the running call; nothing resets it, and readers show a sample only while connected, written while connected and after the current joinedAt, which every join sets, so it is never shown after its call"
+    },
+    {
       "file": "features/connection/RecoverOverlay.ts",
       "binding": "overlays",
       "category": "dom-owned",

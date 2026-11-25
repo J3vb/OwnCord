@@ -213,6 +213,12 @@ export const voiceText = defineCatalog("voice", {
   "tile.kbps": "{value} kbps",
   "tile.lossValue": "{value} %",
 
+  "stats.excellent": "Good",
+  "stats.fair": "Fair",
+  "stats.poor": "Poor",
+  "stats.bad": "Bad",
+  "stats.ping": "{rtt} ms",
+
   "picker.title": "Share your screen",
   "picker.none": "No screens or windows can be shared in this desktop session.",
   "picker.cancel": "Cancel",
