@@ -209,7 +209,7 @@ import { dmStore, setDmChannels } from "@stores/dm.store";
 import type { DmChannel } from "@stores/dm.store";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
 import { voiceStore } from "@stores/voice.store";
-import { currentUserPermissions } from "@lib/permissions";
+import { currentUserPermissions } from "../../src/stores/permissions";
 import { cleanupNotificationAudio } from "@lib/media/notificationSound";
 // The app loads this with the dispatcher chunk (mocked here); it registers the audio reset.
 import "../../src/features/notifications/notifications";

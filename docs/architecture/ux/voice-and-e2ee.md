@@ -327,7 +327,7 @@ a plain scroll still scrolls the grid (`bindVideoZoom` in `src/lib/ui/zoomPan.ts
 lightbox). Scrolling back to 1x, a new or stopped stream, and popping out start it unzoomed; the
 mini-player and your own screen share's cover do not zoom.
 Choosing a text channel from the stream view, the open one included (`onChannelReselect` in
-`lib/nav/channelNavigation.ts`), leaves it with voice still up, and the stream you watch keeps playing in
+`features/navigation/channelNavigation.ts`), leaves it with voice still up, and the stream you watch keeps playing in
 a **mini-player** over the app (`features/voice/miniPlayer.ts`, loaded on first use; the tile's own video
 moves in, as with Pop out). It shows the streamer's name, drags (or moves with the arrow keys) anywhere
 inside the window and keeps that spot for the session; **Return to stream** (or a double-click or

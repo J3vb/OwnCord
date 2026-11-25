@@ -22,13 +22,13 @@ import {
 import { messagesStore } from "../../stores/messages.store";
 import { dmStore } from "../../stores/dm.store";
 import { authStore } from "../../stores/auth.store";
-import { setLiveTailInView } from "../../lib/readState";
+import { setLiveTailInView } from "@stores/readState";
 import type { Payload } from "../connection/dispatchContext";
 import type { ReadyChannel } from "../../lib/types";
 import type { Message } from "../../stores/messages.store";
 
-vi.mock("../../lib/readState", async (importOriginal) => {
-  const actual = await importOriginal<typeof import("../../lib/readState")>();
+vi.mock("@stores/readState", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@stores/readState")>();
   return { ...actual, markChannelRead: vi.fn() };
 });
 vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
@@ -42,7 +42,7 @@ vi.mock("../../lib/prefs/lastChannel", () => ({
   rememberLastChannel: vi.fn(),
   setLastChannelHost: vi.fn(),
 }));
-import { markChannelRead } from "../../lib/readState";
+import { markChannelRead } from "@stores/readState";
 import { showToast } from "../../lib/ui/toast";
 import { notifyChannelActivity, notifyMention } from "../notifications/notifications";
 

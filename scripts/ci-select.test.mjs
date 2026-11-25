@@ -539,7 +539,7 @@ test("every capability is a key of the result, so a missing output cannot skip a
 
 test("permissions.ts and the files that kill its mutants select the mutation hotspot", () => {
   for (const path of [
-    "Client/src/lib/permissions.ts",
+    "Client/src/stores/permissions.ts",
     "Client/tests/unit/permissions.test.ts",
     "Client/tests/unit/session-isolation.test.ts",
     "Client/tests/mutation/stryker.ci.config.mjs",

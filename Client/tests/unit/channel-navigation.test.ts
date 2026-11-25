@@ -7,7 +7,7 @@ import {
   findChannelById,
   findChannelByName,
   stepChannel,
-} from "../../src/lib/nav/channelNavigation";
+} from "../../src/features/navigation/channelNavigation";
 import { channelsStore } from "../../src/stores/channels.store";
 import type { Channel } from "../../src/stores/channels.store";
 import { dmStore, setDmChannels } from "../../src/stores/dm.store";

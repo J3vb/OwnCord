@@ -33,7 +33,7 @@ import {
   isChannelAway,
   isHeldUnread,
   writeReadPointer,
-} from "../../lib/readState";
+} from "@stores/readState";
 import { hasReceivedReady } from "../../lib/net/serverCapabilities";
 import { showToast } from "../../lib/ui/toast";
 import { notifyChannelActivity } from "../notifications/notifications";

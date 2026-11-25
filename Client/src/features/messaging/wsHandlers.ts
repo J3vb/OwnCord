@@ -26,7 +26,7 @@ import type { ConnectionState } from "../../lib/ws";
 import { invalidateReactionUsers } from "./reactionUsers";
 import { handleThreadDeleted, handleThreadFollow, handleThreadState } from "./threadFrames";
 import { loadedThreadsStore } from "../../stores/threadsLoader";
-import { isChannelAway } from "@lib/readState";
+import { isChannelAway } from "@stores/readState";
 import { acknowledgePendingMessage } from "../../lib/pendingMessages";
 import type { DispatchApi, Payload, ReconnectClock, WsRoute } from "../connection/dispatchContext";
 import { log, route } from "../connection/dispatchContext";
@@ -75,7 +75,7 @@ export function handleChatMessage(clock: ReconnectClock, payload: Payload<"chat_
   const isReplayFrame = isReplayedFrame(clock, payload);
   const isMention = raisesMentionBadge(payload, isReplayFrame);
   // "active" only means "the reader is watching" while the window is
-  // focused (isChannelAway, lib/readState.ts). A minimised or unfocused window
+  // focused (isChannelAway, stores/readState.ts). A minimised or unfocused window
   // shows nothing, so a message landing in the active channel then must count
   // like one in any other channel (badge, taskbar, divider) — the same
   // predicate the ready-time mark-read uses.

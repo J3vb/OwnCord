@@ -310,7 +310,7 @@ export const shards = {
     "src/features/moderation/wsHandlers.ts",
     "src/features/push/pushSettingRow.ts",
     "src/features/safety/wsHandlers.ts",
-    "src/lib/nav/pressWarm.ts",
+    "src/features/navigation/pressWarm.ts",
   ],
   "transport-auth-5": [
     "src/features/connection/dispatchContext.ts",
@@ -339,7 +339,7 @@ export const shards = {
     "src/lib/net/certReconnect.ts",
     "src/lib/net/legacyKeyMigration.ts",
     "src/lib/net/serverCapabilities.ts",
-    "src/lib/permissions.ts",
+    "src/stores/permissions.ts",
   ],
   "transport-auth-8": [
     "src/features/connection/logout.ts",
@@ -407,7 +407,7 @@ export const shards = {
     "src/features/messaging/forwardTargets.ts",
     "src/features/messaging/sidePanelScope.ts",
     "src/lib/presence/statusAgreement.ts",
-    "src/lib/readState.ts",
+    "src/stores/readState.ts",
   ],
   "lib-rest-6": [
     "src/features/forums/ForumView.ts",
@@ -647,14 +647,14 @@ export const shards = {
     "src/lib/net/requestClaims.ts",
     "src/lib/prefs/notificationLevel.ts",
     "src/lib/presence/profiles.ts",
-    "src/lib/readStateAway.ts",
+    "src/stores/readStateAway.ts",
     "src/lib/text/discordTimestamp.ts",
     "src/lib/text/markdownScan.ts",
   ],
   "lib-rest-34": [
     "src/features/profiles/avatarSource.ts",
     "src/lib/diagnostics/eventCodes.ts",
-    "src/lib/nav/channelNavigation.ts",
+    "src/features/navigation/channelNavigation.ts",
     "src/lib/text/duration.ts",
     "src/lib/ui/a11y.ts",
     "src/lib/ui/modalFactory.ts",

@@ -32,7 +32,7 @@ vi.mock("../notifications/notifications", () => ({ notifyIncomingMessage: vi.fn(
 import { notifyIncomingMessage } from "../notifications/notifications";
 vi.mock("../../lib/ui/toast", () => ({ showToast: vi.fn() }));
 import { showToast } from "../../lib/ui/toast";
-import { setLiveTailInView } from "../../lib/readState";
+import { setLiveTailInView } from "@stores/readState";
 import { expectConsole } from "../../../tests/helpers/console";
 
 function chat(id: number, timestamp: string): Payload<"chat_message"> {

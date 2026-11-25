@@ -249,7 +249,7 @@ export { K6_HARNESS_PATHS };
  * tests that import it and the inputs of Stryker's dry run.
  */
 const PERMISSIONS_MUTATION_PATHS = new Set([
-  "Client/src/lib/permissions.ts",
+  "Client/src/stores/permissions.ts",
   "Client/tests/unit/permissions.test.ts",
   "Client/tests/unit/channel-permission-bits-3a13.test.ts",
   "Client/tests/unit/channel-categories.test.ts",

@@ -28,7 +28,7 @@ import {
 } from "../../src/stores/ui.store";
 import { voiceStore } from "../../src/stores/voice.store";
 import { channelGroups } from "../../src/features/channels/channelRowModel";
-import { visibleCategories } from "../../src/lib/permissions";
+import { visibleCategories } from "../../src/stores/permissions";
 import { migrateCollapsedToCategoryIds } from "../../src/features/channels/collapsedMigration";
 import {
   CATEGORY_LIST_STALE,

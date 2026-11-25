@@ -25,8 +25,8 @@ import {
 import { setServerHost } from "../features/messaging/message-list/renderers";
 import { setAttachmentCacheScope } from "../features/messaging/content/attachments";
 import { closeActiveLightbox } from "../features/messaging/content/media";
-import { markAllRead } from "@lib/readState";
-import { onChannelReselect, stepChannel } from "@lib/nav/channelNavigation";
+import { markAllRead } from "@stores/readState";
+import { onChannelReselect, stepChannel } from "../features/navigation/channelNavigation";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { setAudioVolumeHost } from "../features/voice/audioElements";
 import { attachGlobalKeybinds } from "../features/settings/GlobalKeybinds";

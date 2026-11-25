@@ -4,7 +4,7 @@
 // disagree about any of them. The caps mirror Server/service/message_poll.go,
 // counted in code points after trimming, as the server counts runes after
 // sanitising.
-import { channelBitOrRole } from "../../lib/permissions";
+import { channelBitOrRole } from "@stores/permissions";
 import type { PollCreateAnswer, PollInfo } from "../../lib/types";
 
 export const POLL_QUESTION_MAX = 300;

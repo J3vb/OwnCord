@@ -1,4 +1,4 @@
-import { Permission } from "./types";
+import { Permission } from "@lib/types";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, type ChannelsState } from "@stores/channels.store";
 

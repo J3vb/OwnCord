@@ -13,7 +13,7 @@ import { createTypingIndicator } from "../../../features/messaging/TypingIndicat
 import { getChannelMessages } from "@stores/messages.store";
 import { lastOwnEditable } from "../../../features/messaging/lastOwnEditable";
 import { watchReplyTarget } from "../../../features/messaging/composer/replyTargetWatch";
-import { canManageMessages } from "@lib/permissions";
+import { canManageMessages } from "@stores/permissions";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { composerPlaceholder } from "../../../features/messaging/composerPlaceholder";

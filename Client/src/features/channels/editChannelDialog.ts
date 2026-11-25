@@ -22,7 +22,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { closeOnBackdropClick, createModal, type ModalInstance } from "@lib/ui/modalFactory";
 import { errorText } from "@lib/api";
-import { canManageChannels } from "@lib/permissions";
+import { canManageChannels } from "@stores/permissions";
 import { forumsEnabled } from "@lib/net/serverCapabilities";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { channelsStore, type Channel, type ChannelsState } from "@stores/channels.store";

@@ -22,7 +22,7 @@ import {
   resetReadPointerState,
   setLiveTailInView,
   setMarkReadSender,
-} from "@lib/readState";
+} from "../../src/stores/readState";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";
 import { makeMessage, makeOpts, resetGateStores } from "../helpers/message-actions-fixtures";
 import { resetMessagesState, resetMembersState } from "../helpers/storeResets";

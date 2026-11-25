@@ -29,7 +29,7 @@ import {
   setMarkReadSender,
   wouldRaiseSeen,
   writeReadPointer,
-} from "@lib/readState";
+} from "../../src/stores/readState";
 import {
   markMessageUnread,
   setMarkUnreadSender,

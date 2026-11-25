@@ -15,7 +15,7 @@ import { parseTimestamp } from "@lib/text/formatting";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
-import { currentUserRoleHasPermission, topPositionFor } from "@lib/permissions";
+import { currentUserRoleHasPermission, topPositionFor } from "@stores/permissions";
 import { Permission, type AdminUser } from "@lib/types";
 import { type ApiClient, ApiClientError, errorText } from "@lib/api";
 import type { ToastContainer, ToastType } from "@lib/ui/toastContainer";

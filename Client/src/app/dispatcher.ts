@@ -75,7 +75,7 @@ import type {
   Subscribe,
   WsRoute,
 } from "../features/connection/dispatchContext";
-import { failMarkUnread, forgetPendingMarkUnread, resetReadPointerState } from "@lib/readState";
+import { failMarkUnread, forgetPendingMarkUnread, resetReadPointerState } from "@stores/readState";
 import { resetServerCapabilities } from "@lib/net/serverCapabilities";
 import {
   applyReadySafety,

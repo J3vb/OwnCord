@@ -17,7 +17,7 @@ import {
 } from "../../../src/features/messaging/content/attachments";
 import { desktop } from "../../../src/platform/desktop";
 import { saveUserStatus } from "../../../src/lib/presence/userStatus";
-import { markAllRead } from "../../../src/lib/readState";
+import { markAllRead } from "../../../src/stores/readState";
 import {
   fakeWs,
   fakeApi,

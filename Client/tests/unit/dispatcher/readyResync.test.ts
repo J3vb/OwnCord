@@ -24,7 +24,7 @@ import {
   loadReactionUsers,
   setReactionUsersFetcher,
 } from "../../../src/features/messaging/reactionUsers";
-import { setMarkReadSender } from "../../../src/lib/readState";
+import { setMarkReadSender } from "../../../src/stores/readState";
 import type { MessageResponse } from "../../../src/lib/types";
 import { ensureIdentityKeyPublished as _ensureIdentityKeyPublished } from "../../../src/lib/net/identity";
 import {

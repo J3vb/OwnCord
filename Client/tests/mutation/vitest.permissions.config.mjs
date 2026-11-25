@@ -25,7 +25,7 @@ const include = ["src", "tests"]
   .filter((file) => IMPORTS_PERMISSIONS.test(readFileSync(file, "utf8")))
   .map((file) => relative(root, file).replaceAll("\\", "/"));
 
-if (include.length === 0) throw new Error("no test imports lib/permissions");
+if (include.length === 0) throw new Error("no test imports stores/permissions");
 
 export default defineConfig({
   ...base,

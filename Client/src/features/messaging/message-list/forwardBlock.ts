@@ -12,7 +12,7 @@
  * modules, so it cannot close a cycle through attachments.ts.
  */
 
-import { findChannelById } from "@lib/nav/channelNavigation";
+import { findChannelById } from "../../navigation/channelNavigation";
 import { createElement, setText } from "@lib/dom";
 import { formatFullDate, formatMessageTimestamp } from "@lib/text/formatting";
 import { createIcon } from "@lib/icons";

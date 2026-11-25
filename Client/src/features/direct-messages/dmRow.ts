@@ -8,7 +8,7 @@ import { createElement, setText, appendChildren } from "@lib/dom";
 import { formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
 import { createIcon } from "@lib/icons";
 import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
-import { attachPressWarm } from "@lib/nav/pressWarm";
+import { attachPressWarm } from "../navigation/pressWarm";
 import { getChannelMute } from "@lib/prefs/channelMutes";
 import { requestsText } from "../../i18n/requests";
 import { voiceText } from "../../i18n/voice";

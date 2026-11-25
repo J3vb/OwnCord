@@ -8,7 +8,7 @@
  */
 
 import { categoryGroups, channelsStore } from "../../stores/channels.store";
-import { visibleCategories } from "../../lib/permissions";
+import { visibleCategories } from "@stores/permissions";
 import { migrateCollapsedCategoryNames } from "../../stores/ui.store";
 
 /**

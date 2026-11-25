@@ -16,11 +16,6 @@
       "features/content-consent/nsfw.ts": 1,
       "stores/channels.store.ts": 1
     },
-    "lib/nav/channelNavigation.ts": {
-      "stores/channels.store.ts": 1,
-      "stores/dm.store.ts": 1,
-      "stores/ui.store.ts": 1
-    },
     "lib/net/connectionDiagnostics.ts": {
       "features/voice/native/devices.ts": 1,
       "features/voice/native/micProbe.ts": 1,
@@ -55,21 +50,9 @@
     "lib/pendingMessages.ts": {
       "stores/messages.store.ts": 1
     },
-    "lib/permissions.ts": {
-      "stores/auth.store.ts": 1,
-      "stores/channels.store.ts": 1
-    },
     "lib/presence/presence.ts": {
       "stores/auth.store.ts": 1,
       "stores/members.store.ts": 1
-    },
-    "lib/readState.ts": {
-      "stores/channels.store.ts": 1,
-      "stores/dm.store.ts": 1
-    },
-    "lib/readStateAway.ts": {
-      "stores/messages.store.ts": 1,
-      "stores/ui.store.ts": 1
     },
     "lib/presence/statusTimer.ts": {
       "stores/auth.store.ts": 1,

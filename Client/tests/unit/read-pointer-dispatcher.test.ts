@@ -21,7 +21,7 @@ import {
   noteMessageSeen,
   setLiveTailInView,
   setMarkReadSender,
-} from "../../src/lib/readState";
+} from "../../src/stores/readState";
 import type { WsClient } from "../../src/lib/ws";
 import {
   markMessageUnread,

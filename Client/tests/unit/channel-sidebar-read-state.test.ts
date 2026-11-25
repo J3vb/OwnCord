@@ -12,7 +12,7 @@ vi.mock("@lib/net/e2eeCrypto", () => mocks.inertE2eeCryptoMock());
 
 import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
 import { channelsStore, setChannels } from "../../src/stores/channels.store";
-import { setMarkReadSender } from "@lib/readState";
+import { setMarkReadSender } from "../../src/stores/readState";
 import { readStateChannels } from "../helpers/sidebarAreaOpts";
 
 const CHANNELS = readStateChannels();

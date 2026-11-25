@@ -5,7 +5,7 @@ import { PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { expectConsole } from "../../helpers/console";
 import { clearAuth } from "@stores/auth.store";
 import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { setMarkReadSender } from "@lib/readState";
+import { setMarkReadSender } from "../../../src/stores/readState";
 import type { ReadyChannel } from "@lib/types";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";

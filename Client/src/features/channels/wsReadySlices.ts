@@ -20,7 +20,7 @@ import {
   isChannelAway,
   markChannelRead,
   markChannelReadSeen,
-} from "../../lib/readState";
+} from "@stores/readState";
 import {
   applyReadyCapabilities,
   readPointerEnabled,
@@ -106,7 +106,7 @@ export function applyReadyActiveChannel(payload: Payload<"ready">): number | nul
  * Only while the reader is actually watching — a focused window whose
  * loaded window is not detached. An unfocused or background resync restates
  * the messages missed while away, and clearing them here would silently mark
- * those unseen messages read (isChannelAway, lib/readState.ts).
+ * those unseen messages read (isChannelAway, stores/readState.ts).
  */
 export function markReadyActiveChannelRead(currentActive: number | null): void {
   // A forum holds no messages, so there is nothing in it to mark read.

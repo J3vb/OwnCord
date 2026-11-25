@@ -8,7 +8,7 @@ import { channelsStore } from "@stores/channels.store";
 import type { Member } from "@stores/members.store";
 import { Permission, type ReadyRole } from "@lib/types";
 import { manageNicknamesEnabled } from "@lib/net/serverCapabilities";
-import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
+import { memberHasPermissionIn, topPositionFor } from "@stores/permissions";
 import { assignableRoleNames, outranksPosition } from "../moderation/roleAssignment";
 
 /** Which moderation menu items the signed-in user may see. */

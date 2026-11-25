@@ -6,7 +6,7 @@ import { parseTimestamp } from "@lib/text/formatting";
 import { notifyIncomingMessage } from "../notifications/notifications";
 import { mentionsCurrentUser } from "../../lib/text/mentions";
 import { loadedThreadsStore } from "../../stores/threadsLoader";
-import { noteAwayUnread } from "@lib/readState";
+import { noteAwayUnread } from "@stores/readState";
 import "./mentionNameLookups";
 import { messagingText } from "../../i18n/messaging";
 import type { Payload, ReconnectClock } from "../connection/dispatchContext";

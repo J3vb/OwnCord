@@ -10,7 +10,7 @@
 
 import { errorText, type ApiClient } from "@lib/api";
 import { Permission } from "@lib/types";
-import { memberHasPermissionIn, topPositionFor } from "@lib/permissions";
+import { memberHasPermissionIn, topPositionFor } from "@stores/permissions";
 import type { ProfileRolesState } from "../profiles/userProfilePopup";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, getRoleIdByName } from "@stores/channels.store";

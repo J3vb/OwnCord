@@ -43,7 +43,7 @@ vi.mock("../../src/features/messaging/TypingIndicator", () => ({
   createTypingIndicator: vi.fn(() => ({ mount: vi.fn(), destroy: vi.fn() })),
 }));
 vi.mock("../../src/pages/main-page/ChatHeader", () => ({ updateChatHeaderForDm: vi.fn() }));
-vi.mock("@lib/readState", () => ({
+vi.mock("../../src/stores/readState", () => ({
   setKnownThreadCheck: vi.fn(),
   setThreadReadPointer: vi.fn(),
   markChannelRead: vi.fn(),

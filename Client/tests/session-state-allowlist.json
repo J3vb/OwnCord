@@ -218,7 +218,7 @@
       "reason": "The bundled changelog, not server data"
     },
     {
-      "file": "lib/nav/channelNavigation.ts",
+      "file": "features/navigation/channelNavigation.ts",
       "binding": "reselectListeners",
       "category": "dom-owned",
       "reason": "Listeners removed by the disposer each subscriber holds"
@@ -278,19 +278,19 @@
       "reason": "Listeners for the game activity switch; each owner (the game activity loop, the Settings pane) removes its own on teardown, and the session reset deliberately keeps them"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "stores/readState.ts",
       "binding": "threadPointers",
       "category": "reset-elsewhere",
       "reason": "Last read pointer per thread id; cleared by resetReadPointerState, which the dispatcher runs per session"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "stores/readState.ts",
       "binding": "highestSeen",
       "category": "reset-elsewhere",
       "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
-      "file": "lib/readStateAway.ts",
+      "file": "stores/readStateAway.ts",
       "binding": "liveTailOutOfView",
       "category": "dom-owned",
       "reason": "Scroll state of mounted lists; each list sets it again from its scroll handler"
@@ -320,19 +320,19 @@
       "reason": "Listeners removed by the disposer each mounted list holds"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "stores/readState.ts",
       "binding": "pendingLiveSeen",
       "category": "reset-elsewhere",
       "reason": "Emptied by setMarkReadSender, which MainPage's teardown calls with null and the next mount re-registers"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "stores/readState.ts",
       "binding": "pendingMarkUnread",
       "category": "reset-elsewhere",
       "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "stores/readState.ts",
       "binding": "unreadHold",
       "category": "reset-elsewhere",
       "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"

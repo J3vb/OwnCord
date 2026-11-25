@@ -23,10 +23,10 @@ import {
   reattachToPresent,
   isWindowDetached,
 } from "@stores/messages.store";
-import { canManageMessages } from "@lib/permissions";
+import { canManageMessages } from "@stores/permissions";
 import { channelsStore, setNsfwAcknowledged } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
-import { markChannelRead, markChannelReadSeen } from "@lib/readState";
+import { markChannelRead, markChannelReadSeen } from "@stores/readState";
 import { readPointerEnabled } from "@lib/net/serverCapabilities";
 import { recoveredPendingText, acknowledgePendingMessage } from "@lib/pendingMessages";
 import { log, currentMessageUser, abortQueued } from "./channelShared";

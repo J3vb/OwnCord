@@ -26,9 +26,9 @@ import type {
 import type { ChannelController } from "./ChannelController";
 import { createMessageJumper } from "../../features/messaging/MessageJump";
 import { setMessageJumpHandler } from "@lib/nav/messageNavigation";
-import { navigateToChannel } from "@lib/nav/channelNavigation";
+import { navigateToChannel } from "../../features/navigation/channelNavigation";
 import { channelsStore } from "@stores/channels.store";
-import { channelBitOrRole } from "@lib/permissions";
+import { channelBitOrRole } from "@stores/permissions";
 import { nsfwConsentRequired } from "../../features/content-consent/nsfw";
 
 // ---------------------------------------------------------------------------
