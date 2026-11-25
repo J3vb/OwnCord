@@ -90,7 +90,7 @@ type OverrideResult struct {
 	AffectedAll   bool
 }
 
-func (s *channelOverrides) resolveOverrideRole(ctx context.Context, actorRole *db.Role, channelID, roleID, allow, deny int64) (*db.Role, error) {
+func (s *channelOverrides) resolveOverrideRole(ctx context.Context, actorID int64, actorRole *db.Role, channelID, roleID, allow, deny int64) (*db.Role, error) {
 	role, err := s.st.GetRoleByID(ctx, roleID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch role: %w", ErrInternal, err)
@@ -107,6 +107,9 @@ func (s *channelOverrides) resolveOverrideRole(ctx context.Context, actorRole *d
 	}
 	if role.Position >= actorRole.Position {
 		return nil, fmt.Errorf("cannot manage a role at or above your own rank%.0w", ErrForbidden)
+	}
+	if err := s.requireOverrideView(ctx, actorID, actorRole, channelID); err != nil {
+		return nil, err
 	}
 	return role, nil
 }
@@ -128,11 +131,8 @@ func (s *channelOverrides) PutRoleOverride(ctx context.Context, actorID int64, a
 	allow := allowRaw & permissions.AllPerms
 	deny := denyRaw & permissions.AllPerms
 
-	role, err := s.resolveOverrideRole(ctx, actorRole, ch.ID, roleID, allow, deny)
+	role, err := s.resolveOverrideRole(ctx, actorID, actorRole, ch.ID, roleID, allow, deny)
 	if err != nil {
-		return OverrideResult{}, err
-	}
-	if err := s.requireOverrideView(ctx, actorID, actorRole, ch.ID); err != nil {
 		return OverrideResult{}, err
 	}
 	if err := s.st.UpsertChannelOverride(ctx, ch.ID, roleID, allow, deny); err != nil {
@@ -153,11 +153,8 @@ func (s *channelOverrides) PutRoleOverride(ctx context.Context, actorID int64, a
 // DeleteRoleOverride clears a role-layer override. Removing a deny restores access PUT
 // refuses to grant, so it is gated identically against the bits the deleted row carries.
 func (s *channelOverrides) DeleteRoleOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, roleID int64) (OverrideResult, error) {
-	role, err := s.resolveOverrideRole(ctx, actorRole, ch.ID, roleID, 0, 0)
+	role, err := s.resolveOverrideRole(ctx, actorID, actorRole, ch.ID, roleID, 0, 0)
 	if err != nil {
-		return OverrideResult{}, err
-	}
-	if err := s.requireOverrideView(ctx, actorID, actorRole, ch.ID); err != nil {
 		return OverrideResult{}, err
 	}
 	if err := s.st.DeleteChannelOverride(ctx, ch.ID, roleID); err != nil {
@@ -177,7 +174,7 @@ func (s *channelOverrides) DeleteRoleOverride(ctx context.Context, actorID int64
 // resolveOverrideUser loads the target user and applies the escalation guard over the
 // union of bits and the user-hierarchy rule: a per-user override (last in resolution
 // order) may not target a member at or above the actor's rank. ADMINISTRATOR bypasses.
-func (s *channelOverrides) resolveOverrideUser(ctx context.Context, actorRole *db.Role, channelID, userID, allow, deny int64) (*db.User, error) {
+func (s *channelOverrides) resolveOverrideUser(ctx context.Context, actorID int64, actorRole *db.Role, channelID, userID, allow, deny int64) (*db.User, error) {
 	user, err := s.st.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, fmt.Errorf("%w: failed to fetch user: %w", ErrInternal, err)
@@ -193,6 +190,9 @@ func (s *channelOverrides) resolveOverrideUser(ctx context.Context, actorRole *d
 		return nil, err
 	}
 	if err := s.requireOutranks(ctx, actorRole, user); err != nil {
+		return nil, err
+	}
+	if err := s.requireOverrideView(ctx, actorID, actorRole, channelID); err != nil {
 		return nil, err
 	}
 	return user, nil
@@ -217,11 +217,8 @@ func (s *channelOverrides) PutUserOverride(ctx context.Context, actorID int64, a
 	allow := allowRaw & permissions.AllPerms
 	deny := denyRaw & permissions.AllPerms
 
-	user, err := s.resolveOverrideUser(ctx, actorRole, ch.ID, userID, allow, deny)
+	user, err := s.resolveOverrideUser(ctx, actorID, actorRole, ch.ID, userID, allow, deny)
 	if err != nil {
-		return OverrideResult{}, err
-	}
-	if err := s.requireOverrideView(ctx, actorID, actorRole, ch.ID); err != nil {
 		return OverrideResult{}, err
 	}
 	if err := s.st.UpsertChannelUserOverride(ctx, ch.ID, userID, allow, deny); err != nil {
@@ -240,11 +237,8 @@ func (s *channelOverrides) PutUserOverride(ctx context.Context, actorID int64, a
 
 // DeleteUserOverride clears a per-user override, gated like a write against the bits the deleted row carries.
 func (s *channelOverrides) DeleteUserOverride(ctx context.Context, actorID int64, actorRole *db.Role, ch *db.Channel, userID int64) (OverrideResult, error) {
-	user, err := s.resolveOverrideUser(ctx, actorRole, ch.ID, userID, 0, 0)
+	user, err := s.resolveOverrideUser(ctx, actorID, actorRole, ch.ID, userID, 0, 0)
 	if err != nil {
-		return OverrideResult{}, err
-	}
-	if err := s.requireOverrideView(ctx, actorID, actorRole, ch.ID); err != nil {
 		return OverrideResult{}, err
 	}
 	if err := s.st.DeleteChannelUserOverride(ctx, ch.ID, userID); err != nil {

@@ -122,9 +122,6 @@ release changes the database, and anything an operator must do first.)
 - The admin panel refuses an upload folder that is the data folder, the database's folder, the backup folder or a folder above them.
 - A new install creates the database, its side files and uploaded files readable by the server's user only (folders likewise); existing files keep their permissions.
 - The server log records an upload by its id, size and type, without the file name.
-
-**Accounts & admin**
-
 - Editing a channel's permission overrides (directly, through a category template, or by syncing) now needs the editor to be able to read that channel; the owner and Administrators are not limited.
 - Giving a member a role now follows the same rule as editing a role: a role manager without Administrator can only hand out permissions their own roles carry.
 - Banning an account removes its push notification registrations; the app registers again after the ban ends.
