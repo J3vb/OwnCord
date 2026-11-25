@@ -42,6 +42,10 @@ export interface MemberContextMenuOptions {
   mentionDisabledReason?: string;
   onMessage?(): void;
   onCall?(): void;
+  /** Joins the voice room the member is in; shown with `joinRoomLabel`. */
+  onJoinRoom?(): void;
+  /** "Join {room}"; the row needs both this and `onJoinRoom`. */
+  joinRoomLabel?: string;
   /** Voice moderation rows for a target in a server voice channel; a string is
    *  why they are unavailable and renders them greyed with that reason. */
   voiceMod?: VoiceModMenuOptions | string;

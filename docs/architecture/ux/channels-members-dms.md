@@ -174,9 +174,38 @@ and do not change.
   change does in Classic. Voice moves patch the icon in place; speaking, mute,
   camera and screen share do not touch the list.
 
+- **Join.** For a member in a server voice room, the row's context menu
+  (right-click, Shift+F10 or the Menu key) offers **"Join {room}"** after Call.
+  It calls the same join the tree's voice rooms use (`onVoiceJoin`, with its
+  join backoff and switch wait), so the password dialog and the server's
+  checks follow as for a click on the room. There is no Join button on the
+  row. The item is left out, not greyed, for your own room, the AFK room, a
+  member in no room or in a DM call, while a switch waits for the server,
+  while the socket is not connected and while you are timed out. The menu
+  reads the target when it opens and again on the click, so a member who
+  moved is joined in their new room, and one who left (or a room that filled)
+  joins nothing. The one full statement of the rule is `joinTarget.ts`.
+- **Full rooms.** A room with a user limit that is at or over it offers no
+  Join unless the channel's `can_moderate_voice` is true: the server lets a
+  voice moderator past the limit, and computes that flag with the same
+  authorizer. An absent flag (an older server) counts as no bypass, so a
+  moderator there joins a full room from the tree instead. **Buddies differs
+  from the tree here:** the tree's room row still lets the click through and
+  shows "n/max", and the server refuses it.
+- **The Join gap.** The client cannot see every refusal. It holds no
+  per-room connect flag (`CONNECT_VOICE` is checked nowhere in the client),
+  so in a room the viewer can read but may not connect to, every member there
+  offers Join; the first click is refused with the server's error toast and
+  starts the join backoff (a password refusal does not), and a refused switch
+  keeps the current call. The tree's room row has the same gap. Between a
+  reconnect's `auth_ok` and its `ready`, the menu can offer a room the member
+  has since left, as the tree's rows can. A room the viewer cannot read sends
+  no voice state, so it shows no voice icon and no Join.
+
 Code: `src/features/members/buddies/` (`activityGroups.ts`,
-`buddiesRenderer.ts`, `buddyContext.ts`, `buddiesTitle.ts`, `buddiesSetup.ts`),
-`src/features/members/memberVoice.ts`, `src/styles/app/buddies.css`.
+`buddiesRenderer.ts`, `buddyContext.ts`, `buddiesTitle.ts`, `buddiesSetup.ts`,
+`joinTarget.ts`, `joinInputs.ts`), `src/features/members/memberVoice.ts`,
+`src/styles/app/buddies.css`.
 
 ---
 

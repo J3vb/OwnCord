@@ -60,4 +60,9 @@ export interface MemberListOptions {
     query: string,
     collapsed: ReadonlySet<string>,
   ) => ListItem[];
+  /** The voice room a Join on member `userId` would enter now, or null. The
+   *  row menu calls it when it opens and again on the click. Absent: no Join. */
+  readonly joinRoomFor?: (
+    userId: number,
+  ) => { readonly label: string; readonly join: () => void } | null;
 }

@@ -32,9 +32,12 @@ import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { createMemberList } from "../../src/features/members/MemberList";
 import { Permission } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
-import { signInAsAdmin } from "../helpers/storeSeeds";
+import { resetVoiceState, signInAsAdmin } from "../helpers/storeSeeds";
 import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
 import { activityItems } from "../../src/features/members/buddies/activityGroups";
+import { setConnectionStatus } from "../../src/stores/ui.store";
+import { makeChannel } from "../helpers/channelFactory";
+import { addVoiceUser } from "../helpers/voiceUsers";
 
 function resetStores(): void {
   signInAsAdmin("testuser", { token: null });
@@ -265,6 +268,38 @@ describe("memberPanel", () => {
       expect(listOpts.flatten).toBeUndefined();
       expect(listOpts.view).toBeUndefined();
       panel.destroy();
+    });
+
+    it("forwards onJoinVoice to the Deck options only", () => {
+      const onJoinVoice = vi.fn();
+      setRunningScreenLayout("deck");
+      const deckPanel = createMemberPanel({ ...opts(), onJoinVoice });
+      const deckOpts = vi.mocked(createMemberList).mock.calls[0]![0];
+      // Member 2 is in voice room 6, and the socket is up: the join reaches onJoinVoice.
+      channelsStore.setState((p) => ({
+        ...p,
+        channels: new Map([[6, makeChannel({ id: 6, name: "Lounge", type: "voice" })]]),
+      }));
+      addVoiceUser(6, 2, "rin");
+      setConnectionStatus("connected");
+      const target = deckOpts.joinRoomFor?.(2);
+      expect(target?.label).toBe("Join Lounge");
+      target?.join();
+      expect(onJoinVoice).toHaveBeenCalledExactlyOnceWith(6);
+      onJoinVoice.mockClear();
+      setConnectionStatus("disconnected");
+      resetVoiceState();
+      deckPanel.destroy();
+
+      const bare = createMemberPanel(opts());
+      expect(vi.mocked(createMemberList).mock.calls[1]![0].joinRoomFor).toBeUndefined();
+      bare.destroy();
+
+      setRunningScreenLayout("classic");
+      const classic = createMemberPanel({ ...opts(), onJoinVoice });
+      expect(vi.mocked(createMemberList).mock.calls[2]![0].joinRoomFor).toBeUndefined();
+      classic.destroy();
+      expect(onJoinVoice).not.toHaveBeenCalled();
     });
   });
 });

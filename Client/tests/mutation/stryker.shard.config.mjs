@@ -682,6 +682,10 @@ export const shards = {
     "src/lib/presence/serverStatus.ts",
     "src/lib/ui/contextMenuKeyboard.ts",
   ],
+  "lib-rest-37": [
+    "src/features/members/buddies/joinInputs.ts",
+    "src/features/members/buddies/joinTarget.ts",
+  ],
   "stores-1": [
     "src/features/forums/ForumSettingsSection.ts",
     "src/features/messaging/messageModel.ts",

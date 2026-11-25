@@ -47,6 +47,21 @@ function timeoutStateOf(userId: number): "active" | "none" | "unknown" {
   return map.has(userId) ? "active" : "none";
 }
 
+/** The Join row's menu params: present only when the list has a resolver and
+ *  it names a room now. The click asks the resolver again, so a target that
+ *  has gone (the room filled, the member left, the socket dropped) joins
+ *  nothing, and a member who moved is joined in their new room. */
+export function joinMenuParams(
+  opts: Pick<MemberListOptions, "joinRoomFor">,
+  memberId: number,
+): { readonly joinRoomLabel: string; readonly onJoinRoom: () => void } | Record<never, never> {
+  const resolve = opts.joinRoomFor;
+  if (resolve === undefined) return {};
+  const atOpen = resolve(memberId);
+  if (atOpen === null) return {};
+  return { joinRoomLabel: atOpen.label, onJoinRoom: () => resolve(memberId)?.join() };
+}
+
 let activeMenu: OpenMenu | null = null;
 
 /** Bumped by every open, close and list teardown. The menu module loads lazily
@@ -222,6 +237,7 @@ export function createMemberItem(
         return;
       }
       const optional = optionalMenuParams(member, voiceMod);
+      const join = joinMenuParams(opts, member.id);
       // Kept on screen and re-placed when it resizes, so the ban form expanding
       // cannot push Confirm Ban and Block off the bottom at the 940x500 minimum.
       const created = createMemberContextMenu({
@@ -248,6 +264,7 @@ export function createMemberItem(
           mentionInComposer(member.username, member.id);
         },
         ...optional,
+        ...join,
         onToggleBlock: () => opts.onToggleBlock(member.id, memberDisplayName(member), !isBlocked),
         onKick: () => opts.onKick(member.id, member.username),
         onBan: () => opts.onBan(member.id, member.username, memberDisplayName(member)),
