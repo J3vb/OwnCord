@@ -362,7 +362,7 @@ test.describe("Delete Channel modal", () => {
     const modal = page.locator("[data-testid='delete-channel-modal']");
     await expect(modal).toBeVisible({ timeout: 5_000 });
     await expect(modal).toContainText("#general");
-    await expect(modal).toContainText("cannot be undone");
+    await expect(modal).toContainText("can't be undone");
 
     await page.locator("[data-testid='delete-channel-confirm']").click();
 
@@ -419,7 +419,9 @@ test.describe("Purge Messages", () => {
     await page.locator("[data-testid='ctx-purge-messages']").click();
     const form = page.locator("[data-testid='purge-form']");
     await expect(form).toBeVisible();
-    await expect(form).toContainText("Deletes the newest 1–100 messages.");
+    await expect(form).toContainText(
+      "Deletes the newest 1–100 messages for everyone. This can't be undone.",
+    );
     await expect(page.locator("[data-testid='purge-count-input']")).toHaveValue("50");
 
     await page.locator("[data-testid='purge-count-input']").fill("0");
