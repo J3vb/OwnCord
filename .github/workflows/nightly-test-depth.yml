@@ -41,7 +41,14 @@ jobs:
       - id: dev
         env:
           REPO: ${{ github.repository }}
-        run: echo "sha=$(git ls-remote "https://github.com/${REPO}" refs/heads/dev | cut -f1)" >> "$GITHUB_OUTPUT"
+          EVENT: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        # A schedule runs main's workflow file against dev: say both, so a red
+        # night can be matched to the code and the workflow it ran.
+        run: |
+          sha=$(git ls-remote "https://github.com/${REPO}" refs/heads/dev | cut -f1)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Testing dev \`$sha\` with the workflow file from \`$WORKFLOW_SHA\` ($EVENT)." >> "$GITHUB_STEP_SUMMARY"
       # If a scheduled run still starts during working hours, the shard
       # matrix would hold most of the 20 runner slots and queue every PR, so
       # a schedule run that starts between 07:00 and 19:59 UTC skips the

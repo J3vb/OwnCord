@@ -116,9 +116,11 @@ jobs:
         env:
           EVENT: ${{ github.event_name }}
           REF: ${{ github.ref }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
         run: |
           echo "event=$EVENT ref=$REF"
           git rev-parse HEAD
+          echo "Tested \`$(git rev-parse HEAD)\` with the workflow file from \`$WORKFLOW_SHA\` ($EVENT)." >> "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
