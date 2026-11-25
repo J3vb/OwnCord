@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -169,8 +170,12 @@ func (d *drill) seedTOTP(b *bState) error {
 	b.lastStep = res.step
 	// Enrolment ends the account's other sessions but not the one that confirmed it; if it did, say so here and
 	// not as a puzzling failure later.
-	if ok, _, err := authenticated(b.twoFA.token); err != nil || !ok {
-		return fmt.Errorf("the session that confirmed the enrolment stopped working (err %v)", err)
+	ok, _, err := authenticated(b.twoFA.token)
+	if err != nil {
+		return fmt.Errorf("checking the session that confirmed the enrolment: %w", err)
+	}
+	if !ok {
+		return errors.New("the session that confirmed the enrolment stopped working")
 	}
 	return nil
 }

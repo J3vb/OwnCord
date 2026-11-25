@@ -26,8 +26,8 @@ func (d *drill) stepBVerify(b *bState, problems *problemList) error {
 	}
 	if res.status != http.StatusOK || res.token == "" {
 		problems.addf("the second-factor sign-in on the restored install was refused with %d: %s", res.status, res.detail)
-	} else if err := d.verifyUpload(b, res.token, problems); err != nil {
-		return d.annotate(err)
+	} else {
+		d.verifyUpload(b, res.token, problems)
 	}
 	if err := d.verifyHistory(b, problems); err != nil {
 		return d.annotate(err)
@@ -53,17 +53,16 @@ func (d *drill) verifyOwner(b *bState, problems *problemList) error {
 	return nil
 }
 
-func (d *drill) verifyUpload(b *bState, token string, problems *problemList) error {
+func (d *drill) verifyUpload(b *bState, token string, problems *problemList) {
 	got, err := fetchAttachment(d.baseURL(), token, b.fileID)
 	if err != nil {
 		problems.addf("the restored install cannot serve the upload by id: %v", err)
-		return nil
+		return
 	}
 	if got.digest != fixturePayloadDigest || got.length != fixturePayloadSize {
 		problems.addf("the restored upload is %d bytes with sha256 %s, want %d bytes with %s",
 			got.length, got.digest, fixturePayloadSize, fixturePayloadDigest)
 	}
-	return nil
 }
 
 func (d *drill) verifyHistory(b *bState, problems *problemList) error {
