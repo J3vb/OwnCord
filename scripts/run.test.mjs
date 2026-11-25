@@ -17,9 +17,13 @@ import { resolveStrict, summarise } from "./run.mjs";
 
 const runner = fileURLToPath(new URL("./run.mjs", import.meta.url));
 // Use Node's absolute path, but leave build tools (and git) unavailable.
-// Listing must not execute a task or require a prepared checkout.
+// Listing must not execute a task or require a prepared checkout. A strict run
+// of the hygiene task runs this file too, so OWNCORD_STRICT is dropped here and
+// set only by the tests that exercise it.
 const env = Object.fromEntries(
-  Object.entries(process.env).filter(([key]) => key.toLowerCase() !== "path"),
+  Object.entries(process.env).filter(
+    ([key]) => key.toLowerCase() !== "path" && key !== "OWNCORD_STRICT",
+  ),
 );
 env.PATH = "";
 
