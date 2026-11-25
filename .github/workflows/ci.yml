@@ -553,8 +553,10 @@ jobs:
           race=$!
           go test -timeout 20m ./db/ ./service/ ./api/ > "$logs/plain.log" 2>&1 &
           plain=$!
-          wait "$race"; race_rc=$?
-          wait "$plain"; plain_rc=$?
+          # bash -e is on for every `shell: bash` step: without the `||` a failed
+          # run would end the step here, before either log is printed.
+          race_rc=0; wait "$race" || race_rc=$?
+          plain_rc=0; wait "$plain" || plain_rc=$?
           echo "::group::go test -race (all packages but db, service, api)"
           cat "$logs/race.log"
           echo "::endgroup::"
