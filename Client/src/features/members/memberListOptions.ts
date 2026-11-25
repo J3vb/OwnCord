@@ -65,4 +65,14 @@ export interface MemberListOptions {
   readonly joinRoomFor?: (
     userId: number,
   ) => { readonly label: string; readonly join: () => void } | null;
+  /** Which group headers are collapsed, and how to toggle one. Absent: no
+   *  header folds. */
+  readonly collapse?: {
+    /** Returns a new Set object only when the set changes. */
+    read(): ReadonlySet<string>;
+    toggle(key: string): void;
+    subscribe(signal: AbortSignal, onChange: () => void): void;
+    /** The header key of the group member `id` belongs in now, or null. */
+    groupOf(id: number): string | null;
+  };
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import "../../helpers/memberListMocks";
 import "../../../src/features/profiles/userProfilePopup";
 import "../../../src/features/moderation/AdminActions";
@@ -210,5 +210,187 @@ describe("member list contract: deck", () => {
     expect(row(1)).toBe(kept);
     expect(document.activeElement).toBe(kept);
     expect(kept.querySelector<HTMLElement>(".buddy-voice")?.title).toBe("In Lounge");
+  });
+});
+
+describe("member list contract: deck, folded groups", () => {
+  let host: HTMLDivElement;
+  let list: ReturnType<typeof createMemberList> | null = null;
+  beforeEach(() => localStorage.removeItem("owncord:settings:buddiesCollapsed"));
+  useMemberListSuite(
+    (c) => {
+      host = c;
+      list = null;
+      resetVoiceState();
+    },
+    () => list,
+  );
+
+  /** ann and bob online, cy and dee offline. */
+  const mount = (): void => {
+    setTestMembers([
+      makeMember({ id: 1, username: "ann" }),
+      makeMember({ id: 2, username: "bob" }),
+      makeMember({ id: 3, username: "cy", status: "offline" }),
+      makeMember({ id: 4, username: "dee", status: "offline" }),
+    ]);
+    list = createMemberList({ ...defaultOpts(), ...deckOptions() });
+    list.mount(host);
+  };
+  const row = (id: number): HTMLElement | null =>
+    host.querySelector<HTMLElement>(`[data-testid="member-${id}"]`);
+  const header = (group: string): HTMLElement =>
+    host.querySelector<HTMLElement>(`[data-testid="buddies-group-${group}"]`)!;
+  const press = (el: HTMLElement, k: string): void => {
+    el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true }));
+  };
+  const search = (text: string): void => {
+    const box = host.querySelector<HTMLInputElement>('[data-testid="member-search"]')!;
+    box.value = text;
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+  };
+
+  it("a header is a Tab stop with no search and plain text during one", () => {
+    mount();
+    expect(header("online").getAttribute("tabindex")).toBe("0");
+    expect(header("offline").getAttribute("aria-expanded")).toBe("true");
+    search("a");
+    expect(header("online").hasAttribute("tabindex")).toBe(false);
+    expect(header("online").hasAttribute("aria-expanded")).toBe(false);
+    search("");
+    expect(header("online").getAttribute("tabindex")).toBe("0");
+  });
+
+  it("Enter folds the focused header in place, and a search still shows its rows", () => {
+    mount();
+    const offline = header("offline");
+    offline.focus();
+    press(offline, "Enter");
+    expect(header("offline")).toBe(offline);
+    expect(document.activeElement).toBe(offline);
+    expect(offline.getAttribute("aria-expanded")).toBe("false");
+    expect(offline.textContent).toBe("OFFLINE — 2");
+    expect(row(3)).toBeNull();
+    expect(row(4)).toBeNull();
+    expect(row(1)).not.toBeNull();
+
+    search("dee");
+    expect(row(4)).not.toBeNull();
+    expect(header("offline").textContent).toBe("OFFLINE — 1");
+    search("");
+    expect(row(4)).toBeNull();
+
+    press(header("offline"), " ");
+    expect(row(3)).not.toBeNull();
+  });
+
+  it("a click folds and opens a group, and the fold is kept on the device", () => {
+    mount();
+    header("online").click();
+    expect(row(1)).toBeNull();
+    list?.destroy?.();
+    host.replaceChildren();
+    mount();
+    expect(row(1)).toBeNull();
+    expect(header("online").getAttribute("aria-expanded")).toBe("false");
+    header("online").click();
+    expect(row(1)).not.toBeNull();
+  });
+
+  it("a focused member who goes offline while OFFLINE is folded leaves focus on its header", () => {
+    mount();
+    header("offline").click();
+    row(2)!.focus();
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    updatePresence(2, "offline");
+    membersStore.flush();
+    expect(row(2)).toBeNull();
+    expect(document.activeElement).toBe(header("offline"));
+    expect(header("offline").textContent).toBe("OFFLINE — 3");
+    expect(focus).toHaveBeenLastCalledWith({ preventScroll: true });
+    focus.mockRestore();
+  });
+
+  it("a focused member renamed while their group is open keeps row focus", () => {
+    mount();
+    header("offline").click();
+    row(2)!.focus();
+    setTestMembers([
+      makeMember({ id: 1, username: "ann" }),
+      makeMember({ id: 2, username: "bob", displayName: "Bobby" }),
+      makeMember({ id: 3, username: "cy", status: "offline" }),
+      makeMember({ id: 4, username: "dee", status: "offline" }),
+    ]);
+    membersStore.flush();
+    expect(document.activeElement).toBe(row(2));
+  });
+
+  it("a focused row that leaves a search's matches gives focus to a row, not a plain header", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "ann" }),
+      makeMember({ id: 2, username: "bob" }),
+      makeMember({ id: 5, username: "bea" }),
+    ]);
+    list = createMemberList({ ...defaultOpts(), ...deckOptions() });
+    list.mount(host);
+    search("b");
+    row(2)!.focus();
+    setTestMembers([
+      makeMember({ id: 1, username: "ann" }),
+      makeMember({ id: 2, username: "rex" }),
+      makeMember({ id: 5, username: "bea" }),
+    ]);
+    membersStore.flush();
+    expect(row(2)).toBeNull();
+    expect(header("online").hasAttribute("tabindex")).toBe(false);
+    expect(document.activeElement).toBe(row(5));
+  });
+
+  it("a fold saved between building the options and mounting is drawn", () => {
+    setTestMembers([
+      makeMember({ id: 1, username: "ann" }),
+      makeMember({ id: 3, username: "cy", status: "offline" }),
+    ]);
+    const options = deckOptions();
+    localStorage.setItem("owncord:settings:buddiesCollapsed", JSON.stringify(["a:offline"]));
+    list = createMemberList({ ...defaultOpts(), ...options });
+    list.mount(host);
+    expect(header("offline").getAttribute("aria-expanded")).toBe("false");
+    expect(row(3)).toBeNull();
+  });
+
+  it("a focused header whose group empties gives focus to the first row in view", () => {
+    mount();
+    header("online").click();
+    const online = header("online");
+    online.focus();
+    updatePresence(1, "offline");
+    updatePresence(2, "offline");
+    membersStore.flush();
+    expect(online.isConnected).toBe(false);
+    expect(document.activeElement).toBe(row(1));
+  });
+
+  it("arrows, Home and End on a header are left to the browser", () => {
+    mount();
+    const online = header("online");
+    online.focus();
+    for (const k of ["ArrowDown", "End", "Home"]) {
+      const e = new KeyboardEvent("keydown", { key: k, bubbles: true, cancelable: true });
+      online.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(false);
+      expect(document.activeElement).toBe(online);
+    }
+  });
+
+  it("Classic's role headers never fold", () => {
+    mount();
+    list?.destroy?.();
+    list = createMemberList(defaultOpts());
+    list.mount(host);
+    const roleHeader = host.querySelector<HTMLElement>(".member-role-group")!;
+    expect(roleHeader.hasAttribute("tabindex")).toBe(false);
+    roleHeader.click();
+    expect(host.querySelectorAll(".member-item")).toHaveLength(4);
   });
 });

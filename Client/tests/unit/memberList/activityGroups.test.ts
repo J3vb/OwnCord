@@ -1,5 +1,9 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { activityItems } from "../../../src/features/members/buddies/activityGroups";
+import {
+  ACTIVITY_GROUP_KEYS,
+  activityItems,
+  groupKeyOf,
+} from "../../../src/features/members/buddies/activityGroups";
 import {
   buildModel,
   flattenModel,
@@ -119,8 +123,8 @@ describe("activityItems: groups and headers", () => {
       "DO NOT DISTURB — 1",
       "OFFLINE — 1",
     ]);
-    expect(headers.at(-1)).toMatchObject({ offline: true, collapsible: false, collapsed: false });
-    expect(headers[0]).toMatchObject({ offline: false, collapsible: false, collapsed: false });
+    expect(headers.at(-1)).toMatchObject({ offline: true, collapsible: true, collapsed: false });
+    expect(headers[0]).toMatchObject({ offline: false, collapsible: true, collapsed: false });
   });
 
   it("gives each row its member's key and role colour", () => {
@@ -188,5 +192,64 @@ describe("activityItems after a full presence snapshot", () => {
     expect(updated).toEqual(activityItems(buildModel(next, []), "", NONE));
     const offline = new Set(members.slice(10).map((m) => m.id));
     for (const id of offline) expect(groupOf(updated, id)).toBe("a:offline");
+  });
+});
+
+describe("activityItems: folded groups", () => {
+  const roster = [
+    makeMember({ id: 1, username: "ann", activity: GAME }),
+    makeMember({ id: 2, username: "bob" }),
+    makeMember({ id: 3, username: "cy" }),
+    makeMember({ id: 4, username: "dee", status: "offline" }),
+  ];
+  const folded = (keys: readonly string[], query = ""): ListItem[] =>
+    activityItems(buildModel(mapOf(roster), []), query, new Set(keys));
+
+  it("keeps a folded group's header with its full count and leaves out its rows", () => {
+    const list = folded(["a:online", "a:offline"]);
+    expect(shape(list)).toEqual(["a:game: 1", "a:online:", "a:offline:"]);
+    const headers = list.filter((i) => i.kind === "header");
+    expect(headers.map((h) => h.text)).toEqual(["IN GAME — 1", "ONLINE — 2", "OFFLINE — 1"]);
+    expect(headers.map((h) => [h.collapsible, h.collapsed])).toEqual([
+      [true, false],
+      [true, true],
+      [true, true],
+    ]);
+  });
+
+  it("during a search every header is plain, unfolded, and shows its matches", () => {
+    const list = folded(["a:online", "a:offline"], "b");
+    expect(shape(list)).toEqual(["a:online: 2"]);
+    expect(list[0]).toMatchObject({ text: "ONLINE — 1", collapsible: false, collapsed: false });
+  });
+
+  it("a blank search still folds", () => {
+    expect(shape(folded(["a:online"], "  "))).toEqual(["a:game: 1", "a:online:", "a:offline: 4"]);
+  });
+
+  it("an unknown key folds nothing", () => {
+    expect(shape(folded(["admin"]))).toEqual(shape(folded([])));
+  });
+});
+
+describe("groupKeyOf", () => {
+  it.each([
+    ["online", true, "a:game"],
+    ["idle", true, "a:game"],
+    ["dnd", true, "a:game"],
+    ["online", false, "a:online"],
+    ["idle", false, "a:away"],
+    ["dnd", false, "a:dnd"],
+    ["offline", false, "a:offline"],
+    ["offline", true, "a:offline"],
+    ["invisible", false, "a:offline"],
+  ] as const)("%s with a game: %s is in %s, as activityItems groups it", (status, game, key) => {
+    const member = makeMember({ id: 1, username: "ann", status, activity: game ? GAME : null });
+    expect(groupKeyOf(member)).toBe(key);
+    expect(groupOf(items([member]), 1)).toBe(key);
+  });
+
+  it("names the groups in display order", () => {
+    expect(ACTIVITY_GROUP_KEYS).toEqual(["a:game", "a:online", "a:away", "a:dnd", "a:offline"]);
   });
 });

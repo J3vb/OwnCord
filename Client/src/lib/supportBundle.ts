@@ -176,6 +176,7 @@ const SETTINGS_ALLOWLIST = [
   "shareMotionPolicy",
   "developerMode",
   "screenLayout",
+  "buddiesCollapsed",
   "logs_min_level",
 ] as const;
 

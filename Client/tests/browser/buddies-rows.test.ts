@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 // Same stylesheet order as main.ts: tokens, the border-box reset, then app.
 import "../../src/styles/tokens.css";
 import "../../src/styles/base.css";
@@ -242,5 +242,103 @@ describe("Buddies rows in a real layout, above 200 members", () => {
     expect(rowFor(host.root, 6)).toBe(moved);
     expect(document.activeElement).toBe(moved);
     expectNoOverlap(host.root);
+  });
+});
+
+describe("Buddies folded groups in a real layout, above 200 members", () => {
+  beforeEach(() => localStorage.removeItem("owncord:settings:buddiesCollapsed"));
+
+  const header = (root: HTMLElement, group: string): HTMLElement | null =>
+    root.querySelector<HTMLElement>(`[data-testid="buddies-group-${group}"]`);
+
+  it("folding and opening a group leaves the rows contiguous", async () => {
+    const host = (mounted = mountColumn());
+    await settle();
+    header(host.root, "game")!.click();
+    await settle();
+    expect(rowFor(host.root, 6)).toBeNull();
+    expectNoOverlap(host.root, true);
+    host.scroller.scrollTop = host.scroller.scrollHeight;
+    await settle();
+    expect(rowFor(host.root, 599)).not.toBeNull();
+    expectNoOverlap(host.root, true);
+    host.scroller.scrollTop = 0;
+    await settle();
+    header(host.root, "game")!.click();
+    await settle();
+    expect(rowFor(host.root, 6)).not.toBeNull();
+    expectNoOverlap(host.root, true);
+    sameHeight(host.root);
+  });
+
+  it("a focused header stays drawn when scrolled away, and Enter folds it in place", async () => {
+    const host = (mounted = mountColumn());
+    await settle();
+    const game = header(host.root, "game")!;
+    game.focus();
+    host.scroller.scrollTop = host.scroller.scrollHeight;
+    await settle();
+    expect(rowFor(host.root, 599)).not.toBeNull();
+    expect(game.isConnected).toBe(true);
+    expect(document.activeElement).toBe(game);
+
+    host.scroller.scrollTop = 0;
+    await settle();
+    game.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    await settle();
+    expect(header(host.root, "game")).toBe(game);
+    expect(document.activeElement).toBe(game);
+    expect(game.getAttribute("aria-expanded")).toBe("false");
+    // The rows below move up with no gap.
+    expectNoOverlap(host.root, true);
+  });
+
+  it("a focused member who moves into a folded group far below leaves focus on its pinned header", async () => {
+    // OFFLINE starts folded, as a stored fold on this device.
+    localStorage.setItem("owncord:settings:buddiesCollapsed", JSON.stringify(["a:offline"]));
+    const host = (mounted = mountColumn());
+    await settle();
+    expect(header(host.root, "offline")).toBeNull();
+
+    // user0006 is the first member in IN GAME.
+    const row = rowFor(host.root, 6)!;
+    row.focus();
+    const top = host.scroller.scrollTop;
+    const focus = vi.spyOn(HTMLElement.prototype, "focus");
+    updatePresence(6, "offline");
+    membersStore.flush();
+    await settle();
+    const offline = header(host.root, "offline");
+    expect(offline).not.toBeNull();
+    expect(document.activeElement).toBe(offline);
+    expect(focus).toHaveBeenCalledWith({ preventScroll: true });
+    focus.mockRestore();
+    expect(host.scroller.scrollTop).toBe(top);
+    expect(rowFor(host.root, 6)).toBeNull();
+    // The header is drawn far below the window, as a pinned item.
+    const view = host.scroller.getBoundingClientRect();
+    expect(offline!.getBoundingClientRect().top).toBeGreaterThan(view.bottom);
+  });
+
+  it("a focused row that leaves a search's matches gives focus to a row, not the plain header", async () => {
+    const host = (mounted = mountColumn());
+    await settle();
+    const box = document.querySelector<HTMLInputElement>('[data-testid="member-search"]')!;
+    box.value = "user00";
+    box.dispatchEvent(new Event("input", { bubbles: true }));
+    await settle();
+    // user0007 is online with a custom status: ONLINE, which keeps other matches.
+    const row = rowFor(host.root, 7)!;
+    row.focus();
+    membersStore.setState((prev) => ({
+      ...prev,
+      members: new Map(prev.members).set(7, { ...member(7), username: "zed0007" }),
+    }));
+    membersStore.flush();
+    await settle();
+    expect(rowFor(host.root, 7)).toBeNull();
+    const active = document.activeElement;
+    expect(active).not.toBe(document.body);
+    expect(active instanceof HTMLElement && active.classList.contains("buddy-row")).toBe(true);
   });
 });

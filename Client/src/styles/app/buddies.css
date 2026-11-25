@@ -2,7 +2,8 @@
 /* Every selector starts with `html.layout-deck`, so Classic's member list is
    untouched. Colours read only --text-normal, --text-muted, --bg-secondary
    and --bg-hover. No transition or animation: the row's `transition: none`
-   only cancels Classic's hover fade. tests/unit/deck/buddies-css.test.ts
+   only cancels Classic's hover fade, and the only outline rule is the group
+   header's outline-offset. tests/unit/deck/buddies-css.test.ts
    enforces these rules.
 
    Heights are fixed so the virtual list never leaves gaps: the strips and the
@@ -54,6 +55,21 @@ html.layout-deck .buddies-group {
   align-items: flex-end;
   padding: 0 var(--space-3) var(--space-1);
   color: var(--text-muted);
+}
+/* A foldable header (no search) is a button: a chevron, turned when folded,
+   and the shared focus ring drawn inside, so the scroller does not clip it. */
+html.layout-deck .buddies-group[role="button"] {
+  cursor: pointer;
+}
+html.layout-deck .buddies-group:focus-visible {
+  outline-offset: -2px;
+}
+html.layout-deck .buddies-group-chevron {
+  flex: none;
+  margin-right: var(--space-1);
+}
+html.layout-deck .buddies-group-chevron.collapsed {
+  transform: rotate(-90deg);
 }
 html.layout-deck .buddies-group-text {
   min-width: 0;
