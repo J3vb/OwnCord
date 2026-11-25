@@ -99,6 +99,11 @@ var EgressAllow = map[string]EgressEntry{
 	"cmd/smoke/drills_probes.go": {"loopback", "the same address (defaultBaseURL, https://127.0.0.1:8443)", "someone invoking cmd/smoke",
 		"the drills' own HTTP probes: /health under disk pressure, an authenticated read, a read while a restore runs, and the upload and backup routes the rehearsals drive; the destination is a server this harness launched moments earlier on loopback, and this binary is a CI harness that ships in no release",
 		[]string{"healthOf", "authenticated", "readWhileRestoring", "uploadStatus", "backupStatus"}},
+	// Phase B's own API calls and its full-archive download, to the server the
+	// drill launched on loopback. Same row shape as the probes above.
+	"cmd/smoke/drills_backup_api.go": {"loopback", "the same address (defaultBaseURL, https://127.0.0.1:8443)", "someone invoking cmd/smoke",
+		"the full-backup drill's API calls (sign-in, TOTP, seeded messages, history, backup list) and its full-archive download; the destination is a server this harness launched moments earlier on loopback, and this binary is a CI harness that ships in no release",
+		[]string{"postJSON", "downloadArchive"}},
 	"cmd/smoke/drills_ws.go": {"loopback", "the /api/v1/ws that upgrades on the same address (defaultBaseURL, https://127.0.0.1:8443)", "someone invoking cmd/smoke",
 		"the drills' WebSocket dial; the destination is a server this harness launched moments earlier on loopback, and this binary is a CI harness that ships in no release",
 		[]string{"dialWS"}},
