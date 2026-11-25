@@ -4,7 +4,6 @@ import (
 	"archive/zip"
 	"encoding/base32"
 	"os"
-	"path"
 	"path/filepath"
 	"runtime"
 	"slices"
@@ -189,7 +188,7 @@ func TestUnpackArchive_NamesMissingCoreFile(t *testing.T) {
 }
 
 func TestRestoredConfigReachesOldInstall(t *testing.T) {
-	old := path.Join(t.TempDir(), "source")
+	old := "/srv/owncord-drill/source"
 	tests := []struct {
 		name  string
 		files map[string]string
