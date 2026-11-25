@@ -228,7 +228,12 @@ func setupPrecheck(w http.ResponseWriter, r *http.Request, limiter *auth.RateLim
 	// Use service.SanitizeText, not a bare bluemonday StrictPolicy: that HTML-escapes survivors (' -> &#39;), so
 	// "O'Brien" would differ from what handleLogin looks up (which only trims) and permanently lock the Owner
 	// out. Registration and profile rename canonicalize the same way.
-	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
+	username, err := service.SanitizeText(req.Username)
+	req.Username = strings.TrimSpace(username)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "username has too many layers of markup or entities")
+		return req, "", false
+	}
 	if req.Username == "" || req.Password == "" {
 		writeErr(w, http.StatusBadRequest, httperr.CodeBadRequest, "username and password are required")
 		return req, "", false

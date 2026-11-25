@@ -20,6 +20,13 @@ func TestCleanTextLongNestedEntitiesIsBounded(t *testing.T) {
 	}
 }
 
+func TestCleanTextUnsettledTextFallsBack(t *testing.T) {
+	t.Parallel()
+	if got := cleanText("&"+strings.Repeat("amp;", 20)+"lt;b&gt;x", 100, "fb"); got != "fb" {
+		t.Fatalf("got %q, want the fallback", got)
+	}
+}
+
 func TestCleanTextCutInsideMultiByteRuneIsValid(t *testing.T) {
 	t.Parallel()
 	// 3-byte runes with max 2 give an 8-byte cut that lands mid-rune.

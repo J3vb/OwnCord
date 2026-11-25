@@ -257,7 +257,10 @@ func pollText(raw, field string, maxRunes int) (string, error) {
 	if len(raw) > maxRunes*4 {
 		return "", fmt.Errorf("%w: poll %s exceeds %d characters", ErrBadRequest, field, maxRunes)
 	}
-	clean := sanitizeToFixpoint(raw)
+	clean, err := sanitizeToFixpoint(raw)
+	if err != nil {
+		return "", fmt.Errorf("poll %s: %w", field, err)
+	}
 	if strings.IndexFunc(clean, pollBreakRune) >= 0 {
 		return "", fmt.Errorf("%w: poll %s contains control characters", ErrBadRequest, field)
 	}

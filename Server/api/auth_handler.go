@@ -137,9 +137,8 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 		return req, false
 	}
 
-	// Bound the raw field before the fixpoint sanitizer, which is quadratic in input length: an
-	// unauthenticated caller could pin a core for minutes with one oversized username before the 32-rune cap
-	// runs. *4 still admits any legitimate 32-rune UTF-8 username.
+	// Bound the raw field before the fixpoint sanitizer, whose passes cost time in proportion to their input;
+	// this request is unauthenticated. *4 still admits any legitimate 32-rune UTF-8 username.
 	if len(req.Username) > maxLoginUsernameLen*4 {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is too long")
 		return req, false
@@ -147,7 +146,11 @@ func registerReadRequest(w http.ResponseWriter, r *http.Request) (registerReques
 
 	// Use service.SanitizeText, not a bare bluemonday call: its HTML-escaped output would differ from what
 	// handleLogin looks up (it only trims), permanently locking out usernames containing ' or &.
-	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
+	username, ok := sanitizeTextField(w, req.Username, "username")
+	if !ok {
+		return req, false
+	}
+	req.Username = username
 	req.InviteCode = strings.TrimSpace(req.InviteCode)
 
 	if req.Username == "" || req.Password == "" {

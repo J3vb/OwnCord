@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"strings"
 
 	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/clientip"
@@ -102,7 +101,11 @@ func handleRecover(svc AuthService, trustedProxies []string) http.HandlerFunc {
 			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username too long")
 			return
 		}
-		req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
+		username, ok := sanitizeTextField(w, req.Username, "username")
+		if !ok {
+			return
+		}
+		req.Username = username
 		if err := auth.ValidateUsername(req.Username); err != nil {
 			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 			return
