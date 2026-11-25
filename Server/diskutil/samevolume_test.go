@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -30,7 +31,7 @@ func TestSameVolume_UnixDeviceIDs(t *testing.T) {
 			"/srv":                  "dev-1",
 			"/srv/owncord/data/bak": "dev-1",
 		}),
-		parent: filepath.Dir,
+		parent: path.Dir,
 	}
 	for _, tc := range []struct {
 		name, a, b string
@@ -98,13 +99,13 @@ func TestSameVolume_ErrorIsUnknown(t *testing.T) {
 	boom := errors.New("permission denied")
 	p := volumeProbe{
 		id:     func(string) (string, error) { return "", boom },
-		parent: filepath.Dir,
+		parent: path.Dir,
 	}
 	if got, err := sameVolume("/a", "/b", p); err == nil || got || !errors.Is(err, boom) {
 		t.Errorf("sameVolume = %v, %v; want false and the probe's error", got, err)
 	}
 	// Nothing exists all the way up: unknown too.
-	p = volumeProbe{id: fakeVolumes(nil), parent: filepath.Dir}
+	p = volumeProbe{id: fakeVolumes(nil), parent: path.Dir}
 	if _, err := sameVolume("/a/b", "/c", p); err == nil {
 		t.Error("sameVolume with no existing parent: no error")
 	}

@@ -542,7 +542,8 @@ jobs:
         if: matrix.os != 'ubuntu-latest' && env.RUN_SERVER != 'false'
         shell: bash
         run: |
-          set -uo pipefail
+          # The runner's bash has -e on: turn it off so a failing run still prints its log below.
+          set +e -uo pipefail
           mapfile -t race_pkgs < <(go list ./... | grep -vE '/Server/(db|service|api)$')
           if [ "${#race_pkgs[@]}" -lt 10 ]; then
             echo "::error::go list returned ${#race_pkgs[@]} packages for the race run"
