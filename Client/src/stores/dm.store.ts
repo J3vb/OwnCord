@@ -10,72 +10,9 @@ import type { Channel } from "@stores/channels.store";
 import type { DmChannelPayload } from "@lib/types";
 import { connectText } from "../i18n/connect";
 
-export interface DmUser {
-  readonly id: number;
-  readonly username: string;
-  readonly avatar: string;
-  readonly status: string;
-  /** On the Android app, copied from presence like `status`. Undefined = not. */
-  readonly mobile?: boolean;
-  /** Nickname to render instead of `username`. "" = unset. */
-  readonly displayName?: string;
-  /** The game this person is playing, copied from presence like
-   *  `status`. Null or undefined = none. */
-  readonly activity?: { readonly name: string; readonly startedAt: number } | null;
-  /** The song this person is listening to, copied from presence like
-   *  `activity`. Null or undefined = none. */
-  readonly listening?: {
-    readonly title: string;
-    readonly artist: string;
-    readonly player: string;
-    readonly startedAt: number;
-    readonly durationMs: number;
-  } | null;
-}
+import type { DmChannel, DmState, DmUser } from "./dmModel";
 
-export interface DmChannel {
-  readonly channelId: number;
-  /**
-   * The other participant of a 1:1 DM. For a group it is the first of
-   * `participants`; anything that must be correct for groups reads
-   * `participants` instead. Kept because most 1:1 call sites want exactly one
-   * user and would otherwise all index into an array.
-   */
-  readonly recipient: DmUser;
-  /** Everyone in the DM except the current user. Never empty for a live DM. */
-  readonly participants: readonly DmUser[];
-  /** Optional group name. "" for a 1:1 DM and for an unnamed group. */
-  readonly name: string;
-  /** True for a group DM (3+ participants at creation). */
-  readonly isGroup: boolean;
-  /**
-   * The group's owner (user id). Present only for a group on a server with
-   * member management; its absence is the feature-detection signal
-   * that hides Add People, Remove and Make Group Owner.
-   */
-  readonly ownerId?: number;
-  /** The group's icon file path; "" or absent for none. */
-  readonly icon?: string;
-  readonly lastMessageId: number | null;
-  /**
-   * The current user's read pointer in this DM (see Channel.lastReadMessageId).
-   * Undefined when the server never said.
-   */
-  readonly lastReadMessageId?: number | undefined;
-  readonly lastMessage: string;
-  readonly lastMessageAt: string;
-  readonly unreadCount: number;
-  /**
-   * Unread messages in this DM that mention the current user. Kept independent
-   * of unreadCount so the red mention badge can outrank the plain one, exactly
-   * as it does for channels.
-   */
-  readonly mentionCount: number;
-}
-
-export interface DmState {
-  readonly channels: readonly DmChannel[];
-}
+export type { DmChannel, DmState, DmUser } from "./dmModel";
 
 const INITIAL: DmState = { channels: [] };
 
@@ -270,7 +207,7 @@ export function dmChannelFromPayload(p: DmChannelPayload): DmChannel {
     ...(p.icon !== undefined && { icon: p.icon }),
     lastMessageId: p.last_message_id,
     lastReadMessageId: p.last_read_message_id,
-    lastMessage: p.last_message,
+    lastMessage: dmPreviewText(p.channel_id, p.last_message_id, p.last_message, participants),
     lastMessageAt: p.last_message_at,
     unreadCount: p.unread_count,
     mentionCount: p.mention_count ?? 0,
@@ -372,6 +309,55 @@ export function updateDmLastMessagePreview(
         ...rest,
       ],
     };
+  });
+}
+
+/** Rewrites a DM's last-message text before the list holds it. The DM ws
+ *  handlers set it (they own the block check); unset = the text as it came. */
+export type DmPreviewFilter = (
+  channelId: number,
+  messageId: number | null,
+  text: string,
+  participants: readonly DmUser[],
+) => string;
+
+let previewFilter: DmPreviewFilter = (_channelId, _messageId, text) => text;
+
+export function setDmPreviewFilter(filter: DmPreviewFilter): void {
+  previewFilter = filter;
+}
+
+/** The text the DM list shows for a DM's last message, through the preview
+ *  filter; `participants` defaults to the DM's as this client lists it. */
+export function dmPreviewText(
+  channelId: number,
+  messageId: number | null,
+  text: string,
+  participants?: readonly DmUser[],
+): string {
+  const members =
+    participants ??
+    dmStore.getState().channels.find((c) => c.channelId === channelId)?.participants;
+  return previewFilter(channelId, messageId, text, members ?? []);
+}
+
+/** Run dmPreviewText over every listed DM's preview, for a block list that
+ *  arrived after the previews did. */
+export function hideBlockedDmPreviews(): void {
+  dmStore.setState((prev) => {
+    let changed = false;
+    const channels = prev.channels.map((c) => {
+      const lastMessage = dmPreviewText(
+        c.channelId,
+        c.lastMessageId,
+        c.lastMessage,
+        c.participants,
+      );
+      if (lastMessage === c.lastMessage) return c;
+      changed = true;
+      return { ...c, lastMessage };
+    });
+    return changed ? { channels } : prev;
   });
 }
 

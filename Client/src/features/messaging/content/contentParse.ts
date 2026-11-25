@@ -4,6 +4,7 @@
  */
 
 import { parseInline, parseBlocks, splitCodeFences, type InlineNode } from "@lib/text/markdown";
+import { boundInboundText } from "@lib/text/inboundText";
 import { highlightCode, resolveLanguage, type CodeToken } from "./syntaxHighlight";
 
 /** Quotes may contain blocks, but a quote inside a quote inside a quote is a
@@ -95,7 +96,7 @@ function parseBlocksInto(text: string, depth: number): readonly ParsedBlock[] {
 
 function parseMessageContent(content: string): ParsedMessage {
   const segments: ParsedSegment[] = [];
-  for (const segment of splitCodeFences(content)) {
+  for (const segment of splitCodeFences(boundInboundText(content))) {
     if (segment.kind === "code") {
       const canonical = resolveLanguage(segment.lang);
       segments.push({
