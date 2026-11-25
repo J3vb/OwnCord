@@ -1,5 +1,5 @@
 {
   "extends": "./tsconfig.json",
   "include": ["src/**/*.d.ts"],
-  "files": ["src/lib/permissions.ts"]
+  "files": ["src/stores/permissions.ts"]
 }
