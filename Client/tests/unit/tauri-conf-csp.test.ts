@@ -36,6 +36,12 @@ describe("tauri.conf.json — CSP", () => {
     }
   });
 
+  // Every form in the app handles its own submit (preventDefault), so no form
+  // ever submits to a URL and the window never loads one that way.
+  it("form-action allows no form submission", () => {
+    expect(directive("form-action")).toEqual(["'none'"]);
+  });
+
   // connect-src is loopback only. REST, the chat socket, the updater and the
   // external-content broker all go through IPC; LiveKit and the native frame
   // sockets reach the renderer through loopback tunnels. A local server's

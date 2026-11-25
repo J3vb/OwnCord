@@ -161,6 +161,9 @@ release changes the database, and anything an operator must do first.)
 - Older messages kept on screen through a reload now show edits, deletes and reactions made while you were away.
 - A mention badge on a voice channel can be cleared with Mark as Read, and the DM header no longer shows a Media button left over from the last channel.
 - Screen readers read a revealed spoiler's text and the member list's collapse arrow.
+- A link preview card's small host line named the site the page claimed to be; it now names the link's real host.
+- The DM list could show a blocked person's text after they edited their message or after a reconnect; it now shows "Blocked message" when that message is loaded, and in a DM where everyone else is blocked.
+- The desktop Save dialog could open with a folder path or hidden characters in the suggested name; it now opens with a plain file name.
 
 **Server (Windows hosting)**
 

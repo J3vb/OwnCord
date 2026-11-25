@@ -16,7 +16,8 @@
 #[cfg(desktop)]
 use std::path::Path;
 
-/// URL schemes `open_external_url` accepts: the plugin's `opener:default` scope.
+/// URL schemes `open_external_url` accepts: the opener plugin's default scope.
+/// The page has no opener grant of its own; this command is its only way.
 const ALLOWED_SCHEMES: [&str; 4] = ["http", "https", "mailto", "tel"];
 
 /// Check `url` is one the renderer may open and return its normalised text.

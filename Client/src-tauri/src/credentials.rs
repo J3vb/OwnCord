@@ -57,6 +57,13 @@ fn login_account(host: &str) -> String {
     host.to_string()
 }
 
+/// Refuse a `host` from the webview that is not a plain server address, so a
+/// sign-in is never written or deleted under another entry's name (the
+/// identity keys and pending messages share the store).
+fn require_server_host(host: &str) -> Result<(), String> {
+    owncord_parse::credentials::validate_credential_host(host).map_err(|e| e.to_string())
+}
+
 /// Account holding the voice-E2EE identity private key for `host`.
 ///
 /// The `identity:` prefix keeps it distinct from the login credential for the
@@ -178,6 +185,7 @@ pub async fn save_credential(
 ) -> Result<(), String> {
     run_store_op(move || {
         require_non_empty(&host, "host")?;
+        require_server_host(&host)?;
         require_non_empty(&token, "token")?;
         require_non_empty(&username, "username")?;
 
@@ -290,6 +298,7 @@ fn parse_credential_blob(json_str: &str) -> Result<CredentialData, String> {
 pub async fn delete_credential(app: AppHandle, host: String) -> Result<(), String> {
     run_store_op(move || {
         require_non_empty(&host, "host")?;
+        require_server_host(&host)?;
         secret_store::delete(&app, &login_account(&host))
             .map_err(|e| format!("delete_credential failed: {e}"))
     })
@@ -839,6 +848,22 @@ mod tests {
         assert_eq!(login_account(host), "chat.example.com");
         assert_eq!(identity_account(host), "identity:chat.example.com");
         assert_ne!(login_account(host), identity_account(host));
+    }
+
+    #[test]
+    fn a_sign_in_is_stored_only_under_a_server_address() {
+        // The page may name any server it saves, but never another entry of
+        // the store: an identity key or a pending-message list.
+        for host in ["chat.example.com", "localhost:8443", "[::1]:8443"] {
+            assert!(require_server_host(host).is_ok(), "{host}");
+            assert!(
+                require_server_host(&identity_account(host)).is_err(),
+                "{host}"
+            );
+            let pending = pending_messages_account(host, 1).unwrap();
+            assert!(require_server_host(&pending).is_err(), "{host}");
+        }
+        assert!(require_server_host("chat.example.com/extra").is_err());
     }
 
     #[test]

@@ -45,7 +45,6 @@ export function renderServerLinkCard(card: LinkPreviewCard, url: string): HTMLDi
   const meta = {
     title: nonBlank(card.title ?? null),
     description: nonBlank(card.description ?? null),
-    siteName: nonBlank(card.site_name ?? null),
   };
   const thumbUrl = cardThumbnailUrl(card);
   if (meta.title === null && meta.description === null && thumbUrl === null) {

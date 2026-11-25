@@ -276,7 +276,7 @@ export function renderGenericLinkPreview(url: string): HTMLDivElement {
     if (load.ok) {
       const { meta } = load;
       // No title, description or image: an empty card with nothing in it, so
-      // render none at all. siteName alone still names the host.
+      // render none at all; the host line alone says nothing the link does not.
       if (meta.title === null && meta.description === null && meta.image === null) {
         wrap.dataset.embedState = "empty";
         const hadFocus = wrap.contains(document.activeElement);
@@ -358,16 +358,18 @@ export function focusMessageLink(card: HTMLElement, url: string): void {
   row.focus();
 }
 
-/** The text of a preview card: title, host line and a description cut at 200 characters. */
+/** The text of a preview card: title, host line and a description cut at 200
+ *  characters. The host line is always the link's own host, never the site
+ *  name the page gives, so the card names where the link really goes. */
 export function applyCardText(
-  meta: Pick<OgMeta, "title" | "description" | "siteName">,
+  meta: Pick<OgMeta, "title" | "description">,
   titleEl: HTMLElement,
   descEl: HTMLElement,
   hostEl: HTMLElement,
   displayHost: string,
 ): void {
   setText(titleEl, meta.title ?? displayHost);
-  setText(hostEl, meta.siteName ?? displayHost);
+  setText(hostEl, displayHost);
   if (meta.description !== null) {
     const desc =
       meta.description.length > 200 ? meta.description.slice(0, 197) + "..." : meta.description;

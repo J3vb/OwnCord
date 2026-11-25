@@ -214,12 +214,29 @@ impl RemoteParticipant {
 
         let mut valid_tracks = HashSet::<TrackSid>::new();
         for track in info.tracks {
-            let track_sid = track.sid.clone().try_into().unwrap();
+            // OWNCORD-PATCH (signal input): entries with an invalid sid or an
+            // unsupported type are skipped.
+            let track_sid = match crate::room::publication::checked_track_ids(&track) {
+                Ok((sid, _)) => sid,
+                Err(reason) => {
+                    log::warn!("ignoring participant track: {}", reason);
+                    continue;
+                }
+            };
             if let Some(publication) = self.get_track_publication(&track_sid) {
                 publication.update_info(track.clone());
             } else {
-                let publication =
-                    RemoteTrackPublication::new(track.clone(), None, self.remote.auto_subscribe);
+                let publication = match RemoteTrackPublication::new(
+                    track.clone(),
+                    None,
+                    self.remote.auto_subscribe,
+                ) {
+                    Ok(publication) => publication,
+                    Err(reason) => {
+                        log::warn!("ignoring participant track: {}", reason);
+                        continue;
+                    }
+                };
 
                 self.add_publication(TrackPublication::Remote(publication.clone()));
 

@@ -135,7 +135,7 @@ describe("rendering from the server's cards", () => {
     expect(card.dataset["embedState"]).toBe("loaded");
     expect(card.querySelector(".msg-embed-link-title")?.textContent).toBe("A post");
     expect(card.querySelector(".msg-embed-link-title")?.getAttribute("href")).toBe(URL_A);
-    expect(card.querySelector(".msg-embed-host")?.textContent).toBe("Example");
+    expect(card.querySelector(".msg-embed-host")?.textContent).toBe("example.com");
     expect(card.querySelector(".msg-embed-link-desc")?.textContent).toBe("What it says");
     expect(host.querySelector("[data-external-url]")).toBeNull();
     expect(host.querySelector(".concealed-item, [data-concealed]")).toBeNull();

@@ -42,8 +42,7 @@
     "http:allow-fetch-read-body",
     "http:allow-fetch-cancel",
     "http:allow-fetch-cancel-body",
-    "opener:default",
-    "dialog:default",
+    "dialog:allow-save",
     "process:allow-restart",
     {
       "identifier": "fs:allow-write-file",

@@ -23,6 +23,7 @@ import { dmStore } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
 import { buildDmEntries } from "../../../features/direct-messages/dmEntries";
 import { followActiveChannel } from "../../../features/direct-messages/followActiveChannel";
+import { watchBlockedPreviews } from "../../../features/direct-messages/blockedPreviewText";
 import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { mountDmPhoneHead } from "../../../features/direct-messages/sidebarDmPhoneHead";
 import type { DmFolderOptions } from "../../../features/direct-messages/dmFolder";
@@ -98,6 +99,9 @@ function mountDmSidebarRefresh(sc: SidebarScope): void {
       refresh,
     ),
   );
+
+  // A row's preview follows the block list (the blocked-message label).
+  sc.channelModeUnsubs.push(watchBlockedPreviews(refresh));
 
   // Re-render DM sidebar when the active conversation changes. Keyed on the
   // active channel rather than activeDmUserId, which a group DM leaves null.

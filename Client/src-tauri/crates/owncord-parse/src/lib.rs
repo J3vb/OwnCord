@@ -3,6 +3,9 @@
 //! a store file on disk) into a decision. Kept free of Tauri, sockets and
 //! libwebrtc so property tests and fuzz targets build in seconds.
 
+pub mod credentials;
+pub mod notify;
 pub mod pins;
 pub mod proxy;
 pub mod store;
+pub mod voice;

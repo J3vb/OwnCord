@@ -512,6 +512,8 @@ export const shards = {
     "src/features/threads/threadAgo.ts",
     "src/features/threads/threadCommands.ts",
     "src/lib/prefs/screenLayout.ts",
+    "src/lib/text/fileName.ts",
+    "src/lib/text/inboundText.ts",
     "src/lib/text/nameLimits.ts",
     "src/lib/text/pickedMentions.ts",
   ],
@@ -717,7 +719,9 @@ export const shards = {
   "stores-4": [
     "src/features/messaging/content/serverLinkCard.ts",
     "src/lib/voice/appAudioShare.ts",
+    "src/features/direct-messages/blockedPreviewText.ts",
     "src/stores/dm.store.ts",
+    "src/stores/dmModel.ts",
     "src/stores/messages.store.ts",
     "src/stores/stickers.store.ts",
     "src/stores/voiceListening.ts",
