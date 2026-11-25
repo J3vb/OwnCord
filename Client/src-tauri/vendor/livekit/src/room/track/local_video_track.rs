@@ -356,7 +356,7 @@ impl LocalVideoTrack {
             .collect()
     }
 
-    // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
+    // OWNCORD-PATCH (video bitrate): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
     /// Each sender encoding's `max_bitrate` and `scale_resolution_down_by`
     /// (1.0 when unset), in encoding order. The SDK lists the full-size layer
     /// first, so a caller finds it by its scale, not its place. Empty if no
@@ -374,7 +374,7 @@ impl LocalVideoTrack {
             .collect()
     }
 
-    // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
+    // OWNCORD-PATCH (video bitrate): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
     /// Sets each sender encoding's `max_bitrate` in place, with no republish
     /// and no renegotiation: the encoder's rate changes live. A no-op when
     /// there is no transceiver or `rates` does not match the encodings one for

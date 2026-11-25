@@ -388,8 +388,9 @@ fn parse_sdp_type(sdp_type: &str) -> EngineResult<SdpType> {
 // OWNCORD-PATCH (signal input)
 fn parse_remote_description(sdp: &str, sdp_type: &str) -> EngineResult<SessionDescription> {
     let sdp_type = parse_sdp_type(sdp_type)?;
-    SessionDescription::parse(sdp, sdp_type)
-        .map_err(|err| EngineError::Internal(format!("invalid session description: {}", err).into()))
+    SessionDescription::parse(sdp, sdp_type).map_err(|err| {
+        EngineError::Internal(format!("invalid session description: {}", err).into())
+    })
 }
 
 // OWNCORD-PATCH (signal input)
@@ -1525,9 +1526,8 @@ impl SessionInner {
                     log::warn!("received subscriber offer without a subscriber pc, ignoring");
                     return Ok(());
                 };
-                let answer = subscriber_pc
-                    .create_anwser(offer_sdp, AnswerOptions::default())
-                    .await?;
+                let answer =
+                    subscriber_pc.create_anwser(offer_sdp, AnswerOptions::default()).await?;
 
                 self.signal_client
                     .send(proto::signal_request::Message::Answer(proto::SessionDescription {

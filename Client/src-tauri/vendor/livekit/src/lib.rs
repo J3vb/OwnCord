@@ -13,6 +13,9 @@
 // limitations under the License.
 
 #![doc = include_str!("../README.md")]
+// OWNCORD-PATCH (lint scope): upstream code, linted upstream. As a workspace
+// member it would otherwise fall under the root crate's clippy -D warnings run.
+#![allow(warnings, clippy::all, clippy::pedantic, clippy::nursery)]
 
 mod plugin;
 pub mod proto;
