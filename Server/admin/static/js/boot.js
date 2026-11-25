@@ -18,9 +18,9 @@ document.addEventListener('keydown',e=>{
      (no log line filterable by path), and the login overlay inherited the
      swallow because hideAll() leaves #content's markup in place. */
   if(e.key==='/'&&!document.querySelector('.modal-overlay.visible')){
-    const t=e.target;
+    const t=e.target instanceof HTMLElement?e.target:null;
     if(t&&(t.isContentEditable||/^(input|textarea|select)$/i.test(t.tagName)))return;
-    const s=document.querySelector('.filter-search');if(s){e.preventDefault();s.focus()}
+    const s=document.querySelector('.filter-search');if(s instanceof HTMLElement){e.preventDefault();s.focus()}
   }
 });
 document.getElementById('modal').addEventListener('click',e=>{if(e.target===e.currentTarget)dismissModal()});
