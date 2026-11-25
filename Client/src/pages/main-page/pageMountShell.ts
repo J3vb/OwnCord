@@ -397,6 +397,7 @@ export function mountDeck(st: PageState, ms: MountScope): void {
     onSearch: () => ms.chatAreaResult.searchCtrl.open(),
     revealSidebar: () => st.sidebarDrawer?.open(),
     serverTabs: ms.switcher,
+    memberToggle: ms.chatAreaResult.chatHeaderRefs.memberListBtn,
   });
   if (teardown !== null) st.unsubscribers.push(teardown);
 }

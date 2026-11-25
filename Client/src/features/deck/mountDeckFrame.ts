@@ -10,10 +10,12 @@
 import { Disposable } from "@lib/disposable";
 import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { createLogger } from "@lib/logger";
+import { buddiesText } from "../../i18n/buddies";
 import { shellText } from "../../i18n/shell";
 import { createDirectButton } from "../direct-messages/directButton";
 import { mountServerTabs } from "../server-rail/mountServerTabs";
 import type { ServerSwitcherDeps } from "../server-rail/switcherOptions";
+import { createDeckPing } from "./deckPing";
 import { createDeckStatusBar } from "./deckStatusBar";
 import { createDeckTopBar } from "./deckTopBar";
 
@@ -29,6 +31,8 @@ export interface DeckFrameInput {
   readonly revealSidebar?: () => void;
   /** The server switcher's inputs; the tabs are drawn when given (null in the web portal). */
   readonly serverTabs?: ServerSwitcherDeps | null;
+  /** The chat header's member toggle, moved to the end of the top bar's connection cell. */
+  readonly memberToggle?: HTMLButtonElement;
 }
 
 /** Writes each bar's measured height on `root`, where the overlays read it. */
@@ -67,6 +71,41 @@ function mountDirectButton(topBar: HTMLElement, input: DeckFrameInput, owner: Di
   } catch (err: unknown) {
     child.destroy();
     log.warn("Command Deck Direct button failed to build", err);
+  }
+}
+
+/** Puts the ping, the connection state and the member toggle in one group, in the
+ *  connection state's grid cell. All or nothing: if the connection state is missing
+ *  or the ping fails to build, nothing moves and the toggle stays in the chat header.
+ *  The teardown moves nothing back, as for the slots. */
+function mountTopEnd(topBar: HTMLElement, input: DeckFrameInput, owner: Disposable): void {
+  const connection = topBar.querySelector(":scope > .deck-connection");
+  if (connection === null) {
+    log.warn("Command Deck top bar has no connection state; the member toggle stays put");
+    return;
+  }
+  const child = new Disposable();
+  owner.addCleanup(() => child.destroy());
+  let group: HTMLDivElement;
+  let ping: HTMLElement;
+  try {
+    group = document.createElement("div");
+    group.className = "deck-top-end";
+    group.dataset["testid"] = "deck-top-end";
+    ping = createDeckPing(child);
+  } catch (err: unknown) {
+    child.destroy();
+    log.warn("Command Deck top bar end group failed to build", err);
+    return;
+  }
+  connection.replaceWith(group);
+  group.append(ping, connection);
+  const toggle = input.memberToggle;
+  if (toggle !== undefined) {
+    const label = buddiesText("title");
+    toggle.title = label;
+    toggle.setAttribute("aria-label", label);
+    group.appendChild(toggle);
   }
 }
 
@@ -110,6 +149,7 @@ export function mountDeckFrame(input: DeckFrameInput): (() => void) | null {
     log.warn("Command Deck bar sizes are not observed", err);
   }
   mountDirectButton(topBar, input, owner);
+  mountTopEnd(topBar, input, owner);
   if (input.serverTabs !== undefined && input.serverTabs !== null) {
     mountServerTabs(input.serverTabs, topBar, owner);
   }

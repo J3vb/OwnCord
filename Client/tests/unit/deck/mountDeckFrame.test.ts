@@ -25,6 +25,8 @@ import { dmStore, setDmChannels } from "../../../src/stores/dm.store";
 import { makeDm } from "../../helpers/dmHarness";
 import { mountServerTabs } from "../../../src/features/server-rail/mountServerTabs";
 import { Disposable } from "../../../src/lib/disposable";
+import { createDeckPing } from "../../../src/features/deck/deckPing";
+import { buddiesText } from "../../../src/i18n/buddies";
 
 vi.mock("../../../src/features/deck/deckStatusBar", async () => {
   const actual = await vi.importActual<typeof import("../../../src/features/deck/deckStatusBar")>(
@@ -45,6 +47,11 @@ vi.mock("../../../src/features/server-rail/mountServerTabs", async () => {
     typeof import("../../../src/features/server-rail/mountServerTabs")
   >("../../../src/features/server-rail/mountServerTabs");
   return { ...actual, mountServerTabs: vi.fn(actual.mountServerTabs) };
+});
+
+vi.mock("../../../src/features/deck/deckPing", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../../src/features/deck/deckPing")>();
+  return { ...real, createDeckPing: vi.fn(real.createDeckPing) };
 });
 
 interface ObserverProbe {
@@ -440,5 +447,167 @@ describe("mountDeckFrame", () => {
     expect((root.firstElementChild as HTMLElement).classList.contains("has-tabs-row")).toBe(false);
     teardown();
     cleanup(result);
+  });
+  describe("the top bar's end group", () => {
+    let header: HTMLDivElement;
+    let toggle: HTMLButtonElement;
+
+    /** The chat header's member toggle as ChatHeader builds it, in a stand-in header. */
+    function headerToggle(): HTMLButtonElement {
+      header = document.createElement("div");
+      header.className = "ch-tools";
+      const button = document.createElement("button");
+      button.className = "profile-btn member-list-btn";
+      button.dataset["testid"] = "member-list-toggle";
+      button.title = "Member List";
+      button.setAttribute("aria-label", "Member List");
+      button.setAttribute("aria-pressed", "true");
+      button.hidden = true;
+      header.appendChild(button);
+      container.appendChild(header);
+      return button;
+    }
+
+    const kids = (el: Element): Array<string | null> =>
+      [...el.children].map((c) => c.getAttribute("data-testid"));
+
+    /** The toggle is still in the chat header with its own label, and untouched. */
+    function expectToggleStays(): void {
+      expect(toggle.parentElement).toBe(header);
+      expect(toggle.getAttribute("aria-label")).toBe("Member List");
+      expect(toggle.title).toBe("Member List");
+    }
+
+    afterEach(() => {
+      header.remove();
+      vi.mocked(createDeckPing).mockClear();
+    });
+
+    it("takes the connection's place: name, search, the group, then Direct", () => {
+      toggle = headerToggle();
+      const result = mountArea(container);
+      const teardown = mountDeckFrame(deckInput(result, { memberToggle: toggle }))!;
+      const top = root.firstElementChild as HTMLElement;
+      expect(kids(top)).toEqual(["deck-top-name", "deck-search", "deck-top-end", "deck-direct"]);
+      const group = top.querySelector<HTMLElement>(":scope > .deck-top-end")!;
+      expect(group.tagName).toBe("DIV");
+      expect(kids(group)).toEqual(["deck-ping", "deck-connection", "member-list-toggle"]);
+      expect(group.lastElementChild).toBe(toggle);
+      expect(toggle.getAttribute("aria-label")).toBe(buddiesText("title"));
+      expect(toggle.title).toBe(buddiesText("title"));
+      // The column controller stays the only writer of these two.
+      expect(toggle.hidden).toBe(true);
+      expect(toggle.getAttribute("aria-pressed")).toBe("true");
+      expect(header.contains(toggle)).toBe(false);
+      teardown();
+      // The teardown moves nothing back, as for the slots.
+      expect(group.lastElementChild).toBe(toggle);
+      cleanup(result);
+    });
+
+    it("without memberToggle the group holds the ping and the connection", () => {
+      toggle = headerToggle();
+      const result = mountArea(container);
+      const teardown = mountDeckFrame(deckInput(result))!;
+      const group = root.querySelector<HTMLElement>("[data-testid='deck-top-end']")!;
+      expect(kids(group)).toEqual(["deck-ping", "deck-connection"]);
+      expectToggleStays();
+      teardown();
+      cleanup(result);
+    });
+
+    it("the ping belongs to the frame: the teardown stops it", () => {
+      toggle = headerToggle();
+      const result = mountArea(container);
+      const teardown = mountDeckFrame(deckInput(result, { memberToggle: toggle }))!;
+      expect(createDeckPing).toHaveBeenCalledTimes(1);
+      const owner = vi.mocked(createDeckPing).mock.calls[0]![0];
+      expect(owner.signal.aborted).toBe(false);
+      teardown();
+      expect(owner.signal.aborted).toBe(true);
+      cleanup(result);
+    });
+
+    it("with Direct failed and the tabs mounted, the toggle still comes before the tabs", async () => {
+      toggle = headerToggle();
+      vi.mocked(createDirectButton).mockImplementationOnce(() => {
+        throw new Error("x");
+      });
+      const result = mountArea(container);
+      const serverTabs = {
+        host: "h.example",
+        isTornDown: () => false,
+        onOpenDm: vi.fn(),
+        onShowServer: vi.fn(),
+        own: vi.fn(),
+      };
+      const teardown = mountDeckFrame(deckInput(result, { serverTabs, memberToggle: toggle }))!;
+      await vi.dynamicImportSettled();
+      for (let i = 0; i < 4; i++) await Promise.resolve();
+      const top = root.firstElementChild as HTMLElement;
+      const nav = top.querySelector("[data-testid='server-tabs']")!;
+      expect(nav).not.toBeNull();
+      expect(toggle.compareDocumentPosition(nav) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(kids(top).indexOf("deck-top-end")).toBeLessThan(kids(top).indexOf("server-tabs"));
+      teardown();
+      cleanup(result);
+    });
+
+    it("a top bar that throws attaches nothing and leaves the toggle in the chat header", () => {
+      toggle = headerToggle();
+      const result = mountArea(container);
+      const getState = vi.spyOn(authStore, "getState").mockImplementationOnce(() => {
+        throw new Error("x");
+      });
+      try {
+        expect(mountDeckFrame(deckInput(result, { memberToggle: toggle }))).toBeNull();
+      } finally {
+        getState.mockRestore();
+      }
+      expect(root.children).toHaveLength(0);
+      expect(createDeckPing).not.toHaveBeenCalled();
+      expectToggleStays();
+      cleanup(result);
+    });
+
+    it("a ping that throws moves nothing and logs one warning", () => {
+      toggle = headerToggle();
+      deckLog.warn.mockClear();
+      deckLog.error.mockClear();
+      vi.mocked(createDeckPing).mockImplementationOnce(() => {
+        throw new Error("boom");
+      });
+      const result = mountArea(container);
+      const teardown = mountDeckFrame(deckInput(result, { memberToggle: toggle }));
+      expect(teardown).not.toBeNull();
+      const top = root.firstElementChild as HTMLElement;
+      expect(kids(top)).toEqual(["deck-top-name", "deck-search", "deck-connection", "deck-direct"]);
+      expect(top.querySelector(".deck-top-end")).toBeNull();
+      expectToggleStays();
+      expect(deckLog.warn).toHaveBeenCalledTimes(1);
+      expect(deckLog.error).not.toHaveBeenCalled();
+      teardown!();
+      cleanup(result);
+    });
+
+    it("a bar with no connection state moves nothing and logs one warning", () => {
+      toggle = headerToggle();
+      deckLog.warn.mockClear();
+      const result = mountArea(container);
+      // The Direct button is built after the bar: drop the connection state there.
+      vi.mocked(createDirectButton).mockImplementationOnce((opts) => {
+        root.querySelector(".deck-top-bar > .deck-connection")?.remove();
+        return vi.mocked(createDirectButton).getMockImplementation()!(opts);
+      });
+      const teardown = mountDeckFrame(deckInput(result, { memberToggle: toggle }))!;
+      const top = root.firstElementChild as HTMLElement;
+      expect(kids(top)).toEqual(["deck-top-name", "deck-search", "deck-direct"]);
+      expect(top.querySelector(".deck-top-end")).toBeNull();
+      expect(createDeckPing).not.toHaveBeenCalled();
+      expectToggleStays();
+      expect(deckLog.warn).toHaveBeenCalledTimes(1);
+      teardown();
+      cleanup(result);
+    });
   });
 });

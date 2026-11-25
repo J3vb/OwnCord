@@ -327,3 +327,106 @@ describe("server-tabs.css: the drop ring in High Contrast", () => {
     expect(shadow[0]!.vars).toEqual(["--accent-text"]);
   });
 });
+
+describe("server-tabs.css: the end group", () => {
+  const END = "html.layout-deck .deck-top-end";
+  const PING = "html.layout-deck .deck-ping";
+  const TOGGLE = `${END} > .member-list-btn`;
+  const TABS_END = "html.layout-deck .deck-top-bar.has-server-tabs > .deck-top-end";
+
+  /** Every declaration of the rule exactly `selector` at top level, as property and parsed value. */
+  const declared = (selector: string, media: string | null = null): Array<[string, string]> =>
+    exactRules(selector, media).flatMap((r) =>
+      r.declarations.map((d): [string, string] => [d.property, valueOf(d)]),
+    );
+  const expected = (pairs: Array<[string, string]>): Array<[string, string]> =>
+    pairs.map(([p, v]) => [p, parsedValue(p, v)]);
+
+  it("the group ends its cell as a flex row, and the connection may shrink", () => {
+    expect(declared(END)).toEqual(
+      expected([
+        ["justify-self", "end"],
+        ["display", "flex"],
+        ["align-items", "center"],
+        ["gap", "var(--deck-gap)"],
+        ["min-width", "0"],
+      ]),
+    );
+    expect(declared(`${END} > .deck-connection`)).toEqual(expected([["min-width", "0"]]));
+  });
+
+  it("the ping never shrinks and spaces its bars by 4px", () => {
+    expect(valueOf(exactDeclaration(PING, "flex", null))).toBe(parsedValue("flex", "none"));
+    expect(valueOf(exactDeclaration(PING, "gap", null))).toBe(parsedValue("gap", "4px"));
+    expect(exactDeclaration(PING, "color", null).vars).toEqual(["--text-muted"]);
+  });
+
+  it("the toggle takes the Direct button's box, hover, focus ring offset and pressed ring", () => {
+    expect(declared(TOGGLE)).toEqual(
+      expected([
+        ["flex", "none"],
+        ["display", "inline-flex"],
+        ["align-items", "center"],
+        ["justify-content", "center"],
+        ["width", "var(--deck-direct-size)"],
+        ["height", "var(--deck-direct-size)"],
+        ["padding", "0"],
+        ["border", "1px solid var(--border-control)"],
+        ["border-radius", "var(--radius-sm)"],
+        ["background", "transparent"],
+        ["color", "var(--text-muted)"],
+        ["cursor", "pointer"],
+      ]),
+    );
+    expect(declared(`${TOGGLE}:hover`)).toEqual(expected([["background", "var(--bg-hover)"]]));
+    expect(declared(`${TOGGLE}:focus-visible`)).toEqual(expected([["outline-offset", "-2px"]]));
+    expect(declared(`${TOGGLE}[aria-pressed="true"]`)).toEqual(
+      expected([
+        ["background", "var(--bg-hover)"],
+        ["color", "var(--header-primary)"],
+        ["border-color", "var(--header-primary)"],
+        ["box-shadow", "inset 0 0 0 1px var(--header-primary)"],
+      ]),
+    );
+  });
+
+  it("a hidden ping or toggle takes no space", () => {
+    const rule = tabsRules().find(
+      (r) =>
+        r.media === null &&
+        r.selectors.includes(`${PING}[hidden]`) &&
+        r.selectors.includes(`${TOGGLE}[hidden]`),
+    );
+    expect(rule?.declarations.map((d) => [d.property, valueOf(d)])).toEqual(
+      expected([["display", "none"]]),
+    );
+  });
+
+  it("in the tab fold the group takes column 4 of row 1 and hides the ping", () => {
+    expect(declared(TABS_END, FOLD)).toEqual(
+      expected([
+        ["grid-row", "1"],
+        ["grid-column", "4"],
+      ]),
+    );
+    expect(declared(`${TABS_END} > .deck-ping`, FOLD)).toEqual(expected([["display", "none"]]));
+    // The old connection rule stays for a group that failed to build.
+    expect(
+      declared("html.layout-deck .deck-top-bar.has-server-tabs > .deck-connection", FOLD),
+    ).toEqual(
+      expected([
+        ["grid-row", "1"],
+        ["grid-column", "4"],
+      ]),
+    );
+  });
+
+  it("adds no grid template rule for the group", () => {
+    const templates = tabsRules().filter((r) =>
+      r.declarations.some((d) => d.property.startsWith("grid-template")),
+    );
+    expect(templates.flatMap((r) => r.selectors).filter((s) => s.includes("deck-top-end"))).toEqual(
+      [],
+    );
+  });
+});

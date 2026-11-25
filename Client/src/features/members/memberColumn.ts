@@ -53,9 +53,12 @@ const log = createLogger("member-column");
 
 /**
  * Below this the column is an overlay, and so it is on a phone on its side
- * (`isPhoneLayout()`). Keep in step with `member-list.css`.
+ * (`isPhoneLayout()`). Keep in step with `member-list.css`. Command Deck uses
+ * DECK_FOLD_QUERY.
  */
 const NARROW_QUERY = "(max-width: 899px)";
+/** Command Deck folds the column behind the top-bar toggle at this width or less. Must match deck.css's fold block. */
+export const DECK_FOLD_QUERY = "(max-width: 1200px)";
 const KEY_STEP = 16;
 
 export interface MemberColumnOptions {
@@ -103,7 +106,8 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   let info: RoomInfoPanel | null = null;
   let destroyed = false;
   // jsdom has no matchMedia; without one the column is never an overlay.
-  const narrow = typeof window.matchMedia === "function" ? window.matchMedia(NARROW_QUERY) : null;
+  const query = runningScreenLayout() === "deck" ? DECK_FOLD_QUERY : NARROW_QUERY;
+  const narrow = typeof window.matchMedia === "function" ? window.matchMedia(query) : null;
   /** The column is an overlay now: a narrow window, or a phone on its side. */
   const overlayMode = (): boolean => narrow?.matches === true || isPhoneLayout();
   let narrowOpen = false;

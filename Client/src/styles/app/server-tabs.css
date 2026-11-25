@@ -79,6 +79,59 @@ html.layout-deck .deck-direct-badge[hidden] {
   display: none;
 }
 
+/* The end group in the connection state's cell: the ping, the connection
+   state and the member toggle. No grid track is added, so search stays centred. */
+html.layout-deck .deck-top-end {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: var(--deck-gap);
+  min-width: 0;
+}
+html.layout-deck .deck-top-end > .deck-connection {
+  min-width: 0;
+}
+html.layout-deck .deck-ping {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+/* The toggle takes the Direct button's box; the group already places it. */
+html.layout-deck .deck-top-end > .member-list-btn {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--deck-direct-size);
+  height: var(--deck-direct-size);
+  padding: 0;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+html.layout-deck .deck-top-end > .member-list-btn:hover {
+  background: var(--bg-hover);
+}
+html.layout-deck .deck-top-end > .member-list-btn:focus-visible {
+  outline-offset: -2px;
+}
+/* Pressed: an inset ring doubles the border, so it does not rest on colour alone. */
+html.layout-deck .deck-top-end > .member-list-btn[aria-pressed="true"] {
+  background: var(--bg-hover);
+  color: var(--header-primary);
+  border-color: var(--header-primary);
+  box-shadow: inset 0 0 0 1px var(--header-primary);
+}
+html.layout-deck .deck-ping[hidden],
+html.layout-deck .deck-top-end > .member-list-btn[hidden] {
+  display: none;
+}
+
 /* ─── The server tabs: row 2 of the bar, outside the fold ─── */
 /* The fold is one query, (max-width: 640px), (max-height: 499px). These are
    base rules with no query; the fold's block below holds only overrides, each
@@ -350,6 +403,14 @@ html.layout-deck.high-contrast .server-tab.drop-into {
   html.layout-deck .deck-top-bar.has-server-tabs > .deck-connection {
     grid-row: 1;
     grid-column: 4;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs > .deck-top-end {
+    grid-row: 1;
+    grid-column: 4;
+  }
+  /* Too little room in column 4 beside the Servers button and Direct. */
+  html.layout-deck .deck-top-bar.has-server-tabs > .deck-top-end > .deck-ping {
+    display: none;
   }
   html.layout-deck .deck-top-bar.has-server-tabs > .server-tabs {
     display: none;

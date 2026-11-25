@@ -70,6 +70,30 @@ html.layout-deck :is(.member-column, .side-panel) {
     top: calc(var(--deck-above-header) + var(--header-height, 48px));
     bottom: var(--deck-below);
   }
+  /* Too little room beside the connection state and the toggle; the voice widget shows the ping. */
+  html.layout-deck .deck-ping {
+    display: none;
+  }
+}
+/* The fold: at 1200px or less the column is an overlay under the chat header,
+   opened by the top bar's toggle (memberColumn.ts's DECK_FOLD_QUERY). The
+   phone clauses stay so the prelude ends with PHONE_LAYOUT_QUERY. */
+@media (max-width: 1200px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .member-column {
+    position: fixed;
+    top: calc(var(--deck-above-header) + var(--header-height, 48px));
+    bottom: var(--deck-below);
+    right: 0;
+    /* Beats the inline width the controller sets and member-list.css's overlay widths. */
+    width: min(280px, 85vw) !important;
+    max-width: none;
+    z-index: 100;
+  }
+  html.layout-deck .member-column-resize {
+    display: none;
+  }
 }
 html.layout-deck .side-panel {
   --deck-overlay-max: calc(
