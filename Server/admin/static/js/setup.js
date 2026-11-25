@@ -133,13 +133,14 @@ function renderWizard(){
   box.querySelectorAll('.form-group').forEach(g=>{const c=g.querySelector('input,select'),hint=g.querySelector('.wiz-hint');if(c&&hint)c.setAttribute('aria-describedby',hint.id)});
   if(wiz.step===2)wizTLSChanged();
   const first=box.querySelector('input,select');
-  (first||document.getElementById('wizTitle')).focus();
+  const start=first||document.getElementById('wizTitle');
+  if(start instanceof HTMLElement)start.focus();
 }
 
 function wizTLSChanged(){
-  const sel=document.getElementById('wizTLS');if(!sel)return;
+  const sel=document.getElementById('wizTLS');if(!(sel instanceof HTMLSelectElement))return;
   const port=document.getElementById('wizPort');
-  document.getElementById('wizTLSHint').innerHTML=wizTLSHint(sel.value,port&&port.value);
+  document.getElementById('wizTLSHint').innerHTML=wizTLSHint(sel.value,port instanceof HTMLInputElement?port.value:null);
   document.getElementById('wizDomainGroup').hidden=sel.value!=='acme';
 }
 
@@ -149,13 +150,13 @@ function wizNeedsRestart(){
 }
 
 function wizCollect(){
-  const g=id=>{const el=document.getElementById(id);return el?el.value:undefined};
+  const g=id=>{const el=document.getElementById(id);return el instanceof HTMLInputElement||el instanceof HTMLSelectElement||el instanceof HTMLTextAreaElement?el.value:undefined};
   const d=wiz.data;
   switch(wiz.step){
     case 1:d.setup_token=(g('wizToken')||'').trim();d.username=(g('wizUser')||'').trim();d.password=g('wizPass')||'';d.confirm=g('wizConfirm')||'';break;
     case 2:d.server_name=(g('wizName')||'').trim();d.port=g('wizPort');d.tls_mode=g('wizTLS')||d.tls_mode;d.tls_domain=(g('wizDomain')||'').trim();break;
     case 3:{d.upload_max_size_mb=g('wizUpload');d.voice_quality=g('wizVoice')||d.voice_quality;const vd=document.getElementById('wizVoiceDl');if(vd)d.voice_auto_download=vd.classList.contains('on');break}
-    case 4:{const t=document.getElementById('wizReg');if(t)d.registration_mode=t.value;d.motd=(g('wizMotd')||'').trim();const rk=document.getElementById('wizRecovery');if(rk)d.recovery_kit=rk.classList.contains('on');break}
+    case 4:{const t=document.getElementById('wizReg');if(t instanceof HTMLSelectElement)d.registration_mode=t.value;d.motd=(g('wizMotd')||'').trim();const rk=document.getElementById('wizRecovery');if(rk)d.recovery_kit=rk.classList.contains('on');break}
   }
 }
 
@@ -225,7 +226,7 @@ function setupAddress(resp){
 
 async function wizFinish(){
   if(wiz.busy)return;wiz.busy=true;
-  const btn=document.getElementById('wizNextBtn');if(btn){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Setting up…'}
+  const btn=document.getElementById('wizNextBtn');if(btn instanceof HTMLButtonElement){btn.disabled=true;btn.innerHTML='<div class="spinner"></div> Setting up…'}
   const d=wiz.data;
   const body={setup_token:d.setup_token,username:d.username,password:d.password};
   if(!wiz.skip){
@@ -244,7 +245,7 @@ async function wizFinish(){
     if(resp.restart_required&&resp.restart_url)beginRestartWait(resp.restart_url,!resp.recovery_kit_secret);
   }catch(e){
     wizFail(e.message);
-    const b=document.getElementById('wizNextBtn');if(b){b.disabled=false;b.textContent=wiz.step===1?'Create Owner Account':'Finish Setup'}
+    const b=document.getElementById('wizNextBtn');if(b instanceof HTMLButtonElement){b.disabled=false;b.textContent=wiz.step===1?'Create Owner Account':'Finish Setup'}
   }finally{wiz.busy=false}
 }
 
@@ -279,7 +280,7 @@ function renderSetupSuccess(resp){
 function beginRestartWait(url,autoFollow){
   document.getElementById('setupContinueBtn').classList.add('hidden');
   document.getElementById('setupRestart').classList.remove('hidden');
-  const link=document.getElementById('restartLink');link.href=url;link.textContent=url;
+  const link=document.getElementById('restartLink');if(link instanceof HTMLAnchorElement){link.href=url;link.textContent=url}
   if(!autoFollow){
     document.getElementById('restartStatus').textContent='The server restarts to apply your settings.';
     document.getElementById('restartNext').textContent='Save your recovery kit, then open the link above.';
@@ -308,7 +309,9 @@ function authMessage(status,message,fallback){
 
 async function submitLogin(){
   const btn=document.getElementById('loginBtn');
-  const u=document.getElementById('loginUser').value.trim(),p=document.getElementById('loginPass').value,err=document.getElementById('loginErr');
+  const userBox=document.getElementById('loginUser'),passBox=document.getElementById('loginPass'),err=document.getElementById('loginErr');
+  if(!(btn instanceof HTMLButtonElement&&userBox instanceof HTMLInputElement&&passBox instanceof HTMLInputElement))return;
+  const u=userBox.value.trim(),p=passBox.value;
   err.textContent='';
   if(!u||!p){err.textContent='Username and password are required.';document.getElementById(u?'loginPass':'loginUser').focus();return}
   // Each submit counts against the login lockout counter — don't spend two.
@@ -333,7 +336,7 @@ function showLoginTotp(partialToken){
   document.getElementById('loginErr').textContent='';
   document.getElementById('loginStep1').classList.add('hidden');
   document.getElementById('loginTotpStep').classList.remove('hidden');
-  const t=document.getElementById('loginTotp');t.value='';t.focus();
+  const t=document.getElementById('loginTotp');if(t instanceof HTMLInputElement){t.value='';t.focus()}
 }
 
 /* Second leg: POST /api/v1/auth/verify-totp authenticated with the partial
@@ -346,9 +349,11 @@ function showLoginTotp(partialToken){
 async function submitTotp(){
   const btn=document.getElementById('totpBtn');
   const err=document.getElementById('loginErr');
-  const code=document.getElementById('loginTotp').value.trim();
+  const codeBox=document.getElementById('loginTotp');
+  if(!(btn instanceof HTMLButtonElement&&codeBox instanceof HTMLInputElement))return;
+  const code=codeBox.value.trim();
   err.textContent='';
-  if(!code){err.textContent='Enter your authentication code.';document.getElementById('loginTotp').focus();return}
+  if(!code){err.textContent='Enter your authentication code.';codeBox.focus();return}
   if(!state.partialToken){resetLoginSteps();err.textContent='That sign-in expired — start again.';return}
   if(btn.disabled)return;
   btn.disabled=true;
