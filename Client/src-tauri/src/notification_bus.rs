@@ -699,7 +699,7 @@ mod tests {
             tx.send(Command::Show {
                 popup: Popup {
                     title: "t".into(),
-                    body: "<a href=\"https://x.example\">b</a> & c".into(),
+                    body: "<a href=\"https://x.example.com\">b</a> & c".into(),
                     target: MessageTarget {
                         host: "h".into(),
                         channel_id,
@@ -724,7 +724,7 @@ mod tests {
         assert_eq!(capability_calls.load(Ordering::SeqCst), 1);
         assert!(lock(&bodies)
             .iter()
-            .all(|b| b == "&lt;a href=\"https://x.example\"&gt;b&lt;/a&gt; &amp; c"));
+            .all(|b| b == "&lt;a href=\"https://x.example.com\"&gt;b&lt;/a&gt; &amp; c"));
         let showed_by = lock(&client).clone().expect("Notify came from the client");
         // The first popup (id 41) survives the server's start announcement,
         // and the 20th (id 60) still opens its target on click.
