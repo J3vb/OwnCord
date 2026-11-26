@@ -15,8 +15,8 @@ import (
 )
 
 // phase is one drill phase: the letter -phases selects it by, and what it covers (printed so a green run says
-// what it ran). The phases are R (backup, restore, deletion markers; drills 1, 2), C (corrupt operator input;
-// drill 5), D (headroom, full, recovery; drills 3, 4) and S (the SFU; drill 6). Nothing relaunches the
+// what it ran). The phases are R (backup, restore, deletion markers; drills 1, 2), B (a full archive,
+// restored into a fresh install), C (corrupt operator input; drill 5), D (headroom, full, recovery; drills 3, 4) and S (the SFU; drill 6). Nothing relaunches the
 // server: a phase that needs a restart asks for one through the owner's endpoint, so the restart is the
 // behaviour under test.
 type phase struct {
@@ -26,6 +26,7 @@ type phase struct {
 
 var drillPhases = []phase{
 	{'R', "backup, restore, deletion markers"},
+	{'B', "full archive, restore into a fresh install"},
 	{'C', "corrupt operator input"},
 	{'D', "headroom, then full, then recovery"},
 	{'S', "the SFU"},
@@ -209,8 +210,8 @@ func (k known) triage(failures []failure) (fail, warn []failure) {
 
 // runDrills runs the selected phases in one process, in numbered order, each in its own install directory so
 // a broken credential or full filesystem is not left for the next.
-func runDrills(binRef string, useDocker bool, phases []phase, dataFS, fillerImage string, k known) error {
-	d := &drill{bin: binRef, dataFS: dataFS, known: k, docker: useDocker, fillerImage: fillerImage}
+func runDrills(binRef string, useDocker bool, phases []phase, dataFS, fillerImage, archiveSource string, k known) error {
+	d := &drill{bin: binRef, dataFS: dataFS, known: k, docker: useDocker, fillerImage: fillerImage, archiveSource: archiveSource}
 
 	if useDocker {
 		fmt.Printf("drills: container leg, phase %s, image %s\n", phaseLetters(phases), binRef)
@@ -429,6 +430,8 @@ func (d *drill) runPhase(p phase) error {
 	switch p.letter {
 	case 'R':
 		runErr = d.phaseR()
+	case 'B':
+		runErr = d.phaseB()
 	case 'C':
 		runErr = d.phaseC()
 	case 'D':
