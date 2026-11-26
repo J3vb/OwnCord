@@ -1,75 +1,75 @@
 {
   "call": {
-    "color-contrast": 3
+    "color-contrast": 2
   },
   "create-channel": {
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "invite": {
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "main": {
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "settings/About": {
     "aria-required-children": 1,
     "button-name": 1,
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "settings/Accessibility": {
     "aria-required-children": 1,
     "button-name": 1,
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "settings/Account": {
     "aria-required-children": 1,
     "button-name": 1,
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "settings/Advanced": {
     "aria-required-children": 1,
     "aria-valid-attr-value": 1,
     "button-name": 1,
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "settings/Appearance": {
     "aria-required-children": 1,
     "button-name": 1,
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "settings/Diagnostics & logs": {
     "aria-required-children": 1,
     "button-name": 1,
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "settings/Keybinds": {
     "aria-required-children": 1,
     "button-name": 1,
-    "color-contrast": 6
+    "color-contrast": 5
   },
   "settings/My uploads": {
     "aria-required-children": 1,
     "button-name": 1,
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "settings/Notifications": {
     "aria-required-children": 1,
     "button-name": 1,
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "settings/Privacy & safety": {
     "aria-required-children": 1,
     "button-name": 1,
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "settings/Text & images": {
     "aria-required-children": 1,
     "button-name": 1,
-    "color-contrast": 5
+    "color-contrast": 4
   },
   "settings/Voice & video": {
     "aria-required-children": 1,
     "button-name": 1,
-    "color-contrast": 5
+    "color-contrast": 4
   }
 }
