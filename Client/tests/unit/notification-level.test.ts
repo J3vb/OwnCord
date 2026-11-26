@@ -76,6 +76,18 @@ describe("notification level storage", () => {
     expect(getGlobalNotificationLevel()).toBe("mentions");
   });
 
+  it("takes the evidence from the caller, so an explicit true wins over empty storage", () => {
+    settleNotificationLevelDefault(true);
+    expect(getGlobalNotificationLevel()).toBe("all");
+  });
+
+  it("keeps an earlier read's answer after the new-install defaults wrote keys", () => {
+    localStorage.setItem("owncord:theme:active", "gunmetal");
+    localStorage.setItem("owncord:settings:screenLayout", '"deck"');
+    settleNotificationLevelDefault(false);
+    expect(getGlobalNotificationLevel()).toBe("mentions");
+  });
+
   it("never overwrites a level the user chose", () => {
     setGlobalNotificationLevel("nothing");
     localStorage.setItem("owncord:settings:lastChannel:a.example", "3");

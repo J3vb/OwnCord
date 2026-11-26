@@ -12,6 +12,8 @@ import { createApiClient } from "@lib/api";
 import { installGlobalGuards } from "./app/globalGuards";
 
 import { deactivatePendingMessages } from "./features/messaging/pendingMessages";
+import { hasInstallEvidence } from "@lib/prefs/installEvidence";
+import { settleNewInstallDefaults } from "@lib/prefs/newInstallDefaults";
 import { settleNotificationLevelDefault } from "@lib/prefs/notificationLevel";
 import { createWsClient } from "@lib/ws";
 import { markActiveChannelReadOnUnload } from "./stores/readState";
@@ -32,9 +34,11 @@ import { configureServerHealth } from "./app/serverHealth";
 import { configureRouter, activePageId, navigate, renderActive, rerunHealth } from "./app/router";
 import { afterCoreSteps, beforeRenderSteps, runStartupSteps } from "./app/startup";
 
-// First, while storage still holds only what earlier sessions wrote: that is
-// how an install from before the notification level is told from a new one.
-settleNotificationLevelDefault();
+// First, before anything writes storage: what earlier sessions left tells an install
+// that ran before from a new one. Read once, so the defaults this load writes do not count.
+const installEvidence = hasInstallEvidence();
+settleNewInstallDefaults(installEvidence);
+settleNotificationLevelDefault(installEvidence);
 
 // Gate the log level before anything logs: debug entries are serialized and
 // persisted to disk, so in production the level must filter real work, not
@@ -47,8 +51,6 @@ const log = createLogger("main");
 installGlobalGuards();
 // Logout and push-to-talk reach the (lazy) voice session facade through this.
 registerVoiceSessionLoader(() => import("./features/voice/livekitSession"));
-
-// Install global error handlers first
 installGlobalErrorHandlers();
 
 // Start log persistence immediately after: an early startup failure (a missing
@@ -117,9 +119,7 @@ const profileManager = createProfileManager(createTauriBackend());
 configureRouter(api, ws, appEl, profileManager);
 configureSession(api, ws, appEl, activePageId, navigate);
 configureServerHealth(api);
-
 installCertPrompts(ws, activePageId, navigate, rerunHealth);
-
 installLogoutTeardown();
 
 // Send voice_leave on window close (best-effort — server readPump defer is the safety net)

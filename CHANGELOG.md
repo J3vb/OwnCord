@@ -115,6 +115,10 @@ release changes the database, and anything an operator must do first.)
 
 ### Changed
 
+**Appearance & layout**
+
+- A new install starts on the Gunmetal theme, and in Command Deck on desktop and in a browser at desktop size. Phone-sized browsers and the Android app run Classic. If you used OwnCord before, your layout and theme stay as they are.
+
 **Voice**
 
 - Shared music is silent until you choose to listen, one person at a time. Tap Listen to music on their tile in the call view, or Listen beside their name in the channel list; the tile and the voice panel show who you are listening to with a volume control and Stop. Listening to someone else switches over, and leaving the call clears it; if their connection drops and their music comes back, you keep listening. Mute music and each person's Music volume work as before. Needs this version of the app on the listener's side only.

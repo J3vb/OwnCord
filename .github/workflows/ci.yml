@@ -1760,9 +1760,9 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.browser == 'true') }}
     runs-on: ubuntu-latest
-    # About 5 minutes of tests plus install and build; the cap is a ceiling for
-    # a hung run, set from measured time once the default flips.
-    timeout-minutes: 25
+    # The first CI run took under 4 minutes end to end; the cap leaves room for
+    # a slow runner and stops a hung run.
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: Client/

@@ -267,6 +267,16 @@ function paintTheme(name: ThemeName): void {
   applyThemeByName(name);
 }
 
+/** The theme a new install starts on. */
+export const NEW_INSTALL_THEME: ThemeName = "gunmetal";
+
+/** Stores NEW_INSTALL_THEME when no theme was ever stored. Never replaces a
+ *  choice: a stored value counts, even one `getActiveThemeName()` would drop. */
+export function recordNewInstallTheme(): void {
+  if (readStored(STORAGE_KEY_ACTIVE) !== null || readStored(STORAGE_KEY_LEGACY) !== null) return;
+  writeStored(STORAGE_KEY_ACTIVE, NEW_INSTALL_THEME);
+}
+
 /** Returns the stored theme choice (a palette name or "system"), defaulting to "neon-glow". */
 export function getActiveThemeName(): string {
   const active = readStored(STORAGE_KEY_ACTIVE);
