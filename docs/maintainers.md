@@ -225,7 +225,8 @@ images on the frozen `dev` head with `npm run screenshots:readme` (from
 `Client/`) and land them in a PR to `dev` before the release PR. The run starts
 a real server in a temporary folder, seeds a demo community through the normal
 HTTP and WebSocket routes, and writes `Client.png`, `loginpage.png` and
-`Admin_Panel.png` at 1440x900 in the default dark theme.
+`Admin_Panel.png` at 1333x934: the client in Command Deck and the login page in
+the Gunmetal theme, which is what a new desktop install shows.
 
 ### Update signing keys
 

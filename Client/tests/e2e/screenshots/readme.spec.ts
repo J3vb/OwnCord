@@ -1,8 +1,10 @@
 import { createServer, type Server } from "node:http";
-import { test, expect, type Page } from "@playwright/test";
+import { join } from "node:path";
+import { test, expect, type BrowserContext, type Page } from "@playwright/test";
 import { fromClientRoot } from "../config/clientRoot";
 import { rawSocket } from "../support/raw-socket";
 import { installRealTransport } from "../support/real-transport";
+import { seedScreenLayout } from "../support/screenLayoutSeed";
 import { startTestServer, TEST_PASSWORD, type TestServer } from "../support/server";
 
 const IMAGES = fromClientRoot("../.github/images");
@@ -104,6 +106,14 @@ async function seed(server: TestServer): Promise<{ token: string; sockets: Socke
   as("noor").send("presence_update", { status: "dnd", custom_status: "Working until 17:00" });
   as("lena").send("presence_update", { status: "idle" });
   await server.api("/admin/api/backup", {}, owner.token);
+  // The demo server keeps its backups in its own data folder, which the Backup
+  // disk check flags; the owner of a real server would confirm another disk.
+  await server.api(
+    "/admin/api/settings",
+    { backup_disk_ack: join(server.directory, "data", "backups") },
+    owner.token,
+    "PATCH",
+  );
   return { token: owner.token, sockets: [...sockets.values()] };
 }
 
@@ -144,12 +154,30 @@ async function fakeLiveKitMetrics(): Promise<Server> {
   return fake;
 }
 
+const VIEWPORT = { width: 1333, height: 934 } as const;
+
+/** Stores the layout and theme a new desktop install gets, explicitly, so the
+ *  pictures do not depend on the new-install settle. The theme is stored raw. */
+async function seedLook(context: BrowserContext): Promise<void> {
+  await seedScreenLayout(context, "deck");
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem("owncord:theme:active", "gunmetal");
+    } catch {
+      // Storage is unavailable on this document: the picture keeps its default look.
+    }
+  });
+}
+
 const HIDE_TOASTS = '[data-testid="toast"] { display: none !important; }';
 
+// The Command Deck Info block (call state and latency) needs a joined call and a
+// real LiveKit, so it is not in the client picture.
 async function signInClient(page: Page, server: TestServer): Promise<void> {
+  await seedLook(page.context());
   await page.goto("/");
-  // A saved profile with a name gives the server rail real initials instead
-  // of the first two characters of 127.0.0.1.
+  // A saved profile with a name gives the server tab a real name instead of
+  // 127.0.0.1.
   await page.getByText("+ Add Server").click();
   await page.getByPlaceholder("My Server").fill(SERVER_NAME);
   await page.getByPlaceholder("example.com:8443", { exact: true }).fill(`127.0.0.1:${server.port}`);
@@ -161,7 +189,7 @@ async function signInClient(page: Page, server: TestServer): Promise<void> {
   await page.locator("#auto-connect").uncheck();
   await page.locator("button[type='submit']").click();
   await expect(page.getByTestId("app-layout")).toBeVisible();
-  await page.locator(".channel-item:not(.voice)").filter({ hasText: "general" }).click();
+  await page.locator(".server-tree [role=treeitem]").filter({ hasText: "general" }).first().click();
   await expect(page.getByText("Drop your game ideas there")).toBeVisible();
 }
 
@@ -201,9 +229,10 @@ test("README screenshots", async ({ page, browser, baseURL }) => {
     const loginContext = await browser.newContext({
       baseURL,
       colorScheme: "dark",
-      viewport: { width: 1440, height: 900 },
+      viewport: VIEWPORT,
     });
     try {
+      await seedLook(loginContext);
       const loginPage = await loginContext.newPage();
       await loginPage.goto("/");
       await loginPage.locator("#host").fill("chat.example.net");
@@ -216,7 +245,7 @@ test("README screenshots", async ({ page, browser, baseURL }) => {
 
     const adminContext = await browser.newContext({
       colorScheme: "dark",
-      viewport: { width: 1440, height: 900 },
+      viewport: VIEWPORT,
     });
     try {
       const adminPage = await adminContext.newPage();
