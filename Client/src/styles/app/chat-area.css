@@ -738,3 +738,10 @@
     min-height: 44px;
   }
 }
+
+/* Phones: a message request's Accept, Ignore, Delete and Block are 44px to hit. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .requests-actions button {
+    min-height: 44px;
+  }
+}

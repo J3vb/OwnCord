@@ -605,3 +605,16 @@
   color: var(--text-muted);
   font-size: var(--font-size-xs);
 }
+
+/* Phones: the emoji category buttons are 44px to hit, in a rail wide enough
+   to hold them. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .ep-categories {
+    gap: 0;
+    width: 56px;
+  }
+  .ep-category-btn {
+    width: 44px;
+    height: 44px;
+  }
+}

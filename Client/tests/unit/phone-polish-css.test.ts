@@ -4,7 +4,7 @@
 import type { Declaration } from "lightningcss";
 import { describe, expect, it } from "vitest";
 import { cascadedDeclaration, keyword } from "../helpers/app-css";
-import { flatMediaRules } from "../helpers/appCssMedia";
+import { flatMediaRules, px } from "../helpers/appCssMedia";
 
 const rules = flatMediaRules();
 type FlatRule = (typeof rules)[number];
@@ -83,5 +83,76 @@ describe("the phone call view's one round control row", () => {
     expect(declared(phoneRule(".video-fs-btn"), "height")).toContain(FORTY_FOUR);
     // Leave stays a pill, and seven controls still fit a 360 px screen.
     expect(declared(phoneRule(".video-fs-btn--leave"), "width")).toContain('"value":56');
+  });
+});
+
+describe("44 px touch targets in the drawer, pickers and lists", () => {
+  it("the drawer header's actions, the emoji categories and People's Message button", () => {
+    for (const selector of [".sidebar-header-action", ".people-msg"]) {
+      expect(declared(phoneRule(selector), "min-width")).toContain(FORTY_FOUR);
+      expect(declared(phoneRule(selector), "min-height")).toContain(FORTY_FOUR);
+    }
+    expect(declared(phoneRule(".ep-category-btn"), "width")).toContain(FORTY_FOUR);
+    expect(declared(phoneRule(".ep-category-btn"), "height")).toContain(FORTY_FOUR);
+    // The rail holds the wider button: 44 plus its 6 px padding each side.
+    expect(declared(phoneRule(".ep-categories"), "width")).toContain('"value":56');
+  });
+
+  it("member rows, Settings buttons and a message request's actions", () => {
+    for (const selector of [".member-item", ".ac-btn", ".requests-actions button"]) {
+      expect(declared(phoneRule(selector), "min-height")).toContain(FORTY_FOUR);
+    }
+  });
+
+  it("leave the desktop sizes alone", () => {
+    expect(px(cascadedDeclaration(".sidebar-header-action", "width"))).toBe(24);
+    expect(px(cascadedDeclaration(".ep-category-btn", "width"))).toBe(32);
+    for (const selector of [".member-item", ".ac-btn", ".people-msg"]) {
+      expect(cascadedDeclaration(selector, "min-height")).toBeUndefined();
+    }
+  });
+});
+
+describe("room for names at 320 px", () => {
+  it("the user bar wraps its controls under a name that keeps about ten letters", () => {
+    expect(declared(phoneRule(".user-bar"), "flex-wrap")).toContain("wrap");
+    expect(declared(phoneRule(".user-bar"), "height")).toContain("auto");
+    // `flex: 1 0 120px`: the name column never shrinks below its basis.
+    const self = declared(phoneRule(".user-bar .ub-self"), "flex");
+    expect(self).toContain('"shrink":0');
+    expect(self).toContain('"value":120');
+  });
+
+  it("the chat header folds Threads and Start video call into More, and tightens", () => {
+    for (const selector of [
+      ".chat-header .ch-tools .threads-btn",
+      ".chat-header .ch-tools .video-call-btn",
+    ]) {
+      expect(declared(phoneRule(selector), "display")).toContain("none");
+    }
+    expect(declared(phoneRule(".chat-header .ch-tools"), "gap")).toContain('"value":0');
+    expect(declared(phoneRule(".chat-header"), "padding")).toContain('"value":4');
+  });
+
+  it("the composer gives its side gutters to the text", () => {
+    expect(declared(phoneRule(".message-input-wrap"), "padding-left")).toContain('"value":6');
+    expect(declared(phoneRule(".message-input-wrap"), "padding-right")).toContain('"value":6');
+    expect(declared(phoneRule(".msg-textarea"), "padding-left")).toContain('"value":0');
+    // The desktop keeps its 16 px gutters.
+    expect(JSON.stringify(cascadedDeclaration(".message-input-wrap", "padding"))).toContain(
+      '"value":16',
+    );
+  });
+
+  it("a toast under a bottom sheet sits below the sheet's backdrop", () => {
+    const sheet = rules.find((r) => r.selector === ".bottom-sheet-overlay" && r.media === "");
+    expect(declared(sheet, "z-index")).toContain('"value":350');
+    // The narrow-window block (responsive.css), which takes in the phone queries.
+    const toast = rules.find(
+      (r) =>
+        r.selector === "body .toast-container.toast-container--under-sheet" &&
+        r.queries.some((q) => q.includes('"coarse"')),
+    );
+    expect(declared(toast, "z-index")).toContain('"value":340');
   });
 });

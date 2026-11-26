@@ -178,7 +178,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   }
   const videoCallBtn = createElement("button", {
     type: "button",
-    class: "call-btn",
+    class: "call-btn video-call-btn",
     title: messagingText("header.startVideoCall"),
     "aria-label": messagingText("header.startVideoCall"),
     "data-testid": "video-call-btn",
@@ -319,8 +319,16 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     });
     searchBtn.addEventListener("click", () => onFocus());
   }
-  // On a phone the panel toggles fold into one More button.
-  const overflow = createChatHeaderOverflow([profileBtn, membersBtn, pinBtn, mediaBtn]);
+  // On a phone the panel toggles, Threads and Start video call fold into one
+  // More button, so the channel name keeps the room.
+  const overflow = createChatHeaderOverflow([
+    videoCallBtn,
+    profileBtn,
+    membersBtn,
+    pinBtn,
+    threadsBtn,
+    mediaBtn,
+  ]);
   appendChildren(
     tools,
     searchField,

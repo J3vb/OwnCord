@@ -65,7 +65,11 @@ export function createThreadListPanelController(opts: {
     errorLog: "Failed to open the thread list", // i18n-exempt: developer log line, never shown
     errorToast: messagingText("thread.panelLoadFailed"),
     isStale: () => sidePanelStale(channelId, opts.getCurrentChannelId()),
-    sidePanel: { panel: ".thread-list-panel", toggle: ".threads-btn" },
+    sidePanel: {
+      panel: ".thread-list-panel",
+      toggle: ".threads-btn",
+      fallbackFocus: ".ch-more-btn",
+    },
   });
 
   return {

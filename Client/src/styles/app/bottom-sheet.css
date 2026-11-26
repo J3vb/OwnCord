@@ -576,8 +576,9 @@
   line-height: 1.4;
 }
 
-/* The header search box becomes an icon on a phone, and the panel toggles
-   fold into the More button (features/messaging/chatHeaderOverflow.ts). */
+/* The header search box becomes an icon on a phone, and the panel toggles,
+   Threads and Start video call fold into the More button
+   (features/messaging/chatHeaderOverflow.ts). */
 .chat-header .ch-tools .search-btn,
 .chat-header .ch-tools .ch-more-btn {
   display: none;
@@ -586,20 +587,29 @@
   .chat-header .search-field,
   .chat-header .ch-tools .profile-btn:not(.call-chat-btn, .member-list-btn),
   .chat-header .ch-tools .pins-btn,
-  .chat-header .ch-tools .media-btn {
+  .chat-header .ch-tools .media-btn,
+  .chat-header .ch-tools .threads-btn,
+  .chat-header .ch-tools .video-call-btn {
     display: none;
   }
   .chat-header .ch-tools .search-btn,
   .chat-header .ch-tools .ch-more-btn {
     display: flex;
   }
-  /* The name gives way before any control does. */
+  /* The name gives way before any control does, so the controls left on the
+     row sit edge to edge (each keeps its 44px target) and the row's padding
+     tightens: at 320px a channel name of about ten letters still shows. */
+  .chat-header {
+    padding: 0 4px;
+    gap: 4px;
+  }
   .chat-header .ch-name-group {
     flex: 1 1 auto;
     max-width: none;
   }
   .chat-header .ch-tools {
     flex-shrink: 0;
+    gap: 0;
     margin-left: auto;
   }
 }

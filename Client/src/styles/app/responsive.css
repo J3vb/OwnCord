@@ -30,6 +30,12 @@
     top: calc(env(safe-area-inset-top, 0px) + 8px);
     bottom: auto;
   }
+  /* A bottom sheet (350) is modal: its backdrop dims the stack too, between the
+     context menus (300) and the sheet. The countdown holds meanwhile
+     (toastContainer.ts), so the toast is still there once the sheet closes. */
+  body .toast-container.toast-container--under-sheet {
+    z-index: 340;
+  }
   /* The dismiss button gets the full 44px touch target without growing the toast. */
   .toast-close {
     min-width: 44px;

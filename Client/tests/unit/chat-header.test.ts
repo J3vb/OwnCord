@@ -294,6 +294,21 @@ describe("updateChatHeaderForDm", () => {
     expect(refs.avatarEl.style.display).toBe("none");
   });
 
+  it("lists Start video call and Threads in the phone's More sheet, which starts the call", () => {
+    const onStartVideoCall = vi.fn();
+    const { element, refs } = buildChatHeader({ onTogglePins: vi.fn(), onStartVideoCall });
+    container.appendChild(element);
+    updateChatHeaderForDm(refs, { username: "Alice", status: "online" });
+    refs.threadsBtn!.hidden = false;
+
+    element.querySelector<HTMLButtonElement>('[data-testid="chat-header-more"]')!.click();
+    const sheet = document.querySelector('[data-testid="chat-header-more-sheet"]')!;
+    expect(sheet.querySelector('[data-testid="chat-header-more-threads-btn"]')).not.toBeNull();
+    sheet.querySelector<HTMLElement>('[data-testid="chat-header-more-video-call-btn"]')!.click();
+
+    expect(onStartVideoCall).toHaveBeenCalledTimes(1);
+  });
+
   it("calls onStartVideoCall, not onStartCall, from the video button", () => {
     const onStartCall = vi.fn();
     const onStartVideoCall = vi.fn();

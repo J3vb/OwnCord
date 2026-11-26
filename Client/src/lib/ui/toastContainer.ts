@@ -6,8 +6,10 @@
  * that vanishes before it can be read or acted on is worse than none at all.
  * Any other type can opt in to the same by passing `durationMs: Infinity`.
  * Every toast pauses its auto-dismiss countdown while hovered or focused, and
- * an identical repeat coalesces into the existing toast with a count instead
- * of stacking a duplicate.
+ * while a bottom sheet covers the stack (the sheet's backdrop draws over it),
+ * so a toast that arrived just before the sheet opened is still there when it
+ * closes. An identical repeat coalesces into the existing toast with a count
+ * instead of stacking a duplicate.
  */
 
 import { createElement, setText } from "@lib/dom";
@@ -112,6 +114,8 @@ export function createToastContainer(): ToastContainer {
   const toasts: ToastEntry[] = [];
   let anchor: HTMLElement | null = null;
   let anchorWatch: Disposable | null = null;
+  /** A bottom sheet is open over the stack: every countdown holds. */
+  let covered = false;
 
   /** Copy the anchor's box into the container's custom properties. A
    *  zero-height anchor (no composer in this view) leaves the vertical
@@ -135,9 +139,9 @@ export function createToastContainer(): ToastContainer {
     else style.removeProperty("--toast-bottom");
   }
 
-  /** Lift the stack clear of a dialog, settings overlay or sheet. Two classes
-   *  the stylesheet keys on, set from code so no rule has to ask the whole page
-   *  whether such an overlay exists. */
+  /** Lift the stack clear of a dialog, settings overlay or sheet, and drop it
+   *  under a bottom sheet's backdrop. Classes the stylesheet keys on, set from
+   *  code so no rule has to ask the whole page whether such an overlay exists. */
   function syncCover(): void {
     if (root === null) return;
     root.classList.toggle(
@@ -148,6 +152,19 @@ export function createToastContainer(): ToastContainer {
       "toast-container--over-sheet",
       document.querySelector(".bottom-sheet-overlay, .modal-overlay") !== null,
     );
+    setCovered(document.querySelector(".bottom-sheet-overlay") !== null);
+  }
+
+  /** Hold every countdown while a sheet covers the stack; run them again for
+   *  the time they had left once it is gone. */
+  function setCovered(next: boolean): void {
+    root?.classList.toggle("toast-container--under-sheet", next);
+    if (next === covered) return;
+    covered = next;
+    for (const entry of toasts) {
+      if (covered) pauseEntry(entry);
+      else resume(entry);
+    }
   }
 
   let coverWatch: MutationObserver | null = null;
@@ -190,10 +207,11 @@ export function createToastContainer(): ToastContainer {
   }
 
   /** Run an auto-dismissing toast's countdown for its remaining time, unless
-   *  it is sticky (persists until dismissed) or held by hover or focus. */
+   *  it is sticky (persists until dismissed), held by hover or focus, or under
+   *  a sheet. */
   function resume(entry: ToastEntry): void {
     if (entry.sticky || entry.timer !== null) return;
-    if (entry.hovered || entry.focused) return;
+    if (entry.hovered || entry.focused || covered) return;
     entry.startedAt = Date.now();
     entry.timer = setTimeout(() => removeToast(entry), entry.remainingMs);
   }
