@@ -496,14 +496,12 @@ test.describe("New-install defaults", () => {
     const { defaultBrowserType: _iphoneBrowser, ...iphone14 } = devices["iPhone 14"];
     test.use(iphone14);
 
-    test("runs Classic on Gunmetal and stores Command Deck for a larger window", async ({
-      page,
-    }) => {
+    test("runs Classic on Gunmetal and stores Classic", async ({ page }) => {
       await startFullSession(page);
       await expect(page.locator("body")).toHaveClass(/theme-gunmetal/);
       expect(await hasDeckClass(page)).toBe(false);
       expect(await storedDefaults(page)).toEqual({
-        [LAYOUT_KEY]: JSON.stringify("deck"),
+        [LAYOUT_KEY]: JSON.stringify("classic"),
         [THEME_KEY]: "gunmetal",
         [LEVEL_KEY]: JSON.stringify("mentions"),
       });

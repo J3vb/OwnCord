@@ -12,6 +12,7 @@ import { settleNotificationLevelDefault } from "../../../src/lib/prefs/notificat
 import { clearLocalStoragePreservingUserData } from "../../../src/features/settings/AdvancedCache";
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
 import { expectConsole } from "../../helpers/console";
+import { usePhone } from "../../helpers/phoneMedia";
 
 const LAYOUT_KEY = STORAGE_PREFIX + SCREEN_LAYOUT_PREF;
 const THEME_KEY = "owncord:theme:active";
@@ -34,6 +35,7 @@ describe("settleNewInstallDefaults", () => {
   afterEach(() => {
     clearHost();
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it("starts a new desktop install on Gunmetal, then Command Deck", () => {
@@ -52,6 +54,13 @@ describe("settleNewInstallDefaults", () => {
     clearHost();
     settleNewInstallDefaults(false);
     expect(snapshot()).toEqual({ [THEME_KEY]: "gunmetal", [LAYOUT_KEY]: '"deck"' });
+  });
+
+  it("starts a new phone-sized browser on Gunmetal and stores Classic", () => {
+    clearHost();
+    usePhone();
+    settleNewInstallDefaults(false);
+    expect(snapshot()).toEqual({ [THEME_KEY]: "gunmetal", [LAYOUT_KEY]: '"classic"' });
   });
 
   it("writes nothing for a new Android install", () => {
