@@ -184,3 +184,17 @@
     min-height: 44px;
   }
 }
+
+/* A phone panel that follows the finger (lib/ui/panelDrag.ts): no easing while
+   the finger moves it, a short one to where it ends up after the lift. */
+.panel-dragging {
+  transition: none;
+}
+.panel-settling {
+  transition:
+    transform 160ms ease-out,
+    opacity 160ms ease-out;
+}
+html.reduced-motion .panel-settling {
+  transition: none;
+}

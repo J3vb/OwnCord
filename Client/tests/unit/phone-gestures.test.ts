@@ -5,7 +5,9 @@ import {
   REPLY_THRESHOLD_PX,
   installPhoneGestures,
 } from "../../src/pages/main-page/phoneGestures";
+import { SETTLE_MS, createPeekTarget } from "../../src/lib/ui/panelDrag";
 import { pointer, swipe } from "../helpers/touch";
+import { sendAppToBackground, swipeTimed } from "../helpers/touch";
 
 let phone = true;
 const owners: AbortController[] = [];
@@ -309,5 +311,135 @@ describe("closing a panel by swiping it away", () => {
     swipe(at("channel"), [250, 100], [100, 100]);
     expect(f.panel.closeOverlay).not.toHaveBeenCalled();
     expect(f.drawer.close).not.toHaveBeenCalled();
+  });
+});
+
+describe("panels that follow the finger", () => {
+  interface Dragged {
+    readonly f: Fixture;
+    readonly drawerPeek: ReturnType<typeof vi.fn<(on: boolean) => void>>;
+    readonly membersPeek: ReturnType<typeof vi.fn<(on: boolean) => void>>;
+  }
+
+  const run = (fn: unknown): void => (fn as () => void)();
+
+  /** The fixture's panels with peek targets: 300 px of travel each (stubbed boxes). */
+  function dragged(): Dragged {
+    const f = fixture();
+    f.sidebar.getBoundingClientRect = () => DOMRect.fromRect({ x: 0, width: 300, height: 600 });
+    f.members.getBoundingClientRect = () =>
+      DOMRect.fromRect({ x: window.innerWidth - 300, width: 300, height: 600 });
+    const drawerPeek = vi.fn<(on: boolean) => void>();
+    const membersPeek = vi.fn<(on: boolean) => void>();
+    const drawerTarget = createPeekTarget({
+      surfaces: [f.sidebar],
+      setPeek: drawerPeek,
+      commit: (open) => run(open ? f.drawer.open : f.drawer.close),
+    });
+    const membersTarget = createPeekTarget({
+      surfaces: [f.members],
+      setPeek: membersPeek,
+      commit: (open) => run(open ? f.panel.openOverlay : f.panel.closeOverlay),
+    });
+    Object.assign(f.drawer, { peekTarget: () => drawerTarget });
+    Object.assign(f.panel, { peekTarget: () => membersTarget });
+    return { f, drawerPeek, membersPeek };
+  }
+
+  const slow = { steps: 13, msPerStep: 50 };
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.advanceTimersByTime(SETTLE_MS);
+    vi.useRealTimers();
+    document.documentElement.classList.remove("reduced-motion");
+  });
+
+  it("a slow drag past 40 % of the travel opens the drawer, and a shorter one snaps back", () => {
+    const { f, drawerPeek } = dragged();
+    swipeTimed(at("title"), [50, 100], [150, 100], slow);
+    expect(f.drawer.open).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(SETTLE_MS);
+    expect(drawerPeek.mock.calls).toEqual([[true], [false]]);
+    expect(f.sidebar.style.transform).toBe("");
+    swipeTimed(at("title"), [50, 100], [180, 100], slow);
+    expect(f.drawer.open).toHaveBeenCalledTimes(1);
+  });
+
+  it("the same for the member list, dragged in from the right", () => {
+    const { f } = dragged();
+    swipeTimed(at("title"), [300, 100], [200, 100], slow);
+    expect(f.panel.openOverlay).not.toHaveBeenCalled();
+    swipeTimed(at("title"), [300, 100], [170, 100], slow);
+    expect(f.panel.openOverlay).toHaveBeenCalledTimes(1);
+    expect(f.drawer.open).not.toHaveBeenCalled();
+  });
+
+  it("a timed flick opens, well short of 40 %", () => {
+    const { f } = dragged();
+    swipeTimed(at("title"), [50, 100], [100, 100], { steps: 5, msPerStep: 10 });
+    expect(f.drawer.open).toHaveBeenCalledTimes(1);
+  });
+
+  it("an open panel dragged shut closes past 40 %, and stays open short of it", () => {
+    const { f } = dragged();
+    f.state.drawerOpen = true;
+    swipeTimed(at("channel"), [250, 100], [150, 100], slow);
+    expect(f.drawer.close).not.toHaveBeenCalled();
+    swipeTimed(at("channel"), [250, 100], [120, 100], slow);
+    expect(f.drawer.close).toHaveBeenCalledTimes(1);
+    f.state.membersOpen = true;
+    swipeTimed(at("who"), [100, 100], [230, 100], slow);
+    expect(f.panel.closeOverlay).toHaveBeenCalledTimes(1);
+  });
+
+  it("under reduced motion nothing follows and a 60 px swipe opens, as before", () => {
+    document.documentElement.classList.add("reduced-motion");
+    const { f, drawerPeek } = dragged();
+    swipe(at("title"), [50, 100], [50 + PANEL_SWIPE_PX, 100]);
+    expect(f.drawer.open).toHaveBeenCalledTimes(1);
+    expect(drawerPeek).not.toHaveBeenCalled();
+  });
+
+  /** A drag well past the open point, interrupted by `interrupt` before the lift. */
+  function interrupted(interrupt: () => void): Dragged {
+    const d = dragged();
+    pointer("pointerdown", at("title"), 50, 100);
+    pointer("pointermove", at("title"), 120, 100);
+    pointer("pointermove", at("title"), 250, 100);
+    expect(d.f.sidebar.style.transform).toBe("translateX(-100px)");
+    interrupt();
+    pointer("pointerup", at("title"), 250, 100);
+    expect(d.f.drawer.open).not.toHaveBeenCalled();
+    expect(d.f.drawer.close).not.toHaveBeenCalled();
+    expect(d.f.sidebar.style.transform).toBe("");
+    expect(d.f.sidebar.classList.contains("panel-dragging")).toBe(false);
+    expect(d.drawerPeek.mock.calls).toEqual([[true], [false]]);
+    return d;
+  }
+
+  it("a pointercancel cancels the drag, and the lift opens nothing", () => {
+    interrupted(() => pointer("pointercancel", at("title"), 250, 100));
+  });
+
+  it("a second finger cancels the drag", () => {
+    interrupted(() =>
+      pointer("pointerdown", at("title"), 200, 300, { pointerId: 2, isPrimary: false }),
+    );
+  });
+
+  it("the app going to the background cancels the drag", () => {
+    interrupted(sendAppToBackground);
+  });
+
+  it("the window leaving the phone layout cancels the drag", () => {
+    interrupted(() => {
+      phone = false;
+      window.dispatchEvent(new Event("resize"));
+      phone = true;
+    });
   });
 });

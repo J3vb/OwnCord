@@ -257,6 +257,7 @@ export const shards = {
     "src/features/voice-messages/linuxMic.ts",
     "src/features/voice/cameraFlip.ts",
     "src/lib/media/soundTables.ts",
+    "src/lib/ui/panelDrag.ts",
     "src/lib/ui/swipe.ts",
     "src/lib/voice/voiceTokenManager.ts",
   ],
