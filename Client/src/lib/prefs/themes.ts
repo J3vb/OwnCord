@@ -58,11 +58,27 @@ export const THEMES = {
     "--border-control": "#6b7787",
     "--text-normal": "#dbe1e8",
     "--text-muted": "#96a2b1",
-    "--text-faint": "#5f6b7a",
+    // --text-faint heads categories, member roles and settings sections, so
+    // it reads at 4.5:1 on --bg-primary and --bg-secondary. --text-micro
+    // stays a step below it, above neon-glow's ratio on the same surfaces.
+    "--text-faint": "#7d8898",
+    "--text-micro": "#6f7a8a",
     "--header-primary": "#f1f4f7",
     "--header-secondary": "#b4bec9",
     "--channel-icon": "#8b97a7",
     "--text-link": "#6cc4ff",
+    // Blue-grey in place of tokens.css's neutral greys. The scrollbar thumb
+    // reads at 3:1 on --bg-primary and --bg-secondary.
+    "--interactive-normal": "#b4bec9",
+    "--interactive-hover": "#dbe1e8",
+    "--interactive-active": "#ffffff",
+    "--interactive-muted": "#3e4a58",
+    "--bg-modifier-hover": "rgba(76, 89, 107, 0.16)",
+    "--bg-modifier-active": "rgba(76, 89, 107, 0.24)",
+    "--bg-modifier-selected": "rgba(76, 89, 107, 0.32)",
+    "--scrollbar-thin-thumb": "#626e7e",
+    "--scrollbar-auto-thumb": "#626e7e",
+    "--role-member": "#9aa5b3",
   },
   light: {
     "--bg-primary": "#ffffff",

@@ -216,6 +216,9 @@ export function serverAvatar(
 ): HTMLElement {
   const el = createElement("span", { class: mini ? "server-rail-mini" : "server-rail-avatar" });
   el.style.background = color;
+  // The accent fallback takes the accent's own text colour; white misses on
+  // a light accent such as Ember or cyan. Saved colours keep the CSS white.
+  if (color === FALLBACK_COLOR) el.style.color = "var(--on-accent)";
   if (iconUrl !== undefined) {
     el.appendChild(createElement("img", { class: "server-rail-icon", src: iconUrl, alt: name }));
   } else if (!mini && isIpAddressName(name)) {

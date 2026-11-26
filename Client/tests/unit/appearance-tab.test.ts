@@ -168,6 +168,25 @@ describe("AppearanceTab — Accessibility", () => {
     expect(hexInput.placeholder).toBe("5865f2");
   });
 
+  it("checks the Ember swatch under Gunmetal, and picking it again returns to Ember", () => {
+    mockGetActiveThemeName.mockReturnValue("gunmetal");
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const checked = (): string[] =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(".accent-swatch[aria-checked='true']"),
+        (s) => s.title,
+      );
+    expect(checked()).toEqual(["#ff7a45"]);
+
+    container.querySelector<HTMLElement>(".accent-swatch[title='#57f287']")!.click();
+    expect(checked()).toEqual(["#57f287"]);
+
+    container.querySelector<HTMLElement>(".accent-swatch[title='#ff7a45']")!.click();
+    expect(checked()).toEqual(["#ff7a45"]);
+    expect(localStorage.getItem("owncord:settings:accentColor")).toBe('"#ff7a45"');
+    expect(document.body.style.getPropertyValue("--accent")).toBe("#ff7a45");
+  });
+
   it("updates the displayed default accent when switching built-in themes without an override", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
@@ -624,12 +643,12 @@ describe("AppearanceTab — Accessibility", () => {
     );
   });
 
-  it("renders all 10 accent color swatches", () => {
+  it("renders all 11 accent color swatches", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
     const swatches = container.querySelectorAll(".accent-swatch");
-    expect(swatches.length).toBe(10);
+    expect(swatches.length).toBe(11);
   });
 
   // --- Swatches have proper ARIA ---

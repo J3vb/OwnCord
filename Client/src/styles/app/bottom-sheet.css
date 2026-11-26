@@ -489,7 +489,8 @@
   align-self: stretch;
   min-height: 52px;
   border-radius: var(--radius-lg);
-  background: var(--green);
+  /* --success-fill, not --green: white text needs 4.5:1. */
+  background: var(--success-fill);
   color: var(--on-fill);
   font-size: var(--font-size-lg);
   font-weight: 700;

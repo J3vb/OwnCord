@@ -41,7 +41,7 @@
 }
 .dm-phone-plus {
   background: var(--accent);
-  color: var(--on-fill);
+  color: var(--on-accent);
 }
 .dm-phone-btn[aria-expanded="true"] {
   background: var(--bg-active);

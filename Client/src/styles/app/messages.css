@@ -2193,8 +2193,8 @@ ul.md-list-nested {
 .call-row .cr-join {
   padding: 2px 10px;
   border-radius: 4px;
-  background: var(--green);
-  color: var(--bg-primary);
+  background: var(--success-fill);
+  color: var(--on-fill);
   font-size: var(--font-size-xs);
   cursor: pointer;
 }

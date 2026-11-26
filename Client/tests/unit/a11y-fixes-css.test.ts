@@ -60,3 +60,23 @@ describe("B9 exit-audit accessibility CSS", () => {
     expect(varToken(cascadedDeclaration(selector, "color"))).toBe("--text-danger");
   });
 });
+
+describe("text on accent and green fills", () => {
+  it.each([
+    ".dm-phone-plus",
+    ".dm-empty-start",
+    '.forum-sort-btn[aria-pressed="true"]',
+    ".forum-tag-chip.selected",
+  ])("%s takes the accent's own text colour, not white", (selector) => {
+    expect(varToken(cascadedDeclaration(selector, "background"))).toBe("--accent");
+    expect(varToken(cascadedDeclaration(selector, "color"))).toBe("--on-accent");
+  });
+
+  it.each([".js-join", ".session-current", ".call-row .cr-join"])(
+    "%s puts white text on the darker --success-fill, not --green",
+    (selector) => {
+      expect(varToken(cascadedDeclaration(selector, "background"))).toBe("--success-fill");
+      expect(varToken(cascadedDeclaration(selector, "color"))).toBe("--on-fill");
+    },
+  );
+});
