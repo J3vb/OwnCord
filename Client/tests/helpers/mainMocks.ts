@@ -319,3 +319,11 @@ export async function dispatcherMock() {
 export function setStartupInvokes(calls: unknown[]): void {
   startupInvokes = calls;
 }
+
+/** Every `localStorage.setItem` the import of main.ts made, from empty storage,
+ *  in order: [key, value] as written. */
+export let startupStorageWrites: ReadonlyArray<readonly [string, string]> = [];
+
+export function setStartupStorageWrites(writes: ReadonlyArray<readonly [string, string]>): void {
+  startupStorageWrites = writes;
+}

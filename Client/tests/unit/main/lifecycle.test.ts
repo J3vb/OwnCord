@@ -20,7 +20,7 @@ import {
   setActivePresenceSender,
   type PresenceSender,
 } from "../../../src/features/presence/presence";
-import { startupInvokes } from "../../helpers/mainMocks";
+import { startupInvokes, startupStorageWrites } from "../../helpers/mainMocks";
 import {
   latestConnectPage,
   startupApiClient,
@@ -60,6 +60,23 @@ useMainHarness();
 describe("main.ts startup", () => {
   it("tells the native host once that the first page rendered", () => {
     expect(startupInvokes.filter((cmd) => cmd === "frontend_ready")).toHaveLength(1);
+  });
+
+  it("settles a new install from one evidence read made before any write", () => {
+    const writes = startupStorageWrites;
+    // The new-install defaults come first: the theme raw, the layout as JSON.
+    expect(writes.slice(0, 2)).toEqual([
+      ["owncord:theme:active", "gunmetal"],
+      ["owncord:settings:screenLayout", JSON.stringify("deck")],
+    ]);
+    // Two keys were written before it, yet the level is the new-install one:
+    // both settles were given the same answer.
+    const levelAt = writes.findIndex(([key]) => key === "owncord:settings:notificationLevel");
+    expect(levelAt).toBeGreaterThan(1);
+    expect(writes[levelAt]).toEqual([
+      "owncord:settings:notificationLevel",
+      JSON.stringify("mentions"),
+    ]);
   });
 });
 

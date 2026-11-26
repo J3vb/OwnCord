@@ -37,6 +37,19 @@ const updater = process.platform === "win32" ? ".nsis.zip" : ".AppImage.tar.gz";
 // error". Only the baseline's launch and first interaction retry on that.
 const BASELINE_SESSION_LOST = /WebDriver [\s\S]*"error":"(invalid session id|unknown error)"/;
 
+interface StoredAppearance {
+  layout: string | null;
+  theme: string | null;
+  deck: boolean;
+}
+
+const storedAppearance = (app: ArtifactDriver) =>
+  app.evaluate<StoredAppearance>(`() => ({
+    layout: localStorage.getItem("owncord:settings:screenLayout"),
+    theme: localStorage.getItem("owncord:theme:active"),
+    deck: document.documentElement.classList.contains("layout-deck"),
+  })`);
+
 const digest = async (file: string) =>
   createHash("sha256")
     .update(await readFile(file))
@@ -126,6 +139,10 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
     await app.press("Enter");
     await waitFor(app, ".msg-text", text);
 
+    // What the previous release stored, before the update decides anything:
+    // a release from before the new-install defaults stores no layout.
+    const before = await storedAppearance(app);
+
     // Update: the binary asks for its own target and gets this release.
     const original = await digest(binary);
     await app.click(".update-banner-install", "Update Now");
@@ -141,6 +158,15 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
     await waitFor(app!, "[data-testid='app-layout']", "", 60_000);
     expect(await appVersion(app!)).toBe(version);
     await waitFor(app!, ".msg-text", text);
+    // The update moves no one to another layout or theme.
+    const after = await storedAppearance(app!);
+    if (before.layout === null) {
+      expect(after.layout).toBe(JSON.stringify("classic"));
+      expect(after.deck).toBe(false);
+    } else {
+      expect(after.layout).toBe(before.layout);
+    }
+    expect(after.theme).toBe(before.theme);
 
     // Roll back: reinstall the previous release over the updated one.
     await app!.close().catch(() => {});

@@ -33,7 +33,7 @@ Open **Settings** (Ctrl+,) and pick a tab.
   and back to 100 % from anywhere in the app.
 - **Theme**: dark, midnight, gunmetal, light, neon glow, or **Match my computer** to
   follow your system's light or dark setting. Each choice is a tile with a
-  small preview of the theme; arrow keys move between them.
+  small preview of the theme; arrow keys move between them. A new install starts on the Gunmetal theme.
 - **Screen layout**: Command Deck or Classic. On desktop and in the browser. The Android app and phone-sized screens run Classic. Applies the next time OwnCord starts or reloads; Restart now applies it at once.
 - **Compact mode** fits more messages on screen.
 - **Time format**: 12-hour or 24-hour clocks. Until you pick one, the clock and the date order follow the device language.

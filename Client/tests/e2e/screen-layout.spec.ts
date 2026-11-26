@@ -5,7 +5,7 @@
  * styles the frame from it. A pick in Settings applies on the next reload.
  */
 
-import type { Locator, Page } from "@playwright/test";
+import { devices, type Locator, type Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   BASE_SESSION_ROUTES,
@@ -433,5 +433,80 @@ test.describe("Command Deck top bar", () => {
     expect((await boxOf(page, "deck-top-bar")).height).toBeGreaterThanOrEqual(TOP_MIN);
     await expect(page.locator("[data-testid='message-input']")).toBeInViewport();
     await expect(page.locator("[data-testid='user-bar']")).toBeInViewport();
+  });
+});
+
+const THEME_KEY = "owncord:theme:active";
+const LEVEL_KEY = "owncord:settings:notificationLevel";
+
+/** The raw stored values the new-install settle decides on. */
+const storedDefaults = (page: Page): Promise<Record<string, string | null>> =>
+  page.evaluate(
+    (keys) => Object.fromEntries(keys.map((k) => [k, localStorage.getItem(k)])),
+    [LAYOUT_KEY, THEME_KEY, LEVEL_KEY],
+  );
+
+test.describe("New-install defaults", () => {
+  test.use({ screenLayout: "fresh" });
+
+  test("an empty profile starts on Command Deck and Gunmetal", async ({ page }) => {
+    await startFullSession(page);
+    await expect(page.locator("html")).toHaveClass(/layout-deck/);
+    await expect(page.locator("body")).toHaveClass(/theme-gunmetal/);
+    expect(await storedDefaults(page)).toEqual({
+      [LAYOUT_KEY]: JSON.stringify("deck"),
+      [THEME_KEY]: "gunmetal",
+      [LEVEL_KEY]: JSON.stringify("mentions"),
+    });
+  });
+
+  test("a store from an older release keeps Classic and its theme, across a reload", async ({
+    page,
+  }) => {
+    // Seeded once: a reload must find what the first load left, so a theme
+    // the app lost is not written back by the seed.
+    await page.addInitScript(
+      ([level, theme]) => {
+        if (sessionStorage.getItem("old-release-seeded") !== null) return;
+        sessionStorage.setItem("old-release-seeded", "1");
+        localStorage.setItem(level, JSON.stringify("all"));
+        localStorage.setItem(theme, "light");
+      },
+      [LEVEL_KEY, THEME_KEY] as const,
+    );
+    await startFullSession(page);
+    await expect(page.locator("body")).toHaveClass(/theme-light/);
+    expect(await hasDeckClass(page)).toBe(false);
+    const upgraded = {
+      [LAYOUT_KEY]: JSON.stringify("classic"),
+      [THEME_KEY]: "light",
+      [LEVEL_KEY]: JSON.stringify("all"),
+    };
+    expect(await storedDefaults(page)).toEqual(upgraded);
+
+    await page.reload();
+    await expect(page.locator("body")).toHaveClass(/theme-light/);
+    expect(await hasDeckClass(page)).toBe(false);
+    expect(await storedDefaults(page)).toEqual(upgraded);
+  });
+
+  test.describe("on a phone-sized browser", () => {
+    // The iPhone profile is a phone browser; an Android user agent with the
+    // Tauri mock would be the Android app, which stores no layout.
+    const { defaultBrowserType: _iphoneBrowser, ...iphone14 } = devices["iPhone 14"];
+    test.use(iphone14);
+
+    test("runs Classic on Gunmetal and stores Command Deck for a larger window", async ({
+      page,
+    }) => {
+      await startFullSession(page);
+      await expect(page.locator("body")).toHaveClass(/theme-gunmetal/);
+      expect(await hasDeckClass(page)).toBe(false);
+      expect(await storedDefaults(page)).toEqual({
+        [LAYOUT_KEY]: JSON.stringify("deck"),
+        [THEME_KEY]: "gunmetal",
+        [LEVEL_KEY]: JSON.stringify("mentions"),
+      });
+    });
   });
 });

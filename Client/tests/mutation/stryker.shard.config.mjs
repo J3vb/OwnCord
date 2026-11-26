@@ -513,6 +513,7 @@ export const shards = {
     "src/features/threads/threadAgo.ts",
     "src/features/threads/threadCommands.ts",
     "src/lib/prefs/installEvidence.ts",
+    "src/lib/prefs/newInstallDefaults.ts",
     "src/lib/prefs/screenLayout.ts",
     "src/lib/text/fileName.ts",
     "src/lib/text/inboundText.ts",

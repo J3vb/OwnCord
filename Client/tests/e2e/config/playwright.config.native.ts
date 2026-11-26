@@ -67,6 +67,7 @@ export default defineConfig({
         "cross-feature-journeys.spec.ts",
         "diagnostics-log.spec.ts",
         "exit-info.spec.ts",
+        "new-install.spec.ts",
       ],
     },
     {
