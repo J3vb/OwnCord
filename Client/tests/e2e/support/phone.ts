@@ -5,6 +5,7 @@
  */
 import { devices, type Page } from "@playwright/test";
 import { test, expect } from "../fixtures";
+import { findUnnamedControls } from "./accessibility";
 
 const { defaultBrowserType: _pixelBrowser, ...pixel7Device } = devices["Pixel 7"];
 const { defaultBrowserType: _iphoneBrowser, ...iphone14Device } = devices["iPhone 14"];
@@ -124,6 +125,8 @@ interface DragPanel {
   readonly name: string;
   /** Where the finger opens it: on the chat, from this side of the screen. */
   readonly side: "left" | "right";
+  /** The panel itself. */
+  readonly root: string;
   /** What a closing drag starts on. */
   readonly closeOn: string;
   isOpen(page: Page): Promise<boolean>;
@@ -143,6 +146,7 @@ const PANELS: readonly DragPanel[] = [
   {
     name: "the channel drawer",
     side: "left",
+    root: DRAWER,
     closeOn: `${DRAWER} .channel-list`,
     isOpen: async (page) =>
       (await page.locator("[data-testid='sidebar-toggle']").getAttribute("aria-expanded")) ===
@@ -159,6 +163,7 @@ const PANELS: readonly DragPanel[] = [
   {
     name: "the member list",
     side: "right",
+    root: MEMBERS,
     closeOn: `${MEMBERS} .member-item`,
     isOpen: async (page) =>
       (await page.locator("[data-testid='member-list-toggle']").getAttribute("aria-pressed")) ===
@@ -203,6 +208,23 @@ async function expectSettled(page: Page, panel: DragPanel, open: boolean): Promi
       ? expect(page.locator(MEMBERS)).toBeVisible()
       : expect(page.locator(MEMBERS)).toBeHidden());
   }
+}
+
+/** A panel opened by a drag: every control named, and the keyboard reaches its first one. */
+async function expectPanelAccessible(page: Page, panel: DragPanel): Promise<void> {
+  const root = page.locator(panel.root);
+  expect(await findUnnamedControls(root)).toEqual([]);
+  const first = root.locator("button:visible, a[href]:visible, [tabindex='0']:visible").first();
+  await first.focus();
+  await expect(first).toBeFocused();
+}
+
+/** A panel shut by a drag keeps no focus inside it. */
+async function expectFocusOutside(page: Page, panel: DragPanel): Promise<void> {
+  const inside = await page
+    .locator(panel.root)
+    .evaluate((el) => el.contains(document.activeElement));
+  expect(inside).toBe(false);
 }
 
 /** Slow: well under the flick speed (0.4 px/ms), so only the distance counts. */
@@ -252,10 +274,12 @@ export function dragCases(layout: PhoneLayout, start: (page: Page) => Promise<vo
         const full = Math.round(travel * 0.9);
         await dragOpen(page, panel, full, slowly(full, 18));
         await expectSettled(page, panel, true);
+        await expectPanelAccessible(page, panel);
 
         const shutBy = panel.side === "left" ? -full : full;
         await swipeOnTimed(page, panel.closeOn, shutBy, 0, slowly(full, 18));
         await expectSettled(page, panel, false);
+        await expectFocusOutside(page, panel);
       });
     }
 
