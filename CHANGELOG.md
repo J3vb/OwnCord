@@ -117,7 +117,7 @@ release changes the database, and anything an operator must do first.)
 
 **Appearance & layout**
 
-- A new install starts on the Gunmetal theme, and in Command Deck on desktop and in a browser at desktop size. Phone-sized browsers and the Android app run Classic. If you used OwnCord before, your layout and theme stay as they are.
+- A new install starts on the Gunmetal theme, and in Command Deck on desktop and in a browser at desktop size. Phone-sized browsers run Classic. A new Android app install keeps the theme it had before and runs Classic. If you used OwnCord before, your layout and theme stay as they are.
 
 **Voice**
 

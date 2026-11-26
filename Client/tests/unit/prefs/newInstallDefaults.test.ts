@@ -54,10 +54,11 @@ describe("settleNewInstallDefaults", () => {
     expect(snapshot()).toEqual({ [THEME_KEY]: "gunmetal", [LAYOUT_KEY]: '"deck"' });
   });
 
-  it("gives a new Android install Gunmetal and no layout value", () => {
+  it("writes nothing for a new Android install", () => {
     hostAndroidApp();
     settleNewInstallDefaults(false);
-    expect(snapshot()).toEqual({ [THEME_KEY]: "gunmetal" });
+    expect(snapshot()).toEqual({});
+    expect(getActiveThemeName()).toBe("neon-glow");
     expect(loadScreenLayout()).toBe("classic");
   });
 

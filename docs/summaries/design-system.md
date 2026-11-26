@@ -6,7 +6,7 @@ The visual rules for the desktop client: themes and tokens, typography, spacing,
 
 ## Brand direction
 
-The visual direction is **Refined Neon** (owner decision Q13), applied across five themes: `neon-glow` (the OwnCord brand identity, and the theme of an install from before Gunmetal became the default that never picked one), `dark` (whose values are `tokens.css`'s `:root` defaults), `midnight`, `gunmetal` (the theme a new install starts on: blue-grey surfaces with an Ember orange `#ff7a45` accent), and `light`.
+The visual direction is **Refined Neon** (owner decision Q13), applied across five themes: `neon-glow` (the OwnCord brand identity, and the theme of an install from before Gunmetal became the default that never picked one), `dark` (whose values are `tokens.css`'s `:root` defaults), `midnight`, `gunmetal` (the theme a new install starts on, except in the Android app: blue-grey surfaces with an Ember orange `#ff7a45` accent), and `light`.
 
 `applyTheme()` (`lib/prefs/themes.ts`) switches themes. It writes the theme's `THEMES` entry as inline custom properties on `<html>`, over `tokens.css`'s `:root` dark defaults, then `applyThemeByName()` (`lib/prefs/themes.ts`) sets `theme-<name>` on `<body>`. Only `body.theme-neon-glow`, `body.theme-gunmetal` (accent block only) and `body.theme-light` (accent fills only) have CSS rules, so midnight is entirely its `THEMES` entry and most of light's palette is too: a new midnight or light value goes in `THEMES`. A user's custom accent (`applyAccent()`, inline on `<body>`) overrides the accent-derived tokens on top of whichever theme is active. High Contrast is a separate toggle layered over any theme.
 
