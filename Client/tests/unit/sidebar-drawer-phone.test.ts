@@ -6,6 +6,7 @@ import { closeSettings, setActiveView, uiStore } from "@stores/ui.store";
 import { claimBack } from "@lib/ui/backHistory";
 import { closeBottomSheet, openBottomSheet } from "@lib/ui/bottomSheet";
 import { guarded, pressBack, settle } from "../helpers/backNav";
+import { panelSwipe } from "@lib/ui/panelDrag";
 
 const ANDROID_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 Chrome/140.0";
 
@@ -225,6 +226,54 @@ describe("the drawer on a phone", () => {
       expect(guarded()).toBe(false);
     });
 
+    it("a peek draws the drawer open with no Back claim, no aria-expanded change and no focus move", () => {
+      const s = setup();
+      drawer = s.drawer;
+      const before = document.activeElement;
+      s.drawer.peekTarget()!.setPeek(true);
+      expect(s.sidebar.classList.contains("drawer-open")).toBe(true);
+      expect(s.rail.classList.contains("drawer-open")).toBe(true);
+      expect(document.querySelector(".sidebar-drawer-backdrop")!.classList.contains("open")).toBe(
+        true,
+      );
+      expect(s.drawer.isOpen()).toBe(false);
+      expect(s.toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(guarded()).toBe(false);
+      expect(document.activeElement).toBe(before);
+      s.drawer.peekTarget()!.setPeek(false);
+      expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
+    });
+
+    it("a Back while the open drawer is dragged shut cancels the drag and closes the drawer", async () => {
+      const s = setup();
+      drawer = s.drawer;
+      s.toggle.click();
+      const shut = panelSwipe(
+        () => s.drawer.peekTarget(),
+        "left",
+        () => false,
+      );
+      shut.start(-12);
+      shut.move(-40);
+      expect(s.sidebar.style.transform).not.toBe("");
+      await pressBack();
+      expect(s.drawer.isOpen()).toBe(false);
+      expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
+      expect(s.sidebar.style.transform).toBe("");
+      // The lift after a cancel opens nothing.
+      expect(shut.end(-40, true)).toBe(true);
+      expect(s.drawer.isOpen()).toBe(false);
+      expect(guarded()).toBe(false);
+    });
+
+    it("has no peek target where the sidebar is not a drawer", () => {
+      narrow.matches = false;
+      phone.matches = false;
+      const s = setup();
+      drawer = s.drawer;
+      expect(s.drawer.peekTarget()).toBeNull();
+    });
+
     it("does not pop twice when the drawer closes another way", async () => {
       const s = setup();
       drawer = s.drawer;
@@ -345,6 +394,33 @@ describe("the drawer in the Android app", () => {
     expect(guarded()).toBe(false);
     await pressBack();
     expect(s.sidebar.classList.contains("drawer-open")).toBe(true);
+  });
+
+  it("an opening peek keeps the guard's entry: the guard follows open, not what is drawn", async () => {
+    const s = setup();
+    drawer = s.drawer;
+    s.drawer.peekTarget()!.setPeek(true);
+    await settle();
+    expect(guarded()).toBe(true);
+    s.drawer.peekTarget()!.setPeek(false);
+  });
+
+  it("a Back during an opening drag cancels it, and the guard opens the drawer as today", async () => {
+    const s = setup();
+    drawer = s.drawer;
+    const drag = panelSwipe(
+      () => s.drawer.peekTarget(),
+      "left",
+      () => true,
+    );
+    drag.start(12);
+    drag.move(40);
+    await pressBack();
+    expect(s.drawer.isOpen()).toBe(true);
+    expect(s.sidebar.classList.contains("drawer-open")).toBe(true);
+    expect(s.sidebar.style.transform).toBe("");
+    expect(drag.end(40, true)).toBe(true);
+    expect(s.drawer.isOpen()).toBe(true);
   });
 
   it("puts the guard back after a channel is reached from the drawer", async () => {

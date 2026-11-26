@@ -56,6 +56,21 @@ button on close, and exposes `aria-expanded`. Above 800px nothing changes.
 `Client/tests/e2e/responsive-nav.spec.ts` pins the keyboard and pointer
 paths at the 640×400 zoom viewport.
 
+Swipes. On a phone the drawer opens with a swipe right on the chat and the
+member list with a swipe left, and each closes when swiped back. Both follow
+the finger while the swipe lasts (`Client/src/lib/ui/panelDrag.ts`) and, on
+release, open (or close) past the larger of 60 px and 40 % of the panel's
+width, or on a flick (at least 30 px, at 0.4 px/ms or faster over the last
+100 ms); otherwise they snap back. A swipe that is interrupted (a second
+finger, the app going to the background, the window leaving the phone layout,
+or a Back while the finger is down) leaves the panel as it was, and that Back
+then does what it does with no drag. A panel is dragged only where its button
+would open it: the member list not in a direct message, in a content view or
+when it sits on the left. With Reduce motion on nothing follows the finger,
+and a swipe of 60 px opens or closes the panel on release. A drag changes
+none of the drawer's `aria-expanded`, focus or Escape behaviour above until
+it opens or closes the panel; every swipe also has a button.
+
 ## Colour tokens
 
 `Client/src/styles/tokens.css` holds the dark defaults, which midnight shares

@@ -36,67 +36,10 @@ import {
   navigateToMainPageReady,
 } from "./helpers";
 import { callLog, mountCallGrid } from "./support/callGrid";
+import { PROFILES, dragCases, holdFinger, swipeOn } from "./support/phone";
 
 const { defaultBrowserType: _pixelBrowser, ...pixel7 } = devices["Pixel 7"];
 const { defaultBrowserType: _iphoneBrowser, ...iphone14 } = devices["iPhone 14"];
-
-const PROFILES = [
-  { name: "Pixel 7", use: pixel7 },
-  { name: "iPhone 14", use: iphone14 },
-];
-
-/** A finger held on `selector`'s centre for `holdMs`, through CDP touch input. */
-async function holdFinger(page: Page, selector: string, holdMs: number): Promise<void> {
-  const box = await page.locator(selector).first().boundingBox();
-  if (box === null) throw new Error(`no box for ${selector}`);
-  const x = box.x + box.width / 2;
-  const y = box.y + box.height / 2;
-  const cdp = await page.context().newCDPSession(page);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
-  await page.waitForTimeout(holdMs);
-  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  await cdp.detach();
-}
-
-/**
- * A one-finger swipe made of touch pointer events dispatched on the element,
- * the way the app's own gesture code listens for them (no browser gesture or
- * hit-testing involved).
- */
-async function swipeOn(
-  page: Page,
-  selector: string,
-  dx: number,
-  dy = 0,
-  start: { x: number; y: number } | null = null,
-): Promise<void> {
-  await page.evaluate(
-    ({ selector, dx, dy, start }) => {
-      const el = document.querySelector(selector);
-      if (el === null) throw new Error(`no element for ${selector}`);
-      const box = el.getBoundingClientRect();
-      const x0 = start?.x ?? box.left + box.width / 2;
-      const y0 = start?.y ?? box.top + box.height / 2;
-      const fire = (type: string, x: number, y: number): void => {
-        el.dispatchEvent(
-          new PointerEvent(type, {
-            bubbles: true,
-            cancelable: true,
-            pointerId: 7,
-            pointerType: "touch",
-            isPrimary: true,
-            clientX: x,
-            clientY: y,
-          }),
-        );
-      };
-      fire("pointerdown", x0, y0);
-      for (let i = 1; i <= 6; i++) fire("pointermove", x0 + (dx * i) / 6, y0 + (dy * i) / 6);
-      fire("pointerup", x0 + dx, y0 + dy);
-    },
-    { selector, dx, dy, start },
-  );
-}
 
 async function noHorizontalScroll(page: Page): Promise<void> {
   const overflow = await page.evaluate(() => {
@@ -217,6 +160,8 @@ for (const profile of PROFILES) {
       await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
       await expect(page.locator("[data-testid='sidebar-drawer-backdrop']")).toBeAttached();
     }
+
+    if (profile.name === "Pixel 7") dragCases("classic", signIn);
 
     test("the main page does not scroll sideways and the drawer reaches the channels", async ({
       page,

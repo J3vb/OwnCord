@@ -18,6 +18,9 @@ import { createRoomInfoPanel } from "../../src/features/deck/roomInfoPanel";
 import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
 import { addLogListener, type LogEntry } from "../../src/lib/logger";
 import { expectConsole } from "../helpers/console";
+import { panelSwipe } from "../../src/lib/ui/panelDrag";
+import { pressBack } from "../helpers/backNav";
+import { sendAppToBackground } from "../helpers/touch";
 
 vi.mock("../../src/features/deck/roomInfoPanel", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../src/features/deck/roomInfoPanel")>();
@@ -619,6 +622,84 @@ describe("MemberColumn", () => {
         mq.matches = false;
         savePref(MEMBER_LAYOUT_PREF, "right");
         expect(ctrl.openOverlay()).toBe(false);
+      });
+
+      it("a peek shows the panel with no Back claim and no aria-pressed change", () => {
+        ctrl = make();
+        ctrl.peekTarget()!.setPeek(true);
+        expect(column.hidden).toBe(false);
+        expect(body.contains(panels[0]!.element)).toBe(true);
+        expect(ctrl.isOverlayOpen()).toBe(false);
+        expect(button.getAttribute("aria-pressed")).toBe("false");
+        expect(guarded()).toBe(false);
+        ctrl.peekTarget()!.setPeek(false);
+        expect(column.hidden).toBe(true);
+      });
+
+      it("a pref change while peeking keeps the same panel element", () => {
+        ctrl = make();
+        ctrl.peekTarget()!.setPeek(true);
+        const element = panels[0]!.element;
+        savePref(MEMBER_OPEN_PREF, false);
+        expect(buildPanel).toHaveBeenCalledTimes(1);
+        expect(body.contains(element)).toBe(true);
+        expect(column.hidden).toBe(false);
+        ctrl.peekTarget()!.setPeek(false);
+        expect(column.hidden).toBe(true);
+      });
+
+      it("has no peek target in a DM, in a content view or with the member list on the left", () => {
+        ctrl = make();
+        setActive(2);
+        expect(ctrl.peekTarget()).toBeNull();
+        setActive(1);
+        uiStore.setState((prev) => ({ ...prev, activeView: "people" }));
+        uiStore.flush();
+        expect(ctrl.peekTarget()).toBeNull();
+        uiStore.setState((prev) => ({ ...prev, activeView: null }));
+        uiStore.flush();
+        savePref(MEMBER_LAYOUT_PREF, "left");
+        expect(ctrl.peekTarget()).toBeNull();
+        expect(buildPanel).not.toHaveBeenCalled();
+        expect(column.hidden).toBe(true);
+      });
+
+      it("a channel change under the finger ends the peek, and the lift opens nothing", () => {
+        ctrl = make();
+        const drag = panelSwipe(
+          () => ctrl.peekTarget(),
+          "right",
+          () => true,
+        );
+        drag.start(-12);
+        drag.move(-200);
+        expect(column.hidden).toBe(false);
+        setActive(2);
+        expect(column.hidden).toBe(true);
+        expect(drag.end(-200, true)).toBe(true);
+        sendAppToBackground();
+        expect(ctrl.isOverlayOpen()).toBe(false);
+        expect(column.hidden).toBe(true);
+        expect(column.style.transform).toBe("");
+      });
+
+      it("a Back while the open overlay is dragged shut cancels the drag and closes it", async () => {
+        ctrl = make();
+        ctrl.openOverlay();
+        const shut = panelSwipe(
+          () => ctrl.peekTarget(),
+          "right",
+          () => false,
+        );
+        shut.start(12);
+        shut.move(40);
+        await pressBack();
+        expect(ctrl.isOverlayOpen()).toBe(false);
+        expect(column.hidden).toBe(true);
+        expect(column.style.transform).toBe("");
+        expect(button.getAttribute("aria-pressed")).toBe("false");
+        expect(shut.end(40, true)).toBe(true);
+        expect(ctrl.isOverlayOpen()).toBe(false);
       });
 
       it("closeOverlay ends isOverlayOpen", () => {

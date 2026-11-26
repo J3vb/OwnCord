@@ -1,9 +1,9 @@
 /**
  * Swipes on a phone, touch only:
  *
- * - swipe right on the chat opens the channel drawer, swipe left opens the
- *   member list;
- * - swipe the open drawer left, or the open member list right, to close it;
+ * - swipe right on the chat opens the channel drawer, swipe left the member list;
+ * - swipe the open drawer left, or the open member list right, to close it
+ *   (either way the panel follows the finger: `lib/ui/panelDrag.ts`);
  * - swipe a message left to reply: the message follows the finger up to a
  *   short distance, a reply icon appears, and letting go past the threshold
  *   starts the reply exactly as the Reply button does.
@@ -17,11 +17,11 @@
 import { createElement } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
+import { PANEL_SWIPE_PX, panelSwipe, peekOf, type Peekable } from "@lib/ui/panelDrag";
 import { watchSwipes } from "@lib/ui/swipe";
 import { ensureActionsBar } from "../../features/messaging/message-list/messageActionBar";
 
-/** How far a swipe must go before letting go opens or closes a panel. */
-export const PANEL_SWIPE_PX = 60;
+export { PANEL_SWIPE_PX };
 /** How far a message follows the finger. */
 export const REPLY_FOLLOW_MAX_PX = 64;
 /** Past this the reply icon is armed and letting go starts the reply. */
@@ -38,13 +38,10 @@ export interface PhoneGesturesOptions {
   /** The member column: a right swipe closes the overlay. */
   readonly memberColumn: HTMLElement;
   /** The drawer, once its code has loaded. */
-  readonly drawer: () => { open(): void; close(): void; isOpen(): boolean } | null;
+  readonly drawer: () => (Peekable & { open(): void; close(): void; isOpen(): boolean }) | null;
   /** The member column, once its code has loaded. */
-  readonly members: () => {
-    openOverlay(): boolean;
-    closeOverlay(): void;
-    isOverlayOpen(): boolean;
-  } | null;
+  readonly members: () =>
+    (Peekable & { openOverlay(): boolean; closeOverlay(): void; isOverlayOpen(): boolean }) | null;
 }
 
 type ChatMode = "pending" | "drawer" | "members" | "reply";
@@ -95,8 +92,20 @@ function release(swipe: ChatSwipe): void {
   row.style.removeProperty("transform");
 }
 
+function endReply(swipe: ChatSwipe, dx: number, released: boolean): void {
+  const commit = released && dx <= -REPLY_THRESHOLD_PX && swipe.row?.isConnected === true;
+  release(swipe);
+  if (commit) swipe.replyButton?.click();
+}
+
 export function installPhoneGestures(opts: PhoneGesturesOptions): void {
   const { signal } = opts;
+  const drawerPeek = () => peekOf(opts.drawer());
+  const membersPeek = () => peekOf(opts.members());
+  const toOpen = {
+    drawer: panelSwipe(drawerPeek, "left", () => true),
+    members: panelSwipe(membersPeek, "right", () => true),
+  };
 
   watchSwipes<ChatSwipe>(opts.chatArea, signal, {
     begin(target) {
@@ -122,18 +131,19 @@ export function installPhoneGestures(opts: PhoneGesturesOptions): void {
       } else {
         swipe.mode = "members";
       }
+      if (swipe.mode !== "reply") toOpen[swipe.mode].start(dx);
       return true;
     },
     move(swipe, dx) {
       if (swipe.mode === "reply") follow(swipe, dx);
+      else if (swipe.mode !== "pending") toOpen[swipe.mode].move(dx);
     },
     end(swipe, dx, released) {
       if (swipe.mode === "reply") {
-        const commit = released && dx <= -REPLY_THRESHOLD_PX && swipe.row?.isConnected === true;
-        release(swipe);
-        if (commit) swipe.replyButton?.click();
+        endReply(swipe, dx, released);
         return;
       }
+      if (swipe.mode !== "pending" && toOpen[swipe.mode].end(dx, released)) return;
       if (!released || !isPhoneLayout()) return;
       if (swipe.mode === "drawer" && dx >= PANEL_SWIPE_PX) opts.drawer()?.open();
       else if (swipe.mode === "members" && dx <= -PANEL_SWIPE_PX) opts.members()?.openOverlay();
@@ -141,24 +151,30 @@ export function installPhoneGestures(opts: PhoneGesturesOptions): void {
   });
 
   for (const surface of opts.drawerSurfaces) {
+    const shut = panelSwipe(drawerPeek, "left", () => false);
     watchSwipes<object>(surface, signal, {
       begin() {
         return isPhoneLayout() && opts.drawer()?.isOpen() === true ? {} : null;
       },
       // Only leftward: the drawer has nowhere further to go the other way.
-      start: (_ctx, dx) => dx < 0,
+      start: (_ctx, dx) => dx < 0 && shut.start(dx),
+      move: (_ctx, dx) => shut.move(dx),
       end(_ctx, dx, released) {
+        if (shut.end(dx, released)) return;
         if (released && dx <= -PANEL_SWIPE_PX) opts.drawer()?.close();
       },
     });
   }
 
+  const membersShut = panelSwipe(membersPeek, "right", () => false);
   watchSwipes<object>(opts.memberColumn, signal, {
     begin() {
       return isPhoneLayout() && opts.members()?.isOverlayOpen() === true ? {} : null;
     },
-    start: (_ctx, dx) => dx > 0,
+    start: (_ctx, dx) => dx > 0 && membersShut.start(dx),
+    move: (_ctx, dx) => membersShut.move(dx),
     end(_ctx, dx, released) {
+      if (membersShut.end(dx, released)) return;
       if (released && dx >= PANEL_SWIPE_PX) opts.members()?.closeOverlay();
     },
   });

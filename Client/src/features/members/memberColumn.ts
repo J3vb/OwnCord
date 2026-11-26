@@ -21,7 +21,9 @@
  * scroller, built with the panel once per show and hidden during the call view.
  *
  * On a phone the overlay claims the Back button while it is up, so Back closes
- * it before it does anything else.
+ * it before it does anything else. A swipe drags it (`peekTarget`): while it
+ * peeks, the panel is drawn and kept, but the overlay is not open, so the
+ * toggle, Back and focus are left as they are.
  *
  * This controller is the only writer of the toggle's `hidden` and
  * `aria-pressed`.
@@ -31,6 +33,7 @@ import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "@lib/disposable";
 import { claimBack, type BackClaim } from "@lib/ui/backHistory";
 import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
+import { createPeekTarget, type PeekTarget } from "@lib/ui/panelDrag";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { createLogger } from "@lib/logger";
@@ -90,6 +93,8 @@ export interface MemberColumn {
   isOverlayOpen(): boolean;
   /** The call view is up in this window (on) or gone (off). */
   setCallView(on: boolean): void;
+  /** What a swipe drags (the overlay drawn open, not opened); null where it could not open. */
+  peekTarget(): PeekTarget | null;
   destroy(): void;
 }
 
@@ -111,6 +116,8 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
   /** The column is an overlay now: a narrow window, or a phone on its side. */
   const overlayMode = (): boolean => narrow?.matches === true || isPhoneLayout();
   let narrowOpen = false;
+  /** Drawn open for a swipe that is dragging it; not open. */
+  let peeking = false;
   let backClaim: BackClaim | null = null;
   let callView = false;
   /** Opened from the toggle while the column steps aside; not saved. */
@@ -262,8 +269,48 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     button.hidden = !(right && onScreen);
     button.setAttribute("aria-pressed", String(shown));
     syncBackClaim(overlay && shown);
-    if (shown) showPanel();
+    // A peek ends for good once the overlay could no longer open here (a
+    // channel, DM or view change under the finger): the lift then does nothing.
+    if (peeking && !overlayCanShow()) peeking = false;
+    if (shown || peeking) showPanel();
     else hidePanel();
+  }
+
+  /** Whether the overlay could open here now: what a tap on the toggle would show. */
+  function overlayCanShow(): boolean {
+    const here = loadMemberLayout() === "right" && guildChannelOnScreen();
+    return here && overlayMode() && uiStore.getState().activeView === null;
+  }
+
+  const peek = createPeekTarget({
+    surfaces: [column],
+    setPeek(on: boolean): void {
+      const next = on && !destroyed && overlayCanShow();
+      if (peeking === next) return;
+      peeking = next;
+      sync();
+    },
+    commit(open: boolean): void {
+      // A peek that ended early (see sync) commits nothing.
+      if (!peeking) return;
+      if (open) openOverlay();
+      else closeOverlay();
+    },
+  });
+
+  function openOverlay(): boolean {
+    if (destroyed || !overlayMode()) return false;
+    if (!narrowOpen) {
+      narrowOpen = true;
+      sync();
+    }
+    return narrowOpen;
+  }
+
+  function closeOverlay(): void {
+    if (destroyed || !narrowOpen) return;
+    narrowOpen = false;
+    sync();
   }
 
   // A channel or DM switch, or a mode change, dismisses the overlay.
@@ -325,19 +372,9 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
 
   return {
     sync,
-    closeOverlay(): void {
-      if (destroyed || !narrowOpen) return;
-      narrowOpen = false;
-      sync();
-    },
-    openOverlay(): boolean {
-      if (destroyed || !overlayMode()) return false;
-      if (!narrowOpen) {
-        narrowOpen = true;
-        sync();
-      }
-      return narrowOpen;
-    },
+    closeOverlay,
+    openOverlay,
+    peekTarget: () => (!destroyed && overlayCanShow() ? peek : null),
     isOverlayOpen: () => !destroyed && overlayMode() && narrowOpen,
     setCallView(on: boolean): void {
       if (destroyed || callView === on) return;
