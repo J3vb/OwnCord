@@ -41,6 +41,7 @@ function rowFor(btn: HTMLButtonElement): ContextMenuItem {
     ...(icon !== undefined ? { icon } : {}),
     testId: `chat-header-more-${btn.dataset["testid"] ?? ""}`,
     ...(pressed === null ? {} : { checked: pressed === "true" }),
+    ...(btn.disabled ? { disabled: true } : {}),
     onClick: () => btn.click(),
   };
 }

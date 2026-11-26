@@ -8,6 +8,7 @@ import {
   setChatHeaderLock,
   setChatHeaderMedia,
 } from "../../src/pages/main-page/ChatHeader";
+import { closeBottomSheet } from "../../src/lib/ui/bottomSheet";
 import { useMountContainer } from "../helpers/mountContainer";
 import { cascadedDeclaration } from "../helpers/app-css";
 
@@ -307,6 +308,24 @@ describe("updateChatHeaderForDm", () => {
     sheet.querySelector<HTMLElement>('[data-testid="chat-header-more-video-call-btn"]')!.click();
 
     expect(onStartVideoCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Start video call as disabled in the More sheet while the header button is", () => {
+    const onStartVideoCall = vi.fn();
+    const { element, refs } = buildChatHeader({ onTogglePins: vi.fn(), onStartVideoCall });
+    container.appendChild(element);
+    updateChatHeaderForDm(refs, { username: "Alice", status: "online" });
+    refs.videoCallBtn.disabled = true;
+
+    element.querySelector<HTMLButtonElement>('[data-testid="chat-header-more"]')!.click();
+    const sheet = document.querySelector('[data-testid="chat-header-more-sheet"]')!;
+    const row = sheet.querySelector<HTMLElement>(
+      '[data-testid="chat-header-more-video-call-btn"]',
+    )!;
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    closeBottomSheet();
+
+    expect(onStartVideoCall).not.toHaveBeenCalled();
   });
 
   it("calls onStartVideoCall, not onStartCall, from the video button", () => {

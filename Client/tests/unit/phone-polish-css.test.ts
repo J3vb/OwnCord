@@ -115,12 +115,20 @@ describe("44 px touch targets in the drawer, pickers and lists", () => {
 
 describe("room for names at 320 px", () => {
   it("the user bar wraps its controls under a name that keeps about ten letters", () => {
-    expect(declared(phoneRule(".user-bar"), "flex-wrap")).toContain("wrap");
-    expect(declared(phoneRule(".user-bar"), "height")).toContain("auto");
+    // The parsed selector names `:not(.layout-deck)` as a pseudo-class.
+    const bar = "html<pseudo-class> .user-bar";
+    expect(declared(phoneRule(bar), "flex-wrap")).toContain("wrap");
+    expect(declared(phoneRule(bar), "height")).toContain("auto");
     // `flex: 1 0 120px`: the name column never shrinks below its basis.
-    const self = declared(phoneRule(".user-bar .ub-self"), "flex");
+    const self = declared(phoneRule(`${bar} .ub-self`), "flex");
     expect(self).toContain('"shrink":0');
     expect(self).toContain('"value":120');
+  });
+
+  it("leaves Command Deck's status bar out of the user bar wrap", () => {
+    for (const selector of [".user-bar", ".user-bar .ub-self", ".user-bar .ub-controls"]) {
+      expect(phoneRule(selector)).toBeUndefined();
+    }
   });
 
   it("the chat header folds Threads and Start video call into More, and tightens", () => {
