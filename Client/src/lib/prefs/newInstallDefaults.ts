@@ -1,7 +1,7 @@
 /**
  * The defaults a new install starts on: Command Deck and the Gunmetal theme.
  * An install that ran before keeps what it had, so it is pinned to Classic
- * and its theme is left alone. Kept out of `screenLayout.ts` so the layout
+ * and its theme is left alone. The Android app is left out entirely. Kept out of `screenLayout.ts` so the layout
  * module does not import the theme module.
  */
 
@@ -14,15 +14,16 @@ import { recordNewInstallTheme } from "./themes";
  *  startup. `evidence` is hasInstallEvidence(), read before any startup
  *  write. A stored value is never changed.
  *
- *  The Android app stores no layout: Command Deck does not run there, and a
- *  value nobody chose must not decide it if that ever changes. It still gets
- *  the new-install theme, so the theme write comes before the Android check. */
+ *  The Android app writes nothing: Command Deck does not run there, a layout
+ *  value nobody chose must not decide it if that ever changes, and a new
+ *  phone install keeps the theme it had before Gunmetal. */
 export function settleNewInstallDefaults(evidence: boolean): void {
+  if (isAndroidHost()) return;
   if (readStored(STORAGE_PREFIX + SCREEN_LAYOUT_PREF) !== null) return;
   if (evidence) {
-    if (!isAndroidHost()) saveScreenLayout("classic");
+    saveScreenLayout("classic");
     return;
   }
   recordNewInstallTheme();
-  if (!isAndroidHost()) saveScreenLayout("deck");
+  saveScreenLayout("deck");
 }
