@@ -541,7 +541,7 @@ half of `NativeProxies`.
 
 **B7-5 moved the rest**, and added two contracts the map lacked:
 `contracts/appProcess.ts` (`AppProcess.relaunch()`, for the Advanced tab's
-"Clear & Restart" — the updater's own relaunch is internal to
+"Clear & Restart" and the Screen layout row's Restart now — the updater's own relaunch is internal to
 `downloadAndInstallUpdate`) and `contracts/trayStatus.ts` (one named
 subscription to the tray's `status-change`, not a by-name event bus).
 `desktop/index.ts` is now a full `Platform`, and no file outside

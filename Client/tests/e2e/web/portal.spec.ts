@@ -50,6 +50,25 @@ test("login, message, reload resumes", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test("Restart now reloads the page and the new layout runs", async ({ page }) => {
+  await page.goto("/");
+  await signIn(page, "alice", { staySignedIn: true });
+  await expect(general(page)).toBeVisible();
+  await expect(page.locator("html")).not.toHaveClass(/layout-deck/);
+
+  await page.locator("button[aria-label='Settings']").click();
+  await page
+    .locator(".settings-sidebar button.settings-nav-item", { hasText: "Appearance" })
+    .click();
+  await page.locator("[data-testid='screen-layout-deck']").click();
+  // A browser session survives a reload, so there is no sign-in warning.
+  await expect(page.locator("[data-testid='screen-layout-restart-signin']")).toHaveCount(0);
+  await page.locator("[data-testid='screen-layout-restart']").click();
+
+  await expect(page.locator("html")).toHaveClass(/layout-deck/);
+  await expect(page.getByTestId("app-layout")).toBeVisible();
+});
+
 test("sign out clears token", async ({ page, server }) => {
   await page.goto("/");
   await signIn(page, "alice", { staySignedIn: true });

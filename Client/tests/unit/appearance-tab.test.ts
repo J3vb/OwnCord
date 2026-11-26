@@ -798,9 +798,9 @@ describe("AppearanceTab - screen layout", () => {
     container.appendChild(buildAppearanceTab(ac.signal));
   };
 
-  it("hides the row with Developer mode off, and shows the member position row", () => {
+  it("shows the row with Developer mode off, and shows the member position row", () => {
     mount(false, '"deck"', "classic");
-    expect(q("screen-layout")).toBeNull();
+    expect(q("screen-layout")).not.toBeNull();
     expect(q("member-layout")).not.toBeNull();
   });
 
@@ -862,9 +862,9 @@ describe("AppearanceTab - screen layout", () => {
     expect(q("member-layout")).not.toBeNull();
   });
 
-  it("Developer mode turned off while Deck runs: row hidden, member row still hidden", () => {
+  it("Developer mode turned off while Deck runs: row shown, member row still hidden", () => {
     mount(false, '"deck"', "deck");
-    expect(q("screen-layout")).toBeNull();
+    expect(q("screen-layout")).not.toBeNull();
     expect(q("member-layout")).toBeNull();
   });
 });

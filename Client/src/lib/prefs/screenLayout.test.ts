@@ -30,8 +30,8 @@ describe("screenLayout", () => {
       ["absent", null, null, "classic"],
       ["the number 1", "1", null, "classic"],
       ['"xyz"', '"xyz"', null, "classic"],
-      ['"deck" with Developer mode off', '"deck"', "false", "classic"],
-      ['"deck" with Developer mode absent', '"deck"', null, "classic"],
+      ['"deck" with Developer mode off', '"deck"', "false", "deck"],
+      ['"deck" with Developer mode absent', '"deck"', null, "deck"],
       ['"deck" with Developer mode on', '"deck"', "true", "deck"],
       ['"classic" with Developer mode on', '"classic"', "true", "classic"],
     ])("%s gives %s", (_name, stored, dev, expected) => {
@@ -50,7 +50,7 @@ describe("screenLayout", () => {
     it("never rewrites the stored value as Developer mode flips", () => {
       localStorage.setItem(KEY, '"deck"');
       localStorage.setItem(DEV_KEY, "false");
-      expect(loadScreenLayout()).toBe("classic");
+      expect(loadScreenLayout()).toBe("deck");
       expect(localStorage.getItem(KEY)).toBe('"deck"');
       localStorage.setItem(DEV_KEY, "true");
       expect(loadScreenLayout()).toBe("deck");
