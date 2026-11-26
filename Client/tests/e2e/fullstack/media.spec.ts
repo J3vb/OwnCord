@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import type { Page } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import { LIVEKIT_KEY_ID, LIVEKIT_API_SECRET } from "../support/server";
+import { seedScreenLayout } from "../support/screenLayoutSeed";
 import { expectDecodedMedia, joinVoice, mediaStats } from "../support/media";
 import { openSettings, switchSettingsTab } from "../helpers";
 
@@ -635,6 +636,7 @@ test("media published without end-to-end encryption is never played", async ({
   // A plain LiveKit client with no room key and no E2EE, under the identity
   // of a user who is not in the call.
   const context = await browser.newContext({ baseURL, permissions: ["microphone"] });
+  await seedScreenLayout(context, "classic");
   try {
     const publisher = await context.newPage();
     await publisher.goto("/");

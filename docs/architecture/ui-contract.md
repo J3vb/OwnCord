@@ -234,7 +234,8 @@ From `Client/tests/e2e/support/accessibility.ts`:
 | `mountSharedControls(page)`       | the shared-controls fixture, including its pending, error and success states                                      |
 
 A feature works in both layouts: Classic and Command Deck, checked in the e2e
-`screen-layout` spec or in the feature's own spec under Deck.
+`screen-layout` spec, in the feature's own spec under Deck, or by the Deck job
+(`playwright.config.deck.ts`).
 
 The server header is one such feature. Classic draws the icon, the server-name
 button (the server menu's anchor), the online count and the invite, Audit Log

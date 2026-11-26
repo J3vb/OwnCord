@@ -1,7 +1,21 @@
 import { test as base, expect } from "@playwright/test";
+import { seedScreenLayout, type ScreenLayoutOption } from "./support/screenLayoutSeed";
+
+/**
+ * Every page starts on the layout the project's `screenLayout` option names
+ * (Classic unless a config or spec says otherwise), so an empty profile is not
+ * read as a new install. The seed is skipped when the page stores a layout.
+ */
+export const layoutTest = base.extend<{ screenLayout: ScreenLayoutOption }>({
+  screenLayout: ["classic", { option: true }],
+  context: async ({ context, screenLayout }, use) => {
+    await seedScreenLayout(context, screenLayout);
+    await use(context);
+  },
+});
 
 /** Unexpected mock failures must fail even when application code catches them. */
-export const test = base.extend<{ runtimeErrors: void }>({
+export const test = layoutTest.extend<{ runtimeErrors: void }>({
   runtimeErrors: [
     async ({ page }, use, testInfo) => {
       const errors: string[] = [];

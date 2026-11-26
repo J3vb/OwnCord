@@ -227,11 +227,15 @@ source): 411 Vitest files and 132 Playwright specs.
 - **Vitest** unit and integration tests, with coverage floors that block CI
   (70% for branches, functions and lines; the statements floor comes from
   `Client/coverage-floor.json`).
-- **Playwright web E2E**, two blocking jobs:
+- **Playwright web E2E**, two blocking jobs, plus `client-e2e-deck` (not yet
+  required):
   - `client-e2e-parity` runs the full 694-test suite against the production
     bundle;
   - `client-e2e` always runs the smoke set against the Vite dev
-    server; the full suite runs only in `client-e2e-parity`.
+    server; the full suite runs only in `client-e2e-parity`;
+  - `client-e2e-deck` runs the shell specs (the list in
+    `playwright.config.deck.ts`) under Command Deck against the production
+    bundle.
 - **Native Tauri suite**, the `client-native` job on `windows-latest` (a
   70-minute budget, on pull requests to `main` and `dev`). It builds the app,
   runs the `native-core` Playwright project, then the auth, UI and

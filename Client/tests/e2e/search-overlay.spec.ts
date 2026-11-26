@@ -17,7 +17,8 @@
  * mocks' own internals.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { layoutTest as test } from "./fixtures";
 import {
   buildTauriMockScript,
   MOCK_MESSAGES,

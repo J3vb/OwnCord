@@ -72,7 +72,11 @@ test.describe("Chat Header — member list under the channels", () => {
     await startFullSession(page);
   });
 
-  test("member list is always visible in sidebar", async ({ page }) => {
+  test("member list is always visible in sidebar", async ({ page, screenLayout }) => {
+    test.skip(
+      screenLayout === "deck",
+      "Classic's member sidebar; Deck's Buddies column is covered by deck-buddies",
+    );
     const memberList = page.locator("[data-testid='sidebar-members']");
     await expect(memberList).toBeVisible({ timeout: 3000 });
 

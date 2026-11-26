@@ -13,6 +13,7 @@ import type { Browser, Page } from "@playwright/test";
 import { test, expect, login } from "./fixtures";
 import { generalChannel, signIn } from "./serverApi";
 import { installRealTransport, recordTraffic, traffic } from "../support/real-transport";
+import { seedScreenLayout } from "../support/screenLayoutSeed";
 import type { TestServer } from "../support/server";
 import { openSettings } from "../helpers";
 
@@ -43,6 +44,7 @@ async function clearTraffic(page: Page): Promise<void> {
 
 async function secondDevice(browser: Browser, server: TestServer) {
   const context = await browser.newContext({ baseURL: "http://localhost:4173" });
+  await seedScreenLayout(context, "classic");
   const page = await context.newPage();
   const transport = await installRealTransport(page, server);
   await login(page, server, "bob");

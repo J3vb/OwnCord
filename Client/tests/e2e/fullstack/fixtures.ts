@@ -2,6 +2,7 @@ import { installMediaProbe } from "../support/media";
 import { test as base, expect, type Page } from "@playwright/test";
 import { startTestServer, TEST_PASSWORD, type TestServer } from "../support/server";
 import { installRealTransport } from "../support/real-transport";
+import { seedScreenLayout } from "../support/screenLayoutSeed";
 
 type Transport = Awaited<ReturnType<typeof installRealTransport>>;
 type Fixtures = {
@@ -29,6 +30,10 @@ export async function login(page: Page, server: TestServer, username: string) {
 }
 
 export const test = base.extend<Fixtures>({
+  context: async ({ context }, use) => {
+    await seedScreenLayout(context, "classic");
+    await use(context);
+  },
   media: [false, { option: true }],
   server: async ({ media }, use, info) => {
     const server = await startTestServer({ livekit: media });
@@ -59,6 +64,7 @@ export const test = base.extend<Fixtures>({
       baseURL,
       permissions: ["microphone", "camera"],
     });
+    await seedScreenLayout(context, "classic");
     const page = await context.newPage();
     if (media) await installMediaProbe(page);
     const transport = await installRealTransport(page, server);

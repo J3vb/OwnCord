@@ -42,6 +42,7 @@ const digest = async (file: string) =>
     .update(await readFile(file))
     .digest("hex");
 
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
 test("the previous release updates to this one, then rolls back", async ({}, info) => {
   test.setTimeout(480_000);
   if (!CURRENT || !PREVIOUS)
@@ -103,7 +104,10 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
     await baseline("launch", async () => {
       await app?.close().catch(() => {});
       await killInstalled(binary);
-      app = await launchArtifact(binary, { pins: { [host]: await serverPin(server.directory) } });
+      app = await launchArtifact(binary, {
+        pins: { [host]: await serverPin(server.directory) },
+        screenLayout: "fresh",
+      });
       await waitFor(app, "#host", "", 60_000);
       previous = await appVersion(app);
       expect(previous).not.toBe(version);

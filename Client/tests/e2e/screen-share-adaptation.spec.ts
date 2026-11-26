@@ -1,5 +1,6 @@
 import { writeFile } from "node:fs/promises";
-import { expect, test } from "@playwright/test";
+import { expect } from "@playwright/test";
+import { layoutTest as test } from "./fixtures";
 import type { ScreenShareCaptureOptions } from "livekit-client";
 
 // Full Chromium supports real tab capture in headless mode; the separate

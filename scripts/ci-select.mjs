@@ -70,7 +70,7 @@ export const CAPABILITIES = [
   "client", // Client Static Checks, Client Unit Tests, Node policy
   "rust", // Rust Unit Tests
   "livekitvendor", // the vendored livekit patch tests, a step inside Rust Unit Tests
-  "browser", // Client E2E (Playwright) + Client E2E (parity subset)
+  "browser", // Client E2E (Playwright) + Client E2E (parity subset) + Client E2E (Deck)
   "integration", // Client E2E (real server and media) + Admin Panel E2E
   "native", // Client E2E (Windows native)
   "webclient", // Client E2E (web portal against a real server), non-blocking
