@@ -1,4 +1,5 @@
 import { test as base, expect, type Page } from "@playwright/test";
+import { seedScreenLayout } from "../support/screenLayoutSeed";
 import { startTestServer, TEST_PASSWORD, type TestServer } from "../support/server";
 
 type Fixtures = {
@@ -9,6 +10,10 @@ type Fixtures = {
 };
 
 export const test = base.extend<Fixtures>({
+  context: async ({ context }, use) => {
+    await seedScreenLayout(context, "classic");
+    await use(context);
+  },
   media: [false, { option: true }],
   server: async ({ media }, use, info) => {
     const server = await startTestServer({ tls: true, browserClient: true, livekit: media });

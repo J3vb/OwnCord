@@ -63,6 +63,7 @@ import {
 } from "./serverApi";
 import { openContextMenuOn } from "../helpers";
 import { installRealTransport, recordTraffic, traffic } from "../support/real-transport";
+import { seedScreenLayout } from "../support/screenLayoutSeed";
 import { TEST_PASSWORD, type TestServer } from "../support/server";
 import { Q1, textContrast } from "../support/accessibility";
 
@@ -462,6 +463,7 @@ test.describe("several-devices journey (real server)", () => {
     // session, so signing in there opens a second connection and leaves the
     // first alone.
     const context = await browser.newContext({ baseURL: "http://localhost:4173" });
+    await seedScreenLayout(context, "classic");
     const page = await context.newPage();
     const transport = await installRealTransport(page, server);
     try {

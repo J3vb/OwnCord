@@ -45,7 +45,7 @@ jobs:
       group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: true
     # Every other long-running job in this repository declares a cap
-    # (ci.yml rust-tests, client-e2e, admin-e2e, client-e2e-parity;
+    # (ci.yml rust-tests, client-e2e, admin-e2e, client-e2e-parity, client-e2e-deck;
     # load-baseline). Without one the job inherits GitHub's 360-minute default,
     # which is the wrong ceiling for metered work.
     timeout-minutes: 30

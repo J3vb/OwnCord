@@ -22,7 +22,8 @@
  * browser mock has no autostart plugin and DevTools is native chrome.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { layoutTest as test } from "./fixtures";
 import {
   buildTauriMockScript,
   grantExternalConsent,
@@ -610,7 +611,10 @@ test.describe("Settings — Notifications Tab", () => {
   });
 
   test("a mute that outlives its channel is listed and can be cleared", async ({ page }) => {
-    await page.addInitScript(() => localStorage.clear());
+    await page.addInitScript(() => {
+      localStorage.clear();
+      localStorage.setItem("owncord:settings:screenLayout", JSON.stringify("classic"));
+    });
     await mockSession(page, { seedMutes: [999] });
     await page.reload();
     await navigateToMainPageReady(page);

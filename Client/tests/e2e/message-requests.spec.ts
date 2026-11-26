@@ -17,6 +17,7 @@ import {
   emitWsMessage,
   openDmRow,
   openHome,
+  expectDmMode,
   BASE_SESSION_ROUTES,
   navigateToMainPageReady,
   dmChannel,
@@ -105,7 +106,7 @@ const inboxReads = async (page: Page): Promise<number> =>
 /** Go to DM mode, where "Message requests" and its count sit at the top. */
 async function toDmMode(page: Page): Promise<void> {
   await openDmRow(page);
-  await expect(page.locator("[data-testid='dm-back-header']")).toBeVisible();
+  await expectDmMode(page);
 }
 
 const view = (page: Page) => page.getByRole("region", { name: "Message Requests" });
@@ -121,7 +122,12 @@ test.describe("Message Requests inbox", () => {
 
   test("open a request, read it as plain text, leave — nothing fetched, nothing accepted", async ({
     page,
+    screenLayout,
   }) => {
+    test.skip(
+      screenLayout === "deck",
+      "focus after leaving is Classic's channelBeforeDm path; Deck's Direct folder is covered by deck-direct",
+    );
     // At desktop width the DM header lives behind Home; DM mode lists the
     // requests with their count (the header badge is covered at narrow width below).
     await toDmMode(page);
@@ -277,7 +283,14 @@ test.describe("DM header badge at narrow width", () => {
   // less (a desktop window at 200 % zoom), inside the sidebar drawer.
   test.use({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 1 });
 
-  test("the DM header badge counts requests apart from unread (Q2)", async ({ page }) => {
+  test("the DM header badge counts requests apart from unread (Q2)", async ({
+    page,
+    screenLayout,
+  }) => {
+    test.skip(
+      screenLayout === "deck",
+      "Classic's embedded DM header in the drawer; Deck's requests entry is covered by deck-direct",
+    );
     await page.addInitScript(mockScript());
     await page.goto("/");
     await signIn(page);

@@ -13,7 +13,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { promisify } from "node:util";
+import { expectSeededLaunch, readSeededState, seedNativeDocument } from "./nativeLayoutSeed";
 import { startProcess, stopProcess, waitForHttp } from "./process";
+import type { ScreenLayoutOption } from "./screenLayoutSeed";
 
 export async function startNativeApp(
   binary = process.env.OWNCORD_E2E_CLIENT_BINARY,
@@ -29,6 +31,10 @@ export async function startNativeApp(
     /** Runs after the profile clear and before launch, with the app data dir
      *  (`%APPDATA%/<identifier>`, where Tauri's `app_data_dir` points). */
     seedAppData?: (appDataDir: string) => Promise<void>;
+    /** The layout a fresh profile starts on (default Classic). `"fresh"` leaves
+     *  the profile empty, as a new install's is. Ignored with `preserveProfile`,
+     *  which keeps whatever the profile holds. */
+    screenLayout?: ScreenLayoutOption;
   } = {},
 ) {
   if (process.platform !== "win32") throw new Error("Native WebView2 tests require Windows");
@@ -129,6 +135,19 @@ export async function startNativeApp(
     await expect(page).toHaveTitle("OwnCord", {
       timeout: Math.max(1, startupDeadline - Date.now()),
     });
+    const layout = options.screenLayout ?? "classic";
+    if (!options.preserveProfile && layout !== "fresh") {
+      // CDP attaches after the app has loaded, so the seed cannot come first.
+      // A page-scoped script that runs once at the start of the next document
+      // clears storage (after the first load's own writes) and stores the
+      // layout; one reload then runs the app from that state.
+      await page.addInitScript(seedNativeDocument, layout);
+      await page.reload();
+      await expect(page).toHaveTitle("OwnCord", {
+        timeout: Math.max(1, startupDeadline - Date.now()),
+      });
+      await expectSeededLaunch(layout, () => page.evaluate(readSeededState));
+    }
     console.log(
       `native app ready: profile cleared ${profileCleared}, first output after ${firstOutput()}, CDP after ${cdpReady}ms, page after ${Date.now() - started}ms`,
     );

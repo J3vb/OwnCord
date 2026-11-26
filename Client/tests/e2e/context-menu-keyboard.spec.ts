@@ -18,6 +18,8 @@ import {
   MOCK_VOICE_STATE,
   navigateToMainPageReady,
   openDmRow,
+  dmRow,
+  isDeckLayout,
   BASE_SESSION_ROUTES,
   dmChannel,
 } from "./helpers";
@@ -94,7 +96,9 @@ async function keyboardReachableRoving(page: Page, cellSel: string, row: Locator
       await page.evaluate(
         (sel) =>
           document.activeElement?.matches(sel) &&
-          document.activeElement?.closest(".channel-list, .dm-conversation-list") !== null,
+          document.activeElement?.closest(
+            ".channel-list, .dm-conversation-list, .server-tree-direct-list",
+          ) !== null,
         cellSel,
       )
     ) {
@@ -163,7 +167,12 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
 
   test("member menu: ArrowRight opens the Change Role submenu and Enter picks a role", async ({
     page,
+    screenLayout,
   }) => {
+    test.skip(
+      screenLayout === "deck",
+      "Classic's member sidebar rows; Deck's Buddies rows are covered by deck-buddies",
+    );
     const row = page.locator("[data-testid='member-2']");
     await row.focus();
     await page.keyboard.press("Shift+F10");
@@ -281,10 +290,14 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
 
   test("DM menu: opens from the keyboard and Enter mutes the conversation", async ({ page }) => {
     await openDmRow(page);
-    const row = page.locator(`.dm-item[data-channel-id="${ONE_TO_ONE_DM_ID}"]`);
+    const row = dmRow(page, ONE_TO_ONE_DM_ID);
     await expect(row).toBeVisible({ timeout: 5_000 });
 
-    await keyboardReachableRoving(page, ".dm-item", row);
+    await keyboardReachableRoving(
+      page,
+      (await isDeckLayout(page)) ? "[data-testid=dm-entry]" : ".dm-item",
+      row,
+    );
     await openMenuWithKeyboard(page, row);
 
     const menu = page.locator(".dm-context-menu");
@@ -301,7 +314,10 @@ test.describe("context menus are keyboard-operable (A11Y-01)", () => {
   }) => {
     const row = page.locator(".voice-user-item[data-voice-uid='2']");
     await expect(row).toBeVisible({ timeout: 5_000 });
-    await keyboardReachable(page, row);
+    // Command Deck draws the voice rows as tree items: the tree is one Tab stop
+    // and arrows reach the row, so it uses the roving check.
+    if (await isDeckLayout(page)) await keyboardReachableRoving(page, "[role=treeitem]", row);
+    else await keyboardReachable(page, row);
 
     await openMenuWithKeyboard(page, row);
     const menu = page.locator(".user-vol-menu");

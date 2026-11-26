@@ -33,6 +33,8 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { promisify } from "node:util";
 import { startNativeApp } from "./native-app";
+import { expectSeededLaunch, readSeededState } from "./nativeLayoutSeed";
+import type { ScreenLayoutOption } from "./screenLayoutSeed";
 import { freePorts, startProcess, stopProcess, waitForHttp } from "./process";
 
 const exec = promisify(execFile);
@@ -151,6 +153,9 @@ export interface LaunchOptions {
   pins?: Record<string, string>;
   /** Extra environment for the app process (Linux: inherited through the driver). */
   env?: Record<string, string>;
+  /** The layout a fresh profile starts on (default Classic); `"fresh"` leaves
+   *  it empty. Ignored with `preserveProfile`. */
+  screenLayout?: ScreenLayoutOption;
 }
 
 /** Launches the installed artifact and attaches the platform driver. */
@@ -164,6 +169,7 @@ export async function launchArtifact(
     const app = await startNativeApp(binary, {
       preserveProfile: options.preserveProfile,
       identifier: IDENTIFIER,
+      screenLayout: options.screenLayout,
       seedAppData: options.pins && ((dir) => certPinsFile(dir, options.pins!).then(() => {})),
     });
     const page = app.page;
@@ -257,6 +263,40 @@ async function launchLinux(binary: string, options: LaunchOptions): Promise<Arti
       script: `return (${body}).apply(null, arguments)`,
       args,
     });
+  const rendered = async (css: string) =>
+    (await evaluate<unknown>(FIND, css, "").catch(() => null)) !== null;
+  const layout = options.screenLayout ?? "classic";
+  if (!options.preserveProfile && layout !== "fresh") {
+    try {
+      // The driver has no script that runs before the first document, so the
+      // first load is let finish, then storage is cleared and seeded and the
+      // page reloaded once. The check fails the launch when anything survived.
+      await expect.poll(() => rendered("#host"), { timeout: 60_000 }).toBe(true);
+      // The clear and the seed run in `pagehide`, after the old document's
+      // beforeunload and any write it made, so none of them lands after it.
+      await evaluate(
+        `(layout) => {
+          window.addEventListener(
+            "pagehide",
+            () => {
+              localStorage.clear();
+              localStorage.setItem("owncord:settings:screenLayout", JSON.stringify(layout));
+            },
+            { once: true },
+          );
+          location.reload();
+        }`,
+        layout,
+      );
+      await expectSeededLaunch(layout, () => evaluate(`${readSeededState.toString()}`));
+      await expect.poll(() => rendered("#host"), { timeout: 60_000 }).toBe(true);
+    } catch (error) {
+      await call("DELETE", `/session/${session}`).catch(() => {});
+      await stopProcess(driver.child);
+      await killInstalled(binary);
+      throw new Error(`${String(error)}\n${driver.log()}`);
+    }
+  }
   const element = async (css: string, text?: string) => {
     let found: Record<string, string> | null = null;
     await expect

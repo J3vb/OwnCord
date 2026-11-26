@@ -121,7 +121,12 @@ test.describe("video grid — chat/grid toggle", () => {
 
   test("a peer sharing their screen is watchable, and a non-streaming peer is not", async ({
     page,
+    screenLayout,
   }) => {
+    test.skip(
+      screenLayout === "deck",
+      "reads the live badge on Classic's member sidebar row; Deck's voice rows are covered by deck-tree",
+    );
     await boot(page);
 
     // Positive control: the screenshare row carries the LIVE badge and opens

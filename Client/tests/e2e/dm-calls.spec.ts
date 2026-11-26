@@ -22,6 +22,8 @@ import {
   parkLiveKitSocket,
   connectVoiceSession,
   openDmRow,
+  dmRow,
+  leaveDmMode,
   BASE_SESSION_ROUTES,
   dmChannel,
   thirdDmChannel,
@@ -392,7 +394,7 @@ test.describe("DM calls — starting a call", () => {
     await expect(voiceWidget(page).locator(".vw-channel")).toHaveText("otheruser");
 
     // Leaving the DM for a text channel takes the call affordance away again.
-    await page.locator("[data-testid='dm-back-header']").click();
+    await leaveDmMode(page);
     await page.locator(".channel-item", { hasText: "general" }).first().click();
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("general");
     await expect(page.locator("[data-testid='call-btn']")).toBeHidden();
@@ -400,7 +402,12 @@ test.describe("DM calls — starting a call", () => {
 
   test("the server rail keeps the DM call one click away from a server's channels", async ({
     page,
+    screenLayout,
   }) => {
+    test.skip(
+      screenLayout === "deck",
+      "the server rail is Classic's; Deck's server tabs are covered by deck-tabs",
+    );
     await boot(page);
     await openDm(page);
     await page.locator("[data-testid='call-btn']").click();
@@ -570,7 +577,7 @@ test.describe("DM calls — call panel", () => {
     await expect(panel(page)).toHaveAttribute("data-state", "outgoing");
 
     // Move to the other DM: the call panel and its "Calling…" are gone.
-    await page.locator(".dm-item[data-channel-id='101']").click();
+    await dmRow(page, 101).click();
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("thirduser");
     await expect(panel(page)).toBeHidden();
 
@@ -595,9 +602,9 @@ test.describe("DM calls — call panel", () => {
     await expect.poll(() => chimeCount(page), { timeout: 3_000 }).toBeGreaterThan(0);
 
     // Looking at another DM hands the ring back to the banner.
-    await page.locator(".dm-item[data-channel-id='101']").click();
+    await dmRow(page, 101).click();
     await expect(banner(page)).toBeVisible();
-    await page.locator(`.dm-item[data-channel-id='${DM_CHANNEL_ID}']`).click();
+    await dmRow(page, DM_CHANNEL_ID).click();
     await expect(banner(page)).toBeHidden();
 
     await panel(page).locator("[data-testid='dcp-accept']").click();
@@ -661,7 +668,7 @@ test.describe("DM calls — call panel", () => {
     await page.locator("[data-testid='call-btn']").click();
     await expect(voiceWidget(page)).toBeVisible({ timeout: 5_000 });
 
-    await page.locator(".dm-item[data-channel-id='101']").click();
+    await dmRow(page, 101).click();
     await expect(page.locator("[data-testid='chat-header-name']")).toHaveText("thirduser");
     await expect(panel(page)).toBeHidden();
 
