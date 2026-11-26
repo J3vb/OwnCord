@@ -610,3 +610,15 @@
     width: auto;
   }
 }
+
+/* Phones: the drawer header's Invite, Audit Log and Moderation buttons are
+   44px to hit; the icons stay their size. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .sidebar-header-actions {
+    gap: 0;
+  }
+  .sidebar-header-action {
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

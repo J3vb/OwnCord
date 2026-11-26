@@ -227,6 +227,13 @@ release changes the database, and anything an operator must do first.)
 - A message notification whose text was cut short in the middle of an emoji fell back to a plain web notification, or did not show at all; it shows as the app's own notification now.
 - On Windows, the log recorded a frozen window after every sleep or hibernate longer than a few seconds; time asleep is no longer counted as a freeze.
 
+**Phones and the Android app**
+
+- On a small phone your name in the channel list's bottom bar shrank to one letter; it now keeps its room, and the mic, headphones and Settings buttons move to a row under it when they do not fit beside it.
+- On a small phone the channel name at the top of a chat and the "Message #channel" hint in the message box were cut short. Threads and Start video call are now in the top bar's More menu there, and the bar and the message box use less spacing.
+- A notice (such as "Unreviewed sign-in") no longer shows on top of an open emoji picker or message menu: it waits under the dimmed background and is still there when you close it.
+- Small buttons are easier to tap on a phone: the server header's Invite, Audit Log and Moderation buttons, the emoji categories, Message on the People page, member rows, the Settings buttons and Accept or Ignore on a message request.
+
 ### Known issues
 
 - **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.

@@ -2002,3 +2002,11 @@ details.disclose[open] > summary .icon {
   display: block;
   margin: var(--space-3) auto 0;
 }
+
+/* Phones: the Settings buttons (Account's Change password, Upload, Sign out
+   and the rest) are 44px to hit. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .ac-btn {
+    min-height: 44px;
+  }
+}

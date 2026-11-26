@@ -377,3 +377,24 @@
     min-height: 44px;
   }
 }
+/* The phone drawer is narrow (216px of user bar at 320px): the name keeps
+   room for about ten letters, and when that and the 44px controls do not fit
+   on one row, the controls wrap onto a row of their own under it instead of
+   squeezing the name to one letter. Command Deck's status bar keeps its own
+   layout on a narrow touch screen. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html:not(.layout-deck) .user-bar {
+    flex-wrap: wrap;
+    height: auto;
+    min-height: 52px;
+    padding: 4px;
+    gap: 0 4px;
+  }
+  html:not(.layout-deck) .user-bar .ub-self {
+    flex: 1 0 120px;
+  }
+  html:not(.layout-deck) .user-bar .ub-controls {
+    gap: 0;
+    margin-left: auto;
+  }
+}
