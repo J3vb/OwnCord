@@ -144,6 +144,13 @@ release changes the database, and anything an operator must do first.)
 
 ### Fixed
 
+**Appearance & layout**
+
+- In Gunmetal, category and section headings, role headings and the "Stay signed in" hint were hard to read; they are brighter now, and the scrollbar, icons and hover shading are blue-grey to match.
+- The orange or cyan "+" for a new direct message, Start one, a selected forum filter and a server icon with no colour of its own had white text that was hard to read; they now use the accent's own text colour.
+- Join Voice, the Join button on a call message and the This device tag use a darker green so their white text reads.
+- Gunmetal's orange accent has its own swatch, so you can pick it again after trying another colour.
+
 **Login & connection**
 
 - A server whose host name also has an IPv6 address that does not answer could not be reached from the desktop app (login, chat and voice timed out) while a browser reached it. The app now tries the server's IPv6 and IPv4 addresses side by side and uses whichever answers first.

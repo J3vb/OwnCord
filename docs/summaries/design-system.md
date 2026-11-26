@@ -58,6 +58,8 @@ Dark and midnight's fill `#5865f2` (2.47–3.72:1) and light's `#4f5bd5` (4.39:1
 
 `--text-faint` and `--text-micro` are for incidental text only (decoration, separators, disabled) and are **not contrast-qualified**. Every other text token above is ≥4.5:1 on each of the four surfaces (`--bg-primary`, `--bg-secondary`, `--bg-tertiary`, `--bg-input`) in every theme, with and without High Contrast.
 
+Gunmetal sets its own blue-grey values for the tokens other dark themes leave at the `:root` greys: `--text-faint` `#7d8898` (4.72:1 on `--bg-primary`, 5.06:1 on `--bg-secondary`, because it heads categories, roles and settings sections there), `--text-micro` `#6f7a8a` (3.89:1 / 4.17:1, above neon-glow's 3.55:1 / 3.74:1), `--interactive-normal`/`-hover`/`-active`/`-muted` `#b4bec9`/`#dbe1e8`/`#ffffff`/`#3e4a58`, `--bg-modifier-hover`/`-active`/`-selected` `rgba(76,89,107,0.16/0.24/0.32)`, both scrollbar thumbs `#626e7e` (≥3:1 on `--bg-primary`/`--bg-secondary`) and `--role-member` `#9aa5b3`. `tests/unit/color-contrast.test.ts` pins these ratios.
+
 ### Borders, status fills, and other tokens
 
 | Token                                                           | Value                                                                                                                 | Note                                                                                                                                                          |

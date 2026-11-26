@@ -1006,7 +1006,7 @@ details.disclose[open] > summary .icon {
   margin-left: 8px;
   padding: 1px 6px;
   border-radius: var(--radius-sm);
-  background: var(--green);
+  background: var(--success-fill);
   color: var(--on-fill);
   font-size: var(--font-size-xs);
   font-weight: 600;

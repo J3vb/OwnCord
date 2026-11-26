@@ -292,6 +292,7 @@ export function buildAppearanceTab(
     "#ed4245", // red
     "#f47b67", // salmon
     "#e78b38", // orange
+    "#ff7a45", // Ember orange, Gunmetal's default
     "#3ba55d", // dark green
     "#5865f2", // blurple
     "#b9bbbe", // grey
