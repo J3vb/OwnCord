@@ -281,6 +281,7 @@ async function launchLinux(binary: string, options: LaunchOptions): Promise<Arti
             () => {
               localStorage.clear();
               localStorage.setItem("owncord:settings:screenLayout", JSON.stringify(layout));
+              localStorage.setItem("owncord:settings:deckSwitchDone", "true");
             },
             { once: true },
           );
