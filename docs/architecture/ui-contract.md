@@ -71,6 +71,13 @@ and a swipe of 60 px opens or closes the panel on release. A drag changes
 none of the drawer's `aria-expanded`, focus or Escape behaviour above until
 it opens or closes the panel; every swipe also has a button.
 
+Call controls on a phone. On Command Deck on a phone, in a call, Mute, Leave
+and hold-to-talk are only in the bottom bar: the call bar, the call view and
+the DM call panel hide their copies (`display: none`, so a screen reader meets
+one of each). The voice widget does not scroll on a phone, so its call row,
+with Leave and "Unsecured", is always drawn; its panels scroll on their own.
+Signal and noise suppression are 44 px.
+
 ## Colour tokens
 
 `Client/src/styles/tokens.css` holds the dark defaults, which midnight shares

@@ -11,6 +11,19 @@ vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true
 import { createVoiceWidget } from "../../../src/features/voice/VoiceWidget";
 import { createDeckStatusBar } from "../../../src/features/deck/deckStatusBar";
 import { voiceStore } from "../../../src/stores/voice.store";
+import { deckRules, keywordOf, type DeckRule } from "../../helpers/deck-css";
+
+/** Whether `rule` takes an element out of sight or out of the accessibility tree. */
+function hides(rule: DeckRule): boolean {
+  return rule.declarations.some(
+    (d) =>
+      (d.property === "display" && keywordOf(d) === "none") ||
+      d.property === "visibility" ||
+      d.property === "clip" ||
+      d.property === "clip-path" ||
+      d.property === "content-visibility",
+  );
+}
 
 describe("the voice widget in the status bar", () => {
   let bar: HTMLDivElement;
@@ -50,6 +63,27 @@ describe("the voice widget in the status bar", () => {
     // sets display inline, which is why that rule cannot use display.
     expect(chip.style.display).toBe("inline-flex");
     expect(chip.matches(".vw-secured:not(.vw-secured--degraded)")).toBe(false);
+  });
+
+  it("a degraded call's chip matches no deck.css rule that hides it, under any media block", () => {
+    voiceStore.setState((prev) => ({ ...prev, encryptionDegraded: true }));
+    mount();
+    document.documentElement.classList.add("layout-deck");
+    try {
+      const chip = bar.querySelector<HTMLElement>("[data-testid='vw-secured']")!;
+      const chain: Element[] = [];
+      for (let el: Element | null = chip; el !== null; el = el.parentElement) chain.push(el);
+      const hiders = deckRules().filter(hides);
+      expect(hiders.length).toBeGreaterThan(0);
+      const hit = hiders.flatMap((r) =>
+        r.selectors
+          .filter((sel) => chain.some((el) => el.matches(sel)))
+          .map((sel) => `${r.media ?? "top level"}: ${sel}`),
+      );
+      expect(hit).toEqual([]);
+    } finally {
+      document.documentElement.classList.remove("layout-deck");
+    }
   });
 
   it("a normal call's chip is the one the 800 px rule hides", () => {

@@ -6,6 +6,10 @@
  * computed at load and what the rest of the app obeys until the next reload,
  * so a pick never changes the layout under a live session.
  *
+ * On a phone host (the Android app, or a phone-sized touch screen) Command
+ * Deck is a preview behind Developer mode until it ships there. Developer mode
+ * is read as a plain preference: `lib/` cannot import `features/`.
+ *
  * `lib/` cannot import `features/voice/native`, so Android is detected through
  * `hostPlatform`.
  */
@@ -18,10 +22,15 @@ export type ScreenLayout = "classic" | "deck";
 
 export const SCREEN_LAYOUT_PREF = "screenLayout";
 
-/** Whether Command Deck can run here: neither the Android app nor a phone-sized
- *  touch screen (which has its own layout). */
+/** The Android app at any size, or a phone-sized touch screen. */
+export function isPhoneHost(): boolean {
+  return isAndroidHost() || isPhoneLayout();
+}
+
+/** Whether Command Deck can run here: anywhere but a phone host, and on a
+ *  phone host only as a preview with Developer mode on, until it ships there. */
 export function screenLayoutAvailable(): boolean {
-  return !isAndroidHost() && !isPhoneLayout();
+  return !isPhoneHost() || loadPref<boolean>("developerMode", false);
 }
 
 /** The stored choice, as the row shows it: `"deck"` only when stored as such,

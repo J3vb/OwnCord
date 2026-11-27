@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import "../../helpers/sidebarAreaMockSetup";
 import { deckLog } from "../../helpers/deckLoggerSpy";
+import { usePhone } from "../../helpers/phoneMedia";
 import { createVoiceWidget } from "../../../src/features/voice/VoiceWidget";
 import { createUserBar } from "../../../src/features/voice/UserBar";
 import { leaveVoiceChannel } from "../../../src/stores/voice.store";
@@ -234,6 +235,34 @@ describe("mountDeckFrame", () => {
     expect(mount).toHaveBeenCalledWith(voiceWidget);
     expect(voiceWidget.parentElement).toBe(result.sidebarWrapper);
     cleanup(result);
+  });
+
+  it("the bars fail to build on a phone: layout-deck stays, one fallback toast, the failure logged", async () => {
+    usePhone();
+    document.documentElement.classList.add("layout-deck");
+    deckLog.error.mockClear();
+    try {
+      stubObserver();
+      const result = mountArea(container);
+      await enterVoiceAndAwaitWidget();
+      vi.mocked(createDeckStatusBar).mockImplementationOnce(() => {
+        throw new Error("x");
+      });
+      const notify = vi.fn();
+      expect(mountDeckFrame(deckInput(result, { notify }))).toBeNull();
+      expect(document.documentElement.classList.contains("layout-deck")).toBe(true);
+      expect(notify).toHaveBeenCalledTimes(1);
+      expect(notify).toHaveBeenCalledWith(shellText("deck.fallback"));
+      expect(deckLog.error).toHaveBeenCalledTimes(1);
+      // The slots stay in the sidebar, so the drawer still holds Mute and Leave.
+      const { userBar, voiceWidget } = result.frameSlots;
+      expect(voiceWidget.parentElement).toBe(result.sidebarWrapper);
+      expect(userBar.parentElement).toBe(result.sidebarWrapper);
+      expect(root.children).toHaveLength(0);
+      cleanup(result);
+    } finally {
+      document.documentElement.classList.remove("layout-deck");
+    }
   });
 
   it("teardown with the slots in the status bar destroys children, then the sidebar's entries, then the frame", async () => {

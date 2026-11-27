@@ -298,11 +298,21 @@ describe("settings search", () => {
         for (const text of appearance()) expect(shown).toContain(text);
       });
 
-      it("are absent in the Android app with Developer mode on", () => {
-        devOn();
+      it("are absent in the Android app with Developer mode off", () => {
         hostAndroidApp();
         try {
           expect(appearance()).not.toContain(rowText);
+        } finally {
+          clearHost();
+        }
+      });
+
+      it("are present in the Android app with Developer mode on", () => {
+        devOn();
+        hostAndroidApp();
+        try {
+          expect(appearance()).toContain(rowText);
+          expect(openAppearance()).toContain(rowText);
         } finally {
           clearHost();
         }

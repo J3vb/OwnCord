@@ -197,7 +197,7 @@ changes apply **live** — `ui.setTheme` + the `owncord:pref-change` event re-sk
 open views without reload. Appearance is editable pre-login (on the connect page)
 so the app respects the user's theme before they authenticate.
 
-**Screen layout.** Settings > Appearance offers Command Deck and Classic on desktop and in the browser. The Android app and phone-sized screens run Classic. A change applies the next time OwnCord starts or reloads; Restart now applies it at once (in a call it asks first). Clear all cache & restart keeps the screen layout and the folded Buddies groups.
+**Screen layout.** Settings > Appearance offers Command Deck and Classic on desktop and in the browser. The Android app and phone-sized screens run Classic. With Developer mode on, they can run Command Deck as a preview. A change applies the next time OwnCord starts or reloads; Restart now applies it at once (in a call it asks first). Clear all cache & restart keeps the screen layout and the folded Buddies groups.
 
 **New installs.** A new install starts on the Gunmetal theme, and in Command Deck on desktop and in a browser at desktop size. Phone-sized browsers run Classic. A new Android app install keeps the theme it had before and runs Classic. If you used OwnCord before, your layout and theme stay as they are. The decision is made once, at the first launch, from whether storage holds anything an earlier launch wrote (`hasInstallEvidence()` in `main.ts`, read before any startup write); the stored layout and theme are never changed by it.
 

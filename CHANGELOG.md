@@ -104,7 +104,7 @@ release changes the database, and anything an operator must do first.)
 
 **Appearance & layout**
 
-- A new screen layout, Command Deck: your servers in tabs across the top, your channels, voice rooms and direct messages in one list on the left, Buddies on the right grouped by what people are doing, and an Info block for the voice room you are in. Pick it in Settings > Appearance > Screen layout, on desktop and in the browser. The Android app and phone-sized screens run Classic. Applies the next time OwnCord starts or reloads; Restart now applies it at once.
+- A new screen layout, Command Deck: your servers in tabs across the top, your channels, voice rooms and direct messages in one list on the left, Buddies on the right grouped by what people are doing, and an Info block for the voice room you are in. Pick it in Settings > Appearance > Screen layout, on desktop and in the browser. The Android app and phone-sized screens run Classic. With Developer mode on, they can run Command Deck as a preview. Clear all cache & restart turns Developer mode off, and with it the preview; to get it back, turn Developer mode on and restart. Applies the next time OwnCord starts or reloads; Restart now applies it at once.
 - The Gunmetal theme, with blue-grey surfaces and an orange accent, in both layouts.
 
 **Accounts & admin**

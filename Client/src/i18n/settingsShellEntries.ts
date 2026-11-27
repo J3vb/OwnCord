@@ -106,6 +106,7 @@ export const settingsShellEntries = {
     "Command Deck puts your servers in tabs across the top, your channels, voice rooms and direct messages in one list on the left, and Buddies on the right. Classic keeps the server rail and channel list you know.",
   "appearance.screenLayout.classic": "Classic",
   "appearance.screenLayout.deck": "Command Deck",
+  "appearance.screenLayout.deckPreview": "Command Deck (preview)",
   "appearance.screenLayout.pending": "Applies the next time OwnCord starts or reloads.",
   "appearance.screenLayout.restart": "Restart now",
   "appearance.screenLayout.restartConfirm": "Leave the call and restart?",
