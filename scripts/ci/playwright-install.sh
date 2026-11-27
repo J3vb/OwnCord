@@ -26,7 +26,12 @@
 # `install-deps` fetched on this same image, so they go in with `dpkg -i` and
 # apt never touches the network: a slow mirror stalls `apt-get update` itself,
 # not just the package download, so reusing the .debs under `install-deps`
-# would not be enough. If dpkg refuses them, the cold path below runs.
+# would not be enough. dpkg installs the set in name order, so a cached
+# library may unpack after the newer data package it needs, while the image's
+# older library still pins the old data package; --auto-deconfigure lets dpkg
+# deconfigure that old library for the length of the run instead of refusing
+# the set and leaving it half installed. If dpkg still refuses them, the cold
+# path below runs.
 #
 # Cold path: `install-deps`, with apt's archive pointed at the cache directory
 # so .github/actions/playwright-install can save every .deb it fetched. The azure mirror
@@ -87,7 +92,7 @@ deps_done=false
 if [[ -n "$apt_cache" && "$apt_cache_hit" == "true" ]]; then
   cached=("$apt_cache"/*.deb)
   echo "apt cache: ${#cached[@]} package(s) restored"
-  if ((${#cached[@]})) && sudo dpkg -i "${cached[@]}"; then
+  if ((${#cached[@]})) && sudo dpkg -i --auto-deconfigure "${cached[@]}"; then
     deps_done=true
   else
     echo "apt cache: dpkg could not install the cached packages, running install-deps"

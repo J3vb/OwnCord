@@ -3,7 +3,10 @@
 // ready.server_time_ms, not with the device clock.
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { applyServerTime, serverNow } from "@lib/net/serverClock";
-import { newClientMessageId, pendingMessageExpired } from "@lib/pendingMessages";
+import {
+  newClientMessageId,
+  pendingMessageExpired,
+} from "../../src/features/messaging/pendingMessages";
 import { runSessionResets } from "@lib/net/sessionRegistry";
 
 const SERVER_NOW = Date.UTC(2026, 10, 12, 12, 0, 0);

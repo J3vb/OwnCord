@@ -14,7 +14,7 @@
  */
 
 import { Permission } from "@lib/types";
-import { hasPermission, permissionsForMemberIn } from "@lib/permissions";
+import { hasPermission, permissionsForMemberIn } from "@stores/permissions";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, type Channel } from "@stores/channels.store";
 import { blocksStore, dmComposerBlockReason } from "@stores/blocks.store";

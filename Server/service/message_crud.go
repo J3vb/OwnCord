@@ -279,30 +279,11 @@ func (s *MessageService) EditMessage(ctx context.Context, userID, msgID int64, r
 		return nil, ErrRateLimited
 	}
 
-	if msgID <= 0 {
-		return nil, fmt.Errorf("%w: message_id must be positive integer", ErrBadRequest)
-	}
-
-	// Empty text is legal only for a message that keeps an attachment; the store decides that atomically.
-	content, err := sanitizeContent(rawContent, true)
+	ch, content, err := s.editPrecheck(ctx, userID, msgID, rawContent)
 	if err != nil {
 		return nil, err
 	}
-
-	_, ch, err := s.loadEditTarget(ctx, msgID)
-	if err != nil {
-		return nil, err
-	}
-	chanType := ch.Type
-	isDM := chanType == "dm"
-
-	if accessErr := s.editMessageCheckAccess(ctx, userID, ch); accessErr != nil {
-		return nil, accessErr
-	}
-
-	if err := s.refuseStickerMessage(ctx, msgID, "a sticker message cannot be edited"); err != nil {
-		return nil, err
-	}
+	isDM := ch.Type == "dm"
 
 	// EditMessage checks ownership itself and returns the row via RETURNING, so edited_at arrives with it.
 	msg, err := s.st.EditMessage(ctx, msgID, userID, content)
@@ -376,7 +357,36 @@ func (s *MessageService) editRefusal(ctx context.Context, msgID int64, content s
 	return fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 }
 
-func (s *MessageService) loadEditTarget(ctx context.Context, msgID int64) (*db.Message, *db.Channel, error) {
+// editPrecheck runs every refusal of an edit that writes nothing, cheapest first: the target is loaded and the
+// caller's access, the sticker rule and authorship are checked before the text is sanitized, so text is only
+// cleaned for an edit that could be applied. Returns the message's channel and the sanitized text.
+func (s *MessageService) editPrecheck(ctx context.Context, userID, msgID int64, rawContent string) (*db.Channel, string, error) {
+	if msgID <= 0 {
+		return nil, "", fmt.Errorf("%w: message_id must be positive integer", ErrBadRequest)
+	}
+	msg, ch, err := s.loadEditTarget(ctx, userID, msgID)
+	if err != nil {
+		return nil, "", err
+	}
+	if err := s.editMessageCheckAccess(ctx, userID, ch); err != nil {
+		return nil, "", err
+	}
+	if err := s.refuseStickerMessage(ctx, msgID, "a sticker message cannot be edited"); err != nil {
+		return nil, "", err
+	}
+	// The store checks ownership again in the write; this only spares the sanitizer for someone else's message.
+	if msg.UserID != userID {
+		return nil, "", fmt.Errorf("%w: cannot edit this message", ErrForbidden)
+	}
+	// Empty text is legal only for a message that keeps an attachment; the store decides that atomically.
+	content, err := sanitizeContent(rawContent, true)
+	if err != nil {
+		return nil, "", err
+	}
+	return ch, content, nil
+}
+
+func (s *MessageService) loadEditTarget(ctx context.Context, userID, msgID int64) (*db.Message, *db.Channel, error) {
 	msg, err := s.st.GetMessage(ctx, msgID)
 	if err != nil {
 		return nil, nil, fmt.Errorf("%w: edit message: load: %w", ErrInternal, err)
@@ -385,7 +395,7 @@ func (s *MessageService) loadEditTarget(ctx context.Context, msgID int64) (*db.M
 		return nil, nil, fmt.Errorf("%w: cannot edit this message", ErrForbidden)
 	}
 	if msg.Deleted {
-		return nil, nil, fmt.Errorf("%w: cannot edit this message", ErrDeletedMessage)
+		return nil, nil, refuseDeletedMessage(ctx, s.st, s.perms, userID, msg, "edit")
 	}
 	// Call log and group event rows are written only by the server.
 	if msg.Kind != db.MessageKindUser {

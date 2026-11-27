@@ -102,11 +102,183 @@ release changes the database, and anything an operator must do first.)
 
 ### Known issues
 
-- **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.
+- **Linux: the crash with your camera on during a screen share is fixed for realtime-priority setups, but not yet confirmed on every PC that showed it.** If it still happens to you, use one at a time.
 - **Linux: this release was not checked by hand on X11, GNOME Wayland and KDE Plasma Wayland.** It works, but it is less tested than Windows.
 - **Scrolling far back in a long channel while it reloads can make the list jump** to another spot. Scroll back to where you were; nothing is lost.
 - **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
 - **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
+- **On a phone in Command Deck, out of a call, after you close the keyboard with Back, the bottom bar stays hidden** until you tap outside the message box.
+- **In the Android app with gesture navigation, a swipe that starts at the very edge of the screen goes Back.** Start the swipe a little way in.
+
+## v2.11.0
+
+**OwnCord 2.11** (the twelfth public beta) gives OwnCord its own look: **Command Deck**, a new layout built for gaming groups, now on every device, phones and the Android app included, with a new Gunmetal theme. Everyone moves over once; a short note says how to go back to Classic in Settings > Appearance > Screen layout. Automatic backups can now save everything (uploads, keys and settings, not only the database), shared music plays only for those who choose to listen, the speaking ring others see matches the speaker's own, and the release carries the fixes of a Windows and a Linux bug hunt, a full security review and a review of every settings, voice and sidebar control.
+
+It is still a **beta and a hobby project**. Update the server and the desktop app together. **This release changes the database** (change 095). The server upgrades it on first start and keeps a safety copy first; you cannot go back to 2.10 without restoring that copy. **Existing servers keep database-only automatic backups** until the owner picks a choice on Backups & restore; pick Everything. **If the server runs its own voice server on the same machine** (the default), LiveKit's port 7880 now listens on that machine only; voice is unaffected.
+
+### Highlights
+
+- **Command Deck**: servers in tabs across the top, channels, voice rooms and DMs in one list, Buddies grouped by what people are doing, and an Info block for your voice room. On every device; Classic stays one setting away.
+- **Gunmetal theme**: blue-grey surfaces with an orange accent, the default for new installs.
+- **Backups of everything**: automatic backups can keep a full archive with uploads, keys and settings, and the Dashboard warns when backups sit on the server's own disk.
+- **Listen to music by choice**: shared music stays silent until you tap Listen, and the music tile shows who is listening.
+- **A speaking ring everyone agrees on**: others see your ring exactly when your own app shows it.
+- **Many fixes**: Windows hosting and updates, Linux voice, camera and AppImage, phones, settings that show their real value, and mute and deafen buttons that follow what really happens.
+
+### Added
+
+**Appearance & layout**
+
+- A new screen layout, Command Deck: your channels, voice rooms and direct messages in one list, Buddies on the right grouped by what people are doing, and an Info block for the voice room you are in. On desktop, your servers are in tabs across the top. Command Deck is now the layout everywhere: on desktop, in the browser, on phones and in the Android app. Your theme stays as it is. If you used Classic, OwnCord moves you to Command Deck once and shows a short note on how to go back: Settings > Appearance > Screen layout, then Classic. If you go back, you stay on Classic. On a phone, the top bar shows the server's name (in the Android app, tap it to switch servers), the channel list has larger rows, Buddies opens from the right, and the bottom bar holds Mute and Leave during a call. Out of a call, the bottom bar hides while you type. During a call, the bar above the chat hides instead, and the bottom bar shrinks to one row with Mute, the call timer, the call's security state and Leave. A layout you pick applies the next time OwnCord starts or reloads; Restart now applies it at once.
+- The Gunmetal theme, with blue-grey surfaces and an orange accent, in both layouts.
+
+**Accounts & admin**
+
+- Automatic backups can include everything. On Backups & restore, "What to back up" has a new choice, Everything: next to each database copy the server keeps a full archive with uploads, keys and settings. The newest 3 archives are kept. New servers start on Everything. Servers that already ran keep database only, and the page asks the owner to choose.
+- The Dashboard warns when your backups may be on the same disk as your server. If it is a false alarm, the owner can press "This is another disk".
+- A full archive can be downloaded or deleted from the backup list by the owner or a member with Restore Backups. It is restored by hand, not from the panel: see the backups guide.
+
+### Changed
+
+**Appearance & layout**
+
+- A new install starts in Command Deck and on the Gunmetal theme. A new Android app install starts in Command Deck too and keeps the theme it had before. If you used OwnCord before, your theme stays as it is.
+- On phones and tablets, the channel list and the member list follow your finger when you swipe them open or closed. With Reduce motion on, they open as before.
+- In Command Deck, screen readers read the Servers button with the current server's name.
+
+**Voice**
+
+- Shared music is silent until you choose to listen, one person at a time. Tap Listen to music on their tile in the call view, or Listen beside their name in the channel list; the tile and the voice panel show who you are listening to with a volume control and Stop. Listening to someone else switches over, and leaving the call clears it; if their connection drops and their music comes back, you keep listening. Mute music and each person's Music volume work as before. Needs this version of the app on the listener's side only.
+- The music tile shows who is listening ("Listening: You, Alex"), like a screen share shows who is watching. Needs this version of the server and app; with an older server the tile shows only you.
+- When the server runs its own voice server and reaches it on the same machine (the default), the voice server's sign-in port 7880 now listens on the local machine only. Voice works as before through 8443 and the media ports; to listen on other addresses, manage `livekit.yaml` yourself.
+
+**Accounts & admin**
+
+- Failed sign-ins from one network address keep counting toward that address's limit for the whole window, also after someone signs in correctly from it.
+- Changing your sign-in name now needs a signed-in session, like changing the password; an API token can still edit the rest of the profile.
+- The admin panel refuses an upload folder that is the data folder, the database's folder, the backup folder or a folder above them.
+- A new install creates the database, its side files and uploaded files readable by the server's user only (folders likewise); existing files keep their permissions.
+- The server log records an upload by its id, size and type, without the file name.
+- Editing a channel's permission overrides (directly, through a category template, or by syncing) now needs the editor to be able to read that channel; the owner and Administrators are not limited.
+- Giving a member a role now follows the same rule as editing a role: a role manager without Administrator can only hand out permissions their own roles carry.
+- Banning an account removes its push notification registrations; the app registers again after the ban ends.
+- Warnings and timeouts are limited to 10 each per moderator per minute; blocking, the age-restricted content setting and closing DMs to 20 per account per minute.
+- Thread and forum post titles follow the display name text rules (single line, no invisible characters); existing titles are unchanged.
+- A connection that sends far more messages than any app does is answered "rate limited" and then closed.
+
+**Settings**
+
+- Clear all cache & restart keeps your screen layout and folded Buddies groups.
+
+### Fixed
+
+**Appearance & layout**
+
+- In Gunmetal, category and section headings, role headings and the "Stay signed in" hint were hard to read; they are brighter now, and the scrollbar, icons and hover shading are blue-grey to match.
+- The orange or cyan "+" for a new direct message, Start one, a selected forum filter and a server icon with no colour of its own had white text that was hard to read; they now use the accent's own text colour.
+- Join Voice, the Join button on a call message and the This device tag use a darker green so their white text reads.
+- Gunmetal's orange accent has its own swatch, so you can pick it again after trying another colour.
+
+**Login & connection**
+
+- A server whose host name also has an IPv6 address that does not answer could not be reached from the desktop app (login, chat and voice timed out) while a browser reached it. The app now tries the server's IPv6 and IPv4 addresses side by side and uses whichever answers first.
+
+**Voice**
+
+- Other people's speaking ring could light late, blink off in the middle of a sentence or stay dark for a quiet voice, while the speaker's own ring was fine. Each app now reports its own ring to the server, which passes it on to the call, so everyone sees the ring the speaker sees, also while deafened. It needs this version of the server and of the app on both sides (Windows, Android and Linux): someone on an older app, and everyone on an older server, is shown as before.
+- If a moderator muted or deafened you and you left the call, you no longer start your next call muted or deafened; your own mute and deafen are kept.
+- In the AFK channel the call view's mic button shows the mic as locked like the user bar, and the mute shortcut or the Android call notification no longer sets a hidden mute.
+- While a moderator has you deafened, every mic button shows the mic as off.
+- A person's volume slider on their camera tile (and in its pop-out) follows a change made in the voice list menu, and unmuting from the tile no longer puts back the old level. Music at 0% shows as muted.
+- In a popped-out call the Music button brings the call back first so its app picker is in view, like Share. Double-clicking a control in a stream pop-out no longer switches full screen, and the voice shortcuts (mute, deafen, camera, share, disconnect) work while a pop-out has focus.
+- Pop-out windows use the theme's colours, also after a custom theme changes.
+- The tile Pop out button is gone on Android and on your own screen share, a tile you are not watching offers Watch stream instead of Stop watching, and the Stream info box closes when you leave focus.
+- Windows: with OwnCord minimised or behind a game, push-to-talk could keep your mic open up to a second after you let go of the key; it now closes after your release delay, as when the window is in front.
+- A screen share at Source (native resolution) with the default frame rate went out at 1080p, like High; it now keeps the screen's or window's own size at every frame rate (Windows and Linux).
+- A Source screen share on the graphics card's H.264 encoder whose window later grew wider than 3840 pixels (a game going full screen on a super-ultrawide monitor) dropped to a few frames per second; it is now kept within the encoder's size for the whole share.
+- In a popped-out call on a monitor with a different display scale, video tiles asked for the wrong picture size (blurry on a high-DPI screen); they now use that window's scale and ask again when it moves to another monitor.
+- On Windows, sharing a Store app's window with its sound (Media Player, the Netflix app) sent silence; the app's own sound is shared now, and you are told when it cannot be found.
+- On Windows, sharing a window with its sound (often Chrome) could be refused without a word after Windows reused an old process number; that window's sound is shared now.
+- On Linux systems that let apps use realtime priority (audio-tuned setups such as CachyOS), the app could close a few seconds after you started a screen share with your camera on; it now stays open.
+- When a moderator lifted their mute on you, a mute you had set yourself was lifted too; your own mute now stays on.
+- A move to another voice channel is followed only by the device that is in the call.
+
+**Settings**
+
+- In the web client the zoom keys (Ctrl+=, Ctrl+- and Ctrl+0) work as the browser's own zoom again, and the Zoom slider that could not work there is hidden. The Flash taskbar switch, which a browser cannot do, is hidden too.
+- Clear all cache & restart keeps each channel's notification level, as it says.
+- The Account status picker follows a status changed from the tray, a timed status or going idle while Settings is open.
+- Choosing a new push-to-talk key and another shortcut at the same time no longer saves one key press for both.
+- After choosing another graphics card, Restart to apply stays visible until you restart, also after reopening Settings.
+- An accent colour typed in capitals shows its swatch as selected.
+
+**Messages and sidebar**
+
+- Pressing Escape while a voice message is recording or waiting to be sent closes the dialog, menu, image or edit you meant instead of throwing the recording away.
+- Voice messages recorded on Windows or Android can be skipped ahead before the first play without Play hanging, and seeking while one plays keeps it playing.
+- The Direct Messages section in the channel sidebar stays collapsed after you open a DM, switch server or reload.
+- The reply bar clears when the message you reply to is deleted, the character counter counts what will actually be sent (`/me`, `/spoiler`, `:shortcodes:`), and ArrowUp edits your last message in threads and forum posts too.
+- On Android, Enter in the message edit box adds a new line; Save saves.
+- Older messages you scrolled up to no longer disappear when a busy channel reloads, or when the app reconnects after an outage while it reloads.
+- Older messages kept on screen through a reload now show edits, deletes and reactions made while you were away.
+- A mention badge on a voice channel can be cleared with Mark as Read, and the DM header no longer shows a Media button left over from the last channel.
+- Screen readers read a revealed spoiler's text and the member list's collapse arrow.
+- A link preview card's small host line named the site the page claimed to be; it now names the link's real host.
+- The DM list could show a blocked person's text after they edited their message or after a reconnect; it now shows "Blocked message" when that message is loaded, and in a DM where everyone else is blocked.
+- The desktop Save dialog could open with a folder path or hidden characters in the suggested name; it now opens with a plain file name.
+
+**Server (Windows hosting)**
+
+- Download full archive always failed on a Windows server ("could not build the archive"); it now builds while the server runs.
+- The saved-log history on a Windows server could miss the newest lines of today's log; it now shows them.
+- A Windows server run as a service (NSSM) or as a scheduled task stopped whenever any user signed out of the machine; it now keeps running. Stopping the service and shutting down still stop it cleanly.
+
+**Linux**
+
+- Pressing Play on a YouTube card showed YouTube's "Error 153" instead of the video; Play now opens the video in your browser.
+- The .deb now needs WebKitGTK 2.44 or newer, and apt installs it with the update: on an older WebKitGTK, Settings opened empty.
+- The diagnostics event log names a page crash or an out-of-memory kill instead of "unknown".
+- Mute, switching your mic and leaving a call no longer hang when the mic accepts the call but never sends sound (a Bluetooth headset that failed to switch, a mic busy in another app): the app stops waiting for it after 5 seconds.
+- After Update and restart or Clear & Restart, the app keeps its error output for the next start's report again, so a silent close after an update is reported. The start that logs a close also keeps the display error GTK printed when the app was started from the menu.
+- AppImage: Launch on login keeps working after you rename or move the AppImage, and when it sits in a folder with a space in its name.
+- AppImage: the app no longer rewrites your system's shared GStreamer plugin cache each time it starts, so your other media apps no longer rescan their plugins after OwnCord ran.
+- Turning your camera on right after opening Voice & Video settings no longer fails with "camera capture failed to start".
+- Your own camera and screen-share preview is now sent at tile size and at most 30 times a second, so a large or fast screen share puts much less load on the app. What others see is unchanged.
+- A picture the app had kept for more than a day (most often an animated GIF avatar in a profile card) showed as a broken image until you restarted the app; it now shows.
+
+**Desktop app**
+
+- If Windows SmartScreen or antivirus stopped the update installer, OwnCord kept running with no window and no tray icon; the window and tray icon now come back and show that the update failed.
+- Opening OwnCord while an update was starting its installer opened a second copy of the old version, which the installer later closed; the update now goes ahead without it.
+- After an update or a restart from Settings, OwnCord no longer opens the invite or message link it was first started from again; new links still open.
+- In-app updates always failed on computers whose antivirus or company network scans HTTPS; the update download now trusts what your computer and browser trust.
+- A message notification whose text was cut short in the middle of an emoji fell back to a plain web notification, or did not show at all; it shows as the app's own notification now.
+- On Windows, the log recorded a frozen window after every sleep or hibernate longer than a few seconds; time asleep is no longer counted as a freeze.
+
+**Phones and the Android app**
+
+- On a small phone your name in the channel list's bottom bar shrank to one letter; it now keeps its room, and the mic, headphones and Settings buttons move to a row under it when they do not fit beside it.
+- On a small phone the channel name at the top of a chat and the "Message #channel" hint in the message box were cut short. Threads and Start video call are now in the top bar's More menu there, and the bar and the message box use less spacing.
+- A notice (such as "Unreviewed sign-in") no longer shows on top of an open emoji picker or message menu: it waits under the dimmed background and is still there when you close it.
+- Small buttons are easier to tap on a phone: the server header's Invite, Audit Log and Moderation buttons, the emoji categories, Message on the People page, member rows, the Settings buttons and Accept or Ignore on a message request.
+
+### Known issues
+
+- **Linux: the crash with your camera on during a screen share is fixed for realtime-priority setups, but not yet confirmed on every PC that showed it.** If it still happens to you, use one at a time.
+- **Linux: this release was not checked by hand on X11, GNOME Wayland and KDE Plasma Wayland.** It works, but it is less tested than Windows.
+- **Scrolling far back in a long channel while it reloads can make the list jump** to another spot. Scroll back to where you were; nothing is lost.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
+- **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
+- **On a phone in Command Deck, out of a call, after you close the keyboard with Back, the bottom bar stays hidden** until you tap outside the message box.
+- **In the Android app with gesture navigation, a swipe that starts at the very edge of the screen goes Back.** Start the swipe a little way in.
+
+### Under the hood
+
+- The pre-release security review found nothing blocking; the fixes of the full security review are in the lists above.
+- Client code moved further into feature folders (voice, notifications, members, connection diagnostics), and the admin panel scripts are typed without casts.
+- New tests: a nightly restore of a full automatic backup, a real disk-full drill in the container, Android screen-recreate tests and an accessibility scan, markdown parser edge cases, and tests for the vendored LiveKit patches.
+- The release pipeline pins the AppImage repack tools; the Android build caches its Gradle downloads.
+- Dependency updates for the Go server, the client's npm and Rust packages and the GitHub Actions; the LiveKit server SDK stays at 2.19.0.
 
 ## v2.10.0
 

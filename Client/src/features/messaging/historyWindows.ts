@@ -1,10 +1,9 @@
-// History-window reducers for the messages store: first-page load state,
-// the REST page merge, around-windows detached from the live tail, window
-// invalidation and infinite-scroll prepends. Pure (prev, input) => next
-// functions, extracted from stores/messages.store.ts, whose mutators wrap each
-// in messagesStore.setState and keep the documented contracts. Returning
-// `prev` by identity when nothing changed is behavior: selector subscriptions
-// compare with ===.
+// History-window reducers for the messages store: first-page load state, the
+// REST page merge, around-windows detached from the live tail, invalidation,
+// prepends and kept-row revalidation. Pure (prev, input) => next functions;
+// stores/messages.store.ts's mutators wrap each in messagesStore.setState.
+// Returning `prev` by identity when nothing changed is behavior: selector
+// subscriptions compare with ===.
 import type { MessageResponse } from "../../lib/types";
 import { MAX_MESSAGES_PER_CHANNEL, messageResponseToMessage } from "./messageModel";
 import type { Message, MessagesState } from "./messageModel";
@@ -17,6 +16,7 @@ export {
   releaseLoadJournal as reduceReleaseLoadJournal,
 } from "./loadJournal";
 import { replayFirstPage, replayLoadJournal } from "./loadJournalReplay";
+export { reduceRevalidateRows } from "./historyRevalidate";
 
 /** setChannelLoading's reducer. */
 export function reduceSetChannelLoading(prev: MessagesState, channelId: number): MessagesState {
@@ -109,15 +109,15 @@ function olderThanPage(
   hasMore: boolean,
   splice: boolean,
 ): Message[] {
-  // A resync splice keeps the loaded rows older than the page when the page
-  // reaches back to what was loaded at fetch start, so nothing is missing
-  // between them. A gap, or a page that is the whole channel, replaces.
-  const minSnapshotId = trimmed[0]?.id ?? 0;
-  return splice &&
-    hasMore &&
-    trimmed.length > 0 &&
-    minSnapshotId <= (prev.loadWatermark?.get(channelId) ?? 0)
-    ? previous.filter((m) => m.status === "sent" && m.id < minSnapshotId)
+  // Kept when the page reaches what was loaded at fetch start, or the unbroken
+  // tail an install left since; a gap, or a whole-channel page, replaces.
+  const minId = trimmed[0]?.id ?? 0;
+  const tail = prev.loadedChannels.has(channelId) && !prev.detachedChannels.has(channelId);
+  const reaches =
+    minId <= (prev.loadWatermark?.get(channelId) ?? 0) ||
+    (tail && previous.some((m) => m.status === "sent" && m.id >= minId));
+  return splice && hasMore && trimmed.length > 0 && reaches
+    ? previous.filter((m) => m.status === "sent" && m.id < minId)
     : [];
 }
 

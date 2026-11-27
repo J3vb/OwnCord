@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from "vitest";
-import { canPublishScreen } from "../../src/features/voice/native/platform";
+import { canPublishScreen } from "../../src/lib/hostOs";
 
 const ANDROID_UA =
   "Mozilla/5.0 (Linux; Android 16; CPH2747) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/155.0 Mobile Safari/537.36";

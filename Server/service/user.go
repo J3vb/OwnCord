@@ -117,31 +117,56 @@ func nullable(v string) *string {
 
 // cleanText strips HTML and trims a free-text profile field; callers run it before any bound check so markup
 // cannot buy length. It uses sanitizeToFixpoint (message.go) because these fields render through the client's
-// textContent-only path, where a single pass would show literal &#39;/&gt;/&amp;.
-func cleanText(v string) string {
-	return strings.TrimSpace(sanitizeToFixpoint(v))
+// textContent-only path, where a single pass would show literal &#39;/&gt;/&amp;. Text the sanitizer refuses
+// returns its error (wrapping ErrBadRequest) and no text.
+func cleanText(v string) (string, error) {
+	s, err := sanitizeToFixpoint(v)
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(s), nil
 }
 
-// cleanTextBounded is cleanText plus a raw-byte guard: sanitizeToFixpoint is quadratic in input length, so
-// bounding only its output lets a nested-entity payload cost seconds of CPU. The byte pre-check on the
-// untouched input makes rejection O(len(v)). *4 is deliberately looser than maxRunes; the real rune bound
-// still runs on the cleaned value.
+// cleanTextBounded is cleanText plus a raw-byte guard: each sanitizer pass costs time in proportion to its
+// input, so the input is bounded before the first one. The byte pre-check on the untouched input makes
+// rejection O(len(v)). *4 is deliberately looser than maxRunes; the real rune bound still runs on the cleaned
+// value.
 func cleanTextBounded(v string, maxRunes int, fieldName string) (string, error) {
 	if len(v) > maxRunes*4 {
 		return "", fmt.Errorf("%w: %s must be at most %d characters", ErrBadRequest, fieldName, maxRunes)
 	}
-	cleaned := cleanText(v)
+	cleaned, err := cleanText(v)
+	if err != nil {
+		return "", fmt.Errorf("%s: %w", fieldName, err)
+	}
 	if utf8.RuneCountInString(cleaned) > maxRunes {
 		return "", fmt.Errorf("%w: %s must be at most %d characters", ErrBadRequest, fieldName, maxRunes)
 	}
 	return cleaned, nil
 }
 
+// resolveOptional is the merged value of an already cleaned optional field: existing when the patch leaves it
+// alone, else the patch with "" meaning cleared.
 func resolveOptional(patch *string, existing *string) *string {
 	if patch == nil {
 		return existing
 	}
-	return nullable(cleanText(*patch))
+	return nullable(*patch)
+}
+
+// cleanAboutPatch cleans and bounds the about field of a patch; nil stays nil.
+func cleanAboutPatch(about *string) (*string, error) {
+	if about == nil {
+		return nil, nil
+	}
+	cleaned, err := cleanText(*about)
+	if err != nil {
+		return nil, fmt.Errorf("about: %w", err)
+	}
+	if utf8.RuneCountInString(cleaned) > MaxAboutLen {
+		return nil, fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
+	}
+	return &cleaned, nil
 }
 
 // UpdateProfile applies a ProfilePatch and returns the updated user.
@@ -165,8 +190,9 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 		}
 		cleanDisplayName = &cleaned
 	}
-	if patch.About != nil && utf8.RuneCountInString(cleanText(*patch.About)) > MaxAboutLen {
-		return nil, fmt.Errorf("%w: about must be at most %d characters", ErrBadRequest, MaxAboutLen)
+	cleanAbout, err := cleanAboutPatch(patch.About)
+	if err != nil {
+		return nil, err
 	}
 
 	cleanBannerColor, err := cleanBannerPatch(patch.BannerColor)
@@ -199,7 +225,7 @@ func (s *UserService) UpdateProfile(ctx context.Context, userID int64, patch Pro
 	if cleanDisplayName != nil {
 		next.DisplayName = nullable(*cleanDisplayName)
 	}
-	next.About = resolveOptional(patch.About, current.About)
+	next.About = resolveOptional(cleanAbout, current.About)
 	next.BannerID, next.BannerColor = mergeBanner(current, patch.BannerID, cleanBannerColor)
 	if patch.IdentityKey != nil {
 		next.IdentityPublicKey = patch.IdentityKey

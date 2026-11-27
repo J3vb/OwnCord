@@ -7,6 +7,7 @@ import {
   loadMemberLayout,
 } from "../../src/features/members/memberLayout";
 import { STORAGE_PREFIX, savePref } from "../../src/lib/prefs/preferences";
+import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
 
 describe("memberLayout", () => {
   beforeEach(() => {
@@ -36,6 +37,18 @@ describe("memberLayout", () => {
     savePref(MEMBER_LAYOUT_PREF, "right");
     expect(loadMemberLayout()).toBe("right");
     savePref(MEMBER_LAYOUT_PREF, "left");
+    expect(loadMemberLayout()).toBe("left");
+  });
+
+  it("reads as right while Command Deck runs, and the stored left applies again after", () => {
+    savePref(MEMBER_LAYOUT_PREF, "left");
+    try {
+      setRunningScreenLayout("deck");
+      expect(loadMemberLayout()).toBe("right");
+      expect(localStorage.getItem(STORAGE_PREFIX + MEMBER_LAYOUT_PREF)).toBe('"left"');
+    } finally {
+      setRunningScreenLayout("classic");
+    }
     expect(loadMemberLayout()).toBe("left");
   });
 

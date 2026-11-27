@@ -14,6 +14,9 @@
  * published and the capture device stays open across presses, so no press
  * ever puts a raw track on the sender, and a user's own mute is never PTT's
  * to lift (v006) — a press while muted opens a gate on a stopped capture.
+ * Both edges reach the gate as soon as their event arrives; a release hands
+ * the gate its delay, which runs on the audio clock rather than a page timer
+ * (a hidden or minimised window slows page timers down).
  *
  * On a Wayland session the host reports the push-to-talk key only once the
  * desktop's global-shortcut service has bound it, so `ptt_polling_supported`
@@ -28,9 +31,15 @@
  */
 
 import { loadPref, savePref } from "@lib/prefs/preferences";
-import { voiceStore, setPttPollingLive, isPttPollingLive } from "@stores/voice.store";
+import {
+  voiceStore,
+  setPttPollingLive,
+  isPttPollingLive,
+  isPttClosePending,
+} from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
 import { vkName, pttReleaseDelayMs } from "@lib/voice/ptt";
+import { loadVoiceSession } from "@lib/voice/voiceSessionLoader";
 import { inputMode } from "@lib/ui/inputMode";
 import { invokeOrThrow } from "./nativeInvoke";
 import type { PushToTalk } from "../contracts/pushToTalk";
@@ -51,7 +60,6 @@ let binding: PttBinding | null = null;
 let nativeStarted = false;
 let nativeStop: Promise<void> | null = null;
 let edge = 0;
-let releaseTimer: ReturnType<typeof setTimeout> | undefined;
 let statusWatch: (() => void) | null = null;
 
 /** Re-arm a binding that started before the desktop had bound the PTT key. A
@@ -111,12 +119,13 @@ function retainListener(attempt: PttBinding, unlisten: () => void): boolean {
 
 /** Open the gate when the poller can no longer produce a future press/release
  *  edge — clearing the key binding (stopPtt) or the polling thread dying
- *  (ptt-error) — so a closed gate is never stranded with no way to open it. */
+ *  (ptt-error) — so a closed gate is never stranded with no way to open it. A
+ *  release still waiting out its delay is a gate about to close: it opens too. */
 function ungateMic(): void {
-  if (voiceStore.getState().pttGated !== true) return;
+  if (voiceStore.getState().pttGated !== true && !isPttClosePending()) return;
   const version = generation;
   const { currentChannelId, joinedAt } = voiceStore.getState();
-  void import("@lib/voice/livekitSession")
+  void loadVoiceSession()
     .then(({ setPttGated }) => {
       const state = voiceStore.getState();
       if (
@@ -167,7 +176,9 @@ interface PttEdge {
   pressed: boolean;
 }
 
-function applyEdge(edgeInfo: PttEdge, setPttGated: (gated: boolean) => void): void {
+type SetPttGated = (gated: boolean, releaseDelayMs?: number) => void;
+
+function applyEdge(edgeInfo: PttEdge, setPttGated: SetPttGated): void {
   const { attempt, version, edge: currentEdge, channelId, joinedAt, pressed } = edgeInfo;
   const state = voiceStore.getState();
   if (
@@ -177,8 +188,11 @@ function applyEdge(edgeInfo: PttEdge, setPttGated: (gated: boolean) => void): vo
     state.joinedAt !== joinedAt
   )
     return;
-  setPttGated(!pressed);
-  log.debug(pressed ? "PTT pressed — gate open" : "PTT released — gate closed");
+  // A release keeps transmitting for the saved delay, so the tail of a word
+  // is not cut; a press opens at once and cancels a close still waiting.
+  if (pressed) setPttGated(false);
+  else setPttGated(true, pttReleaseDelayMs());
+  log.debug(pressed ? "PTT pressed — gate open" : "PTT released — gate closing");
 }
 
 function onPttState(attempt: PttBinding, supported: boolean, pressed: boolean): void {
@@ -194,22 +208,12 @@ function onPttState(attempt: PttBinding, supported: boolean, pressed: boolean): 
     joinedAt,
     pressed,
   };
-  // A newer edge supersedes a release still waiting out its delay; the
-  // edge guard in applyEdge already drops it, this just frees the timer.
-  clearTimeout(releaseTimer);
   // livekitSession (and the ~1.3 MB livekit-client SDK behind it) is
   // loaded lazily so it stays out of the startup path. In a voice channel
   // the module is necessarily already loaded, so this import resolves
   // from the module cache in a microtask.
-  void import("@lib/voice/livekitSession")
-    .then(({ setPttGated }) => {
-      // A release keeps transmitting for the saved delay, so the
-      // tail of a word is not cut; a press opens at once.
-      const delay = pressed ? 0 : pttReleaseDelayMs();
-      const apply = (): void => applyEdge(edgeInfo, setPttGated);
-      if (delay > 0) releaseTimer = setTimeout(apply, delay);
-      else apply();
-    })
+  void loadVoiceSession()
+    .then(({ setPttGated }) => applyEdge(edgeInfo, setPttGated))
     .catch((e) => log.warn("Failed to apply PTT gate", e));
 }
 
@@ -376,13 +380,14 @@ async function gateBoundMic(attempt: PttBinding): Promise<void> {
     currentChannelId === null ||
     !isPttPollingLive() ||
     pttGated === true ||
+    isPttClosePending() ||
     edge !== attempt.initialEdge
   )
     return;
   const version = attempt.generation;
   const currentEdge = edge;
   try {
-    const { setPttGated } = await import("@lib/voice/livekitSession");
+    const { setPttGated } = await loadVoiceSession();
     const state = voiceStore.getState();
     if (
       !isCurrent(attempt, version) ||

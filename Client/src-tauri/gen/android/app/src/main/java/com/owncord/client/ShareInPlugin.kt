@@ -2,6 +2,7 @@ package com.owncord.client
 
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
@@ -59,6 +60,26 @@ object SharedName {
   }
 }
 
+// Which shared addresses the plugin reads, apart from the plugin so a JVM test
+// can check it: content another app lends, never a file:// address (it would
+// name this app's private files) and never one of this app's own providers,
+// which this app may always read whoever sent the address. From Android 15
+// the platform also refuses a share whose sender cannot read the address
+// itself (requireContentUriPermissionFromCaller on MainActivity).
+object SharedUriFilter {
+  fun accepts(scheme: String?, authority: String?, ownAuthorities: Set<String>): Boolean {
+    if (scheme != "content" || authority == null) return false
+    // An address for another Android user is written "<user>@<authority>".
+    val provider = authority.substringAfterLast('@').lowercase()
+    return provider.isNotEmpty() && provider !in ownAuthorities
+  }
+
+  // The authorities a provider entry lists, ';'-separated, in the form
+  // `accepts` compares.
+  fun authoritiesOf(listed: String?): List<String> =
+    listed.orEmpty().split(';').map { it.trim().lowercase() }.filter { it.isNotEmpty() }
+}
+
 // Shares from other apps ("Share" > OwnCord). Android lends the shared
 // content:// URIs only while this activity lives, so each file is copied into
 // the cache `incoming/` folder at once; the webview takes the share
@@ -67,8 +88,13 @@ object SharedName {
 // and the webview asks again shortly. One share at a time: a new one
 // replaces the last, and a share nobody took within ten minutes is dropped.
 @TauriPlugin
-class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
-  private val io = RetirableWorker()
+class ShareInPlugin internal constructor(
+  private val activity: Activity,
+  private val io: RetirableWorker,
+) : Plugin(activity) {
+  // The one Tauri calls; a test passes its own worker to the other.
+  constructor(activity: Activity) : this(activity, RetirableWorker())
+
   // Copy work holds this, not the activity, so a queued copy cannot keep a
   // retired screen alive.
   private val appContext = activity.applicationContext
@@ -78,6 +104,8 @@ class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
   private var readyAt = 0L
   // A share whose files are still being copied: the webview asks again shortly.
   private var copying = false
+  // This app's own content providers, whose addresses a share never names.
+  private val ownAuthorities: Set<String> by lazy { ownProviderAuthorities() }
 
   override fun load(webView: WebView) {
     super.load(webView)
@@ -128,7 +156,7 @@ class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
       val share = try {
         copyShare(gen, uris, text)
       } catch (e: Exception) {
-        NativeLog.info("share: not copied: $e")
+        NativeLog.info("share: not copied: ${e.javaClass.simpleName}")
         null
       }
       synchronized(lock) {
@@ -173,9 +201,22 @@ class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
       }
       listOfNotNull(one)
     }
-    // Only content the sending app lends us; a file:// URI would name our own
-    // private files.
-    return found.filter { it.scheme == "content" }.take(MAX_FILES)
+    return found
+      .filter { SharedUriFilter.accepts(it.scheme, it.authority, ownAuthorities) }
+      .take(MAX_FILES)
+  }
+
+  @Suppress("DEPRECATION")
+  private fun ownProviderAuthorities(): Set<String> {
+    val name = appContext.packageName
+    val providers = try {
+      appContext.packageManager.getPackageInfo(name, PackageManager.GET_PROVIDERS).providers
+    } catch (e: PackageManager.NameNotFoundException) {
+      null
+    }
+    val listed = providers.orEmpty().flatMap { SharedUriFilter.authoritiesOf(it.authority) }
+    // The file provider is named even if the package lookup came back empty.
+    return (listed + SharedUriFilter.authoritiesOf("$name.fileprovider")).toSet()
   }
 
   private fun copyShare(gen: Int, uris: List<Uri>, text: String): JSObject {
@@ -223,7 +264,7 @@ class ShareInPlugin(private val activity: Activity) : Plugin(activity) {
         files.put(target.absolutePath)
       } catch (e: Exception) {
         target.delete()
-        NativeLog.info("share: a file was not copied: $e")
+        NativeLog.info("share: a file was not copied: ${e.javaClass.simpleName}")
       }
     }
     return JSObject().apply {

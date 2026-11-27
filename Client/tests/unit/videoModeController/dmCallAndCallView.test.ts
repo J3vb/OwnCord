@@ -16,7 +16,7 @@ import {
 } from "../../helpers/videoModeControllerHarness";
 
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 const { mockVoiceStoreGetState, mockGetLocalCameraStream } = mocks;
 

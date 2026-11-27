@@ -10,7 +10,7 @@ import { isInstrumented, withoutSandboxHeader } from "../helpers/instrumented";
 const srcDir = path.resolve(__dirname, "../../src");
 
 const lineCaps: Record<string, number> = {
-  "lib/dispatcher.ts": 329,
+  "app/dispatcher.ts": 329,
   "main.ts": 150,
   "pages/MainPage.ts": 482,
 };
@@ -33,10 +33,10 @@ describe("registration points", () => {
     },
   );
 
-  it.runIf(judged("lib/dispatcher.ts"))(
+  it.runIf(judged("app/dispatcher.ts"))(
     "the dispatcher subscribes features through their route tables",
     () => {
-      const calls = source("lib/dispatcher.ts").match(/\.on\(/g) ?? [];
+      const calls = source("app/dispatcher.ts").match(/\.on\(/g) ?? [];
       expect(calls.length).toBeLessThanOrEqual(dispatcherOnCap);
     },
   );

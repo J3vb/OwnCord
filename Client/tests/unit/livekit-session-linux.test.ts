@@ -33,8 +33,8 @@ const mockVoiceState = vi.hoisted(() => ({
   voiceUsers: { get: () => ({ has: () => true, keys: () => [].values() }) },
 }));
 
-vi.mock("../../src/features/voice/native/platform", async (importOriginal) => ({
-  ...(await importOriginal<typeof import("../../src/features/voice/native/platform")>()),
+vi.mock("../../src/lib/hostOs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../src/lib/hostOs")>()),
   isLinuxDesktop: () => true,
 }));
 
@@ -77,13 +77,19 @@ vi.mock("livekit-client", () => ({
     Kind: { Audio: "audio", Video: "video" },
   },
   VideoPresets: { h360: {}, h720: {}, h1080: {} },
-  ScreenSharePresets: { h720fps5: {}, h720fps30: {}, h1080fps30: {} },
+  ScreenSharePresets: {
+    h720fps5: { resolution: { width: 1280, height: 720 } },
+    h720fps30: { resolution: { width: 1280, height: 720 } },
+    h1080fps30: { resolution: { width: 1920, height: 1080 } },
+  },
   VideoPreset: vi.fn(),
   DisconnectReason: { UNKNOWN_REASON: 0, CLIENT_INITIATED: 1 },
   ExternalE2EEKeyProvider: vi.fn(function () {
     return webKeyProvider;
   }),
 }));
+
+vi.mock("@stores/voiceListening", () => ({ setListeningTo: vi.fn() }));
 
 vi.mock("@stores/voice.store", () => ({
   voiceStore: {
@@ -251,7 +257,7 @@ vi.mock("@lib/net/e2eeCrypto", () => ({
   computeKeyFingerprint: vi.fn(async () => "AB12"),
   computeRawKeyFingerprint: vi.fn(async () => "5E55"),
 }));
-vi.mock("@lib/net/identity", () => ({
+vi.mock("../../src/features/connection/identity", () => ({
   getOrCreateIdentityKeyPair: vi.fn(async () => ({ publicKey: {}, privateKey: {} })),
   getIdentityPin: vi.fn(async () => ({ status: "unpinned" })),
   storeIdentityPin: vi.fn(async () => true),
@@ -260,7 +266,7 @@ globalThis.Worker = vi.fn(function () {
   throw new Error("no E2EE web worker on Linux");
 }) as unknown as typeof Worker;
 
-import { LiveKitSession } from "../../src/lib/voice/livekitSession";
+import { LiveKitSession } from "../../src/features/voice/livekitSession";
 import { vadThreshold } from "../../src/lib/voice/gateScale";
 import { setVoiceStatus, setListenOnly } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
@@ -478,15 +484,17 @@ describe("LiveKitSession on the Linux native backend", () => {
   it("per-user and output volume reach the native playout mixer", async () => {
     prefs.set("userVolume_3", 50);
     await session.handleVoiceToken("tok", "/livekit", 1, undefined, true);
+    session.listenToMusic(4);
     host.commands.length = 0;
     // A participant starts at their saved volume: the web path applies it on
-    // the audio TrackSubscribed, which the native room never raises.
+    // the audio TrackSubscribed, which the native room never raises. Music
+    // plays only for the sharer listened to (user 4), at 0 for the rest.
     emit({ session: 1, event: { type: "participantConnected", identity: "user-3" } });
     emit({ session: 1, event: { type: "participantConnected", identity: "user-4" } });
     expect(host.commands).toEqual([
       ["setVolume", [1, "user-3", 0.5]],
       ["setScreenshareVolume", [1, "user-3", 1]],
-      ["setMusicVolume", [1, "user-3", 1]],
+      ["setMusicVolume", [1, "user-3", 0]],
       ["setVolume", [1, "user-4", 1]],
       ["setScreenshareVolume", [1, "user-4", 1]],
       ["setMusicVolume", [1, "user-4", 1]],
@@ -623,7 +631,7 @@ describe("LiveKitSession on the Linux native backend", () => {
       expect(picker).toHaveBeenCalledOnce();
       expect(host.commands).toContainEqual([
         "startScreen",
-        [2, "window:81", { fps: 30, maxWidth: 1920, maxHeight: 1080 }],
+        [2, "window:81", { fps: 30, maxWidth: 1280, maxHeight: 720 }],
       ]);
       expect(toasts.show).not.toHaveBeenCalled();
     });
@@ -776,9 +784,8 @@ describe("LiveKitSession on the Linux native backend", () => {
     expect(host.commands).toEqual([
       ["screenSources", []],
       // The default (medium) share: 3 Mbps at 30 fps as one layer (the
-      // backup copy is off by default). This file's livekit mock presets carry no resolution, so the
-      // capture keeps its 1080p fallback.
-      ["startScreen", [1, "portal", { fps: 30, maxWidth: 1920, maxHeight: 1080 }]],
+      // backup copy is off by default), its capture held to 720p.
+      ["startScreen", [1, "portal", { fps: 30, maxWidth: 1280, maxHeight: 720 }]],
       [
         "publishScreen",
         [

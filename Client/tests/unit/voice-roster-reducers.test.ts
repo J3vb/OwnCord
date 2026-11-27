@@ -5,6 +5,7 @@ import {
   ownReadyRow,
   withJoinedChannel,
   withLeftChannel,
+  withReadyVoice,
   withSpeakers,
   withVoiceState,
 } from "../../src/stores/voiceRoster";
@@ -88,6 +89,26 @@ describe("channel membership", () => {
 
     expect(next.voiceUsers.has(4)).toBe(false);
     expect(next).toMatchObject({ currentChannelId: null, voiceStatus: "idle", joinedAt: null });
+  });
+});
+
+describe("withReadyVoice", () => {
+  const row = (serverMuted: boolean): ReadyVoiceState =>
+    ({ channel_id: 4, user_id: 1, server_muted: serverMuted }) as unknown as ReadyVoiceState;
+
+  it("marks a moderator's mute a full resync brings over an open mic, and only that one", () => {
+    const open = withReadyVoice(inChannel(), new Map(), row(true));
+    expect(open).toMatchObject({ localServerMuted: true, moderatorMuted: true });
+
+    const own = withReadyVoice({ ...inChannel(), localMuted: true }, new Map(), row(true));
+    expect(own.moderatorMuted).toBe(false);
+
+    expect(withReadyVoice(open, new Map(), row(true)).moderatorMuted).toBe(true);
+    expect(withReadyVoice(open, new Map(), undefined)).toMatchObject({
+      currentChannelId: 4,
+      localServerMuted: false,
+      moderatorMuted: false,
+    });
   });
 });
 

@@ -13,9 +13,9 @@
 
 import { createElement } from "@lib/dom";
 import { getChannelsByCategory, type CategoryRef } from "@stores/channels.store";
-import { canManageChannels, visibleCategories } from "@lib/permissions";
+import { canManageChannels, visibleCategories } from "@stores/permissions";
 import { collapseCategories, isCategoryCollapsed, toggleCategory } from "@stores/ui.store";
-import { hasUnread, markChannelsRead } from "@lib/readState";
+import { markChannelsRead, showsUnreadBadge } from "@stores/readState";
 import { openMenuOnKeyboard, openMenuShell } from "@lib/ui/contextMenu";
 import { shellText } from "../../../i18n/shell";
 import { canMoveCategory } from "../categoryActions";
@@ -28,6 +28,8 @@ export interface CategoryMenuTarget extends CategoryRef {
 
 /** The management callbacks the page wired; an absent one hides its entry. */
 export interface CategoryMenuActions {
+  /** Tree mode only: the header's "+" has no keyboard route there, so the menu offers it. */
+  readonly onCreateChannel?: (() => void) | undefined;
   readonly onCreateCategory?: (() => void) | undefined;
   readonly onRenameCategory?: ((category: CategoryRef) => void) | undefined;
   readonly onDeleteCategory?: ((category: CategoryRef) => void) | undefined;
@@ -43,8 +45,20 @@ function appendManageItems(
 ): void {
   const ref: CategoryRef = { id: target.id, name: target.name };
   const real = target.id > 0;
-  const { onCreateCategory, onRenameCategory, onDeleteCategory, onMoveCategory } = actions;
+  const { onCreateChannel, onCreateCategory, onRenameCategory, onDeleteCategory, onMoveCategory } =
+    actions;
   const manage: (() => void)[] = [];
+  if (onCreateChannel !== undefined) {
+    manage.push(() =>
+      addItem(
+        shellText("channel.create"),
+        "context-menu-item",
+        "ctx-category-create-channel",
+        onCreateChannel,
+        "plus",
+      ),
+    );
+  }
   if (onCreateCategory !== undefined) {
     manage.push(() =>
       addItem(
@@ -134,7 +148,7 @@ export function attachCategoryContextMenu(
     const category = target.key;
     const groups = getChannelsByCategory(visibleCategories());
     const unreadIds = (groups.get(category) ?? [])
-      .filter((ch) => ch.type !== "voice" && hasUnread(ch.id))
+      .filter((ch) => showsUnreadBadge(ch.id))
       .map((ch) => ch.id);
     addItem(
       shellText("category.markRead"),

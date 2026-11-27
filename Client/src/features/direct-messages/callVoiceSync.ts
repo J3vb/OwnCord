@@ -1,7 +1,7 @@
 /** How the DM call state follows the voice store. */
 
 import { createLogger } from "@lib/logger";
-import { enableCamera } from "@lib/voice/livekitSession";
+import { enableCamera } from "../voice/livekitSession";
 import type { OutgoingCall, RingController } from "@lib/voice/callRing";
 import type { VoiceState } from "@stores/voice.store";
 

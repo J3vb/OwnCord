@@ -1,0 +1,486 @@
+/* ═══ Command Deck (preview layout) ═══ */
+/* Loaded last. Every selector starts with `html.layout-deck`, which
+   applyStoredAppearance() sets from the running screen layout, so Classic is
+   untouched. tests/unit/deck/deck-css.test.ts enforces this file's rules.
+
+   The colour rule. Deck loads after accessibility.css, so it must never
+   decide a colour itself, or High Contrast and reduced motion would stop
+   winning:
+   - A colour property (color, background, background-color, border and its
+     side and -color forms, box-shadow, fill, stroke, caret-color,
+     text-decoration-color, column-rule-color) reads only var(--bg-primary),
+     var(--bg-secondary), var(--bg-tertiary), var(--bg-input), var(--border),
+     var(--border-control), var(--text-normal), var(--text-muted),
+     var(--header-primary), var(--red), var(--green) or var(--yellow), or the
+     keywords none, transparent and currentcolor. --red, --green and --yellow
+     are fills only: background, background-color and fill.
+   - Any other var() names a layout token: --deck-*, --header-height,
+     --safe-bottom, --radius-* or --font-size-*.
+   - No literal colour, and no outline, transition or animation property. */
+
+html.layout-deck {
+  /* 6px is a recorded exception to the 4px --space-* steps; no 3px radius token exists. */
+  --deck-gap: 6px;
+  --deck-radius: 3px;
+  --deck-top-min: 36px;
+  --deck-status-min: 46px;
+}
+
+/* The frame. The top bar takes the top inset, the status bar the bottom one. */
+html.layout-deck .app {
+  padding: var(--deck-gap) calc(var(--deck-gap) + env(safe-area-inset-right)) var(--deck-gap)
+    env(safe-area-inset-left);
+}
+/* Margins, not a flex gap, so an empty .dm-profile-slot gets none. */
+html.layout-deck .app > .unified-sidebar,
+html.layout-deck
+  .app
+  > :is(.chat-area, .thread-panel-slot, .member-column, .dm-profile-slot):not(:empty) {
+  margin-left: var(--deck-gap);
+  border: 1px solid var(--border);
+  border-radius: var(--deck-radius);
+}
+html.layout-deck .dm-profile-sidebar {
+  border-left: 0;
+}
+
+/* At 800px and below the sidebar collapses to zero width; the open drawer is unchanged. */
+@media (max-width: 800px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .app > .unified-sidebar {
+    margin-left: 0;
+    border: 0;
+    border-radius: 0;
+  }
+}
+
+/* The overlays under the chat header. The measured sizes are written on the
+   page root, so they are declared here on the overlays, never on <html>,
+   where their var()s would resolve to 0. */
+html.layout-deck :is(.member-column, .side-panel) {
+  /* top bar, frame padding, frame border */
+  --deck-above-header: calc(var(--deck-top-measured, 0px) + var(--deck-gap) + 1px);
+  --deck-below: var(--deck-status-measured, 0px);
+}
+@media (max-width: 899px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .member-column {
+    top: calc(var(--deck-above-header) + var(--header-height, 48px));
+    bottom: var(--deck-below);
+  }
+  /* Too little room beside the connection state and the toggle; the voice widget shows the ping. */
+  html.layout-deck .deck-ping {
+    display: none;
+  }
+}
+/* The fold: at 1200px or less the column is an overlay under the chat header,
+   opened by the top bar's toggle (memberColumn.ts's DECK_FOLD_QUERY). The
+   phone clauses stay so the prelude ends with PHONE_LAYOUT_QUERY. */
+@media (max-width: 1200px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .member-column {
+    position: fixed;
+    top: calc(var(--deck-above-header) + var(--header-height, 48px));
+    bottom: var(--deck-below);
+    right: 0;
+    /* Beats the inline width the controller sets and member-list.css's overlay widths. */
+    width: min(280px, 85vw) !important;
+    max-width: none;
+    z-index: 100;
+  }
+  html.layout-deck .member-column-resize {
+    display: none;
+  }
+}
+html.layout-deck .side-panel {
+  --deck-overlay-max: calc(
+    100vh - var(--deck-above-header) - var(--header-height, 48px) - var(--deck-below) -
+      var(--deck-gap)
+  );
+  top: calc(var(--deck-above-header) + var(--header-height, 48px));
+  right: calc(var(--deck-gap) + 1px);
+  max-height: min(80vh, 720px, var(--deck-overlay-max));
+}
+html.layout-deck .media-gallery.side-panel {
+  height: min(80vh, 720px, var(--deck-overlay-max));
+}
+@media (max-width: 600px) {
+  html.layout-deck .side-panel {
+    right: 0;
+    bottom: var(--deck-below);
+  }
+}
+
+/* The top bar: the server's name, search as a field, the connection state. */
+html.layout-deck .deck-top-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(160px, 420px) minmax(0, 1fr);
+  align-items: center;
+  gap: var(--deck-gap);
+  min-height: var(--deck-top-min);
+  padding: env(safe-area-inset-top) calc(var(--deck-gap) + env(safe-area-inset-right)) 0
+    calc(var(--deck-gap) + env(safe-area-inset-left));
+  flex: none;
+  background: var(--bg-tertiary);
+}
+html.layout-deck .deck-top-name {
+  justify-self: start;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  padding-inline-start: var(--deck-gap);
+  font-weight: 600;
+  color: var(--header-primary);
+}
+/* --bg-input on purpose: the field must stand apart from the bar's --bg-tertiary. */
+html.layout-deck .deck-search {
+  justify-self: stretch;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--border-control);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-align: start;
+  cursor: pointer;
+}
+html.layout-deck .deck-connection {
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+}
+html.layout-deck .deck-connection-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.layout-deck .deck-led {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-circle);
+}
+html.layout-deck .deck-led[data-state="connected"] {
+  background: var(--green);
+}
+html.layout-deck .deck-led:is([data-state="elsewhere"], [data-state="reconnecting"]) {
+  background: var(--yellow);
+}
+html.layout-deck .deck-led:is([data-state="offline"], [data-state="unreachable"]) {
+  background: var(--red);
+}
+@media (max-width: 640px) {
+  html.layout-deck .deck-top-bar {
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  }
+  html.layout-deck .deck-search-text {
+    display: none;
+  }
+}
+
+/* The status bar: the user bar, then (in a call) the voice widget. No
+   overflow, so focus rings at the edges are not clipped. */
+html.layout-deck .deck-status-bar {
+  display: flex;
+  align-items: flex-end;
+  gap: var(--deck-gap);
+  min-height: var(--deck-status-min);
+  padding: 0 calc(var(--deck-gap) + env(safe-area-inset-right)) var(--safe-bottom, 0px)
+    calc(var(--deck-gap) + env(safe-area-inset-left));
+  flex: none;
+  background: var(--bg-tertiary);
+}
+html.layout-deck .deck-status-bar > .deck-slot {
+  display: contents;
+}
+html.layout-deck .deck-status-bar .user-bar {
+  height: auto;
+  min-height: var(--deck-status-min);
+  flex: 0 1 240px;
+  min-width: 0;
+  background: none;
+}
+
+/* The voice widget grows the bar upward up to 35vh, then scrolls. */
+html.layout-deck .deck-status-bar .voice-widget {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 4px 2px;
+  border: 0;
+  background: none;
+  max-height: max(var(--deck-status-min), 35vh);
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+html.layout-deck .deck-status-bar .voice-widget.visible {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: 8px;
+  row-gap: 4px;
+}
+html.layout-deck .deck-status-bar .vw-header {
+  flex: 1 1 auto;
+  min-width: 0;
+  padding: 0;
+}
+html.layout-deck .deck-status-bar .vw-controls {
+  flex: none;
+  padding: 0;
+}
+html.layout-deck .deck-status-bar .vw-controls button {
+  flex: none;
+  width: 32px;
+}
+/* The widget's panels sit above the call row. */
+html.layout-deck
+  .deck-status-bar
+  :is(
+    .vw-listening,
+    .vw-stats.visible,
+    .vw-grant-mic,
+    .vw-mic-notice:not(:empty),
+    .vw-stream-card
+  ) {
+  order: -1;
+  flex: 1 0 100%;
+  margin: 0;
+}
+
+/* By width, and on a phone: room in the bar. */
+@media (max-width: 800px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .deck-status-bar .vw-channel {
+    display: none;
+  }
+  /* The normal Secured chip stays readable to screen readers (the .sr-only
+     declarations); securedBadge.ts sets its display inline, so display
+     cannot hide it. "Unsecured" always shows. */
+  html.layout-deck .deck-status-bar .vw-secured:not(.vw-secured--degraded) {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border-width: 0;
+  }
+}
+@media (max-width: 560px) {
+  html.layout-deck .deck-status-bar .ub-info {
+    display: none;
+  }
+}
+
+/* server-rail.css hides the Switch-server button inside .app when the rail
+   shows; under Deck the user bar is outside .app. */
+@media (min-width: 801px) {
+  html.layout-deck
+    .app.has-server-rail
+    ~ .deck-status-bar
+    .user-bar
+    [data-testid="disconnect-btn"] {
+    display: none;
+  }
+  html.layout-deck .app.has-server-rail ~ .deck-status-bar .user-bar .ub-controls {
+    gap: 6px;
+  }
+}
+
+/* On a phone in a call, Mute, hold-to-talk and Leave live only in the status
+   bar: the call bar, the call view's bar and the DM call panel hide their
+   copies, but only once the voice widget shows the call (voice-widget-up on
+   <html>), so a widget that fails to load leaves them in place. The voice widget takes its own row above yours and never clips, so
+   the call row (Leave, and "Unsecured" in its header) is always drawn; each
+   panel above it scrolls inside its own cap. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck.voice-widget-up [data-testid="pcb-mute"],
+  html.layout-deck.voice-widget-up [data-testid="pcb-leave"],
+  html.layout-deck.voice-widget-up .phone-call-bar .talk-btn--bar,
+  html.layout-deck.voice-widget-up .video-grid__controls [data-call-control="mute"],
+  html.layout-deck.voice-widget-up .video-grid__controls [data-call-control="leave"],
+  html.layout-deck.voice-widget-up .video-grid__controls .talk-btn--call,
+  html.layout-deck.voice-widget-up [data-testid="dcp-mute"],
+  html.layout-deck.voice-widget-up [data-testid="dcp-leave"],
+  html.layout-deck.voice-widget-up [data-testid="dcp-leave-call"],
+  html.layout-deck.voice-widget-up [data-testid="dm-call-panel"] .talk-btn--bar {
+    display: none;
+  }
+  html.layout-deck .deck-status-bar {
+    flex-wrap: wrap;
+  }
+  html.layout-deck .deck-status-bar .voice-widget.visible {
+    order: -1;
+    flex: 1 0 100%;
+    max-height: none;
+    overflow: visible;
+  }
+  html.layout-deck
+    .deck-status-bar
+    :is(
+      .vw-listening,
+      .vw-stats.visible,
+      .vw-grant-mic,
+      .vw-mic-notice:not(:empty),
+      .vw-stream-card
+    ) {
+    max-height: 12vh;
+    overflow-y: auto;
+  }
+  html.layout-deck .deck-status-bar .user-bar {
+    flex: 1 1 100%;
+  }
+  html.layout-deck .deck-status-bar .vw-controls button,
+  html.layout-deck .deck-status-bar .user-bar .ub-controls button {
+    width: 44px;
+    height: 44px;
+  }
+  html.layout-deck .deck-status-bar :is(.vw-signal, .vw-ns) {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+  html.layout-deck .deck-status-bar .ub-info {
+    display: flex;
+  }
+}
+
+/* On a phone while the message box has focus. Out of a call the status bar's
+   contents hide and the bar stays as a strip of its bottom inset, so Send
+   stays above the navigation bar after Back closes the keyboard. In a call the
+   call bar and the tall panels go, and the status bar is one row: Mute, the
+   timer, the security chip, the signal and Leave. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck body.composer-typing .deck-status-bar:not(:has(.voice-widget.visible)) {
+    min-height: 0;
+  }
+  html.layout-deck body.composer-typing .deck-status-bar:not(:has(.voice-widget.visible)) > * {
+    display: none;
+  }
+  html.layout-deck body.composer-typing .phone-call-bar {
+    display: none;
+  }
+  html.layout-deck
+    body.composer-typing
+    .deck-status-bar
+    :is(.vw-stats.visible, .vw-listening, .vw-mic-notice, .vw-stream-card) {
+    display: none;
+  }
+  html.layout-deck body.composer-typing .deck-status-bar:has(.voice-widget.visible) .user-bar {
+    flex: none;
+    order: -2;
+  }
+  html.layout-deck body.composer-typing .deck-status-bar .voice-widget.visible {
+    flex: 1 1 0;
+  }
+  html.layout-deck body.composer-typing .deck-status-bar .vw-header {
+    flex-direction: row;
+    align-items: center;
+  }
+  html.layout-deck
+    body.composer-typing
+    .deck-status-bar:has(.voice-widget.visible)
+    :is(
+      .vw-connected.vw-steady,
+      .vw-ns,
+      .vw-controls > :not(:last-child),
+      .ub-self,
+      [data-testid="ub-deafen"],
+      [data-testid="ub-deafen"] ~ *
+    ) {
+    display: none;
+  }
+  /* A squeezed name clips instead of spilling over Mute. */
+  html.layout-deck .deck-status-bar .ub-info {
+    overflow: hidden;
+  }
+  /* The last small buttons in the bar. */
+  html.layout-deck
+    .deck-status-bar
+    :is(.vw-grant-mic, .vw-listening__stop, .vw-stream-card button) {
+    min-height: 44px;
+  }
+}
+
+/* A short, wide window: a phone on its side. Landscape, so a phone upright
+   with the keyboard up (as short, but narrower than tall) keeps its rows. */
+@media (max-height: 499px) and (orientation: landscape) {
+  /* Your row beside the call row. These repeat the desktop values, so only the
+     phone rules above are undone. */
+  html.layout-deck .deck-status-bar .voice-widget.visible {
+    flex: 1 1 auto;
+  }
+  html.layout-deck .deck-status-bar .user-bar {
+    flex: 0 1 240px;
+  }
+  /* With the keyboard up: the top bar keeps only its inset and the chat
+     header goes. */
+  html.layout-deck body.composer-typing .deck-top-bar {
+    min-height: 0;
+  }
+  /* The second selector outweighs the tab fold's Servers button rule. */
+  html.layout-deck body.composer-typing .deck-top-bar > *,
+  html.layout-deck body.composer-typing .deck-top-bar.has-server-tabs > * {
+    display: none;
+  }
+  html.layout-deck body.composer-typing .chat-header {
+    display: none;
+  }
+}
+
+/* On a phone: a 44 px top bar, search as a 44 px icon, and the connection
+   state's words kept for a screen reader only. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck {
+    --deck-top-min: 44px;
+  }
+  html.layout-deck .deck-top-bar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  html.layout-deck .deck-search {
+    justify-self: end;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+  html.layout-deck .deck-search-text {
+    display: none;
+  }
+  html.layout-deck .deck-connection-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}
+
+/* On a phone Buddies is a drawer from below the top bar to the status bar.
+   member-list.css already pads the column's bottom inset, which the bottom
+   edge counts here. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .member-column {
+    top: var(--deck-above-header);
+    bottom: max(var(--deck-below), var(--safe-bottom, 0px));
+    width: min(320px, 88vw) !important;
+    padding-bottom: 0;
+  }
+}

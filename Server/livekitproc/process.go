@@ -4,7 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -123,7 +125,7 @@ func (p *Process) generateConfig() (string, error) {
 # Your keys entry must still match voice.livekit_api_key /
 # voice.livekit_api_secret in config.yaml.
 port: 7880
-
+%s
 rtc:
 %s%s
   pli_throttle:
@@ -142,7 +144,7 @@ keys:
 
 logging:
   level: info
-`, rtcPortLines, addrLines, p.cfg.LiveKitAPIKey, p.cfg.LiveKitAPISecret)
+`, bindAddressesBlock(p.cfg.LiveKitURL), rtcPortLines, addrLines, p.cfg.LiveKitAPIKey, p.cfg.LiveKitAPISecret)
 
 	if err := os.MkdirAll(p.dataDir, 0o750); err != nil {
 		return "", fmt.Errorf("creating data dir: %w", err)
@@ -152,6 +154,48 @@ logging:
 	}
 
 	return cfgPath, nil
+}
+
+// bindAddressesBlock keeps LiveKit's signalling port on the local machine when OwnCord reaches it over
+// loopback: clients sign in to voice through the /livekit proxy on the main port, and a same-machine client's
+// direct URL is loopback too. LiveKit applies bind_addresses to the signalling listener only; the media
+// ports (rtc.tcp_port and UDP) keep listening on every interface. Any other voice.livekit_url (a LAN or
+// container address) keeps today's all-interfaces listener, so returns "".
+func bindAddressesBlock(rawURL string) string {
+	u, err := url.Parse(rawURL)
+	if err != nil {
+		return ""
+	}
+	host := u.Hostname()
+	var addrs []string
+	switch ip := net.ParseIP(host); {
+	case ip != nil && ip.IsLoopback():
+		addrs = []string{ip.String()}
+	case strings.EqualFold(host, "localhost"):
+		addrs = []string{"127.0.0.1"}
+		if loopbackIPv6Usable() {
+			addrs = append(addrs, "::1")
+		}
+	default:
+		return ""
+	}
+	var b strings.Builder
+	b.WriteString("bind_addresses:\n")
+	for _, a := range addrs {
+		fmt.Fprintf(&b, "  - %q\n", a)
+	}
+	return b.String()
+}
+
+// loopbackIPv6Usable reports whether this host can listen on ::1. LiveKit refuses to start when a bind
+// address cannot be listened on, and some hosts and containers turn IPv6 off.
+func loopbackIPv6Usable() bool {
+	ln, err := net.Listen("tcp", "[::1]:0")
+	if err != nil {
+		return false
+	}
+	_ = ln.Close()
+	return true
 }
 
 func rtcAddressLines(cfg *config.VoiceConfig) (string, error) {

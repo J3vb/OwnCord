@@ -68,7 +68,7 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     reason: "app-lifetime preference listener installed once at module load",
   },
   {
-    file: "lib/text/formatting.ts",
+    file: "features/messaging/formatting.ts",
     receiver: "window",
     event: "owncord:pref-change",
     category: "app-lifetime",
@@ -103,7 +103,7 @@ const R1_ALLOWLIST: readonly R1Entry[] = [
     reason: "app-lifetime cross-tab storage listener installed once at module load",
   },
   {
-    file: "lib/voice/deviceManager.ts",
+    file: "features/voice/deviceManager.ts",
     receiver: "navigator.mediaDevices",
     event: "devicechange",
     category: "per-mount",
@@ -228,7 +228,7 @@ const R4_ALLOWLIST: readonly R4Entry[] = [
     reason: "owner: the per-attempt HEALTH_TIMEOUT_MS timer that aborts it",
   },
   {
-    file: "lib/voice/roomEventHandlers.ts",
+    file: "features/voice/roomEventHandlers.ts",
     fn: "abandonRoomAndReconnect",
     category: "cancellation-token",
     reason: "owner: the next attempt, which aborts this one",

@@ -355,7 +355,17 @@ jobs:
       # breaks Mesa EGL init on newer hosts (white window on Arch/Fedora —
       # EGL_BAD_PARAMETER). Strip them and regenerate the updater artifact +
       # signatures for the patched image.
-      - name: Strip host-incompatible libs from AppImage and re-sign
+      - name: Strip host-incompatible libs from AppImage
+        working-directory: Client
+        shell: bash
+        run: |
+          BUNDLE_DIR="src-tauri/target/release/bundle/appimage"
+          APPIMAGE=$(find "$BUNDLE_DIR" -name "*.AppImage" ! -name "*.sig" | head -1)
+          bash scripts/strip-appimage-bundled-libs.sh "$APPIMAGE"
+
+      # Its own step, so the signing key is in the environment of the signer
+      # alone and of nothing the repack above runs.
+      - name: Re-sign the stripped AppImage
         working-directory: Client
         shell: bash
         env:
@@ -364,7 +374,6 @@ jobs:
         run: |
           BUNDLE_DIR="src-tauri/target/release/bundle/appimage"
           APPIMAGE=$(find "$BUNDLE_DIR" -name "*.AppImage" ! -name "*.sig" | head -1)
-          bash scripts/strip-appimage-bundled-libs.sh "$APPIMAGE"
           TARBALL="$APPIMAGE.tar.gz"
           rm -f "$TARBALL" "$APPIMAGE.sig" "$TARBALL.sig"
           tar czf "$TARBALL" -C "$(dirname "$APPIMAGE")" "$(basename "$APPIMAGE")"
@@ -500,7 +509,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache: false
@@ -720,7 +729,17 @@ jobs:
         run: bash scripts/check-nvenc-linked.sh src-tauri/target/release/owncord-client
 
       # Same strip + re-sign as the x86_64 job — see the comment there.
-      - name: Strip host-incompatible libs from AppImage and re-sign
+      - name: Strip host-incompatible libs from AppImage
+        working-directory: Client
+        shell: bash
+        run: |
+          BUNDLE_DIR="src-tauri/target/release/bundle/appimage"
+          APPIMAGE=$(find "$BUNDLE_DIR" -name "*.AppImage" ! -name "*.sig" | head -1)
+          bash scripts/strip-appimage-bundled-libs.sh "$APPIMAGE"
+
+      # Its own step, so the signing key is in the environment of the signer
+      # alone and of nothing the repack above runs.
+      - name: Re-sign the stripped AppImage
         working-directory: Client
         shell: bash
         env:
@@ -729,7 +748,6 @@ jobs:
         run: |
           BUNDLE_DIR="src-tauri/target/release/bundle/appimage"
           APPIMAGE=$(find "$BUNDLE_DIR" -name "*.AppImage" ! -name "*.sig" | head -1)
-          bash scripts/strip-appimage-bundled-libs.sh "$APPIMAGE"
           TARBALL="$APPIMAGE.tar.gz"
           rm -f "$TARBALL" "$APPIMAGE.sig" "$TARBALL.sig"
           tar czf "$TARBALL" -C "$(dirname "$APPIMAGE")" "$(basename "$APPIMAGE")"

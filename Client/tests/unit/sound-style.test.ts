@@ -19,7 +19,7 @@ vi.mock("../../src/platform/desktop", () => ({
     notifier: {},
   },
 }));
-vi.mock("../../src/features/voice/native/platform", () => ({
+vi.mock("../../src/lib/hostOs", () => ({
   isLinuxDesktop: () => host.linux,
   isWindowsDesktop: () => false,
 }));

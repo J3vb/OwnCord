@@ -218,25 +218,25 @@
       "reason": "The bundled changelog, not server data"
     },
     {
-      "file": "lib/nav/channelNavigation.ts",
+      "file": "features/navigation/channelNavigation.ts",
       "binding": "reselectListeners",
       "category": "dom-owned",
       "reason": "Listeners removed by the disposer each subscriber holds"
     },
     {
-      "file": "lib/text/formatting.ts",
+      "file": "features/messaging/formatting.ts",
       "binding": "parsedTimestampCache",
       "category": "pure-cache",
       "reason": "Parse result keyed by the timestamp string itself"
     },
     {
-      "file": "lib/net/identity.ts",
+      "file": "features/connection/identity.ts",
       "binding": "identityKeyPairCache",
       "category": "host-keyed",
       "reason": "Keyed by host and user, so a second server never reads the first's pair"
     },
     {
-      "file": "lib/net/identity.ts",
+      "file": "features/connection/identity.ts",
       "binding": "pinWrites",
       "category": "host-keyed",
       "reason": "In-flight pin writes keyed by host and user; each entry removes itself when its write settles"
@@ -278,19 +278,19 @@
       "reason": "Listeners for the game activity switch; each owner (the game activity loop, the Settings pane) removes its own on teardown, and the session reset deliberately keeps them"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "stores/readState.ts",
       "binding": "threadPointers",
       "category": "reset-elsewhere",
       "reason": "Last read pointer per thread id; cleared by resetReadPointerState, which the dispatcher runs per session"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "stores/readState.ts",
       "binding": "highestSeen",
       "category": "reset-elsewhere",
       "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
-      "file": "lib/readStateAway.ts",
+      "file": "stores/readStateAway.ts",
       "binding": "liveTailOutOfView",
       "category": "dom-owned",
       "reason": "Scroll state of mounted lists; each list sets it again from its scroll handler"
@@ -320,19 +320,19 @@
       "reason": "Listeners removed by the disposer each mounted list holds"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "stores/readState.ts",
       "binding": "pendingLiveSeen",
       "category": "reset-elsewhere",
       "reason": "Emptied by setMarkReadSender, which MainPage's teardown calls with null and the next mount re-registers"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "stores/readState.ts",
       "binding": "pendingMarkUnread",
       "category": "reset-elsewhere",
       "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
     },
     {
-      "file": "lib/readState.ts",
+      "file": "stores/readState.ts",
       "binding": "unreadHold",
       "category": "reset-elsewhere",
       "reason": "Emptied by resetReadPointerState (pendingMarkUnread also by forgetPendingMarkUnread) in the dispatcher cleanup, which also runs when startSession retries"
@@ -362,6 +362,12 @@
       "reason": "Listeners removed by the disposer each subscriber holds"
     },
     {
+      "file": "features/voice/popoutDocuments.ts",
+      "binding": "documentHooks",
+      "category": "app-lifetime",
+      "reason": "Hooks the app's shortcuts register for pop-out window documents, each removed when its owner's signal aborts; nothing in it is per-server"
+    },
+    {
       "file": "features/custom-themes/customTheme.ts",
       "binding": "changeListeners",
       "category": "dom-owned",
@@ -372,6 +378,12 @@
       "binding": "lastJoins",
       "category": "app-lifetime",
       "reason": "Join diagnostics, exempt in the 5.2 design note"
+    },
+    {
+      "file": "lib/voice/liveStats.ts",
+      "binding": "liveStatsStore",
+      "category": "transient",
+      "reason": "Last connection sample of the running call; nothing resets it, and readers show a sample only while connected, written while connected and after the current joinedAt, which every join sets, so it is never shown after its call"
     },
     {
       "file": "features/connection/RecoverOverlay.ts",
@@ -440,12 +452,6 @@
       "reason": "In-flight tunnel start keyed by host"
     },
     {
-      "file": "platform/desktop/pushToTalkService.ts",
-      "binding": "releaseTimer",
-      "category": "app-lifetime",
-      "reason": "Key-release debounce of the local push-to-talk binding"
-    },
-    {
       "file": "platform/desktop/updater.ts",
       "binding": "installListeners",
       "category": "app-lifetime",
@@ -500,10 +506,10 @@
       "reason": "WeakMap keyed by the copy button; a pending label reset goes with its button, and an owner's signal drops it on abort"
     },
     {
-      "file": "features/voice/talkButton.ts",
-      "binding": "releaseTimer",
-      "category": "transient",
-      "reason": "A release's pending gate write for the call in progress; it checks that call's channel and join time before writing, so it never touches a later session's call"
+      "file": "stores/voicePttClose.ts",
+      "binding": "pendingClose",
+      "category": "reset-elsewhere",
+      "reason": "A push-to-talk release's pending store write for the call in progress; voice.store's resetVoiceStore and leaveVoiceChannel cancel it, and it checks that call's channel and join time before writing, so it never touches a later session's call"
     },
     {
       "file": "features/voice/talkButton.ts",

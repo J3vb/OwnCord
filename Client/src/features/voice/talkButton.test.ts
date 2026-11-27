@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const session = vi.hoisted(() => ({ setPttGated: vi.fn() }));
-vi.mock("../../lib/voice/livekitSession", () => ({ setPttGated: session.setPttGated }));
+vi.mock("./livekitSession", () => ({ setPttGated: session.setPttGated }));
 
 import {
   createTalkButton,
@@ -13,8 +13,10 @@ import {
 } from "./talkButton";
 import { pttGates } from "../../lib/ui/inputMode";
 import {
+  isPttClosePending,
   isPttPollingLive,
   resetVoiceStore,
+  setPttGated,
   setPttPollingLive,
   voiceStore,
 } from "../../stores/voice.store";
@@ -44,9 +46,10 @@ describe("talk button", () => {
     localStorage.clear();
     resetVoiceStore();
     session.setPttGated.mockReset();
-    // The real session writes the store; the mock does it too.
-    session.setPttGated.mockImplementation((gated: boolean) =>
-      voiceStore.setState((s) => ({ ...s, pttGated: gated })),
+    // The real session writes the store, a release's close once its delay
+    // has run; the mock does it too.
+    session.setPttGated.mockImplementation((gated: boolean, releaseDelayMs?: number) =>
+      setPttGated(gated, releaseDelayMs),
     );
     owner = new AbortController();
   });
@@ -55,6 +58,7 @@ describe("talk button", () => {
     owner.abort();
     resetTalkButtonForTest();
     setPttPollingLive(false);
+    resetVoiceStore();
   });
 
   it("makes Push to talk gate on the button alone, with no key bound", () => {
@@ -70,7 +74,7 @@ describe("talk button", () => {
     expect(isPttPollingLive()).toBe(false);
   });
 
-  it("opens the gate on press and closes it after the release delay", async () => {
+  it("opens the gate on press and hands a release its delay at once, as a key does", async () => {
     setPref("inputMode", "ptt");
     setPref("pttReleaseDelayMs", 100);
     startTalkButton(owner.signal);
@@ -82,9 +86,8 @@ describe("talk button", () => {
 
     releaseTalk();
     await settle();
-    expect(session.setPttGated).toHaveBeenCalledTimes(1);
-    await new Promise((r) => setTimeout(r, 150));
-    expect(session.setPttGated).toHaveBeenLastCalledWith(true);
+    // The session closes the mic on the audio clock: no page timer here.
+    expect(session.setPttGated.mock.calls).toEqual([[false], [true, 100]]);
   });
 
   it("a press right after a release keeps the mic open", async () => {
@@ -96,10 +99,12 @@ describe("talk button", () => {
     pressTalk();
     await settle();
     releaseTalk();
+    await settle();
     pressTalk();
-    await new Promise((r) => setTimeout(r, 250));
-    expect(session.setPttGated).not.toHaveBeenLastCalledWith(true);
+    await settle();
+    expect(session.setPttGated).toHaveBeenLastCalledWith(false);
     expect(voiceStore.getState().pttGated).toBe(false);
+    expect(isPttClosePending()).toBe(false);
   });
 
   it("does nothing outside a call or in Voice activity mode", async () => {
@@ -117,7 +122,7 @@ describe("talk button", () => {
     expect(session.setPttGated).not.toHaveBeenCalled();
   });
 
-  it("a release whose delay outlives the call writes nothing to the next one", async () => {
+  it("a release that lands after the call changed writes nothing to the next one", async () => {
     setPref("inputMode", "ptt");
     setPref("pttReleaseDelayMs", 100);
     startTalkButton(owner.signal);
@@ -127,10 +132,28 @@ describe("talk button", () => {
     session.setPttGated.mockClear();
 
     releaseTalk();
-    await settle();
     voiceStore.setState((s) => ({ ...s, joinedAt: 2000 }));
-    await new Promise((r) => setTimeout(r, 150));
+    await settle();
     expect(session.setPttGated).not.toHaveBeenCalled();
+  });
+
+  it("switching to Voice activity during a release's delay opens the closing gate", async () => {
+    setPref("inputMode", "ptt");
+    setPref("pttReleaseDelayMs", 500);
+    startTalkButton(owner.signal);
+    joinCall(true);
+    pressTalk();
+    await settle();
+    releaseTalk();
+    await settle();
+    // The mic is closing; the store records it only once the delay has run.
+    expect(voiceStore.getState().pttGated).toBe(false);
+    session.setPttGated.mockClear();
+
+    setPref("inputMode", "vad");
+    syncTalkSource();
+    await settle();
+    expect(session.setPttGated).toHaveBeenLastCalledWith(false);
   });
 
   it("closes the gate of a call in progress when Push to talk is chosen, and opens it again for Voice activity", async () => {

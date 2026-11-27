@@ -14,9 +14,10 @@ import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
 import type { Selection } from "@lib/ui/select";
 import { enableRovingNavigation } from "@lib/ui/a11y";
+import { enableTreeNavigation, type TreeNavigation } from "@lib/ui/treeKeys";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { shellText } from "../../i18n/shell";
-import type { ChannelSidebarOptions } from "./channelSidebarTypes";
+import type { ChannelSidebarOptions, TreeSection } from "./channelSidebarTypes";
 import { createListRenderer } from "./channelListRender";
 import {
   occupiedKey,
@@ -47,6 +48,11 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
   // still use `disposable.signal`.
   let root: HTMLDivElement | null = null;
   let channelList: HTMLDivElement | null = null;
+  /** Tree mode only: stamps the levels and keeps the one Tab stop. */
+  let treeNav: TreeNavigation | null = null;
+  /** Tree mode only: the group under the list (the Direct folder), if the page gave one. */
+  let directSection: TreeSection | null = null;
+  const tree = options.tree === true;
   let serverNameEl: HTMLSpanElement | null = null;
   /** Everything the sidebar draws, from the one `select`
    *  mount() creates. */
@@ -71,6 +77,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     lifetime: disposable.signal,
     ownerByEl,
     voice,
+    tree: options.tree === true,
   });
 
   function renderChannels(): void {
@@ -78,6 +85,7 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // sidebarSel exists from mount() on, which is also when channelList does.
     if (channelList !== null && sidebarSel !== null) drawList(channelList, sidebarSel.get());
     voice.restoreFocus(focus, channelList);
+    treeNav?.refresh();
   }
 
   /** The projection changed: redraw what it touches. */
@@ -100,6 +108,8 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
       renderChannels();
     } else {
       voice.refresh(channelList);
+      // A rebuilt participant row must never leave the tree without a Tab stop.
+      treeNav?.refresh();
     }
   }
 
@@ -123,12 +133,30 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // Channel list
     channelList = createElement("div", { class: "channel-list" });
 
-    // One Tab stop for the whole list; ArrowUp/Down step, Enter/Space open the
-    // focused channel. The listener lives on the list, which survives
-    // every keyed re-render.
-    enableRovingNavigation(channelList, ".channel-item", disposable.signal, "vertical");
-
-    appendChildren(root, header, channelList);
+    if (tree) {
+      // The list sits in the tree, which owns the keys (a file tree's) and the
+      // one Tab stop; the root row's heading names it.
+      const treeEl = createElement("div", {
+        class: "server-tree",
+        role: "tree",
+        "aria-labelledby": "server-tree-name",
+      });
+      treeEl.appendChild(channelList);
+      treeNav = enableTreeNavigation(treeEl, disposable.signal);
+      // Built before the first render, so its first draw is stamped by that render's refresh().
+      directSection = options.direct?.() ?? null;
+      if (directSection !== null) {
+        treeEl.appendChild(directSection.element);
+        directSection.onRender(() => treeNav?.refresh());
+      }
+      appendChildren(root, header, treeEl);
+    } else {
+      // One Tab stop for the whole list; ArrowUp/Down step, Enter/Space open the
+      // focused channel. The listener lives on the list, which survives
+      // every keyed re-render.
+      enableRovingNavigation(channelList, ".channel-item", disposable.signal, "vertical");
+      appendChildren(root, header, channelList);
+    }
     container.appendChild(root);
 
     // Initial render
@@ -140,12 +168,15 @@ export function createChannelSidebar(options: ChannelSidebarOptions): MountableC
     // drag listeners (drag-reorder.ts tracks owners by signal).
     disposable.destroy();
     voice.dispose();
+    directSection?.destroy();
+    directSection = null;
     sidebarSel = null;
     if (root !== null) {
       root.remove();
       root = null;
     }
     channelList = null;
+    treeNav = null;
     serverNameEl = null;
   }
 

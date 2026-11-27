@@ -22,7 +22,8 @@
  * browser mock has no autostart plugin and DevTools is native chrome.
  */
 
-import { test, expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test";
+import { layoutTest as test } from "./fixtures";
 import {
   buildTauriMockScript,
   grantExternalConsent,
@@ -547,7 +548,7 @@ test.describe("Settings — Advanced Tab button contrast", () => {
   // The cache actions are secondary buttons and Clear & restart is destructive
   // (danger text at rest, danger fill once armed); each must read at 4.5:1 on
   // its composited background in every theme, with and without High contrast.
-  for (const theme of ["dark", "neon-glow", "midnight", "light"] as const) {
+  for (const theme of ["dark", "neon-glow", "midnight", "gunmetal", "light"] as const) {
     test(`${theme}: secondary and destructive buttons read at 4.5:1`, async ({ page }) => {
       await mockSession(page);
       await page.goto("/");
@@ -610,7 +611,11 @@ test.describe("Settings — Notifications Tab", () => {
   });
 
   test("a mute that outlives its channel is listed and can be cleared", async ({ page }) => {
-    await page.addInitScript(() => localStorage.clear());
+    await page.addInitScript(() => {
+      localStorage.clear();
+      localStorage.setItem("owncord:settings:screenLayout", JSON.stringify("classic"));
+      localStorage.setItem("owncord:settings:deckSwitchDone", "true");
+    });
     await mockSession(page, { seedMutes: [999] });
     await page.reload();
     await navigateToMainPageReady(page);

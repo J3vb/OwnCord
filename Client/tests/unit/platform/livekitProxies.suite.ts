@@ -41,6 +41,9 @@ export type LiveKitProxiesSeam = Pick<
   "setLiveKitServerHost" | "resolveLiveKitUrl" | "stopLiveKitProxy"
 >;
 
+// Matched by name: a suite may load the subject through a fresh module graph.
+const REFUSED = { name: "LiveKitAddressError" };
+
 export interface LiveKitProxiesSubject {
   readonly subject: LiveKitProxiesSeam;
   readonly native: NativeControl;
@@ -89,10 +92,37 @@ export function describeLiveKitProxiesSuite(
       });
     }
 
-    check("passes an absolute URL through when no server host is set", async () => {
+    check(
+      "refuses an address that is not the server's proxy path, with no server host",
+      async () => {
+        ctx.native.succeedWith(40123);
+        await expect(ctx.subject.resolveLiveKitUrl("wss://sfu.example/rtc")).rejects.toMatchObject(
+          REFUSED,
+        );
+      },
+    );
+
+    check("refuses an absolute address from a remote server", async () => {
       ctx.native.succeedWith(40123);
-      await expect(ctx.subject.resolveLiveKitUrl("wss://sfu.example/rtc")).resolves.toBe(
-        "wss://sfu.example/rtc",
+      ctx.subject.setLiveKitServerHost("chat.example:8443");
+      await expect(
+        ctx.subject.resolveLiveKitUrl("wss://other.example/x", "wss://chat.example:7880"),
+      ).rejects.toMatchObject(REFUSED);
+    });
+
+    check("refuses an address that is not loopback from a local server", async () => {
+      ctx.native.succeedWith(40123);
+      ctx.subject.setLiveKitServerHost("localhost:8443");
+      await expect(ctx.subject.resolveLiveKitUrl("wss://other.example/x")).rejects.toMatchObject(
+        REFUSED,
+      );
+    });
+
+    check("accepts a loopback direct address as the URL itself from a local server", async () => {
+      ctx.native.succeedWith(40123);
+      ctx.subject.setLiveKitServerHost("localhost:8443");
+      await expect(ctx.subject.resolveLiveKitUrl("ws://127.0.0.1:7880")).resolves.toBe(
+        "ws://127.0.0.1:7880",
       );
     });
 

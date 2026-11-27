@@ -18,11 +18,11 @@ import {
   voiceStateEvent,
 } from "../../helpers/dispatcherHarness";
 
-vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
-vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
+vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notificationsMock());
+vi.mock("../../../src/features/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
-vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
+vi.mock("../../../src/features/connection/identity", () => dispatcherMocks.identityMock());
 vi.mock("../../../src/features/connection/dispatchContext", async (importOriginal) =>
   dispatcherMocks.dispatchContextMock(await importOriginal<object>()),
 );

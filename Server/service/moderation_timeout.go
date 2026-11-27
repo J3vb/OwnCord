@@ -87,10 +87,15 @@ func (s *ModerationService) Timeout(ctx context.Context, actorID, targetID int64
 	if err := s.requireOutranksRole(ctx, actorRole, targetID); err != nil {
 		return nil, err
 	}
+	refund, err := s.reserveModAction("mod_timeout", actorID)
+	if err != nil {
+		return nil, err
+	}
 
 	expires := time.Now().Add(duration)
 	id, supersededIDs, err := s.st.TimeoutUser(ctx, targetID, actorID, reportID, reason, expires)
 	if err != nil {
+		refund()
 		if errors.Is(err, db.ErrOutranked) {
 			return nil, fmt.Errorf("%w: cannot moderate a user of equal or higher rank", ErrForbidden)
 		}

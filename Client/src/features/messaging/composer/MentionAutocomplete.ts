@@ -7,9 +7,9 @@ import { createElement, setText } from "@lib/dom";
 import { membersStore, memberDisplayName } from "@stores/members.store";
 import { getChannelMessages } from "@stores/messages.store";
 import { getCurrentUser } from "@stores/auth.store";
-import { currentUserHasPermission } from "@lib/permissions";
+import { currentUserHasPermission } from "@stores/permissions";
 import { Permission } from "@lib/types";
-import { EVERYONE_TOKEN, HERE_TOKEN, isEveryoneToken } from "@lib/text/mentions";
+import { EVERYONE_TOKEN, HERE_TOKEN, isEveryoneToken } from "../mentions";
 import { idMentionsEnabled } from "@lib/net/serverCapabilities";
 import { channelsStore } from "@stores/channels.store";
 import { createAvatarElement, pickAvatarColor } from "../../profiles/avatar";
@@ -97,12 +97,13 @@ export function filterMentionSuggestions(query: string, channelId?: number): Men
   const prefix: MentionSuggestion[] = [];
   const substring: MentionSuggestion[] = [];
   const ranks = recentChatterRanks(channelId);
+  const idMentions = idMentionsEnabled();
 
   for (const member of membersStore.getState().members.values()) {
-    // Skip usernames the mention grammar cannot express (a space, an "@",
-    // etc. truncate the token on insert) -- picking one would insert a dead
-    // token that resolves to no mention and notifies nobody.
-    if (!/^[\p{L}\p{N}_.-]{1,64}$/u.test(member.username)) continue;
+    // A picked member is sent as `<@id>` where the server resolves ids, so any
+    // username works there. Elsewhere only the plain `@name` grammar exists, and
+    // a username it cannot express (a space, an "@") would insert a dead token.
+    if (!idMentions && !/^[\p{L}\p{N}_.-]{1,64}$/u.test(member.username)) continue;
     // Match on the display name too, so typing "@Ali" finds "Alice". The
     // token inserted is still the username -- it is the unique handle the
     // mention grammar resolves against.

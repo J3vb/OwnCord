@@ -67,6 +67,7 @@ describe("attachment server-host handling for bare IPv6 literals", () => {
     expect(ensureHttpProxyMock).toHaveBeenCalledWith("[2001:db8::1]");
     expect(fetchMock).toHaveBeenCalledWith("http://127.0.0.1:49812/api/v1/files/abc-123", {
       headers: { Authorization: "Bearer session-token" },
+      maxRedirections: 0,
     });
   });
 

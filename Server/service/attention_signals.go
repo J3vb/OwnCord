@@ -182,6 +182,24 @@ func BackupScheduleInterval(schedule string) time.Duration {
 	return 0
 }
 
+// backupFreshness is the time the backup signal ages from, and whether that is the full archive's. With
+// Everything, the backup is only as fresh as the older of its two copies. An archive that does not exist yet
+// has aged since its first failed run, or counts as the database copy until one fails.
+func backupFreshness(r attentionReadings, interval time.Duration) (time.Time, bool) {
+	last := r.lastBackup
+	if interval <= 0 || last.IsZero() || r.archive == nil || BackupScope(r.archive.Scope) != BackupScopeEverything {
+		return last, false
+	}
+	ref := r.archive.Newest
+	if ref.IsZero() {
+		ref = r.archive.FailingSince
+	}
+	if ref.IsZero() || !ref.Before(last) {
+		return last, false
+	}
+	return ref, true
+}
+
 func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 	sig := AttentionSignal{ID: attentionBackupSignal, Label: "Last successful backup", ObservedAt: now}
 	title := "Backups are out of date"
@@ -192,8 +210,9 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 		return
 	}
 	interval := BackupScheduleInterval(r.schedule)
-	if !r.lastBackup.IsZero() {
-		sig.Value = r.lastBackup.UTC().Format("2006-01-02 15:04 UTC")
+	last, archiveStale := backupFreshness(r, interval)
+	if !last.IsZero() {
+		sig.Value = last.UTC().Format("2006-01-02 15:04 UTC")
 	}
 	switch {
 	case interval == 0 && r.lastBackup.IsZero():
@@ -206,7 +225,7 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 			sig.Status, sig.Detail = AttentionStatusUnknown, "waiting for the first scheduled backup run"
 		}
 	default:
-		age := now.Sub(r.lastBackup)
+		age := now.Sub(last)
 		sig.Status = AttentionStatusOK
 		if age > 3*interval {
 			sig.Status = AttentionStatusCritical
@@ -214,11 +233,58 @@ func (s *AttentionService) evalBackup(r attentionReadings, now time.Time) {
 			sig.Status = AttentionStatusWarning
 		}
 		sig.Detail = fmt.Sprintf("%s old", age.Truncate(time.Minute))
+		if archiveStale {
+			sig.Detail = fmt.Sprintf("the full archive is %s old", age.Truncate(time.Minute))
+			if r.archive.Reason != "" {
+				sig.Detail += "; last failure: " + r.archive.Reason
+			}
+			title = "The full backup archive is out of date"
+			action = "The scheduled full archive has not finished. Check free space on the backup folder, then search Server Logs for \"scheduled archive failed\". It is tried again every hour. The database copies are still being taken."
+		}
 	}
 	if interval > 0 {
 		sig.Threshold = fmt.Sprintf("%s schedule: warn after %s", r.schedule, interval*3/2)
 	}
 	s.settle(sig, title, action)
+}
+
+// evalBackupPolicy reports the two backup hints that are about setup rather than freshness: what automatic
+// backups leave out until the owner chooses, and a backup folder that may share the server's disk. Neither is
+// pushed to the owner.
+func (s *AttentionService) evalBackupPolicy(r attentionReadings, now time.Time) {
+	if r.archive != nil && r.scheduleErr == nil {
+		sig := AttentionSignal{ID: attentionBackupScopeSignal, Label: "Backup coverage", ObservedAt: now}
+		scope := BackupScope(r.archive.Scope)
+		sig.Value = map[string]string{
+			BackupScopeDatabase:   "database only",
+			BackupScopeEverything: "everything",
+			BackupScopeUnset:      "database only, not chosen yet",
+		}[scope]
+		if scope == BackupScopeUnset && BackupScheduleInterval(r.schedule) > 0 {
+			sig.Status = AttentionStatusWarning
+			sig.Detail = "automatic backups take the database only, and leave out uploads, key files and settings"
+		} else {
+			sig.Status = AttentionStatusOK
+		}
+		s.settle(sig, "Automatic backups leave out uploads and key files",
+			"Open Backups & restore and choose Everything.")
+	}
+	if d := r.backupDisk; d != nil {
+		sig := AttentionSignal{ID: attentionBackupDiskSignal, Label: "Backup disk", Value: d.Dir, ObservedAt: now}
+		switch {
+		case d.Unknown != "":
+			sig.Status, sig.Detail = AttentionStatusUnknown, "could not check the backup disk: "+d.Unknown
+		case d.Shared && d.Acked:
+			sig.Status, sig.Detail = AttentionStatusOK, "you confirmed the backup folder is on another disk"
+		case d.Shared:
+			sig.Status = AttentionStatusWarning
+			sig.Detail = fmt.Sprintf("the backup folder and %s look to be on the same disk", d.With)
+		default:
+			sig.Status, sig.Detail = AttentionStatusOK, "no shared disk detected (this check cannot see every setup)"
+		}
+		s.settle(sig, "Your backups may be on the same disk as your server",
+			"If that disk fails, the server and its backups are lost together. Point backup.dir at another disk, or if this is a false alarm, open Backups & restore and choose \"This is another disk\". Details: docs/hosting/backups.md#keep-them-off-the-servers-disk")
+	}
 }
 
 // evalVoice reports the LiveKit voice path's health. A managed companion that is not

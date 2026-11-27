@@ -80,16 +80,23 @@ export interface VoiceState {
   readonly inAfkChannel?: boolean;
   /** The local deafen in effect is the one a moderator's deafen applied, not
    *  the member's own: the moderator's lift releases it, while a deafen the
-   *  member chose survives the lift. Follows localDeafened, so it outlives a
-   *  leave (a moderator move) and clears on any undeafen. */
+   *  member chose survives the lift. Follows localDeafened and clears on any
+   *  undeafen. A leave drops that deafen with it: the server re-sends a
+   *  moderator's deafen that follows the member (a moderator move). */
   readonly moderatorDeafened?: boolean;
+  /** The local mute in effect is the one a moderator's mute applied over an
+   *  open mic, not the member's own. Set from the member's own voice row while
+   *  the moderator's mute holds; a leave drops that mute, as for the deafen
+   *  above. Optional for the fixture reason above. */
+  readonly moderatorMuted?: boolean;
   /** The member was already muted when they deafened, so undeafening restores
    *  that mute instead of lifting it. Written by the widget's deafen toggle and
    *  cleared by the widget's undeafen. Like localDeafened it outlives a leave, so a
    *  re-join restates the same pair. Optional for the fixture reason above. */
   readonly mutedBeforeDeafen?: boolean;
-  /** True while push-to-talk is bound and the key is NOT currently held —
-   *  i.e. the mic processor's push-to-talk gate is closed. Deliberately a
+  /** True while push-to-talk is bound and the key is NOT currently held, from
+   *  the end of a release's delay — i.e. once the mic processor's push-to-talk
+   *  gate has closed. Deliberately a
    *  separate flag from localMuted: PTT never writes the flag that represents
    *  the user's own explicit mute (livekitSession.setPttGated only closes and
    *  opens the gate), so a press can't undo a self-mute and a release can't
@@ -112,6 +119,10 @@ export interface VoiceState {
    *  included while you share. Read from the room's publications, not the
    *  server, and cleared on leave. Optional for the fixture reason above. */
   readonly musicSharers?: ReadonlySet<number>;
+  /** The remote sharer whose music you listen to (one at a time), or null.
+   *  Written from the voice session's RemoteTracks, which owns the
+   *  subscription; reset on leave. Optional for the fixture reason above. */
+  readonly listeningTo?: number | null;
   /** Bumped when the live camera's capture is replaced without the camera
    *  going off (a device switch): the self tile redraws on the new track. */
   readonly localCameraRev?: number;
@@ -170,6 +181,11 @@ export interface VoiceState {
    *  and resetVoiceStore clear it. Your own watching is read from the local
    *  RemoteTracks set, not from here. Optional for the fixture reason above. */
   readonly peerWatching?: ReadonlyMap<number, readonly number[]>;
+  /** Whose music each member of the current channel listens to (the sharer's
+   *  user id), from the `music_id` of their `voice_watching` frames. Only
+   *  members who listen to someone have an entry. Same writer and lifetime as
+   *  peerWatching. Your own listening is `listeningTo`. */
+  readonly peerListening?: ReadonlyMap<number, number>;
   /** Fingerprint of the local user's own ephemeral session key, so
    *  it can be read out to a peer who sees us as unverified. Null outside a
    *  voice session. Optional for the same fixture reason as peerVerifications. */
@@ -198,6 +214,7 @@ export function createVoiceState(): VoiceState {
     localServerMuted: false,
     localServerDeafened: false,
     moderatorDeafened: false,
+    moderatorMuted: false,
     mutedBeforeDeafen: false,
     pttGated: false,
     phoneCallHold: false,
@@ -213,8 +230,10 @@ export function createVoiceState(): VoiceState {
     peerKeySlots: new Set(),
     peerBoundOffers: new Set(),
     peerWatching: new Map(),
+    peerListening: new Map(),
     localMusic: false,
     musicSharers: new Set(),
+    listeningTo: null,
     localGateSpeaking: null,
   };
 }

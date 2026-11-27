@@ -1,5 +1,5 @@
 import { vi, beforeEach } from "vitest";
-import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { deactivatePendingMessages } from "../../src/features/messaging/pendingMessages";
 import { createChannelController } from "../../src/pages/main-page/ChannelController";
 import type {
   ChannelController,

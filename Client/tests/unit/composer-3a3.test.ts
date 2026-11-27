@@ -167,6 +167,19 @@ describe("composer polish (3A-3)", () => {
       comp.destroy?.();
     });
 
+    it("counts a /me or /spoiler message as it will be sent, with its escapes", () => {
+      const comp = createMessageInput(makeOptions());
+      comp.mount(container);
+      const counter = container.querySelector("[data-testid=char-counter]") as HTMLSpanElement;
+      // Each backslash is doubled on send, and underscores wrap the text.
+      type("/me " + "\\".repeat(1900));
+      expect(counter.hidden).toBe(false);
+      expect(counter.textContent).toBe(String(4000 - (1900 * 2 + 2)));
+      type("/spoiler " + "\\".repeat(2100));
+      expect(counter.classList.contains("over")).toBe(true);
+      comp.destroy?.();
+    });
+
     it("clears after a send", () => {
       const comp = createMessageInput(makeOptions());
       comp.mount(container);

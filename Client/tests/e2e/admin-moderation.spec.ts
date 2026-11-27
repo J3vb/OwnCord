@@ -156,7 +156,7 @@ test.describe("Admin moderation — member context menu", () => {
     await expect(logout).toHaveText("Force Logout");
 
     await logout.click();
-    await expect(logout).toHaveText("Log them out?");
+    await expect(logout).toHaveText("Log them out of every device? They can sign in again.");
     // Armed but not fired: no DELETE has gone out.
     expect((await fetchCalls(page)).filter((c) => c.method === "DELETE")).toHaveLength(0);
 

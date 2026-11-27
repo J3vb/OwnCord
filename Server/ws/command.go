@@ -225,15 +225,27 @@ type VoiceE2EEAnnounceCmd struct {
 func (c VoiceE2EEAnnounceCmd) Type() string  { return MsgTypeVoiceE2EEAnnounce }
 func (c VoiceE2EEAnnounceCmd) UserID() int64 { return c.userID }
 
-// VoiceWatchCmd is the whole set of users whose screen share the sender watches;
-// unvalidated, handleVoiceWatchV2 bounds, filters, dedupes and sorts it.
+// VoiceWatchCmd is the whole set of users whose screen share the sender watches, plus
+// the one sharer whose music it listens to (MusicID, 0 = nobody); unvalidated,
+// handleVoiceWatchV2 bounds, filters, dedupes and sorts the set and checks the id.
 type VoiceWatchCmd struct {
 	userID  int64
 	UserIDs []int64
+	MusicID int64
 }
 
 func (c VoiceWatchCmd) Type() string  { return MsgTypeVoiceWatch }
 func (c VoiceWatchCmd) UserID() int64 { return c.userID }
+
+// VoiceSpeakCmd is the sender's own speaking ring: lit, dark, or nil for "no verdict of my
+// own" (a client with no input gate, whose ring listeners take from the media server).
+type VoiceSpeakCmd struct {
+	userID   int64
+	Speaking *bool
+}
+
+func (c VoiceSpeakCmd) Type() string  { return MsgTypeVoiceSpeak }
+func (c VoiceSpeakCmd) UserID() int64 { return c.userID }
 
 // ChatCommandCmd represents a chat_command (plugin slash command) message.
 type ChatCommandCmd struct {

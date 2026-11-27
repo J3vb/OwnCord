@@ -5,7 +5,7 @@
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { buildSettingsSection } from "./settingsSection";
 import { loadPref, savePref, createToggle, platformText } from "./helpers";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { readStored } from "@lib/prefs/preferences";
 import {
   THEMES,
@@ -37,9 +37,11 @@ import {
   type TimeFormat,
 } from "@lib/text/timeFormat";
 import { loadMemberLayout, MEMBER_LAYOUT_PREF, type MemberLayout } from "../members/memberLayout";
-import { appZoom, ZOOM_LEVELS, zoomIndex } from "../zoom";
+import { appZoom, hostCanZoom, ZOOM_LEVELS, zoomIndex } from "../zoom";
 import { buildCustomThemeSection } from "../custom-themes/customThemeSection";
 import { buildChoiceRow, buildSettingRow } from "./settingRow";
+import { buildScreenLayoutRow } from "./screenLayoutRow";
+import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { settingsText as t } from "../../i18n/settings";
 
 /** "system" is a choice, not a palette: the accent default follows what it shows. */
@@ -98,8 +100,10 @@ function buildFontSizeRow(signal: AbortSignal, currentFontSize: number): HTMLEle
   return buildSettingRow({ label: t("appearance.fontSize"), control: fontRow });
 }
 
-/** The zoom slider row. Null on Android, which has no webview zoom to set. */
+/** The zoom slider row. Null on Android and the web build, which have no webview zoom to set. */
 function buildZoomRow(signal: AbortSignal): HTMLElement | null {
+  // The Android app and a browser tab have no webview zoom to set.
+  if (isAndroidApp() || !hostCanZoom()) return null;
   const zoomRow = createElement("div", { class: "slider-row" });
   const zoomSlider = createElement("input", {
     class: "settings-slider",
@@ -140,8 +144,6 @@ function buildZoomRow(signal: AbortSignal): HTMLElement | null {
   );
   zoomReset.addEventListener("click", () => void appZoom.reset(), { signal });
   appendChildren(zoomRow, zoomSlider, zoomLabel, zoomReset);
-  // The Android app has no webview zoom to set.
-  if (isAndroidApp()) return null;
   return buildSettingRow({ label: t("appearance.zoom"), control: zoomRow });
 }
 
@@ -274,7 +276,11 @@ export function buildAppearanceTab(
     save: (value) => savePref(MEMBER_LAYOUT_PREF, value),
   }).row;
   // A phone shows the member list as an overlay, so it has no side to pick.
-  if (!isAndroidApp()) layoutGroup.card.appendChild(memberLayoutRow);
+  // Command Deck owns the member list's place, so it hides the row too.
+  if (!isAndroidApp() && runningScreenLayout() !== "deck") {
+    layoutGroup.card.appendChild(memberLayoutRow);
+  }
+  layoutGroup.card.appendChild(buildScreenLayoutRow(signal));
 
   // Accent color picker
   const ACCENT_PRESETS: readonly string[] = [
@@ -285,12 +291,14 @@ export function buildAppearanceTab(
     "#ed4245", // red
     "#f47b67", // salmon
     "#e78b38", // orange
+    "#ff7a45", // Ember orange, Gunmetal's default
     "#3ba55d", // dark green
     "#5865f2", // blurple
     "#b9bbbe", // grey
   ];
 
-  const currentAccent = loadPref<string>("accentColor", defaultAccent);
+  // Presets are lower case; an accent stored in upper case still selects its swatch.
+  const currentAccent = loadPref<string>("accentColor", defaultAccent).toLowerCase();
 
   function saveAccent(color: string): void {
     hasStoredAccent = true;
@@ -382,7 +390,7 @@ export function buildAppearanceTab(
       const raw = hexInput.value.replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
       hexInput.value = raw;
       if (raw.length === 6) {
-        const color = `#${raw}`;
+        const color = `#${raw.toLowerCase()}`;
         saveAccent(color);
         syncDisplayedAccent(color);
       }

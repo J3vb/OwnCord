@@ -34,9 +34,10 @@ import { createIcon } from "@lib/icons";
 import { focusDialog } from "@lib/ui/a11y";
 import { claimBack, holdBackGuard, type BackClaim, type BackGuard } from "@lib/ui/backHistory";
 import { isPhoneLayout, onPhoneLayoutChange } from "@lib/ui/bottomSheet";
+import { createPeekTarget, type PeekTarget } from "@lib/ui/panelDrag";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
-import { isAndroidApp } from "../../features/voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import { shellText } from "../../i18n/shell";
 
 /**
@@ -67,6 +68,8 @@ export interface SidebarDrawer {
   /** Close as a tap outside does. */
   close(): void;
   isOpen(): boolean;
+  /** What a swipe drags (a peek only draws it open); null while it is no drawer. */
+  peekTarget(): PeekTarget | null;
   destroy(): void;
 }
 
@@ -78,6 +81,7 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   /** Whether the sidebar is collapsed into the drawer right now. */
   const collapsed = (): boolean => narrow.matches || isPhoneLayout();
   let open = false;
+  let peeking = false;
   let restoreFocusRef: (() => void) | null = null;
   let backClaim: BackClaim | null = null;
   // Only the Android app has a Back button to catch (a phone browser has its
@@ -116,9 +120,9 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   }
 
   function sync(): void {
-    sidebar.classList.toggle("drawer-open", open);
-    rail?.classList.toggle("drawer-open", open);
-    backdrop.classList.toggle("open", open);
+    sidebar.classList.toggle("drawer-open", open || peeking);
+    rail?.classList.toggle("drawer-open", open || peeking);
+    backdrop.classList.toggle("open", open || peeking);
     // With the drawer shut, Back from a chat has an entry to pop (Android).
     backGuard?.setActive(!open && collapsed() && isPhoneLayout());
     // Below the breakpoint the closed sidebar is off-screen, so its controls
@@ -260,7 +264,17 @@ export function createSidebarDrawer(opts: SidebarDrawerOptions): SidebarDrawer {
   // A rotation moves a phone across the other breakpoint (its height).
   onPhoneLayoutChange(onBreakpoint, owner.signal);
 
+  const peek = createPeekTarget({
+    surfaces: rail === null ? [sidebar] : [rail, sidebar],
+    backdrop,
+    setPeek: (on) => {
+      peeking = on;
+      sync();
+    },
+    commit: (to) => (to ? openDrawer(true) : closeDrawer("dismiss")),
+  });
   return {
+    peekTarget: () => (collapsed() ? peek : null),
     open: () => openDrawer(true),
     close: () => closeDrawer("dismiss"),
     isOpen: () => open,

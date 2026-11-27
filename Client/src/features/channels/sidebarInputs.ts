@@ -64,6 +64,7 @@ function projectVoiceInputs(
     movable: movable.toSorted((a, b) => a - b),
     localMute,
     ...(voice.musicSharers === undefined ? {} : { musicSharers: voice.musicSharers }),
+    ...(voice.listeningTo == null ? {} : { listeningTo: voice.listeningTo }),
   };
 }
 
@@ -71,7 +72,22 @@ function projectVoiceInputs(
  *  in voice (equal when every entry is the same object, so presence churn of
  *  anyone else never reaches the voice rows) and the movable ids. */
 export function sameVoiceInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
-  if (
+  if (!sameMusicInputs(a, b) || !sameCallInputs(a, b)) return false;
+  if (a.voiceMembers.size !== b.voiceMembers.size) return false;
+  for (const [uid, member] of a.voiceMembers) {
+    if (b.voiceMembers.get(uid) !== member) return false;
+  }
+  return a.movable.length === b.movable.length && a.movable.every((id, i) => b.movable[i] === id);
+}
+
+/** What the music note and the Listen pill draw from. */
+function sameMusicInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
+  return a.musicSharers === b.musicSharers && a.listeningTo === b.listeningTo;
+}
+
+/** The scalar fields the rows draw from, apart from the music ones. */
+function sameCallInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
+  return !(
     a.voiceUsers !== b.voiceUsers ||
     a.currentChannelId !== b.currentChannelId ||
     a.peerVerifications !== b.peerVerifications ||
@@ -80,16 +96,8 @@ export function sameVoiceInputs(a: VoiceRowInputs, b: VoiceRowInputs): boolean {
     a.selfId !== b.selfId ||
     a.connectionStatus !== b.connectionStatus ||
     a.timeout !== b.timeout ||
-    a.localMute !== b.localMute ||
-    a.musicSharers !== b.musicSharers
-  ) {
-    return false;
-  }
-  if (a.voiceMembers.size !== b.voiceMembers.size) return false;
-  for (const [uid, member] of a.voiceMembers) {
-    if (b.voiceMembers.get(uid) !== member) return false;
-  }
-  return a.movable.length === b.movable.length && a.movable.every((id, i) => b.movable[i] === id);
+    a.localMute !== b.localMute
+  );
 }
 
 /** The voice channels with at least one participant, as one comparable key. */

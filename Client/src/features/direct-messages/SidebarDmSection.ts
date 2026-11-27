@@ -6,33 +6,25 @@
 
 import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { atEachMidnight, formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
+import { atEachMidnight, formatBadgeCount } from "../messaging/formatting";
 import { reconcileChildren } from "@lib/net/reconcile";
 import { enableRovingNavigation, setRovingTabindex } from "@lib/ui/a11y";
-import { dmStore, dmDisplayName } from "@stores/dm.store";
+import { dmStore } from "@stores/dm.store";
 import { totalDmUnread } from "@lib/dmUnread";
 import type { DmChannel } from "@stores/dm.store";
-import { setSidebarMode } from "@stores/ui.store";
-import { CHANNEL_MUTE_CHANGED, getChannelMute, isChannelMuted } from "@lib/prefs/channelMutes";
+import {
+  DM_SECTION_COLLAPSED_KEY,
+  isCategoryCollapsed,
+  setSidebarMode,
+  toggleCategory,
+} from "@stores/ui.store";
 import { trackCurrentView } from "../navigation/contentView";
 import type { CountSource } from "../navigation/destinations";
 import { navigationText } from "../../i18n/navigation";
 import { shellText } from "../../i18n/shell";
-import { voiceStore } from "@stores/voice.store";
-import { createIcon } from "@lib/icons";
-import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
-import type { ModalInstance } from "@lib/ui/modalFactory";
-import {
-  openDmContextMenu,
-  openLeaveConfirm,
-  type DmMenuActions,
-  type DmMenuConvo,
-} from "./dmContextMenu";
-import { voiceText } from "../../i18n/voice";
-import { dmPreviewText, isDmInCall } from "./SidebarDmHelpers";
-import { rowActivity } from "../members/listeningLine";
+import type { DmMenuActions } from "./dmContextMenu";
+import { buildDmRow, createLeavePrompt, dmRowSignature, watchDmListInputs } from "./sidebarDmRow";
 import { onPrefChange } from "@lib/prefs/preferences";
-import { applyStatusIndicator } from "@lib/ui/statusIndicator";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -68,43 +60,12 @@ export interface SidebarDmSectionResult {
 // Factory
 // ---------------------------------------------------------------------------
 
-/** Everything a preview row draws. A changed value rebuilds just that row. */
-function dmRowSignature(dm: DmChannel): string {
-  return [
-    dmDisplayName(dm),
-    dm.isGroup ? "g" : "1",
-    dm.recipient.status,
-    dm.recipient.mobile === true && !dm.isGroup ? "p" : "",
-    dm.isGroup ? "" : (rowActivity(dm.recipient.activity, dm.recipient.listening)?.text ?? ""),
-    isChannelMuted(dm.channelId) ? "m" : "",
-    isDmInCall(dm.channelId) ? "c" : "",
-    dm.mentionCount,
-    dm.unreadCount,
-    dmPreviewText(dm),
-    formatDmRowTime(dm.lastMessageAt),
-  ].join("|");
-}
-
-function menuConvo(dm: DmChannel): DmMenuConvo {
-  return {
-    channelId: dm.channelId,
-    userId: dm.recipient.id,
-    username: dmDisplayName(dm),
-    isGroup: dm.isGroup,
-    hasOwner: dm.ownerId !== undefined,
-    hasIcon: dm.icon !== undefined && dm.icon !== "",
-    unread: dm.unreadCount > 0 || dm.mentionCount > 0,
-    muted: isChannelMuted(dm.channelId),
-    mutedUntil: getChannelMute(dm.channelId)?.until ?? null,
-  };
-}
-
 export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDmSectionResult {
   const unsubs: Array<() => void> = [];
   const listLifecycle = new Disposable();
   // Each row's menu listeners die with the row, not with the section.
   const rowOwners = new Map<Element, Disposable>();
-  let leavePrompt: { channelId: number; modal: ModalInstance } | null = null;
+  const { confirmLeave, closeIfGone } = createLeavePrompt(listLifecycle.signal);
 
   // --- Root container ---
   const dmSection = createElement("div", { class: "sidebar-dm-section" });
@@ -171,7 +132,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   dmSection.appendChild(dmHeader);
 
   // --- DM list ---
-  let dmCollapsed = false;
+  let dmCollapsed = isCategoryCollapsed(DM_SECTION_COLLAPSED_KEY);
 
   // "Message Requests (N)" above the conversations, while any are pending.
   let renderRequestsRow: (() => void) | undefined;
@@ -213,130 +174,6 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
 
   // --- Render logic ---
 
-  function confirmLeave(convo: DmMenuConvo, onClose: (channelId: number) => void): void {
-    leavePrompt = {
-      channelId: convo.channelId,
-      modal: openLeaveConfirm(convo, onClose, listLifecycle.signal),
-    };
-  }
-
-  function buildDmRow(dm: DmChannel, signal: AbortSignal): HTMLDivElement {
-    const muted = isChannelMuted(dm.channelId);
-    const dmItem = createElement("div", {
-      class: muted ? "channel-item muted" : "channel-item",
-      "data-testid": "dm-entry",
-      // Roving list item: reachable by Tab once, then arrow-stepped.
-      role: "button",
-      tabindex: "-1",
-    });
-    dmItem.dataset.channelId = String(dm.channelId);
-    // A group has no presence of its own, so it gets a neutral marker rather
-    // than the first member's dot dressed up as the conversation's state.
-    const statusDot = createElement("span", {
-      class: dm.isGroup ? "dm-section-status dm-section-status-group" : "dm-section-status",
-      "aria-hidden": "true",
-    });
-    if (dm.isGroup) statusDot.style.background = "var(--text-micro)";
-    else applyStatusIndicator(statusDot, dm.recipient.status, dm.recipient.mobile === true);
-    const name = createElement("span", { class: "ch-name" }, dmDisplayName(dm));
-    // Discord's DM list shows the last line and when it arrived. An empty
-    // timestamp means the DM was never messaged, so no time is drawn.
-    const preview = createElement("span", { class: "dm-preview" }, dmPreviewText(dm));
-    const body = createElement("div", { class: "dm-item-body" });
-    // A 1:1 partner's game, else their music, between the name and the last
-    // line.
-    const shown = dm.isGroup ? null : rowActivity(dm.recipient.activity, dm.recipient.listening);
-    if (shown !== null) {
-      const activity = createElement("span", {
-        class: "dm-activity",
-        "data-testid": `dm-activity-${dm.channelId}`,
-      });
-      const icon = createIcon(shown.icon, 12);
-      icon.setAttribute("aria-hidden", "true");
-      icon.classList.add("dm-activity-icon");
-      const text = createElement("span", { class: "dm-activity-text" });
-      text.textContent = shown.text;
-      appendChildren(activity, icon, text);
-      appendChildren(body, name, activity, preview);
-    } else {
-      appendChildren(body, name, preview);
-    }
-    const time = createElement(
-      "span",
-      { class: "dm-preview-time" },
-      formatDmRowTime(dm.lastMessageAt),
-    );
-    const parts: Element[] = [statusDot, body, time];
-    // A live call is visible without opening the DM, as in the full list.
-    if (isDmInCall(dm.channelId)) {
-      const glyph = createElement("span", {
-        class: "dm-in-call",
-        role: "img",
-        "aria-label": voiceText("call.inProgress"),
-        title: voiceText("call.inProgress"),
-        "data-testid": `dm-in-call-${dm.channelId}`,
-      });
-      glyph.appendChild(createIcon("phone", 14));
-      parts.push(glyph);
-    }
-    // A mention badge outranks the plain unread badge, and a mute never
-    // dims or suppresses it: a mute silences chatter, never something
-    // addressed to the reader directly (see lib/prefs/channelMutes.ts).
-    if (dm.mentionCount > 0) {
-      const mentionBadge = createElement(
-        "span",
-        {
-          class: "dm-mention-badge",
-          style: `margin-left:auto;background:var(--danger-fill);color:var(--on-fill);border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
-        },
-        String(dm.mentionCount),
-      );
-      parts.push(mentionBadge);
-    } else if (dm.unreadCount > 0) {
-      // Muted: the count still increments (it is a fact about the channel),
-      // it just stops shouting. Only the colour changes.
-      const badge = createElement(
-        "span",
-        {
-          class: muted ? "dm-unread-badge muted" : "dm-unread-badge",
-          style: `margin-left:auto;background:${muted ? "var(--text-micro)" : "var(--danger-fill)"};color:var(--on-fill);border-radius:10px;padding:1px 6px;font-size:0.7rem;`,
-        },
-        formatBadgeCount(dm.unreadCount),
-      );
-      parts.push(badge);
-    }
-    appendChildren(dmItem, ...parts);
-    dmItem.addEventListener("click", () => {
-      opts.onSelectDm(dmStore.getState().channels.find((c) => c.channelId === dm.channelId) ?? dm);
-    });
-    const menuActions = opts.menu;
-    if (menuActions !== undefined) {
-      const openMenu = (x: number, y: number): void => {
-        // The row may have changed since it was built: read the live channel.
-        const live = dmStore.getState().channels.find((c) => c.channelId === dm.channelId);
-        if (live === undefined) return;
-        openDmContextMenu({
-          convo: menuConvo(live),
-          actions: menuActions,
-          confirmLeave,
-          x,
-          y,
-          signal,
-        });
-      };
-      dmItem.addEventListener(
-        "contextmenu",
-        (e: MouseEvent) => {
-          e.preventDefault();
-          openMenu(e.clientX, e.clientY);
-        },
-        { signal },
-      );
-      openMenuOnKeyboard(dmItem, openMenu, signal);
-    }
-    return dmItem;
-  }
-
   function renderDmListItems(): void {
     const dmChannels = dmStore.getState().channels;
     const displayChannels = dmChannels.slice(0, 3);
@@ -345,7 +182,11 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
       signature: dmRowSignature,
       create: (dm) => {
         const owner = new Disposable();
-        const el = buildDmRow(dm, owner.signal);
+        const el = buildDmRow(dm, owner.signal, {
+          onSelectDm: opts.onSelectDm,
+          menu: opts.menu,
+          confirmLeave,
+        });
         rowOwners.set(el, owner);
         return el;
       },
@@ -354,10 +195,7 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
         rowOwners.delete(el);
       },
     });
-    if (leavePrompt !== null && !dmChannels.some((c) => c.channelId === leavePrompt?.channelId)) {
-      leavePrompt.modal.close();
-      leavePrompt = null;
-    }
+    closeIfGone(dmChannels);
     // One Tab stop; arrows/Home/End step within the preview list.
     setRovingTabindex(dmList, "[data-testid='dm-entry']");
 
@@ -396,35 +234,11 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
   // A clock-format change relabels the preview times in place.
   onPrefChange(["timeFormat", "dateFormat"], () => renderDmListItems(), listLifecycle.signal);
 
-  // A mute toggled from a row menu (or Settings) is not in a store.
-  window.addEventListener(CHANNEL_MUTE_CHANGED, () => renderDmListItems(), {
-    signal: listLifecycle.signal,
-  });
-  // The live-call glyph follows who is in each DM's voice channel. Occupied
-  // channels only: a speaking tick replaces voiceUsers too and must not redraw.
-  unsubs.push(
-    voiceStore.subscribeSelector(
-      (s) =>
-        [...s.voiceUsers]
-          .filter(([, users]) => users.size > 0)
-          .map(([id]) => id)
-          .join(","),
-      () => renderDmListItems(),
-    ),
-  );
-
-  // --- Store subscription ---
-  const unsubDmSection = dmStore.subscribeSelector(
-    (s) => s.channels,
-    () => {
-      renderDmListItems();
-    },
-  );
-  unsubs.push(unsubDmSection);
+  // A mute, a call starting or ending, and the DM list itself redraw the preview.
+  watchDmListInputs(listLifecycle.signal, unsubs, renderDmListItems);
 
   // --- Collapse toggle ---
-  dmHeader.addEventListener("click", () => {
-    dmCollapsed = !dmCollapsed;
+  function paintCollapsed(): void {
     dmHeader.classList.toggle("collapsed", dmCollapsed);
     dmArrow.textContent = dmCollapsed ? "\u25B6" : "\u25BC";
     dmArrow.setAttribute("aria-expanded", String(!dmCollapsed));
@@ -435,6 +249,13 @@ export function createSidebarDmSection(opts: SidebarDmSectionOptions): SidebarDm
       : dmStore.getState().channels.length > 3
         ? ""
         : "none";
+  }
+  if (dmCollapsed) paintCollapsed();
+  dmHeader.addEventListener("click", () => {
+    // Saved per server with the categories, so it survives a remount or reload.
+    toggleCategory(DM_SECTION_COLLAPSED_KEY);
+    dmCollapsed = isCategoryCollapsed(DM_SECTION_COLLAPSED_KEY);
+    paintCollapsed();
   });
 
   // --- Add DM button ---

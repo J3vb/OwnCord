@@ -1,0 +1,149 @@
+/* ═══ Command Deck: the Buddies column ═══ */
+/* Every selector starts with `html.layout-deck`, so Classic's member list is
+   untouched. Colours read only --text-normal, --text-muted, --bg-secondary
+   and --bg-hover. No transition or animation: the row's `transition: none`
+   only cancels Classic's hover fade, and the only outline rule is the group
+   header's outline-offset. tests/unit/deck/buddies-css.test.ts
+   enforces these rules.
+
+   Heights are fixed so the virtual list never leaves gaps: the strips and the
+   headers in px (their text fits from 12 to 20 px), and the rows and their two
+   lines from the text size, never below 40 and 18 px. */
+
+/* The strips above the rows; the scroller keeps a focused row clear of them. */
+html.layout-deck .member-column-body {
+  scroll-padding-top: 64px;
+}
+html.layout-deck .buddies-title {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 0 var(--space-3);
+  background: var(--bg-secondary);
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  white-space: nowrap;
+}
+html.layout-deck .buddies-title-text {
+  margin: 0;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+html.layout-deck .buddies-count {
+  flex: none;
+  white-space: nowrap;
+}
+html.layout-deck .member-column .member-search-wrap {
+  top: 32px;
+  height: 32px;
+  margin-top: 0;
+  box-shadow: none;
+}
+
+/* Group headers: "IN GAME — 3". */
+html.layout-deck .buddies-group {
+  height: 28px;
+  display: flex;
+  align-items: flex-end;
+  padding: 0 var(--space-3) var(--space-1);
+  color: var(--text-muted);
+}
+/* A foldable header (no search) is a button: a chevron, turned when folded,
+   and the shared focus ring drawn inside, so the scroller does not clip it. */
+html.layout-deck .buddies-group[role="button"] {
+  cursor: pointer;
+}
+html.layout-deck .buddies-group:focus-visible {
+  outline-offset: -2px;
+}
+html.layout-deck .buddies-group-chevron {
+  flex: none;
+  margin-right: var(--space-1);
+}
+html.layout-deck .buddies-group-chevron.collapsed {
+  transform: rotate(-90deg);
+}
+html.layout-deck .buddies-group-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: var(--font-size-xs);
+  font-weight: 700;
+  letter-spacing: 0.06em;
+}
+
+/* Rows: two fixed lines beside the avatar. */
+html.layout-deck .buddy-row {
+  height: max(40px, calc(var(--font-size, 16px) * 2.5));
+  margin: 1px var(--space-1);
+  padding: 0 var(--space-2);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  border-radius: var(--deck-radius);
+  transition: none;
+}
+html.layout-deck .buddy-row:hover {
+  background: var(--bg-hover);
+}
+html.layout-deck .buddy-lines {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+html.layout-deck .buddy-line1,
+html.layout-deck .buddy-line2 {
+  height: max(18px, calc(var(--font-size, 16px) * 1.125));
+  line-height: max(18px, calc(var(--font-size, 16px) * 1.125));
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  white-space: nowrap;
+}
+html.layout-deck .buddy-row .mi-name {
+  min-width: 0;
+  font-size: var(--font-size-md);
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.layout-deck .buddy-voice {
+  flex: none;
+  display: inline-flex;
+  margin-left: var(--space-1);
+  color: var(--text-muted);
+}
+html.layout-deck .buddy-voice[hidden] {
+  display: none;
+}
+html.layout-deck .buddy-row .mi-activity,
+html.layout-deck .buddy-row .mi-custom-status {
+  min-width: 0;
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+html.layout-deck .buddy-row .mi-activity-icon {
+  flex: none;
+}
+
+/* On a phone a foldable header is 44 px to hit; a plain header is not a control. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .buddies-group[role="button"] {
+    height: 44px;
+  }
+}

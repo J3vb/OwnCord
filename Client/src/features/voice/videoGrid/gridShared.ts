@@ -12,7 +12,7 @@ import {
   setScreenshareAudioVolume,
   setUserLocalMute,
   setUserVolume,
-} from "@lib/voice/livekitSession";
+} from "../livekitSession";
 import { videoSurfaceOf } from "@lib/voice/videoSurface";
 import type { ZoomPan } from "@lib/ui/zoomPan";
 import { voiceText } from "../../../i18n/voice";
@@ -196,6 +196,8 @@ export interface CellEntry {
   name: string;
   /** Draw a volume set elsewhere (remote tiles only). */
   applyVolume?: (volume: number, muted: boolean) => void;
+  /** Wire the volume controls' listeners again (see buildVolumeControls). */
+  rewireVolume?: () => void;
   /** The volume controls (remote tiles only): they go along into a pop-out. */
   volumeOverlay?: HTMLElement;
   /** Ctrl + wheel zoom and drag pan on the tile's video. */
@@ -249,6 +251,9 @@ export function isPlayingHere(e: CellEntry | undefined): boolean {
 export function buildVolumeControls(config: TileConfig): {
   overlay: HTMLDivElement;
   apply: (volume: number, muted: boolean) => void;
+  /** Wire the slider and mute again, replacing the last wiring: a pop-out
+   *  window can drop the listeners of the nodes it took. */
+  rewire: () => void;
 } {
   // Mic and screenshare audio state both survive tile rebuilds —
   // initialize from the same persisted values the sidebar volume menu
@@ -313,7 +318,7 @@ export function buildVolumeControls(config: TileConfig): {
     }
   }
 
-  volumeSlider.addEventListener("input", () => {
+  function onInput(): void {
     const value = Number(volumeSlider.value);
     muted = value === 0;
     shown = value;
@@ -328,21 +333,31 @@ export function buildVolumeControls(config: TileConfig): {
       }
     }
     render();
-  });
+  }
 
-  muteBtn.addEventListener("click", (e) => {
+  function onMuteClick(e: MouseEvent): void {
     e.stopPropagation();
     muted = !muted;
     if (!muted && currentVolume === 0) currentVolume = 100;
     shown = muted ? 0 : currentVolume;
     commit();
     render();
-  });
+  }
+
+  let wiring = new Disposable();
+  function rewire(): void {
+    wiring.destroy();
+    wiring = new Disposable();
+    volumeSlider.addEventListener("input", onInput, { signal: wiring.signal });
+    muteBtn.addEventListener("click", onMuteClick, { signal: wiring.signal });
+  }
+  rewire();
 
   render();
   appendChildren(overlay, muteBtn, volumeSlider, output);
   return {
     overlay,
+    rewire,
     // A tile menu changed the same setting: show it here too.
     apply(volume: number, isMuted: boolean): void {
       muted = isMuted;

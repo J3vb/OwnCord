@@ -1,8 +1,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
-import { LiveKitSession, setPttPollingLive } from "../../../src/lib/voice/livekitSession";
+import { LiveKitSession, setPttPollingLive } from "../../../src/features/voice/livekitSession";
 import { setTalkButton } from "../../../src/lib/ui/inputMode";
-import { setLocalMuted, setLocalDeafened, setPttGated, setListenOnly } from "@stores/voice.store";
+import {
+  setLocalMuted,
+  setLocalDeafened,
+  setPttGated,
+  setListenOnly,
+  isPttClosePending,
+} from "@stores/voice.store";
 import { getLiveKitProxyPort } from "../../../src/platform/desktop/nativeProxies";
 import { takeWatchRefusal } from "../../../src/lib/voice/watchRequest";
 import {
@@ -20,11 +26,12 @@ vi.mock("livekit-client", () => mocks.livekitClientMock());
 vi.mock("@stores/voice.store", () => mocks.voiceStoreMock());
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@lib/prefs/preferences", (importOriginal) => mocks.prefsPreferencesMock(importOriginal));
+vi.mock("@stores/voiceListening", () => ({ setListeningTo: vi.fn() }));
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../../src/features/connection/identity", () => mocks.netIdentityMock());
 
 const { mockVoiceState, pttPollingListeners, mockRoom, mockInvoke } = mocks;
 
@@ -432,6 +439,52 @@ describe("LiveKitSession", () => {
       expect(watchFrames(ws)).toEqual([[]]);
     });
 
+    const musicFrames = (ws: { send: ReturnType<typeof vi.fn> }) =>
+      ws.send.mock.calls.filter(([m]) => m.type === "voice_watch").map(([m]) => m.payload.music_id);
+
+    it("sends music_id with every frame, 0 when listening to nobody", () => {
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
+      session.setWsClient(ws);
+      (session as any)._remoteTracks.watch(9, "screenshare", true);
+      expect(musicFrames(ws)).toEqual([0]);
+    });
+
+    it("sends a voice_watch when the listening changes, and none while leaving", () => {
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
+      session.setWsClient(ws);
+      session.listenToMusic(7);
+      session.listenToMusic(8);
+      session.listenToMusic(null);
+      expect(musicFrames(ws)).toEqual([7, 8, 0]);
+      session.listenToMusic(7);
+      ws.send.mockClear();
+      session.leaveVoice(true);
+      expect(musicFrames(ws)).toEqual([]);
+    });
+
+    it("a rate-limited frame is retried with the latest music_id, not the one that failed", () => {
+      vi.useFakeTimers();
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
+      session.setWsClient(ws);
+      session.listenToMusic(7); // refused by the server (rate limited)
+      session.retryWatching();
+      ws.send.mockClear();
+      session.listenToMusic(8); // the listen changes during the back-off
+      vi.advanceTimersByTime(1000);
+      expect(musicFrames(ws)).toEqual([8, 8]);
+    });
+
+    it("a fresh join restores a kept listen even with nothing watched", () => {
+      const ws = { send: vi.fn(), getState: () => "connected", ping: async () => {} } as any;
+      session.setWsClient(ws);
+      (session as any).sendWatching(undefined, true);
+      expect(musicFrames(ws)).toEqual([]);
+      session.listenToMusic(7);
+      ws.send.mockClear();
+      (session as any).sendWatching(undefined, true);
+      expect(musicFrames(ws)).toEqual([7]);
+    });
+
     it("an error reply to a voice_watch is recognised and dropped", () => {
       const ws = {
         send: vi.fn(() => "env-1"),
@@ -817,12 +870,14 @@ describe("LiveKitSession", () => {
       const gateSpy = vi.spyOn((session as any)._audioPipeline, "setPttGated");
 
       session.setPttGated(false);
-      session.setPttGated(true);
+      session.setPttGated(true, 20);
 
-      expect(setPttGated).toHaveBeenNthCalledWith(1, false);
-      expect(setPttGated).toHaveBeenNthCalledWith(2, true);
-      expect(gateSpy).toHaveBeenNthCalledWith(1, false);
-      expect(gateSpy).toHaveBeenNthCalledWith(2, true);
+      // The store records a release's close once its delay has run (the
+      // indicator and the ticks); the pipeline counts it on the audio clock.
+      expect(setPttGated).toHaveBeenNthCalledWith(1, false, 0);
+      expect(setPttGated).toHaveBeenNthCalledWith(2, true, 20);
+      expect(gateSpy).toHaveBeenNthCalledWith(1, false, 0);
+      expect(gateSpy).toHaveBeenNthCalledWith(2, true, 20);
       // Never a mute: PTT does not touch setMicrophoneEnabled.
       expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalled();
       gateSpy.mockRestore();
@@ -1032,7 +1087,7 @@ describe("LiveKitSession", () => {
       await session.retryMicPermission();
 
       expect(errorCb).toHaveBeenCalledWith(
-        "Microphone still unavailable — check your browser permissions",
+        "Microphone still unavailable — check your microphone permission",
       );
       // setListenOnly(false) should NOT have been called on failure
       expect(setListenOnly).not.toHaveBeenCalled();
@@ -1174,6 +1229,24 @@ describe("LiveKitSession", () => {
       expect(gateSpy).toHaveBeenCalledWith(true);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).toHaveBeenCalledWith(true);
       expect(mockRoom.localParticipant.setMicrophoneEnabled).not.toHaveBeenCalledWith(false);
+      gateSpy.mockRestore();
+    });
+
+    // A release's close lands in the store only once its delay has run; a
+    // reconnect inside it must not reopen the mic the release is closing.
+    it("mode reconnect re-closes the pipeline's PTT gate when a release was still waiting out its delay", async () => {
+      const gateSpy = vi.spyOn((session as any)._audioPipeline, "setPttGated");
+      mockVoiceState.localMuted = false;
+      mockVoiceState.localDeafened = false;
+      mockVoiceState.pttGated = false;
+      vi.mocked(isPttClosePending).mockReturnValueOnce(true);
+
+      enterReconnecting(session, 7, { latestToken: "token", lastUrl: "/lk" });
+      const ac = new AbortController();
+      await runReconnect(session, 7, { url: "/lk", signal: ac.signal });
+
+      expect(gateSpy).toHaveBeenCalledWith(true);
+      expect(gateSpy).not.toHaveBeenCalledWith(false);
       gateSpy.mockRestore();
     });
 

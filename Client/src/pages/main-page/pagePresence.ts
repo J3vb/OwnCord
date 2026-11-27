@@ -34,7 +34,7 @@ export function createPagePresence(st: PageState, _pg: PageApi) {
    *  stuck on "idle" with nothing left to correct it. `presenceSender`
    *  retries once the window reopens instead, re-reading the status at that
    *  time so a burst of calls in between coalesces onto one retry carrying
-   *  the latest value — see @lib/presence/presence. */
+   *  the latest value — see features/presence/presence. */
   function applyPresence(status: UserStatus): void {
     st.presenceSender.send(status);
   }

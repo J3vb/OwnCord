@@ -3,7 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { createMessageList } from "../../src/features/messaging/MessageList";
 import { renderMessage } from "../../src/features/messaging/message-list/renderers";
 import { messageActionGates } from "../../src/features/messaging/message-list/messageActions";
-import { shouldGroup } from "@lib/text/formatting";
+import { shouldGroup } from "../../src/features/messaging/formatting";
 import type { Message } from "@stores/messages.store";
 import { voiceStore } from "@stores/voice.store";
 import {

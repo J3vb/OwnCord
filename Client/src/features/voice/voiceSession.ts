@@ -1,6 +1,6 @@
-// The LiveKit session class behind lib/voice/livekitSession.ts: one instance
+// The LiveKit session class behind features/voice/livekitSession.ts: one instance
 // owns the voice connection lifecycle and wires the join, room lifecycle and
-// media modules together. lib/voice/livekitSession.ts creates the singleton
+// media modules together. features/voice/livekitSession.ts creates the singleton
 // and exports its bound methods.
 //
 // The class is the top of a chain of layers, one concern each, so no file
@@ -12,15 +12,23 @@
 // the session.
 import { Track } from "livekit-client";
 import type { WsClient } from "@lib/ws";
-import { restateSelfVoiceState, isPttPollingLive, setLocalGateSpeaking } from "@stores/voice.store";
+import {
+  restateSelfVoiceState,
+  isPttPollingLive,
+  setLocalGateSpeaking,
+  getLocalRing,
+  onLocalRingChange,
+  cancelPttClose,
+} from "@stores/voice.store";
 import { createLogger } from "@lib/logger";
+import { voiceSpeakingEnabled } from "@lib/net/serverCapabilities";
 import { AudioPipeline } from "@lib/voice/audioPipeline";
-import { AudioElements } from "@lib/voice/audioElements";
-import { E2EEManager } from "@lib/voice/livekitE2EE";
-import { DeviceManager } from "@lib/voice/deviceManager";
+import { AudioElements } from "./audioElements";
+import { E2EEManager } from "./livekitE2EE";
+import { DeviceManager } from "./deviceManager";
 import { type CameraTrackState, type ScreenTrackState } from "./screenShare";
-import { buildSessionDebugInfo } from "@lib/voice/livekitDiagnostics";
-import type { RoomEventHandlers } from "@lib/voice/roomEventHandlers";
+import { buildSessionDebugInfo } from "./livekitDiagnostics";
+import type { RoomEventHandlers } from "./roomEventHandlers";
 import { getShareMotionPolicy } from "@lib/voice/shareFlags";
 import { JoinOrchestration } from "./joinOrchestration";
 import { RoomLifecycle } from "./roomLifecycle";
@@ -28,9 +36,10 @@ import { MediaControl } from "./mediaControl";
 import { restoreLocalVoiceState } from "./localVoiceRestore";
 import { dismissMediaLostNotice } from "./mediaLostNotice";
 import { noteVoiceLeave } from "./leaveOwed";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { nativeCounters } from "./native/counters";
 import { speechDetectionOf } from "./sileroDetection";
+import { createRingAnnouncer } from "./ringAnnouncer";
 import { desktop } from "../../platform/desktop";
 import { SessionReconnect } from "./sessionReconnect";
 import type { MusicShare, MusicStartOptions, MusicStartOutcome } from "./musicShare";
@@ -134,6 +143,12 @@ export class LiveKitSession extends SessionReconnect {
   protected _audioElements = new AudioElements();
   protected _deviceManager = new DeviceManager();
   protected _eventHandlers: RoomEventHandlers;
+  /** Reports the own speaking ring to the call, through the OwnCord server. */
+  protected _ringAnnouncer = createRingAnnouncer({
+    getCall: () => this._room,
+    getRing: getLocalRing,
+    send: (speaking) => this.sendRing(speaking),
+  });
 
   /** Manually published local tracks (camera/screenshare) for explicit cleanup. */
   /** Built on the first Share music, so the share code loads with the first use. */
@@ -144,6 +159,7 @@ export class LiveKitSession extends SessionReconnect {
   constructor() {
     super();
     this._audioPipeline.onGateSpeaking = setLocalGateSpeaking;
+    onLocalRingChange(this._ringAnnouncer.update);
     this._eventHandlers = this.createEventHandlers();
   }
 
@@ -157,6 +173,8 @@ export class LiveKitSession extends SessionReconnect {
   /** Update all extracted modules with a room reference. See RoomLifecycle. */
   protected syncModuleRooms(room: VoiceRoom | null = this._room): void {
     this._lifecycle.syncModuleRooms(room);
+    // A ring that was lit before this call existed has not been reported to it.
+    this._ringAnnouncer.update();
   }
 
   // --- Volume helpers ---
@@ -173,6 +191,26 @@ export class LiveKitSession extends SessionReconnect {
   }
 
   // --- Public API ---
+
+  /** Report the own ring (voice_speak) while the server relays it and the
+   *  socket is up. The server drops a report from outside a voice channel. */
+  protected sendRing(speaking: boolean | null): boolean {
+    if (!voiceSpeakingEnabled() || this.ws?.getState() !== "connected") return false;
+    this.ws.send({ type: "voice_speak", payload: { speaking } });
+    return true;
+  }
+
+  /** The socket resumed while in voice: a ring change made while it was down
+   *  was never sent either. */
+  override resendWatching(): void {
+    super.resendWatching();
+    this._ringAnnouncer.update();
+  }
+
+  /** The ring a member of our channel reports for itself (voice_speaking). */
+  handleRingAnnounced(userId: number, speaking: boolean | null): void {
+    this._eventHandlers.handleRingAnnounced(userId, speaking);
+  }
 
   setWsClient(client: WsClient): void {
     this.ws = client;
@@ -206,6 +244,9 @@ export class LiveKitSession extends SessionReconnect {
     // The join a reconnect was cleared for has its answer: from here the
     // attempt itself is the session.
     this.clearYield();
+    // Listening is not carried to another channel; a rebuilt room of the
+    // same channel keeps it.
+    this._remoteTracks.keepListenFor(channelId);
     return this._join.connectAndSetup(token, url, channelId, directUrl, isKeyHolder);
   }
 
@@ -232,6 +273,7 @@ export class LiveKitSession extends SessionReconnect {
     this._eventHandlers.handleConnected(room);
     this._remoteTracks.dropUnpublishedWatches();
     this._remoteTracks.removeUnpublishedTiles();
+    this._remoteTracks.reviewListening();
   }
 
   /** Resolves once the room's disconnect has completed (the native room's,
@@ -242,6 +284,7 @@ export class LiveKitSession extends SessionReconnect {
     this._lostOnReconnect = null;
     this._lostMusicApp = null;
     this._music?.stop();
+    cancelPttClose();
     if (this._watchRetry !== null) clearTimeout(this._watchRetry);
     this._watchRetry = null;
     dismissMediaLostNotice();

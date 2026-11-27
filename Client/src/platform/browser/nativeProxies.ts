@@ -2,6 +2,7 @@
 // to the server that served it. REST goes to the page's own origin, and
 // LiveKit through the server's proxy path on the page's host.
 import type { NativeProxies } from "../contracts/nativeProxies";
+import { LiveKitAddressError, isProxyPath } from "@lib/voice/livekitAddress";
 
 /** `ws:`/`wss:` to match the page, so a socket is as secure as the page. */
 function socketScheme(): string {
@@ -30,10 +31,10 @@ export const nativeProxies: NativeProxies = {
   // The page's host is the only server, so there is nothing to record.
   setLiveKitServerHost: () => undefined,
   async resolveLiveKitUrl(proxyPath: string): Promise<string> {
-    // A proxy path goes through the server; anything else is already a URL.
-    return proxyPath.startsWith("/")
-      ? `${socketScheme()}//${location.host}${proxyPath}`
-      : proxyPath;
+    // A proxy path goes through the server that served the page; any other
+    // address is refused.
+    if (!isProxyPath(proxyPath)) throw new LiveKitAddressError();
+    return `${socketScheme()}//${location.host}${proxyPath}`;
   },
   stopLiveKitProxy: () => undefined,
 };

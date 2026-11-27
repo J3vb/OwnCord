@@ -7,7 +7,7 @@ import { createIcon, type IconName } from "@lib/icons";
 import { showToast } from "@lib/ui/toast";
 import { loadPref, savePref } from "@lib/prefs/preferences";
 import { voiceText } from "../../../i18n/voice";
-import { canPublishScreen } from "../native/platform";
+import { canPublishScreen } from "@lib/hostOs";
 import { openPopoutWindow } from "../popout";
 import { createRouteSlot } from "../routeSlot";
 import { voiceStore } from "@stores/voice.store";
@@ -22,7 +22,7 @@ import { createPausedNote, drawPausedNote } from "./gridPhoneHold";
 import { VIEW_PREFS, type ViewToggle, log, callButton } from "./gridShared";
 import { createGridViewMenu } from "./gridViewMenu";
 import type { GridState, GridApi } from "./gridState";
-import type { VideoGridCallbacks } from "./VideoGrid";
+import type { CallState, VideoGridCallbacks } from "./VideoGrid";
 
 /** Swap a control's icon only when it changes: the bars redraw on every voice
  *  store tick, and speaking alone ticks it several times a second. */
@@ -31,6 +31,15 @@ function setIcon(btn: HTMLButtonElement, name: IconName): void {
   if (current?.getAttribute("data-icon") === name) return;
   current?.remove();
   btn.appendChild(createIcon(name, 18));
+}
+
+/** The mic control's label: the first lock that applies, in the user bar's order. */
+function muteTitle(cs: CallState, deafened: boolean): string {
+  if (cs.phoneHold === true) return voiceText("widget.control.phoneCallHold");
+  if (cs.serverMuted === true) return voiceText("widget.mutedByModerator");
+  if (cs.afkLocked === true) return voiceText("widget.control.afkLocked");
+  if (cs.listenOnly) return voiceText("widget.control.listenOnly");
+  return voiceText(deafened ? "widget.control.deafenedMic" : "widget.control.mute");
 }
 
 export function createGridCallBar(st: GridState, api: GridApi) {
@@ -122,9 +131,14 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     }
     // Music goes where a share does: a phone, or a call without a share control, has no button.
     if (canPublishScreen() && cc.onScreenshareToggle !== undefined) {
-      bar.appendChild(
-        callButton(voiceText("music.share"), "music", "music", () => void toggleMusicShare()),
-      );
+      // Its app picker opens in the app window too: the call comes back first.
+      const onMusic = (): void => {
+        if (st.callPop !== null && voiceStore.getState().localMusic !== true) {
+          closeCallPopout(true);
+        }
+        void toggleMusicShare();
+      };
+      bar.appendChild(callButton(voiceText("music.share"), "music", "music", onMusic));
     }
     if (inCallView) {
       // A phone's view options: one round control instead of square toggles.
@@ -180,18 +194,14 @@ export function createGridCallBar(st: GridState, api: GridApi) {
     const serverMuted = st.callState.serverMuted === true;
     // A phone call holds the call: the mic is closed until it ends.
     const held = st.callState.phoneHold === true;
-    mute.setAttribute("aria-pressed", String(muted || held));
-    setIcon(mute, muted || listenOnly || held ? "mic-off" : "mic");
-    mute.disabled = listenOnly || serverMuted || held;
-    mute.title = voiceText(
-      held
-        ? "widget.control.phoneCallHold"
-        : serverMuted
-          ? "widget.mutedByModerator"
-          : listenOnly
-            ? "widget.control.listenOnly"
-            : "widget.control.mute",
-    );
+    // The AFK channel is listen-only: the mic reads muted and is locked.
+    const afk = st.callState.afkLocked === true;
+    // A deafen closes the mic as well; a moderator's deafen leaves the mute as it was.
+    const deafened = st.callState.deafened && !muted;
+    mute.setAttribute("aria-pressed", String(muted || held || afk));
+    setIcon(mute, muted || listenOnly || held || afk || deafened ? "mic-off" : "mic");
+    mute.disabled = listenOnly || serverMuted || held || afk;
+    mute.title = muteTitle(st.callState, deafened);
   }
 
   function drawDeafenControl(bar: Element): void {

@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi, type Mock } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   createMentionAutocomplete,
@@ -188,10 +188,9 @@ describe("filterMentionSuggestions", () => {
     expect(filterMentionSuggestions("every").map((s) => s.token)).toEqual(["everyone"]);
   });
 
-  // The composer's own token scanner and both parsers (client lib/text/mentions.ts,
-  // server mentions.go) only accept [\p{L}\p{N}_.-]{1,64} -- a username with a
-  // space or "@" truncates the token on insert, so picking it produces a dead
-  // token that resolves to no mention and notifies nobody.
+  // Without id mentions both parsers (client features/messaging/mentions.ts, server
+  // mentions.go) only accept [\p{L}\p{N}_.-]{1,64} -- a username with a space
+  // or "@" would be a dead token. With them, see mention-spaced-names.test.ts.
   it("skips members whose username cannot be expressed as a mention token", () => {
     seedMembers(["alice", "John Smith", "weird@name"]);
     expect(filterMentionSuggestions("").map((s) => s.token)).toEqual(["alice"]);

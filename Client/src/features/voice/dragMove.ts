@@ -44,6 +44,9 @@ function dropChannelAt(x: number, y: number, fromChannelId: number): HTMLElement
     if (!contains(el.getBoundingClientRect(), x, y)) continue;
     const list = el.closest(".channel-list");
     if (list !== null && !contains(list.getBoundingClientRect(), x, y)) continue;
+    // Under the tree the list no longer clips: the tree is the visible box.
+    const tree = el.closest(".server-tree");
+    if (tree !== null && !contains(tree.getBoundingClientRect(), x, y)) continue;
     return el;
   }
   return null;

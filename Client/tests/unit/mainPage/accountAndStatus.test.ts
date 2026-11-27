@@ -4,7 +4,7 @@ import { createMainPage } from "../../../src/pages/MainPage";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { authStore, clearAuth } from "../../../src/stores/auth.store";
 import { uiStore } from "../../../src/stores/ui.store";
-import { wireConnectionStatus } from "../../../src/lib/dispatcher";
+import { wireConnectionStatus } from "../../../src/app/dispatcher";
 import { createMockWsClient } from "../../helpers/mock-ws";
 import { voiceStore } from "../../../src/stores/voice.store";
 import { dmStore } from "../../../src/stores/dm.store";
@@ -17,7 +17,7 @@ import {
 } from "../../../src/features/messaging/content/attachments";
 import { desktop } from "../../../src/platform/desktop";
 import { saveUserStatus } from "../../../src/lib/presence/userStatus";
-import { markAllRead } from "../../../src/lib/readState";
+import { markAllRead } from "../../../src/stores/readState";
 import {
   fakeWs,
   fakeApi,
@@ -35,11 +35,11 @@ vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
 );
 vi.mock("@lib/logger", () => mocks.loggerMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/media/notificationSound", () => mocks.mediaNotificationSoundMock());
 vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messagesCallAlertsMock());
 vi.mock("../../../src/features/updates/UpdateNotifier", () => mocks.updateNotifierMock());
-vi.mock("@lib/voice/audioElements", () => mocks.voiceAudioElementsMock());
+vi.mock("../../../src/features/voice/audioElements", () => mocks.voiceAudioElementsMock());
 vi.mock("@lib/presence/autoIdle", () => mocks.presenceAutoIdleMock());
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),

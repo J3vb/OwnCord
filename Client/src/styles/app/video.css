@@ -915,3 +915,81 @@ video[hidden] + .video-surface {
   border: 1px solid var(--border-control);
   cursor: grab;
 }
+
+/* ── Music tile: a member's shared music, drawn like a stopped share ── */
+.video-cell--music {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--border);
+  background: color-mix(in srgb, var(--success-fill) 18%, var(--bg-secondary));
+}
+.video-music {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+  height: 100%;
+  padding: 12px 12px 44px;
+  text-align: center;
+  color: var(--text-normal);
+  font-size: var(--font-size-sm);
+  font-weight: 600;
+}
+.video-music__disc {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 72px;
+  height: 72px;
+  flex-shrink: 0;
+  border: 2px solid var(--success-fill);
+  border-radius: var(--radius-circle);
+  background: var(--bg-primary);
+  color: var(--text-positive);
+}
+.video-music__text {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.video-music__listeners {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+.video-music__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.video-cell--music:not(.video-cell--listening) .video-music__btn {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+.video-cell--music:not(.video-cell--listening) .video-music__btn:hover {
+  background: var(--accent-hover);
+}
+.video-music__volume {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: 100%;
+  padding: 4px 10px;
+  border-radius: var(--radius-sm);
+  background: var(--scrim);
+  color: var(--on-fill);
+}
+/* A small tile (the strip beside a focused one, a phone) drops the line under the disc. */
+@container (max-height: 200px) {
+  .video-music__disc {
+    width: 48px;
+    height: 48px;
+  }
+}

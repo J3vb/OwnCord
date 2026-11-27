@@ -91,8 +91,10 @@ and proceeds, so a reviewer can see what was assumed.
   Bounded work gets `context.WithTimeout`/`WithDeadline` with its `cancel`
   deferred; a long-lived loop takes its owner's lifecycle context
   (`ws/event_persister.go`'s `go p.run(ctx)` is the pattern). A bare
-  `go func() { … }()` with no context and no exit path is a leak and is
-  rejected in review. `contextcheck` fails a dropped or replaced context.
+  `go func() { … }()` with no context and no exit path is a leak. In `api`,
+  `admin`, `service` and `ws`, `invariants/request_path_go.go` fails any `go`
+  statement not inventoried in `GoAllow`; elsewhere review rejects it.
+  `contextcheck` fails a dropped or replaced context.
 
 ### Frontend and Tauri (`Client/`)
 
@@ -113,7 +115,7 @@ and proceeds, so a reviewer can see what was assumed.
   cannot touch the live connection. New code follows it: a handler checks it
   still owns the attempt before acting, reconnect cleanup touches only its
   own attempt's resources, and server events reach stores only through
-  `src/lib/dispatcher.ts` (`no-store-write-in-ws-on` and
+  `src/app/dispatcher.ts` (`no-store-write-in-ws-on` and
   `src/features/dispatcherDoor.test.ts` enforce that door).
 
 ## Gotchas

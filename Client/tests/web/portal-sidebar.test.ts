@@ -14,7 +14,7 @@ vi.mock("@lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
 vi.mock("../../src/features/connection/logout", () => ({ logout: vi.fn() }));
-vi.mock("@lib/voice/livekitSession", () => ({}));
+vi.mock("../../src/features/voice/livekitSession", () => ({}));
 vi.mock("../../src/features/navigation/QuickSwitchOverlay", () => ({
   createQuickSwitchOverlay: vi.fn().mockReturnValue({ mount: vi.fn(), destroy: vi.fn() }),
 }));

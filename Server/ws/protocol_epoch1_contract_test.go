@@ -728,6 +728,7 @@ func TestEpoch1Fixtures(t *testing.T) {
 		{"resume-replay", journeyResumeReplay},
 		{"voice-join-e2ee-leave", journeyVoiceJoinE2EELeave},
 		{"voice-watch", journeyVoiceWatch},
+		{"voice-speak", journeyVoiceSpeak},
 		{"voice-self-state", journeyVoiceSelfState},
 		{"voice-moderation", journeyVoiceModeration},
 		{"voice-moderation-move-kick", journeyVoiceModerationMoveKick},

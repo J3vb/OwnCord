@@ -2,9 +2,13 @@ package api
 
 // heic_meta.go decides whether a HEIC has the plain still-image layout that
 // is converted: an allowlist of the file shape, checked before any HEIC
-// decoder runs. Everything outside it is refused, so what the decoder is then
-// handed is one primary picture (or one grid of single-picture tiles) of a
-// bounded size, found where the boxes say it is.
+// decoder runs. Everything outside it is refused. The check walks the items
+// the decoder reads for the primary image the way the decoder finds them (the
+// primary, the tiles of a grid, and one alpha plane, which is a coded image, a
+// grid of coded tiles, or one coded image per tile of a grid), holds every
+// grid on that walk to its descriptor and every coded item on it to exactly
+// one picture, all of them under one shared pixel, NAL unit and byte budget,
+// and refuses a layout in which an item would be reached twice.
 
 import (
 	"bytes"
@@ -169,48 +173,62 @@ func extentsTotal(ext []heicExtent) uint64 {
 // and for the preview, and reads the headers and each NAL's first bytes but
 // none of the picture data.
 func validateHEIC(r io.ReaderAt, size int64) (heicInfo, error) {
+	info, _, _, err := checkHEIC(r, size)
+	return info, err
+}
+
+// checkHEIC is validateHEIC, also returning the parsed meta box and the items
+// the decoder reads, which the tests compare with what the decoder does.
+func checkHEIC(r io.ReaderAt, size int64) (heicInfo, *heicMeta, heicPlan, error) {
 	if size < 16 {
-		return heicInfo{}, refuse("too short")
+		return heicInfo{}, nil, heicPlan{}, refuse("too short")
 	}
 	meta, err := heicTopLevel(r, size)
 	if err != nil {
-		return heicInfo{}, err
+		return heicInfo{}, nil, heicPlan{}, err
 	}
 	m, err := parseHEICMeta(meta, uint64(size))
 	if err != nil {
-		return heicInfo{}, err
+		return heicInfo{}, nil, heicPlan{}, err
 	}
-	if t := m.types[m.primary]; t != "hvc1" && t != "grid" {
-		return heicInfo{}, refuse("primary item is not a coded still")
+	plan, err := m.decodePlan()
+	if err != nil {
+		return heicInfo{}, nil, heicPlan{}, err
 	}
-	budget := heicBudget{pixels: 2 * heicMaxPixels, nals: heicMaxNALs, bytes: uint64(size)}
-	decoded := m.decodedItems()
-	coded := 0
-	for _, id := range decoded {
-		t := m.types[id]
-		if t != "hvc1" && t != "grid" {
-			return heicInfo{}, refuse("unsupported item type")
-		}
-		if err := m.checkItemProps(id); err != nil {
-			return heicInfo{}, err
-		}
-		if t == "hvc1" {
-			coded++
-			if err := m.checkCoded(r, id, &budget); err != nil {
-				return heicInfo{}, err
-			}
-		}
-	}
-	if coded == 0 {
-		return heicInfo{}, refuse("no coded image")
-	}
-	if m.types[m.primary] == "grid" {
-		if err := m.checkGrid(r, m.primary); err != nil {
-			return heicInfo{}, err
-		}
+	if err := m.checkPlan(r, plan, uint64(size)); err != nil {
+		return heicInfo{}, nil, heicPlan{}, err
 	}
 	body, found := m.property(m.primary, "irot")
-	return heicInfo{quarterTurn: found && len(body) >= 1 && body[0]&1 == 1}, nil
+	return heicInfo{quarterTurn: found && len(body) >= 1 && body[0]&1 == 1}, m, plan, nil
+}
+
+// checkPlan holds every grid the decoder assembles to its descriptor, then
+// every coded item it decodes to one picture, all under one shared budget.
+func (m *heicMeta) checkPlan(r io.ReaderAt, plan heicPlan, size uint64) error {
+	for _, id := range plan.grids {
+		if err := m.checkItemProps(id); err != nil {
+			return err
+		}
+		if err := m.checkGrid(r, id); err != nil {
+			return err
+		}
+	}
+	if len(plan.coded) == 0 {
+		return refuse("no coded image")
+	}
+	budget := heicBudget{pixels: 2 * heicMaxPixels, nals: heicMaxNALs, bytes: size}
+	for _, id := range plan.coded {
+		if m.types[id] != "hvc1" {
+			return refuse("unsupported item type")
+		}
+		if err := m.checkItemProps(id); err != nil {
+			return err
+		}
+		if err := m.checkCoded(r, id, &budget); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // checkItemProps refuses an association of a coded image or grid to a
@@ -227,33 +245,117 @@ func (m *heicMeta) checkItemProps(id uint32) error {
 	return nil
 }
 
-// decodedItems lists the items the decoder reads for the primary image: the
-// primary item, a grid's tiles, and the alpha channel items that are
-// auxiliary to them (an auxC of an alpha type, whatever the item's own type).
-// Every other item (Exif, XMP, a tone map, thumbnails, depth or gain maps) is
+// heicPlan is what the decoder reads for the primary image: the grids it
+// assembles and the coded items it decodes. Every other item (Exif, XMP, a
+// tone map, thumbnails, depth or gain maps, the alpha of an alpha plane) is
 // never decoded, and the layout check does not look at it.
-func (m *heicMeta) decodedItems() []uint32 {
-	list := []uint32{m.primary}
-	if m.types[m.primary] == "grid" {
-		list = append(list, m.dimg[m.primary]...)
+type heicPlan struct {
+	grids []uint32
+	coded []uint32
+}
+
+// decodePlan lists the items the decoder reads for the primary image, found
+// the way it finds them: the primary, a grid's tiles, and the alpha plane,
+// which is the alpha item of the primary (a coded image or a grid of coded
+// tiles) or, for a grid with none, the alpha items of its tiles when every
+// tile has one. A layout the decoder could read more than one way is refused:
+// an item with several alpha items, a grid with alpha of its own and on its
+// tiles, alpha on only some tiles, and an item reached twice.
+func (m *heicMeta) decodePlan() (heicPlan, error) {
+	if t := m.types[m.primary]; t != "hvc1" && t != "grid" {
+		return heicPlan{}, refuse("primary item is not a coded still")
 	}
-	seen := make(map[uint32]bool, len(list))
-	var out []uint32
-	for _, id := range list {
-		if seen[id] {
+	var plan heicPlan
+	m.addImage(&plan, m.primary)
+	alpha, err := m.alphaOf(m.primary)
+	if err != nil {
+		return heicPlan{}, err
+	}
+	tileAlpha, err := m.tileAlpha(m.primary)
+	if err != nil {
+		return heicPlan{}, err
+	}
+	switch {
+	case alpha != 0 && len(tileAlpha) > 0:
+		return heicPlan{}, refuse("alpha on a grid and on its tiles")
+	case alpha != 0:
+		if t := m.types[alpha]; t != "hvc1" && t != "grid" {
+			return heicPlan{}, refuse("unsupported item type")
+		}
+		m.addImage(&plan, alpha)
+	default:
+		plan.coded = append(plan.coded, tileAlpha...)
+	}
+	if err := plan.distinct(); err != nil {
+		return heicPlan{}, err
+	}
+	return plan, nil
+}
+
+// addImage adds an image item to the plan: a grid and its tiles, or else the
+// item itself as a coded image (checkPlan refuses one of another type).
+func (m *heicMeta) addImage(plan *heicPlan, id uint32) {
+	if m.types[id] != "grid" {
+		plan.coded = append(plan.coded, id)
+		return
+	}
+	plan.grids = append(plan.grids, id)
+	plan.coded = append(plan.coded, m.dimg[id]...)
+}
+
+// alphaOf is the item that carries id's alpha channel, or 0 when none does:
+// an item auxiliary to id with an alpha auxC, whatever its own type. More
+// than one is refused.
+func (m *heicMeta) alphaOf(id uint32) (uint32, error) {
+	var found uint32
+	for _, a := range m.auxl {
+		if a[1] != id || !m.isAlpha(a[0]) {
 			continue
 		}
-		seen[id] = true
-		out = append(out, id)
-		for _, a := range m.auxl {
-			if a[1] != id || seen[a[0]] || !m.isAlpha(a[0]) {
-				continue
-			}
-			seen[a[0]] = true
-			out = append(out, a[0])
+		if found != 0 {
+			return 0, refuse("several alpha planes")
+		}
+		found = a[0]
+	}
+	return found, nil
+}
+
+// tileAlpha lists the alpha items of a grid's tiles: none, or one for every
+// tile.
+func (m *heicMeta) tileAlpha(id uint32) ([]uint32, error) {
+	if m.types[id] != "grid" {
+		return nil, nil
+	}
+	tiles := m.dimg[id]
+	out := make([]uint32, 0, len(tiles))
+	for _, t := range tiles {
+		a, err := m.alphaOf(t)
+		if err != nil {
+			return nil, err
+		}
+		if a != 0 {
+			out = append(out, a)
 		}
 	}
-	return out
+	if len(out) != 0 && len(out) != len(tiles) {
+		return nil, refuse("alpha on some tiles only")
+	}
+	return out, nil
+}
+
+// distinct refuses a plan that reaches an item twice, which the decoder would
+// then decode twice.
+func (p heicPlan) distinct() error {
+	seen := make(map[uint32]bool, len(p.grids)+len(p.coded))
+	for _, list := range [][]uint32{p.grids, p.coded} {
+		for _, id := range list {
+			if seen[id] {
+				return refuse("an item reached twice")
+			}
+			seen[id] = true
+		}
+	}
+	return nil
 }
 
 func (m *heicMeta) isAlpha(id uint32) bool {

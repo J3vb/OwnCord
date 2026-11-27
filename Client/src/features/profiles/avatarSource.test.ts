@@ -3,7 +3,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 const fetchImageAsObjectUrl = vi.hoisted(() => vi.fn<(url: string) => Promise<string | null>>());
 const smallThumbnailUrl = vi.hoisted(() => vi.fn<(url: string, size: number) => string | null>());
 
-vi.mock("../messaging/content/attachments", () => ({ fetchImageAsObjectUrl, smallThumbnailUrl }));
+const generation = vi.hoisted(() => ({ value: 0 }));
+
+vi.mock("../messaging/content/attachments", () => ({
+  attachmentCacheGeneration: () => generation.value,
+  fetchImageAsObjectUrl,
+  smallThumbnailUrl,
+}));
 
 const { avatarFetchUrl, fetchAvatarObjectUrl, playOriginalOnEngage } =
   await import("./avatarSource");
@@ -33,6 +39,23 @@ describe("avatarFetchUrl and fetchAvatarObjectUrl", () => {
     smallThumbnailUrl.mockReturnValue("https://s/f/thumb?size=128");
     fetchImageAsObjectUrl.mockResolvedValue("blob:small");
     expect(await fetchAvatarObjectUrl("https://s/f", 128)).toBe("blob:small");
+    expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it("falls back to the original when the preview fails", async () => {
+    smallThumbnailUrl.mockReturnValue("https://s/f/thumb?size=128");
+    fetchImageAsObjectUrl.mockResolvedValueOnce(null).mockResolvedValueOnce("blob:original");
+    expect(await fetchAvatarObjectUrl("https://s/f", 128)).toBe("blob:original");
+    expect(fetchImageAsObjectUrl).toHaveBeenLastCalledWith("https://s/f");
+  });
+
+  it("starts no fallback when the caches were cleared while the preview was on its way", async () => {
+    smallThumbnailUrl.mockReturnValue("https://s/f/thumb?size=128");
+    fetchImageAsObjectUrl.mockImplementationOnce(() => {
+      generation.value += 1;
+      return Promise.resolve(null);
+    });
+    expect(await fetchAvatarObjectUrl("https://s/f", 128)).toBeNull();
     expect(fetchImageAsObjectUrl).toHaveBeenCalledTimes(1);
   });
 });

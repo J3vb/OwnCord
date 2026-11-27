@@ -12,6 +12,7 @@
 import { Disposable } from "@lib/disposable";
 import { isImeCommit } from "@lib/text/ime";
 import { createElement } from "@lib/dom";
+import { isAndroidApp } from "@lib/hostOs";
 import { inlineEditText } from "../../i18n/inlineEdit";
 import { replaceEmojiShortcodes } from "./shortcodes";
 import { FORMAT_MARKERS, wrapWithMarker } from "./markdownMarkers";
@@ -55,6 +56,8 @@ export function createInlineEdit(o: InlineEditOptions): InlineEditSession {
     "data-testid": `msg-edit-input-${id}`,
     "aria-label": inlineEditText("label"),
     rows: "1",
+    // The soft keyboard has no Shift: Enter is a new line there, as in the composer.
+    ...(isAndroidApp() ? { enterkeyhint: "enter" } : {}),
   });
   textarea.value = o.text;
 
@@ -77,12 +80,16 @@ export function createInlineEdit(o: InlineEditOptions): InlineEditSession {
     },
     inlineEditText("hint.save"),
   );
-  hint.append(
-    `${inlineEditText("hint.escapeTo")} `,
-    cancelLink,
-    ` ${inlineEditText("hint.separator")} ${inlineEditText("hint.enterTo")} `,
-    saveLink,
-  );
+  if (isAndroidApp()) {
+    hint.append(cancelLink, ` ${inlineEditText("hint.separator")} `, saveLink);
+  } else {
+    hint.append(
+      `${inlineEditText("hint.escapeTo")} `,
+      cancelLink,
+      ` ${inlineEditText("hint.separator")} ${inlineEditText("hint.enterTo")} `,
+      saveLink,
+    );
+  }
 
   const errorId = `msg-edit-error-${id}`;
   const error = createElement("div", {
@@ -156,7 +163,7 @@ export function createInlineEdit(o: InlineEditOptions): InlineEditSession {
           return;
         }
       }
-      if (e.key === "Enter" && !e.shiftKey) {
+      if (e.key === "Enter" && !e.shiftKey && !isAndroidApp()) {
         // A CJK IME commits its candidate on Enter (isComposing, or keyCode 229).
         if (isImeCommit(e)) return;
         e.preventDefault();

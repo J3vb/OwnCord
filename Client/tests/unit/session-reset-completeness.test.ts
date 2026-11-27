@@ -13,10 +13,7 @@ import {
   rememberReadingPosition,
   takeReadingPosition,
 } from "../../src/features/messaging/message-list/readingPositions";
-import {
-  claimForwardRequest,
-  isForwardRequest,
-} from "../../src/features/messaging/forwardRequests";
+import { claimRequest, isClaimedRequest } from "../../src/lib/net/requestClaims";
 import { claimPollRequest, isPollRequest } from "../../src/features/messaging/pollRequests";
 import { pollCardState } from "../../src/features/messaging/message-list/pollCard";
 import { createThreadSender, holdsThreadDrafts } from "../../src/features/threads/threadSender";
@@ -50,6 +47,7 @@ import { stickersStore, setStickers } from "../../src/stores/stickers.store";
 import {
   externalPartition,
   fetchMediaAsObjectUrl,
+  isTrustedServerUrl,
   setServerHost,
 } from "../../src/features/messaging/content/attachments";
 import { renderGenericLinkPreview } from "../../src/features/messaging/content/embeds";
@@ -90,7 +88,7 @@ import type { DmChannel } from "../../src/stores/dm.store";
 import { safetyStore, setReadyNotices } from "../../src/features/safety/store";
 import { memberTimeoutsStore, setMemberTimeouts } from "../../src/features/moderation/store";
 // Loaded for its registrations: the two notification resets.
-import "../../src/lib/notifications";
+import "../../src/features/notifications/notifications";
 import {
   getCachedReactionUsers,
   loadReactionUsers,
@@ -326,6 +324,15 @@ const PROBES: readonly Probe[] = [
       stickersStore.getState().rev > stickerRevBefore,
   },
   {
+    // Before the cache probe, whose check sets the host again.
+    name: "attachments:server-host",
+    mutate: () => {
+      setServerHost("chat.example");
+      expect(isTrustedServerUrl(FILE_URL)).toBe(true);
+    },
+    isInitial: () => !isTrustedServerUrl(FILE_URL),
+  },
+  {
     name: "attachments:caches",
     mutate: async () => {
       setServerHost("chat.example");
@@ -341,6 +348,8 @@ const PROBES: readonly Probe[] = [
       expect(fetchMock).toHaveBeenCalledTimes(1); // cached: the probe can fail
     },
     isInitial: async () => {
+      // The reset also forgot the host; the next main page sets it again.
+      setServerHost("chat.example");
       await fetchMediaAsObjectUrl(FILE_URL);
       return fetchMock.mock.calls.length === 2; // refetched, so the cache was dropped
     },
@@ -607,9 +616,9 @@ const PROBES: readonly Probe[] = [
     isInitial: () => Math.abs(serverNow() - Date.now()) < 1000,
   },
   {
-    name: "messaging:forwardRequests",
-    mutate: () => claimForwardRequest("fwd-probe"),
-    isInitial: () => !isForwardRequest("fwd-probe"),
+    name: "net:requestClaims",
+    mutate: () => claimRequest("fwd-probe"),
+    isInitial: () => !isClaimedRequest("fwd-probe"),
   },
   {
     name: "messaging:pollRequests",
@@ -718,6 +727,9 @@ const EXEMPT: readonly string[] = [
   // body-observer timers the timer-count probes read; bottomSheet.test.ts
   // ("closes from closeBottomSheet and from a session reset") runs the reset.
   "bottomSheet:open",
+  // A body class, not store state, registered inside installTouchInput, which
+  // adds document-wide listeners; touchInput.test.ts runs the reset.
+  "touchInput:typing",
   // The reset pops the history entry, and jsdom runs history.back() on a timer,
   // which the timer-count probes read; backHistory.test.ts ("a session reset
   // drops every claim and the guard, and pops the entry") runs the reset.

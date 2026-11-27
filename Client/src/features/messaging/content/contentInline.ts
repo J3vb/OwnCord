@@ -4,7 +4,7 @@
  */
 
 import { createElement, setText } from "@lib/dom";
-import type { MentionInfo } from "@lib/text/mentions";
+import type { MentionInfo } from "../mentions";
 import { formatDiscordTimestamp } from "@lib/text/discordTimestamp";
 import { parseInline, type InlineNode, type InlineStyle } from "@lib/text/markdown";
 import { isSafeUrl } from "./attachments";
@@ -46,9 +46,16 @@ function buildSpoiler(
     // spoiler must not open on the same click that uncovers it.
     e.preventDefault();
     e.stopPropagation();
+    const hadFocus = document.activeElement === span;
     span.classList.add("revealed");
-    span.setAttribute("aria-pressed", "true");
-    span.setAttribute("aria-label", messagingText("spoiler.revealed"));
+    // Revealed, it is plain text again: a screen reader reads the words, not a button's name.
+    for (const attr of ["role", "aria-pressed", "aria-label", "tabindex"])
+      span.removeAttribute(attr);
+    // Keep a keyboard reader's place: focusable by script only, not a tab stop.
+    if (hadFocus) {
+      span.tabIndex = -1;
+      span.focus();
+    }
   };
   span.addEventListener("click", reveal);
   span.addEventListener("keydown", (e: KeyboardEvent) => {

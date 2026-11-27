@@ -42,11 +42,19 @@ export function isVoiceAttachment(att: Attachment): att is VoiceAttachment {
  * `querySelectorAll` cannot see it). A session end pauses them all.
  */
 const playingAudios = new Set<HTMLAudioElement>();
+/** Per clip: drop a pending resume, for a pause that comes from outside the clip. */
+const cancelResume = new WeakMap<HTMLAudioElement, () => void>();
+
+/** Pause a clip on behalf of another one (or the session): it must not resume itself. */
+function pauseFromOutside(audio: HTMLAudioElement): void {
+  cancelResume.get(audio)?.();
+  audio.pause();
+}
 // app-lifetime: the playing set is module state that outlives every player
 void registerSessionReset(
   "voice-messages:player",
   () => {
-    for (const audio of playingAudios) audio.pause();
+    for (const audio of playingAudios) pauseFromOutside(audio);
     playingAudios.clear();
   },
   { phase: "cache" },
@@ -196,6 +204,15 @@ export function renderVoicePlayer(
 
   let durationFixed = false;
   let fixing: Promise<void> | null = null;
+  let resumeAfterFix = false;
+  cancelResume.set(audio, () => {
+    resumeAfterFix = false;
+    // Its pause event is ignored while the probe runs, so the state flips here.
+    if (fixing !== null && playing) {
+      playing = false;
+      paintPlaying();
+    }
+  });
 
   /** Move the audio to `position`; the first move on an unknown-length file learns the length first. */
   function applyAudioPosition(): void {
@@ -205,9 +222,18 @@ export function renderVoicePlayer(
       return;
     }
     durationFixed = true;
+    // The far seek ends playback; remember it so the clip carries on from the new spot.
+    resumeAfterFix = playing;
     fixing = learnDuration(audio).then(() => {
       fixing = null;
       audio.currentTime = position;
+      if (resumeAfterFix && wrap.isConnected) {
+        resumeAfterFix = false;
+        void audio.play().catch(() => {
+          playing = false;
+          paintPlaying();
+        });
+      }
     });
   }
 
@@ -231,6 +257,8 @@ export function renderVoicePlayer(
       paintPlaying();
       return false;
     }
+    // preload none never fetches until play(), so the length could not be learned before it.
+    audio.preload = "metadata";
     audio.src = objectUrl;
     audio.defaultPlaybackRate = PLAYBACK_SPEEDS[speedIndex] ?? 1;
     audio.playbackRate = PLAYBACK_SPEEDS[speedIndex] ?? 1;
@@ -244,6 +272,14 @@ export function renderVoicePlayer(
 
   async function togglePlay(): Promise<void> {
     if (playing) {
+      if (fixing !== null) {
+        // Paused mid-seek: the element is already paused, so only the state flips.
+        resumeAfterFix = false;
+        playing = false;
+        playingAudios.delete(audio);
+        paintPlaying();
+        return;
+      }
       audio.pause();
       return;
     }
@@ -265,11 +301,13 @@ export function renderVoicePlayer(
   audio.addEventListener("play", () => {
     playing = true;
     // One voice message at a time.
-    for (const other of playingAudios) if (other !== audio) other.pause();
+    for (const other of playingAudios) if (other !== audio) pauseFromOutside(other);
     playingAudios.add(audio);
     paintPlaying();
   });
   audio.addEventListener("pause", () => {
+    // The length workaround pauses the element on purpose; it resumes afterwards.
+    if (fixing !== null) return;
     playing = false;
     playingAudios.delete(audio);
     paintPlaying();
@@ -296,6 +334,8 @@ export function renderVoicePlayer(
     paintPlaying();
   });
   audio.addEventListener("error", () => {
+    resumeAfterFix = false;
+    fixing = null;
     playing = false;
     playingAudios.delete(audio);
     loaded = false;

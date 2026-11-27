@@ -20,13 +20,13 @@ vi.mock("livekit-client", () => ({
 
 const voice = { localDeafened: false, currentChannelId: null as number | null };
 vi.mock("@stores/voice.store", () => ({ voiceStore: { getState: () => voice } }));
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     parseUserId: (identity: string) => Number(/^user-(\d+)$/.exec(identity)?.[1] ?? 0),
   }),
 );
 
-import { AudioElements } from "../../src/lib/voice/audioElements";
+import { AudioElements } from "../../src/features/voice/audioElements";
 
 function track(sid: string) {
   const el = document.createElement("audio");
@@ -44,6 +44,28 @@ beforeEach(() => {
   prefs.clear();
   voice.localDeafened = false;
   elements = new AudioElements();
+  // Music plays only for the sharer listened to; these cases listen to 42.
+  elements.setListenedMusicUser(42);
+});
+
+describe("listening", () => {
+  it("plays only the listened-to sharer's music, at 0 for everyone else", () => {
+    expect(elements.getMusicGain(7)).toBe(0);
+    elements.setListenedMusicUser(7);
+    expect(elements.getMusicGain(7)).toBe(1);
+    expect(elements.getMusicGain(42)).toBe(0);
+    elements.setListenedMusicUser(null);
+    expect(elements.getMusicGain(7)).toBe(0);
+  });
+
+  it("tells a native mixer when the listened-to sharer changes", () => {
+    const listener = vi.fn();
+    elements.setMusicGainListener(listener);
+    elements.setListenedMusicUser(7);
+    expect(listener).toHaveBeenCalledTimes(1);
+    elements.setListenedMusicUser(7);
+    expect(listener).toHaveBeenCalledTimes(1);
+  });
 });
 
 describe("music volume and mute", () => {
@@ -75,6 +97,18 @@ describe("music volume and mute", () => {
     expect(elements.getMusicMuted(42)).toBe(false);
     voice.localDeafened = false;
     expect(elements.getMusicGain(42)).toBe(1);
+  });
+
+  it("announces a Music volume moving to or from 0, which reads as muted", () => {
+    const seen: unknown[] = [];
+    const onChange = (e: Event): void => void seen.push((e as CustomEvent).detail);
+    window.addEventListener("owncord:user-local-mute-changed", onChange);
+    elements.setMusicVolume(42, 50);
+    elements.setMusicVolume(42, 0);
+    elements.setMusicVolume(42, 0);
+    elements.setMusicVolume(42, 30);
+    window.removeEventListener("owncord:user-local-mute-changed", onChange);
+    expect(seen).toEqual([{ userId: 42 }, { userId: 42 }]);
   });
 
   it("tells a native room when a music setting changes", () => {
@@ -132,5 +166,17 @@ describe("routing by track name", () => {
     const state = elements as unknown as Played;
     expect(state.musicAudioElements.get(42)?.size ?? 0).toBe(0);
     expect(state.screenshareAudioElements.get(42)?.size).toBe(1);
+  });
+});
+
+describe("Music volume announcement", () => {
+  it("announces every level change, so the tile slider and the panel bar follow", () => {
+    const seen = vi.fn();
+    window.addEventListener("owncord:user-volume-changed", seen, { once: true });
+
+    elements.setMusicVolume(42, 55);
+
+    expect(seen).toHaveBeenCalledTimes(1);
+    expect((seen.mock.calls[0]![0] as CustomEvent<{ userId: number }>).detail.userId).toBe(42);
   });
 });

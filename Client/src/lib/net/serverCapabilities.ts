@@ -25,6 +25,7 @@ export interface ReadyCapabilityFlags {
   readonly id_mentions?: boolean;
   readonly thread_follows?: boolean;
   readonly voice_messages?: boolean;
+  readonly voice_speaking?: boolean;
   readonly game_activity?: boolean;
   readonly listening_activity?: boolean;
   readonly channel_media?: boolean;
@@ -197,6 +198,15 @@ export function threadFollowsEnabled(): boolean {
  */
 export function voiceMessagesEnabled(): boolean {
   return caps?.voice_messages === true;
+}
+
+/**
+ * Whether the server relays the speaking ring a client reports for itself
+ * (`voice_speak`, relayed as `voice_speaking`). False sends nothing: every
+ * ring follows the media server's speaker detection.
+ */
+export function voiceSpeakingEnabled(): boolean {
+  return caps?.voice_speaking === true;
 }
 
 /**

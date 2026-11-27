@@ -13,10 +13,8 @@ channels, voice and video, and a server you own.
 
 > **Beta, and a hobby project.**
 > I build this for fun and run it for a small group of friends. It is not a
-> product. There is no support promise, and it is not production-ready. Expect
-> rough edges, fast changes and the odd breaking change.
->
-> Do not use it for anything sensitive.
+> product. There is no support promise. Expect rough edges, fast changes and
+> the odd breaking change.
 
 OwnCord has two parts:
 
@@ -76,8 +74,7 @@ Security is reviewed in regular passes. Each review is a dated audit, listed in
   can download and run for you. Calls are end-to-end encrypted. Screen
   sharing, music sharing from one app, a call layout you can pin and resize,
   noise suppression, and optional passwords on voice channels.
-- **Several servers.** A server rail like Discord's, with Home for your direct
-  messages, and an icon for each server.
+- **Several servers.** Server tabs across the top in Command Deck, or a server rail with Home for your direct messages in Classic.
 - **Bring your Discord history.** The admin panel imports a Discord channel
   export, with the original authors on each message.
 - **Files and links.** Uploads with inline images and video, a Media panel per

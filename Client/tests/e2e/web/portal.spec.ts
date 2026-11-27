@@ -50,6 +50,25 @@ test("login, message, reload resumes", async ({ page }) => {
   expect(errors).toEqual([]);
 });
 
+test("Restart now reloads the page and the new layout runs", async ({ page }) => {
+  await page.goto("/");
+  await signIn(page, "alice", { staySignedIn: true });
+  await expect(general(page)).toBeVisible();
+  await expect(page.locator("html")).not.toHaveClass(/layout-deck/);
+
+  await page.locator("button[aria-label='Settings']").click();
+  await page
+    .locator(".settings-sidebar button.settings-nav-item", { hasText: "Appearance" })
+    .click();
+  await page.locator("[data-testid='screen-layout-deck']").click();
+  // A browser session survives a reload, so there is no sign-in warning.
+  await expect(page.locator("[data-testid='screen-layout-restart-signin']")).toHaveCount(0);
+  await page.locator("[data-testid='screen-layout-restart']").click();
+
+  await expect(page.locator("html")).toHaveClass(/layout-deck/);
+  await expect(page.getByTestId("app-layout")).toBeVisible();
+});
+
 test("sign out clears token", async ({ page, server }) => {
   await page.goto("/");
   await signIn(page, "alice", { staySignedIn: true });
@@ -118,6 +137,27 @@ test.describe("phone viewport", () => {
     const text = `phone-message-${crypto.randomUUID()}`;
     await sendMessage(page, text);
     // Nothing spills sideways at 412 px.
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
+  test("on phone Command Deck the top bar shows the server's name as plain text", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("owncord:settings:screenLayout", JSON.stringify("deck"));
+    });
+    await page.goto("/");
+    await signIn(page);
+    await expect(page.locator("html")).toHaveClass(/layout-deck/);
+    // A browser has no server tabs, so no Servers button and no Servers sheet.
+    const name = page.getByTestId("deck-top-name");
+    await expect(name).toBeVisible();
+    await expect(name).not.toHaveText("");
+    await expect(page.getByTestId("deck-servers-btn")).toHaveCount(0);
+    // Sign out stays in your row.
+    await expect(page.getByTestId("deck-status-bar").getByTestId("disconnect-btn")).toBeVisible();
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);

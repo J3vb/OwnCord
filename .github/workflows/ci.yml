@@ -65,6 +65,7 @@ jobs:
       server: ${{ steps.select.outputs.server }}
       client: ${{ steps.select.outputs.client }}
       rust: ${{ steps.select.outputs.rust }}
+      livekitvendor: ${{ steps.select.outputs.livekitvendor }}
       browser: ${{ steps.select.outputs.browser }}
       integration: ${{ steps.select.outputs.integration }}
       webclient: ${{ steps.select.outputs.webclient }}
@@ -198,7 +199,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
@@ -344,7 +345,7 @@ jobs:
             echo "::notice::not selected for this change — this leg runs no server checks"
           fi
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         if: env.RUN_SERVER != 'false' || (matrix.os == 'ubuntu-latest' && env.RUN_CHANGELOG != 'false')
         with:
           go-version: "1.27"
@@ -542,7 +543,8 @@ jobs:
         if: matrix.os != 'ubuntu-latest' && env.RUN_SERVER != 'false'
         shell: bash
         run: |
-          set -uo pipefail
+          # The runner's bash has -e on: turn it off so a failing run still prints its log below.
+          set +e -uo pipefail
           mapfile -t race_pkgs < <(go list ./... | grep -vE '/Server/(db|service|api)$')
           if [ "${#race_pkgs[@]}" -lt 10 ]; then
             echo "::error::go list returned ${#race_pkgs[@]} packages for the race run"
@@ -553,8 +555,10 @@ jobs:
           race=$!
           go test -timeout 20m ./db/ ./service/ ./api/ > "$logs/plain.log" 2>&1 &
           plain=$!
-          wait "$race"; race_rc=$?
-          wait "$plain"; plain_rc=$?
+          # bash -e is on for every `shell: bash` step: without the `||` a failed
+          # run would end the step here, before either log is printed.
+          race_rc=0; wait "$race" || race_rc=$?
+          plain_rc=0; wait "$plain" || plain_rc=$?
           echo "::group::go test -race (all packages but db, service, api)"
           cat "$logs/race.log"
           echo "::endgroup::"
@@ -624,7 +628,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
@@ -725,7 +729,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
@@ -1025,6 +1029,11 @@ jobs:
 
       - name: Comment ids must not grow
         run: node scripts/checks/check-comment-ids.mjs
+
+      # Every OWNCORD-PATCH marker in the vendored livekit crate has an entry in
+      # its OWNCORD-PATCH.md, and every entry still has a marker.
+      - name: Vendored livekit patches are documented
+        run: node --test scripts/checks/check-vendor-patches.test.mjs
 
       - name: Ledger schema is valid
         run: node .superpowers/render-ledger.mjs --check
@@ -1522,6 +1531,14 @@ jobs:
       - name: Rust unit tests
         run: cargo test --lib
 
+      # The patched livekit crate's own tests (signal-input helpers, rtc_session
+      # parsing, stereo signalling); `--lib` above covers the root package only.
+      # Run through the root workspace so they use the root Cargo.lock and the
+      # pinned libwebrtc, never the vendored crate's upstream lockfile.
+      - name: Vendored livekit patch tests
+        if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.livekitvendor == 'true') }}
+        run: cargo test -p livekit --lib -- signal_input stereo rtc_session
+
       # The pure parsers crate: its own lints plus the property tests in its
       # tests/ folder, which `--lib` above does not run.
       - name: Parser crate lint and property tests
@@ -1655,7 +1672,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
@@ -1697,8 +1714,10 @@ jobs:
     # the old 15-minute cap: a normal-length run was SIGKILLed at exactly 15m
     # and reported `cancelled` rather than a verdict, which parks every PR until
     # the job is rerun by hand. This bound is a real ceiling, not a retry — a
-    # genuinely hung run still dies here.
-    timeout-minutes: 20
+    # genuinely hung run still dies here. 30, not 20, since the suite passed
+    # 1 180 tests: the test step alone reached 18.5 minutes and a run with no
+    # failure was cancelled mid-suite at 20.
+    timeout-minutes: 30
     defaults:
       run:
         working-directory: Client/
@@ -1728,6 +1747,51 @@ jobs:
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
           name: playwright-report-parity
+          path: |
+            Client/playwright-report/
+            Client/test-results/
+          retention-days: 7
+
+  # The shell specs under Command Deck, against the same built assets as the
+  # parity job. The spec list is the `testMatch` in
+  # Client/tests/e2e/config/playwright.config.deck.ts. Not yet a required check.
+  client-e2e-deck:
+    name: Client E2E (Deck)
+    needs: changes
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.browser == 'true') }}
+    runs-on: ubuntu-latest
+    # The first CI run took under 4 minutes end to end; the cap leaves room for
+    # a slow runner and stops a hung run.
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: Client/
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: Client/package-lock.json
+
+      - name: Install npm dependencies
+        run: npm ci
+
+      - name: Install Playwright browser
+        timeout-minutes: 12
+        uses: ./.github/actions/playwright-install # zizmor: ignore[self-repository] actionlint 1.7.7 rejects the $/ form
+
+      - name: Run Command Deck e2e specs
+        run: npm run test:e2e:deck
+
+      - name: Upload Playwright report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: playwright-report-deck
           path: |
             Client/playwright-report/
             Client/test-results/
@@ -1906,7 +1970,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
@@ -1962,7 +2026,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
@@ -2007,7 +2071,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
@@ -2140,6 +2204,20 @@ jobs:
           workspaces: Client/src-tauri
           key: android-aarch64
 
+      # Gradle's dependency cache and wrapper, plus the android-all jars
+      # Robolectric fetches into ~/.m2 on first use. Without them every run
+      # pulls the same files from Maven Central, which rate-limits (429).
+      - name: Gradle and Robolectric cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.m2/repository/org/robolectric
+          key: android-gradle-${{ runner.os }}-${{ hashFiles('Client/src-tauri/gen/android/**/*.gradle*', 'Client/src-tauri/gen/android/**/gradle-wrapper.properties', 'Client/src-tauri/gen/android/**/robolectric.properties') }}
+          restore-keys: |
+            android-gradle-${{ runner.os }}-
+
       - name: Install npm dependencies
         run: npm ci
 
@@ -2208,6 +2286,12 @@ jobs:
       - name: Remove the signing config
         if: always()
         run: rm -f "$RUNNER_TEMP/owncord-release.jks" src-tauri/gen/android/keystore.properties
+
+      # The JVM unit tests next to the app's Kotlin code (src/test). They run
+      # after the build, which writes the Gradle files Tauri generates.
+      - name: Android unit tests
+        working-directory: Client/src-tauri/gen/android
+        run: ./gradlew --no-daemon :app:testArm64DebugUnitTest
 
       - name: Check signature, page alignment and size
         id: apk
@@ -2317,6 +2401,7 @@ jobs:
       - client-e2e
       - admin-e2e
       - client-e2e-parity
+      - client-e2e-deck
       - server-docker-build
       - tauri-build
       - client-fullstack

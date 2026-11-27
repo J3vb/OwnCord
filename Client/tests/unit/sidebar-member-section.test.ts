@@ -3,7 +3,7 @@ import { useMountContainer } from "../helpers/mountContainer";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
 // We need to mock livekitSession before importing anything that uses auth.store
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     switchInputDevice: vi.fn().mockResolvedValue(undefined),
     switchOutputDevice: vi.fn().mockResolvedValue(undefined),
@@ -327,6 +327,22 @@ describe("SidebarMemberSection", () => {
       // Persisted to localStorage
       expect(localStorage.getItem(LS_KEY_COLLAPSED)).toBe("true");
 
+      section.destroy();
+    });
+
+    it("names the collapse control after the heading and reports its expanded state", () => {
+      const section = mountSection();
+      const arrow = container.querySelector<HTMLButtonElement>(
+        ".sidebar-members-header .category-arrow",
+      )!;
+      const heading = container.querySelector(".sidebar-members-header .category-name")!;
+      expect(arrow.getAttribute("aria-labelledby")).toBe(heading.id);
+      expect(heading.id).not.toBe("");
+      expect(arrow.getAttribute("aria-expanded")).toBe("true");
+      arrow.click();
+      expect(arrow.getAttribute("aria-expanded")).toBe("false");
+      arrow.click();
+      expect(arrow.getAttribute("aria-expanded")).toBe("true");
       section.destroy();
     });
 

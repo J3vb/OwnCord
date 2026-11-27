@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { createMemberColumn, type MemberColumn } from "../../src/pages/main-page/MemberColumn";
+import {
+  createMemberColumn,
+  DECK_FOLD_QUERY,
+  type MemberColumn,
+} from "../../src/features/members/memberColumn";
 import type { MemberPanel } from "../../src/features/members/memberPanel";
 import { channelsStore, type Channel } from "../../src/stores/channels.store";
 import { uiStore } from "../../src/stores/ui.store";
@@ -10,6 +14,28 @@ import {
   MEMBER_WIDTH_PREF,
 } from "../../src/features/members/memberLayout";
 import { guarded, settle } from "../helpers/backNav";
+import { createRoomInfoPanel } from "../../src/features/deck/roomInfoPanel";
+import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
+import { addLogListener, type LogEntry } from "../../src/lib/logger";
+import { expectConsole } from "../helpers/console";
+import { panelSwipe } from "../../src/lib/ui/panelDrag";
+import { pressBack } from "../helpers/backNav";
+import { sendAppToBackground } from "../helpers/touch";
+import { PHONE_LAYOUT_QUERY } from "../../src/lib/ui/phoneLayout";
+import { createMemberList } from "../../src/features/members/MemberList";
+import "../../src/features/moderation/AdminActions";
+import {
+  defaultOpts,
+  resetStore,
+  rightClickMember,
+  setTestMembers,
+  testMembers,
+} from "../helpers/memberListHarness";
+
+vi.mock("../../src/features/deck/roomInfoPanel", async (importOriginal) => {
+  const real = await importOriginal<typeof import("../../src/features/deck/roomInfoPanel")>();
+  return { ...real, createRoomInfoPanel: vi.fn(real.createRoomInfoPanel) };
+});
 
 /** A controllable `(max-width: 899px)` media query: jsdom has no matchMedia. */
 class FakeMediaQueryList extends EventTarget {
@@ -608,6 +634,84 @@ describe("MemberColumn", () => {
         expect(ctrl.openOverlay()).toBe(false);
       });
 
+      it("a peek shows the panel with no Back claim and no aria-pressed change", () => {
+        ctrl = make();
+        ctrl.peekTarget()!.setPeek(true);
+        expect(column.hidden).toBe(false);
+        expect(body.contains(panels[0]!.element)).toBe(true);
+        expect(ctrl.isOverlayOpen()).toBe(false);
+        expect(button.getAttribute("aria-pressed")).toBe("false");
+        expect(guarded()).toBe(false);
+        ctrl.peekTarget()!.setPeek(false);
+        expect(column.hidden).toBe(true);
+      });
+
+      it("a pref change while peeking keeps the same panel element", () => {
+        ctrl = make();
+        ctrl.peekTarget()!.setPeek(true);
+        const element = panels[0]!.element;
+        savePref(MEMBER_OPEN_PREF, false);
+        expect(buildPanel).toHaveBeenCalledTimes(1);
+        expect(body.contains(element)).toBe(true);
+        expect(column.hidden).toBe(false);
+        ctrl.peekTarget()!.setPeek(false);
+        expect(column.hidden).toBe(true);
+      });
+
+      it("has no peek target in a DM, in a content view or with the member list on the left", () => {
+        ctrl = make();
+        setActive(2);
+        expect(ctrl.peekTarget()).toBeNull();
+        setActive(1);
+        uiStore.setState((prev) => ({ ...prev, activeView: "people" }));
+        uiStore.flush();
+        expect(ctrl.peekTarget()).toBeNull();
+        uiStore.setState((prev) => ({ ...prev, activeView: null }));
+        uiStore.flush();
+        savePref(MEMBER_LAYOUT_PREF, "left");
+        expect(ctrl.peekTarget()).toBeNull();
+        expect(buildPanel).not.toHaveBeenCalled();
+        expect(column.hidden).toBe(true);
+      });
+
+      it("a channel change under the finger ends the peek, and the lift opens nothing", () => {
+        ctrl = make();
+        const drag = panelSwipe(
+          () => ctrl.peekTarget(),
+          "right",
+          () => true,
+        );
+        drag.start(-12);
+        drag.move(-200);
+        expect(column.hidden).toBe(false);
+        setActive(2);
+        expect(column.hidden).toBe(true);
+        expect(drag.end(-200, true)).toBe(true);
+        sendAppToBackground();
+        expect(ctrl.isOverlayOpen()).toBe(false);
+        expect(column.hidden).toBe(true);
+        expect(column.style.transform).toBe("");
+      });
+
+      it("a Back while the open overlay is dragged shut cancels the drag and closes it", async () => {
+        ctrl = make();
+        ctrl.openOverlay();
+        const shut = panelSwipe(
+          () => ctrl.peekTarget(),
+          "right",
+          () => false,
+        );
+        shut.start(12);
+        shut.move(40);
+        await pressBack();
+        expect(ctrl.isOverlayOpen()).toBe(false);
+        expect(column.hidden).toBe(true);
+        expect(column.style.transform).toBe("");
+        expect(button.getAttribute("aria-pressed")).toBe("false");
+        expect(shut.end(40, true)).toBe(true);
+        expect(ctrl.isOverlayOpen()).toBe(false);
+      });
+
       it("closeOverlay ends isOverlayOpen", () => {
         ctrl = make();
         ctrl.openOverlay();
@@ -713,6 +817,334 @@ describe("MemberColumn", () => {
       expect(signal?.aborted).toBe(true);
       mq.set(false);
       expect(buildPanel).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  describe("room Info under Command Deck", () => {
+    const info = (): HTMLElement | null => column.querySelector('[data-testid="room-info"]');
+
+    /** Run `fn` with the page running Command Deck, then put Classic back. */
+    function underDeck(fn: () => void): void {
+      setRunningScreenLayout("deck");
+      try {
+        fn();
+      } finally {
+        setRunningScreenLayout("classic");
+      }
+    }
+
+    it("appends Info directly after the scroller when the column shows, and removes it when it hides", () => {
+      underDeck(() => {
+        ctrl = make();
+        ctrl.sync();
+        expect(column.hidden).toBe(false);
+        const el = info();
+        expect(el).not.toBeNull();
+        expect(body.nextElementSibling).toBe(el);
+        expect(body.contains(el)).toBe(false);
+        expect(el!.classList.contains("room-info--aside")).toBe(false);
+
+        savePref(MEMBER_OPEN_PREF, false);
+        expect(column.hidden).toBe(true);
+        expect(info()).toBeNull();
+
+        savePref(MEMBER_OPEN_PREF, true);
+        expect(info()).not.toBeNull();
+        expect(info()).not.toBe(el);
+      });
+    });
+
+    it("destroy removes Info", () => {
+      underDeck(() => {
+        ctrl = make();
+        ctrl.sync();
+        expect(info()).not.toBeNull();
+        ctrl.destroy();
+        expect(info()).toBeNull();
+      });
+    });
+
+    it("under Classic the column never builds Info", () => {
+      ctrl = make();
+      ctrl.sync();
+      expect(column.hidden).toBe(false);
+      expect(info()).toBeNull();
+      expect(vi.mocked(createRoomInfoPanel)).not.toHaveBeenCalled();
+    });
+
+    it("hides Info with room-info--aside during the call view, even when the toggle opens the column", () => {
+      underDeck(() => {
+        ctrl = make();
+        ctrl.sync();
+        ctrl.setCallView(true);
+        expect(column.hidden).toBe(true);
+
+        ctrl.toggle();
+        expect(column.hidden).toBe(false);
+        expect(panels.at(-1)!.element.isConnected).toBe(true);
+        const el = info();
+        expect(el!.classList.contains("room-info--aside")).toBe(true);
+
+        ctrl.setCallView(false);
+        expect(column.hidden).toBe(false);
+        expect(info()).toBe(el);
+        expect(el!.classList.contains("room-info--aside")).toBe(false);
+
+        ctrl.setCallView(true);
+        ctrl.toggle();
+        expect(info()!.classList.contains("room-info--aside")).toBe(true);
+      });
+    });
+
+    it("a throwing Info build logs one error, keeps Buddies, and the next show builds Info", () => {
+      const errors: LogEntry[] = [];
+      const stop = addLogListener((e) => {
+        if (e.component === "member-column" && e.level === "error") errors.push(e);
+      });
+      try {
+        underDeck(() => {
+          vi.mocked(createRoomInfoPanel).mockImplementationOnce(() => {
+            throw new Error("boom");
+          });
+          ctrl = make();
+          ctrl.sync();
+          ctrl.sync();
+          expect(errors).toHaveLength(1);
+          expectConsole("error", /room info failed to build/);
+          expect(column.hidden).toBe(false);
+          expect(body.querySelector('[data-testid="member-list"]')).not.toBeNull();
+          expect(info()).toBeNull();
+
+          savePref(MEMBER_OPEN_PREF, false);
+          savePref(MEMBER_OPEN_PREF, true);
+          expect(info()).not.toBeNull();
+          expect(errors).toHaveLength(1);
+        });
+      } finally {
+        stop();
+      }
+    });
+  });
+  describe("the Command Deck fold", () => {
+    let mq: FakeMediaQueryList;
+    let media: ReturnType<typeof vi.fn<(query: string) => FakeMediaQueryList>>;
+
+    beforeEach(() => {
+      mq = new FakeMediaQueryList();
+      media = vi.fn((q: string) => (q === PHONE_LAYOUT_QUERY ? new FakeMediaQueryList() : mq));
+      vi.stubGlobal("matchMedia", media);
+      buildPanel.mockImplementation(() => {
+        const element = document.createElement("div");
+        element.dataset["testid"] = "member-list";
+        const input = document.createElement("input");
+        input.dataset["testid"] = "member-search";
+        element.appendChild(input);
+        const panel = { element, destroy: vi.fn() };
+        panels.push(panel);
+        return panel;
+      });
+    });
+    afterEach(() => {
+      vi.unstubAllGlobals();
+    });
+
+    const search = (): HTMLInputElement =>
+      body.querySelector<HTMLInputElement>('[data-testid="member-search"]')!;
+
+    /** Run `fn` with the page running Command Deck, then put Classic back. */
+    function underDeck(fn: () => void): void {
+      setRunningScreenLayout("deck");
+      try {
+        fn();
+      } finally {
+        setRunningScreenLayout("classic");
+      }
+    }
+
+    it("asks for (max-width: 1200px) under Deck and (max-width: 899px) under Classic", () => {
+      expect(DECK_FOLD_QUERY).toBe("(max-width: 1200px)");
+      underDeck(() => {
+        ctrl = make();
+      });
+      // The phone check asks for its own coarse-pointer query beside the width one.
+      const widths = (): string[] =>
+        media.mock.calls.map(([q]) => q).filter((q) => !q.startsWith("(pointer: coarse)"));
+      expect(widths()).toEqual(["(max-width: 1200px)"]);
+      ctrl.destroy();
+      media.mockClear();
+      ctrl = make();
+      expect(widths()).toEqual(["(max-width: 899px)"]);
+    });
+
+    it("crossing above 1200 px with the overlay open: the open pref decides, and focus is kept or falls back", () => {
+      underDeck(() => {
+        mq.matches = true;
+        ctrl = make();
+        ctrl.sync();
+        expect(column.hidden).toBe(true);
+        ctrl.toggle();
+        expect(column.hidden).toBe(false);
+        expect(document.activeElement).toBe(search());
+
+        // Open pref true (the default): the column stays, in flow, and focus stays.
+        mq.set(false);
+        expect(column.hidden).toBe(false);
+        expect(ctrl.isOverlayOpen()).toBe(false);
+        expect(document.activeElement).toBe(search());
+        expect(fallbackFocus).not.toHaveBeenCalled();
+
+        // Open pref false: back in the fold, open it, then widen: it hides and focus falls back.
+        savePref(MEMBER_OPEN_PREF, false);
+        expect(column.hidden).toBe(true);
+        fallbackFocus.mockClear();
+        mq.set(true);
+        ctrl.toggle();
+        expect(column.hidden).toBe(false);
+        expect(document.activeElement).toBe(search());
+        mq.set(false);
+        expect(column.hidden).toBe(true);
+        expect(fallbackFocus).toHaveBeenCalledTimes(1);
+        expect(localStorage.getItem("owncord:settings:memberListOpen")).toBe("false");
+      });
+    });
+
+    it("crossing to 1200 px or less: the in-flow column becomes a closed overlay and focus falls back", () => {
+      underDeck(() => {
+        mq.matches = false;
+        ctrl = make();
+        ctrl.sync();
+        expect(column.hidden).toBe(false);
+        search().focus();
+        mq.set(true);
+        expect(column.hidden).toBe(true);
+        expect(button.getAttribute("aria-pressed")).toBe("false");
+        expect(fallbackFocus).toHaveBeenCalledTimes(1);
+        // The saved choice is untouched: widening shows the column again.
+        mq.set(false);
+        expect(column.hidden).toBe(false);
+      });
+    });
+
+    it("during the call view, a column opened above 1200 px closes in the fold and opens again past it", () => {
+      underDeck(() => {
+        mq.matches = false;
+        ctrl = make();
+        ctrl.sync();
+        ctrl.setCallView(true);
+        expect(column.hidden).toBe(true);
+        ctrl.toggle();
+        expect(column.hidden).toBe(false);
+        mq.set(true);
+        expect(column.hidden).toBe(true);
+        mq.set(false);
+        expect(column.hidden).toBe(false);
+      });
+    });
+
+    it("Escape with focus in the Deck overlay closes it and focuses the toggle", () => {
+      underDeck(() => {
+        mq.matches = true;
+        ctrl = make();
+        ctrl.sync();
+        ctrl.toggle();
+        expect(column.hidden).toBe(false);
+        const esc = new KeyboardEvent("keydown", {
+          key: "Escape",
+          bubbles: true,
+          cancelable: true,
+        });
+        search().dispatchEvent(esc);
+        expect(esc.defaultPrevented).toBe(true);
+        expect(column.hidden).toBe(true);
+        expect(document.activeElement).toBe(button);
+        expect(fallbackFocus).not.toHaveBeenCalled();
+        expect(localStorage.getItem("owncord:settings:memberListOpen")).toBeNull();
+      });
+    });
+  });
+
+  describe("Buddies on phone Command Deck", () => {
+    beforeEach(() => {
+      const phone = new FakeMediaQueryList();
+      phone.matches = true;
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn(() => phone),
+      );
+      setRunningScreenLayout("deck");
+      buildPanel.mockImplementation(() => {
+        const element = document.createElement("div");
+        element.innerHTML =
+          '<h2 class="buddies-title-text" tabindex="-1">Buddies</h2><input data-testid="member-search">';
+        const panel = { element, destroy: vi.fn() };
+        panels.push(panel);
+        return panel;
+      });
+    });
+    afterEach(async () => {
+      ctrl?.destroy();
+      await settle();
+      setRunningScreenLayout("classic");
+      vi.unstubAllGlobals();
+    });
+
+    const heading = (): HTMLElement | null => body.querySelector(".buddies-title-text");
+
+    it("the button opens the drawer with focus on the heading, not the search", () => {
+      ctrl = make();
+      ctrl.sync();
+      ctrl.toggle();
+      expect(column.hidden).toBe(false);
+      expect(button.getAttribute("aria-pressed")).toBe("true");
+      expect(document.activeElement).toBe(heading());
+      expect(guarded()).toBe(true);
+    });
+
+    it("with no heading, nothing in the drawer takes focus", () => {
+      buildPanel.mockImplementation(() => {
+        const element = document.createElement("div");
+        element.innerHTML = '<input data-testid="member-search">';
+        const panel = { element, destroy: vi.fn() };
+        panels.push(panel);
+        return panel;
+      });
+      ctrl = make();
+      ctrl.toggle();
+      expect(column.hidden).toBe(false);
+      expect(column.contains(document.activeElement)).toBe(false);
+    });
+
+    it("Classic on a phone still focuses the search", () => {
+      setRunningScreenLayout("classic");
+      ctrl = make();
+      ctrl.toggle();
+      expect(document.activeElement).toBe(body.querySelector('[data-testid="member-search"]'));
+      expect(document.activeElement).not.toBe(heading());
+    });
+
+    it("the buddy menu and the Buddies drawer close on one Back", async () => {
+      resetStore();
+      setTestMembers(testMembers);
+      buildPanel.mockImplementation(() => {
+        const element = document.createElement("div");
+        const list = createMemberList(defaultOpts());
+        list.mount(element);
+        const panel = { element, destroy: vi.fn(() => list.destroy?.()) };
+        panels.push(panel);
+        return panel;
+      });
+      ctrl = make();
+      ctrl.toggle();
+      await rightClickMember(body, 3);
+      expect(document.querySelector(".context-menu")).not.toBeNull();
+      expect(guarded()).toBe(true);
+
+      await pressBack();
+      expect(document.querySelector(".context-menu")).toBeNull();
+      expect(ctrl.isOverlayOpen()).toBe(false);
+      expect(column.hidden).toBe(true);
+      expect(guarded()).toBe(false);
+      resetStore();
     });
   });
 });

@@ -6,7 +6,7 @@ const credentials = vi.hoisted(() => ({
   saveCredential: vi.fn(),
 }));
 
-vi.mock("@lib/net/credentials", () => credentials);
+vi.mock("../../src/features/connection/credentials", () => credentials);
 vi.mock("../../src/features/settings/SettingsOverlay", () => ({
   createSettingsOverlay: (deps: Record<string, unknown>) => {
     captured.deps = deps;

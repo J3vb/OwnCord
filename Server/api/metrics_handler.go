@@ -253,6 +253,8 @@ type MetricsSources struct {
 	// Raw counts of every latency histogram for the Prometheus exposition; nil leaves the histogram families
 	// out.
 	LatencyCounts func() hubstats.LatencyCounts
+	// Fills the runtime memory figures; nil reads runtime.ReadMemStats. Tests pin it so two reads agree.
+	MemStats func(*runtime.MemStats)
 }
 
 func handleMetrics(src MetricsSources) http.HandlerFunc {
@@ -261,11 +263,21 @@ func handleMetrics(src MetricsSources) http.HandlerFunc {
 	}
 }
 
+// readMemStats reads the runtime memory figures, through src.MemStats when a test pins it.
+func readMemStats(src MetricsSources) runtime.MemStats {
+	var m runtime.MemStats
+	if src.MemStats != nil {
+		src.MemStats(&m)
+		return m
+	}
+	runtime.ReadMemStats(&m)
+	return m
+}
+
 // collectMetrics reads every source once; it backs both the JSON and Prometheus encoders so the two cannot
 // disagree.
 func collectMetrics(ctx context.Context, src MetricsSources) ServerMetrics {
-	var m runtime.MemStats
-	runtime.ReadMemStats(&m)
+	m := readMemStats(src)
 
 	uptime := time.Since(serverStartTime)
 	metrics := ServerMetrics{

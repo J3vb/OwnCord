@@ -39,7 +39,7 @@ vi.mock("@stores/ui.store", () => ({
   setTheme: (...args: unknown[]) => mockSetTheme(...args),
 }));
 
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     switchInputDevice: vi.fn().mockResolvedValue(undefined),
     switchOutputDevice: vi.fn().mockResolvedValue(undefined),
@@ -72,6 +72,8 @@ import {
   clearHighlights,
 } from "../../src/features/settings/settingsSearch";
 import { settingsText } from "../../src/i18n/settings";
+import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
+import { PHONE_LAYOUT_QUERY } from "../../src/lib/ui/phoneLayout";
 import { whatsNewText } from "../../src/i18n/whatsNew";
 import { gameActivityText } from "../../src/i18n/gameActivity";
 import { listeningDetailsText } from "../../src/i18n/listeningDetails";
@@ -245,6 +247,75 @@ describe("settings search", () => {
           .map((el) => (el.textContent ?? "").trim())
           .filter((text) => text !== "" && !known.has(text) && !STATE_TEXT.has(text));
         expect(unindexed).toEqual([]);
+      });
+    });
+
+    describe("Screen layout entries", () => {
+      const rowText = settingsText("appearance.screenLayout");
+      const memberText = settingsText("appearance.memberLayout");
+      const appearance = (): readonly string[] => SETTINGS_SEARCH_INDEX.Appearance();
+      const openAppearance = (): string => {
+        mountOverlay();
+        tabs()
+          .find((t) => labelFor(t) === "Appearance")!
+          .click();
+        return (
+          container.querySelector<HTMLElement>(".settings-content")!.textContent ?? ""
+        ).replace(/\s+/g, " ");
+      };
+      const devOn = (): void => localStorage.setItem("owncord:settings:developerMode", "true");
+      afterEach(() => setRunningScreenLayout("classic"));
+
+      it("are present with Developer mode off, and the on-screen row agrees", () => {
+        expect(appearance()).toContain(rowText);
+        expect(openAppearance()).toContain(rowText);
+      });
+
+      it("are present on a phone too, and match the screen and the index", () => {
+        // The cached index must not hand back the phone-sized answer.
+        vi.stubGlobal("matchMedia", (media: string) => ({
+          matches: media === PHONE_LAYOUT_QUERY,
+          media,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+        }));
+        expect(appearance()).toContain(rowText);
+        vi.unstubAllGlobals();
+        expect(appearance()).toContain(rowText);
+        expect(appearance()).toContain(settingsText("appearance.screenLayout.desc"));
+        const shown = openAppearance();
+        for (const text of appearance()) expect(shown).toContain(text);
+        expect(appearance()).not.toContain(settingsText("appearance.screenLayout.pending"));
+      });
+
+      it("drop the member position entries while Command Deck runs", () => {
+        devOn();
+        expect(appearance()).toContain(memberText);
+        setRunningScreenLayout("deck");
+        expect(appearance()).not.toContain(memberText);
+        const shown = openAppearance();
+        expect(shown).not.toContain(memberText);
+        for (const text of appearance()) expect(shown).toContain(text);
+      });
+
+      it("are present in the Android app with Developer mode off", () => {
+        hostAndroidApp();
+        try {
+          expect(appearance()).toContain(rowText);
+        } finally {
+          clearHost();
+        }
+      });
+
+      it("are present in the Android app with Developer mode on", () => {
+        devOn();
+        hostAndroidApp();
+        try {
+          expect(appearance()).toContain(rowText);
+          expect(openAppearance()).toContain(rowText);
+        } finally {
+          clearHost();
+        }
       });
     });
 

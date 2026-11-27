@@ -4,7 +4,7 @@
  */
 import { setText, setOwnedTimeout } from "@lib/dom";
 import { loadPref, savePref } from "../helpers";
-import { setVoiceSensitivity } from "@lib/voice/livekitSession";
+import { setVoiceSensitivity } from "../../voice/livekitSession";
 import { vadThreshold } from "@lib/voice/audioPipeline";
 import { GATE_LOOKAHEAD_S, type MicProcessor } from "@lib/voice/micProcessor";
 import { desktop } from "../../../platform/desktop";

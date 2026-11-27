@@ -338,7 +338,7 @@ function setSettingsChanged(changed){
   if(state.settingsChanged!==changed){state.settingsChanged=changed;renderNav()}
   const s=document.getElementById('settingsSaveState');if(s)s.textContent=changed?'Unsaved changes':'All changes saved';
   const bar=document.getElementById('settingsSaveBar');if(bar)bar.classList.toggle('dirty',changed);
-  ['saveSettingsBtn','discardSettingsBtn'].forEach(id=>{const b=document.getElementById(id);if(b)b.disabled=!changed});
+  ['saveSettingsBtn','discardSettingsBtn'].forEach(id=>{const b=document.getElementById(id);if(b instanceof HTMLButtonElement)b.disabled=!changed});
 }
 
 function markSettingsChanged(){
@@ -350,7 +350,7 @@ function discardSettings(){renderContent()}
 
 async function saveSettings(){
   const btn=document.getElementById('saveSettingsBtn');
-  if(btn){if(btn.disabled)return;btn.disabled=true}
+  if(btn instanceof HTMLButtonElement){if(btn.disabled)return;btn.disabled=true}
   const body=settingsDiff(settingsFormValues(SETTINGS_KEYS));
   if(!Object.keys(body).length){setSettingsChanged(false);showToast('Settings saved');return}
   try{
@@ -359,7 +359,7 @@ async function saveSettings(){
     setSettingsChanged(false);showToast('Settings saved');
   }catch(e){
     showToast(e.message,'error');
-    if(btn)btn.disabled=false;
+    if(btn instanceof HTMLButtonElement)btn.disabled=false;
   }
 }
 
@@ -453,7 +453,7 @@ async function renderRetention(){
    confirmation sends the signed proposal back through the existing routes. */
 function readRetentionDays(id){
   const el=document.getElementById(id);
-  const raw=el?el.value.trim():'';
+  const raw=el instanceof HTMLInputElement?el.value.trim():'';
   const days=Number(raw);
   if(!raw||!Number.isInteger(days)||days<0||days>3650){showToast('Window must be 0 (keep forever) or between 1 and 3650 days','error');return null}
   return days;
@@ -503,7 +503,7 @@ async function applyRetention(){
     state.retentionProposal=null;closeModal();showToast('The window changed. Preview it again before applying.','error');return;
   }
   pending.applying=true;
-  const button=document.getElementById('applyRetentionPreview');if(button)button.disabled=true;
+  const button=document.getElementById('applyRetentionPreview');if(button instanceof HTMLButtonElement)button.disabled=true;
   const change=pending.change;
   const headers={'X-Retention-Preview':pending.preview.token};
   try{
@@ -578,7 +578,7 @@ function restartingHTML(title,lead){
 }
 
 /* ═══ Backups ═══ */
-const BACKUP_KEYS=['backup_schedule','backup_retention'];
+const BACKUP_KEYS=['backup_schedule','backup_retention','backup_scope'];
 async function renderBackups(){
   /* The owner sees everything. A MANAGE_BACKUPS holder sees the page cut down
      to what the server lets them do: create, list and download. A RESTORE_BACKUPS
@@ -601,13 +601,21 @@ async function renderBackups(){
   let html='<div class="page-head"><div><div class="page-title">'+title+'</div><div class="page-desc">'+desc+'</div></div>'
     +'<div class="btn-row">'+(restorer?'<button class="btn btn-ghost" data-action="downloadArchive"'+(state.archiveRunning?' disabled':'')+'>'+(state.archiveRunning?'<span class="spinner" aria-hidden="true"></span> Preparing…':I.download+' Download full archive')+'</button>':'')
     +createBtn+'</div></div>';
-  if(restorer)html+='<p class="card-note">The full archive holds the database, uploads, the key files and <code>config.yaml</code> — everything a restore needs. A database backup alone does not.</p>';
-  html+=backupStatusLine(backups||[],(owner&&!policyErr)?(v('backup_schedule')||'off'):'',await backupSignal());
+  if(restorer)html+='<p class="card-note">The full archive holds the database, uploads, the key files and <code>config.yaml</code> — everything a restore needs. A database backup alone does not. “Create backup now” takes the database only.</p>';
+  const signals=await backupSignals();
+  const scope=(owner&&!policyErr)?(v('backup_scope')||'unset'):'';
+  html+=backupStatusLine(backups||[],(owner&&!policyErr)?(v('backup_schedule')||'off'):'',signals.find(g=>g.id==='backup')||null,scope);
+  if(owner&&!policyErr&&scope==='unset'&&(v('backup_schedule')||'off')!=='off')html+='<div class="callout-warning" id="backupScopeHint"><strong>Automatic backups leave out uploads and key files.</strong> They copy the database only. Choose Everything to also keep a full archive that holds uploads, key files and settings.<div class="card-actions"><button class="btn btn-accent" data-action="chooseBackupEverything">Switch to Everything</button></div></div>';
+  const diskSig=signals.find(g=>g.id==='backup_disk');
+  if(owner&&diskSig&&diskSig.status==='warning')html+='<div class="callout-warning" id="backupDiskHint"><strong>Your backups may be on the same disk as your server.</strong> '+esc(diskSig.detail||'')+'. If that disk fails, the server and its backups are lost together. Move <code>backup.dir</code> to another disk. If this is a false alarm (for example a Docker volume or an Unraid share), you can say so. <a href="https://github.com/J3vb/OwnCord/blob/main/docs/hosting/backups.md#keep-them-off-the-servers-disk" target="_blank" rel="noopener noreferrer">Read more</a><div class="card-actions"><button class="btn btn-ghost" data-action="confirmBackupOtherDisk" data-args="'+actArgs(diskSig.value||'')+'">This is another disk</button></div></div>';
   if(owner){
     let sched;
     if(policyErr)sched='<p style="color:var(--text-danger)">'+esc(policyErr)+'</p>';
     else sched=settingsRow('backup_schedule','Automatic backups','A copy is taken on this schedule by the server\'s maintenance sweep','<select class="filter-select" id="s-backup_schedule" aria-describedby="s-backup_schedule-desc" data-change-action="markBackupPolicyChanged">'
         +[['off','Off'],['daily','Daily'],['weekly','Weekly']].map(([o,l])=>'<option value="'+o+'"'+(v('backup_schedule')===o?' selected':'')+'>'+l+'</option>').join('')+'</select>')
+      +settingsRow('backup_scope','What to back up','Database only is the quick copy. Everything also keeps a full archive: the database, uploads, key files and settings. It uses more disk; the newest 3 are kept.','<select class="filter-select" id="s-backup_scope" aria-describedby="s-backup_scope-desc" data-change-action="markBackupPolicyChanged">'
+        +(scope==='unset'?'<option value="" selected disabled>Choose…</option>':'')
+        +[['database','Database only'],['everything','Everything (database, uploads, keys, settings)']].map(([o,l])=>'<option value="'+o+'"'+(scope===o?' selected':'')+'>'+l+'</option>').join('')+'</select>')
       +settingsRow('backup_retention','Keep backups for (days)','0 keeps every backup; otherwise 7 to 3650 days. Older backups are deleted.','<input class="form-input" id="s-backup_retention" type="number" min="0" max="3650" value="'+esc(v('backup_retention'))+'" aria-describedby="s-backup_retention-desc" data-input-action="markBackupPolicyChanged">')
       +'<div class="card-actions"><button class="btn btn-accent" id="saveBackupPolicyBtn" data-action="saveBackupPolicy" disabled>Save schedule</button></div>';
     html+=settingsCard('Schedule',sched);
@@ -615,8 +623,14 @@ async function renderBackups(){
   html+='<section class="section-card" aria-labelledby="sc-history"><div class="section-card-header"><h3 id="sc-history">Backup history</h3></div><div class="section-card-body no-pad"><table class="tbl"><thead><tr><th>File</th><th>Size</th><th>Created</th><th style="text-align:right">Actions</th></tr></thead><tbody>';
   if(!backups||!backups.length)html+='<tr><td colspan="4" class="tbl-empty">No backups yet.'+(keeper?' Create one now'+(owner?', or turn on automatic backups above':''):'')+'.</td></tr>';
   else backups.forEach(b=>{
-    html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code></td>';
+    const full=b.kind==='full';
+    html+='<tr><td><code style="font-family:var(--font-mono);font-size:12px">'+esc(b.name)+'</code>'+(full?' <span class="badge badge-green">Full archive</span>':'')+'</td>';
     html+='<td>'+fmtBytes(b.size)+'</td><td>'+(b.date?esc(new Date(b.date).toLocaleString()):'')+'</td>';
+    if(full){
+      /* A full archive holds password hashes and key files, so it is the restorer's, and it is never restored from here. */
+      html+='<td><div class="act-group" style="justify-content:flex-end">'+(restorer?'<button class="btn btn-ghost" aria-label="Download '+esc(b.name)+'" data-action="downloadStoredArchive" data-args="'+actArgs(b.name)+'">Download</button><button class="act-btn danger" title="Delete '+esc(b.name)+'" aria-label="Delete '+esc(b.name)+'" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button>':'')+'</div></td></tr>';
+      return;
+    }
     html+='<td><div class="act-group" style="justify-content:flex-end">'+(keeper?'<button class="btn btn-ghost" aria-label="Download '+esc(b.name)+'" data-action="downloadBackup" data-args="'+actArgs(b.name)+'">Download</button>':'')
       +(restorer?'<button class="btn btn-ghost" data-action="openRestoreModal" data-args="'+actArgs(b.name,b.date||'')+'">Restore</button><button class="act-btn danger" title="Delete '+esc(b.name)+'" aria-label="Delete '+esc(b.name)+'" data-action="openDeleteBackupModal" data-args="'+actArgs(b.name)+'">'+I.trash+'</button>':'')+'</div></td></tr>';
   });
@@ -627,9 +641,9 @@ async function renderBackups(){
 /* The answer first: when the last backup was taken and what happens next.
    The server's own backup health signal (GET /attention, View Diagnostics)
    sets the icon when it is readable, so this line and the dashboard agree. */
-async function backupSignal(){
-  if(!can(PERM.VIEW_DIAGNOSTICS))return null;
-  try{const rep=await api('GET','/attention');return((rep&&rep.signals)||[]).find(g=>g.id==='backup')||null}catch(e){return null}
+async function backupSignals(){
+  if(!can(PERM.VIEW_DIAGNOSTICS))return[];
+  try{const rep=await api('GET','/attention');return(rep&&rep.signals)||[]}catch(e){return[]}
 }
 function relTime(d){
   const mins=Math.round((Date.now()-d.getTime())/60000);
@@ -638,9 +652,12 @@ function relTime(d){
   const h=Math.round(mins/60);if(h<48)return h+' h ago';
   return Math.round(h/24)+' days ago';
 }
-function backupStatusLine(backups,schedule,signal){
+function backupStatusLine(backups,schedule,signal,scope){
+  /* Two kinds: the database copy and the full archive. The line follows the database copy, and with Everything
+     it also says how old the archive is, so a stuck archive is not hidden behind a fresh database copy. */
   const dated=backups.filter(b=>b.date&&!isNaN(new Date(b.date).getTime())).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime());
-  const latest=dated[0];
+  const latest=dated.find(b=>b.kind!=='full');
+  const latestFull=dated.find(b=>b.kind==='full');
   const auto={daily:'Automatic backups run daily',weekly:'Automatic backups run weekly',off:'Automatic backups are off'}[schedule]||'';
   if(signal&&schedule&&((signal.threshold||'').split(' ')[0]||'off')!==schedule)signal=null;
   if(latest&&signal&&(!signal.value||new Date(signal.observed_at).getTime()<new Date(latest.date).getTime()))signal=null;
@@ -651,24 +668,45 @@ function backupStatusLine(backups,schedule,signal){
   else{tone='warning';title='No backups yet'}
   if(alarm)tone=signal.status;
   const parts=[];
-  if(latest)parts.push(backups.length+(backups.length===1?' backup kept':' backups kept'));
+  const dbCount=backups.filter(b=>b.kind!=='full').length;
+  if(latest)parts.push(dbCount+(dbCount===1?' backup kept':' backups kept'));
+  if(latestFull)parts.push('Full archive '+relTime(new Date(latestFull.date)));
+  else if(scope==='everything'&&schedule&&schedule!=='off')parts.push('No full archive yet');
   if(auto)parts.push(auto);
   if(alarm&&signal.detail)parts.push(signal.detail);
   return'<div class="status-line" id="backupStatus">'+statusIcon(tone)+'<div><div class="status-line-title">'+esc(title)+'<span class="sr-only"> ('+esc(attnWord(tone))+')</span></div>'+(parts.length?'<div class="status-line-sub">'+esc(parts.join(' · '))+'</div>':'')+'</div></div>';
 }
 
+/* While the scope is still unset the select shows no choice, and that blank is not a change to send. */
+function backupPolicyDiff(){
+  const body=settingsDiff(settingsFormValues(BACKUP_KEYS));
+  if(!body.backup_scope)delete body.backup_scope;
+  return body;
+}
 function markBackupPolicyChanged(){
   const b=document.getElementById('saveBackupPolicyBtn');
-  if(b)b.disabled=!Object.keys(settingsDiff(settingsFormValues(BACKUP_KEYS))).length;
+  if(b instanceof HTMLButtonElement)b.disabled=!Object.keys(backupPolicyDiff()).length;
+}
+
+async function chooseBackupEverything(){
+  try{state._settings=await api('PATCH','/settings',{backup_scope:'everything'});showToast('Automatic backups now include everything');renderContent()}
+  catch(e){showToast(e.message,'error')}
+}
+
+/* The server compares this folder with the data, database and uploads folders. It cannot see every setup, so the
+   owner can say the folder is on another disk. The answer holds only while backup.dir is still this folder. */
+async function confirmBackupOtherDisk(dir){
+  try{state._settings=await api('PATCH','/settings',{backup_disk_ack:dir});showToast('Noted. This folder is treated as another disk');renderContent()}
+  catch(e){showToast(e.message,'error')}
 }
 
 async function saveBackupPolicy(){
   const btn=document.getElementById('saveBackupPolicyBtn');
-  if(btn){if(btn.disabled)return;btn.disabled=true}
-  const body=settingsDiff(settingsFormValues(BACKUP_KEYS));
+  if(btn instanceof HTMLButtonElement){if(btn.disabled)return;btn.disabled=true}
+  const body=backupPolicyDiff();
   if(!Object.keys(body).length)return;
   try{state._settings=await api('PATCH','/settings',body);showToast('Backup schedule saved');renderContent()}
-  catch(e){showToast(e.message,'error');if(btn)btn.disabled=false}
+  catch(e){showToast(e.message,'error');if(btn instanceof HTMLButtonElement)btn.disabled=false}
 }
 
 async function createBackup(){
@@ -698,6 +736,14 @@ async function downloadArchive(){
   finally{if(state.token===token){state.archiveRunning=false;if(state.section==='backups')renderContent()}}
 }
 
+/* A stored full archive goes through the archive's own link (restore holders only), named by file. */
+async function downloadStoredArchive(name){
+  try{
+    const r=await api('POST','/archive/link',{name});
+    const a=document.createElement('a');a.href=r.path;a.download=name;document.body.appendChild(a);a.click();a.remove();
+  }catch(e){showToast(e.message,'error')}
+}
+
 /* One backup, on the archive's pattern: a single-use link for that file,
    opened as a plain navigation so the browser streams it to disk. */
 async function downloadBackup(name){
@@ -713,8 +759,9 @@ function openRestoreModal(name,date){
   openModal('<div class="modal-header"><h3>Restore backup</h3><button class="modal-close" aria-label="Close dialog" data-action="closeModal">&times;</button></div><div class="modal-body">'
     +'<p>Replace the live database with <strong>'+esc(name)+'</strong>'+(date?', taken '+esc(new Date(date).toLocaleString()):'')+'.</p>'
     +'<ul class="modal-list"><li><strong style="color:var(--text-danger)">Everything since that backup is lost</strong>: messages, members, roles and settings.</li>'
-    +'<li>A safety copy of the current database (<code>pre_restore_…</code>) is saved first and appears in this list.</li>'
-    +'<li>The server restarts by itself. Everyone, including you, is disconnected and may need to sign in again.</li></ul>'
+    +'<li>A safety copy of the current database (<code>pre_restore_…</code>) is saved first and shows in this list. Restore it to undo this.</li>'
+    +'<li>The server restarts by itself. Everyone, including you, is disconnected and may need to sign in again.</li>'
+    +'<li>People who erased their account since stay erased.</li></ul>'
     +'<div class="form-group" style="margin-top:16px"><label class="form-label" for="restoreConfirm">Type <strong style="color:var(--text-normal);text-transform:none">'+esc(name)+'</strong> to confirm</label><input class="form-input" id="restoreConfirm" autocomplete="off" autocapitalize="off" spellcheck="false" data-input-action="checkRestoreConfirm" data-args="'+actArgs(name)+'"></div>'
     +'<p class="auth-error" id="restoreErr" role="alert"></p></div>'
     +'<div class="modal-footer"><button class="btn btn-ghost" data-action="closeModal">Cancel</button><button class="btn btn-danger" id="restoreConfirmBtn" data-action="confirmRestore" data-args="'+actArgs(name)+'" disabled>Restore and restart</button></div>');
@@ -722,12 +769,14 @@ function openRestoreModal(name,date){
 
 function checkRestoreConfirm(name){
   const b=document.getElementById('restoreConfirmBtn');
-  if(b)b.disabled=(document.getElementById('restoreConfirm')?.value||'').trim()!==name;
+  const box=document.getElementById('restoreConfirm');
+  if(b instanceof HTMLButtonElement)b.disabled=(box instanceof HTMLInputElement?box.value:'').trim()!==name;
 }
 
 async function confirmRestore(name){
-  if((document.getElementById('restoreConfirm')?.value||'').trim()!==name)return;
-  const b=document.getElementById('restoreConfirmBtn');if(b)b.disabled=true;
+  const box=document.getElementById('restoreConfirm');
+  if((box instanceof HTMLInputElement?box.value:'').trim()!==name)return;
+  const b=document.getElementById('restoreConfirmBtn');if(b instanceof HTMLButtonElement)b.disabled=true;
   lockModal(true);
   try{
     await api('POST','/backups/'+encodeURIComponent(name)+'/restore');
@@ -739,7 +788,7 @@ async function confirmRestore(name){
     if(/restarting/i.test(e.message)){setModalHTML(restartingHTML('Restore failed',e.message));waitForRestart('restartWait');return}
     lockModal(false);
     const err=document.getElementById('restoreErr');if(err)err.textContent=e.message;
-    if(b)b.disabled=false;
+    if(b instanceof HTMLButtonElement)b.disabled=false;
   }
 }
 
@@ -819,7 +868,7 @@ async function applyUpdate(){
   let text;
   try{
     const list=await api('GET','/backups');
-    const latest=(list||[]).filter(b=>b.date).sort((a,b)=>new Date(b.date)-new Date(a.date))[0];
+    const latest=(list||[]).filter(b=>b.date).sort((a,b)=>new Date(b.date).getTime()-new Date(a.date).getTime())[0];
     text=latest?'Latest backup: '+new Date(latest.date).toLocaleString()+' ('+latest.name+').':'There are no backups yet.';
   }catch(e){text='The backup list could not be read.'}
   const el=document.getElementById('updateLastBackup');if(el)el.textContent=text;
@@ -827,15 +876,17 @@ async function applyUpdate(){
 
 function syncUpdateConfirm(){
   const b=document.getElementById('updateConfirmBtn');
-  if(b)b.textContent=document.getElementById('updateBackupFirst')?.checked?'Back up and update':'Update without a backup';
+  const backup=document.getElementById('updateBackupFirst');
+  if(b)b.textContent=backup instanceof HTMLInputElement&&backup.checked?'Back up and update':'Update without a backup';
 }
 
 async function confirmApplyUpdate(){
   const btn=document.getElementById('updateConfirmBtn');
-  if(btn){if(btn.disabled)return;btn.disabled=true}
+  if(btn instanceof HTMLButtonElement){if(btn.disabled)return;btn.disabled=true}
   const err=document.getElementById('updateErr');if(err)err.textContent='';
-  const fail=msg=>{if(err)err.textContent=msg;if(btn)btn.disabled=false};
-  if(document.getElementById('updateBackupFirst')?.checked){
+  const fail=msg=>{if(err)err.textContent=msg;if(btn instanceof HTMLButtonElement)btn.disabled=false};
+  const backup=document.getElementById('updateBackupFirst');
+  if(backup instanceof HTMLInputElement&&backup.checked){
     if(btn)btn.textContent='Backing up…';
     try{await api('POST','/backup')}catch(e){syncUpdateConfirm();return fail('The backup failed, so nothing was updated: '+e.message)}
     if(!btn?.isConnected||!document.getElementById('modal').classList.contains('visible')){showToast('Update cancelled. The backup was kept.');return}
@@ -854,7 +905,7 @@ async function confirmApplyUpdate(){
 }
 
 Object.assign(ACTIONS,{showPendingMembers,applyRetention,toggleRetentionEdit,applyUpdate,checkRestoreConfirm,clearChannelRetention,confirmApplyUpdate,
-  confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,downloadBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,videoCapChanged,
+  chooseBackupEverything,confirmBackupOtherDisk,downloadStoredArchive,confirmDeleteBackup,confirmRestore,createBackup,downloadArchive,downloadBackup,discardSettings,markBackupPolicyChanged,markSettingsChanged,videoCapChanged,
   openApplyRetention,openChannelRetention,openDeleteBackupModal,openRestoreModal,saveBackupPolicy,saveChannelRetention,
   saveSettings,saveAfkChannel,syncUpdateConfirm,uploadServerIcon,removeServerIcon,
   reloadPage(){location.reload()},

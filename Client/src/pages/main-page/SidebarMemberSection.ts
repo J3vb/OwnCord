@@ -70,10 +70,14 @@ export function createSidebarMemberSection(
   const memberHeader = createElement("div", { class: "category sidebar-members-header" });
   const memberLabelEl = createElement(
     "span",
-    { class: "category-name" },
+    { class: "category-name", id: "sidebar-members-heading" },
     shellText("members.heading"),
   );
-  const memberArrow = createElement("button", { type: "button", class: "category-arrow" });
+  const memberArrow = createElement("button", {
+    type: "button",
+    class: "category-arrow",
+    "aria-labelledby": "sidebar-members-heading",
+  });
   memberArrow.textContent = "\u25BC";
   appendChildren(memberHeader, memberArrow, memberLabelEl);
   memberListContainer.appendChild(memberHeader);
@@ -160,6 +164,7 @@ export function createSidebarMemberSection(
   function applyMembersCollapsed(): void {
     memberHeader.classList.toggle("collapsed", membersCollapsed);
     memberArrow.textContent = membersCollapsed ? "\u25B6" : "\u25BC";
+    memberArrow.setAttribute("aria-expanded", String(!membersCollapsed));
     memberContent.style.display = membersCollapsed ? "none" : "";
     resizeHandle.style.display = membersCollapsed ? "none" : "";
     if (membersCollapsed) {

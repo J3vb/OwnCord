@@ -1,5 +1,5 @@
 {
-  "nextId": 602,
+  "nextId": 629,
   "findings": [
     {
       "id": "OC-0001",
@@ -11025,12 +11025,18 @@
       "evidence": "Server/db/message_delivery.go:57 and :102: CreatedAtMS below the floor with no receipt returns ErrMessageDeliveryBeforeRestore. Server/service/message_delivery.go:74-75 maps it to ErrBadRequest with \"review the pending message before sending it again\". Client/src/lib/pendingMessages.ts:41-52: an id counts as expired only when older than 24h or createdAt > max(now+5min, floor), so ids below the floor stay valid. Client/src/pages/main-page/ChannelController.ts:468-493: retrySend reuses draft.clientMessageId. ChannelController.ts:356-360: performSend keeps existingClientMessageId. Client/src/features/messaging/wsHandlers.ts:362-380: markSendFailed(id, payload.code) drops the message text. No client test covers the floor.",
       "suggestedFix": "Do not refuse a pre-floor id on the client: Retry resends the same client_message_id with its unchanged timestamp and lets the server decide. If the restored database holds the receipt, the server deduplicates (chat_send_ok with deduplicated) and the row reconciles. Otherwise it returns the before-restore BAD_REQUEST: handleMessagingError, using pendingMessageBeforeRestore in lib/pendingMessages.ts, labels the row BEFORE_RESTORE (\"The server was restored \u2014 check the conversation before sending this again.\"), keeping its text for copy or discard, and ChannelController shows the same text as a toast. Never mint a replacement id (docs/protocol.md). Vitest cases cover both the deduplicated and the refused retry.",
       "confidence": "high",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-09-25",
       "hunt": "b9-exit-audit-2026-09-25",
       "lens": "reliability-upgrade",
       "finder": "b9-exit-audit",
-      "note": "Cross-exam: keeping the id is by design (docs/protocol.md:472-483). Fix direction accepted (owner decision 2026-09-27, option a, revised): resend the same id and label the server's refusal with the restore reason; the text is retained for copy/discard. No silent new id."
+      "note": "Cross-exam: keeping the id is by design (docs/protocol.md:472-483). Fix direction accepted (owner decision 2026-09-27, option a, revised): resend the same id and label the server's refusal with the restore reason; the text is retained for copy/discard. No silent new id.",
+      "fixedDate": "2026-09-27",
+      "fix": {
+        "commit": "c27115f6",
+        "test": "Client/src/features/messaging/wsHandlers.test.ts (labels a refused pre-restore retry and keeps its text); Client/tests/unit/pending-messages.test.ts (detects a keyed id that predates the restore floor)",
+        "revertProof": "not re-run: the fix shipped in #1882 and the entry was closed on 2026-11-21"
+      }
     },
     {
       "id": "OC-0477",
@@ -11350,12 +11356,19 @@
       "evidence": "Run 39069195764, job 117503072275 (scale_connections=1000, dev 59197a25, 2026-10-17): login window auth_time 10,125 / 10,556 / 10,656 ms (p50 / p95 / p99, 395 samples), login_burst_ok 395, login_burst_giveups 105, login_burst_time max 53,727 ms, server CPU 1.35 avg / 2.03 peak of 2. Run 39069193852, job 117503067669 (scale_connections=2000): 394 ok, 106 give-ups, auth_time p95 / p99 11,949 / 12,787 ms, login_burst_time max 77,270 ms, server CPU 1.80 / 2.09. Published in docs/capacity.md, Scale profile > Measured.",
       "suggestedFix": "Do not loosen the budget. Options for the owner and the next work package to evaluate: the 4 vCPU tier (which doubles the admission budget and the hash throughput), a longer admission wait or a larger admission queue for a burst the server can finish inside the budget, or a login-burst budget derived from the measured bcrypt rate with the client retry schedule aligned to it.",
       "confidence": "high",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-10-17",
       "hunt": "roadmap-wp-4.2-2026-10-17",
       "lens": "perf",
       "finder": "wp-4.2-scale-run",
-      "note": "Roadmap Phase 4, WP 4.2."
+      "note": "Roadmap Phase 4, WP 4.2.",
+      "fixedDate": "2026-11-21",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/scripts/k6/ws-load.test.mjs (login burst retries a busy refusal on the app's schedule, within 70 s); load-baseline run 44902649604 (scale, 1,000): 500 of 500 logins, 0 give-ups, max 59,055 ms",
+        "revertProof": "the 2026-10-17 run with the 12-attempt retry: 105 of 500 gave up"
+      },
+      "rationale": "Owner decision 2026-11-21: the give-ups came from the load test stopping after about 45 s while the app retries for 70 s; the test now retries like the app and every login gets a token within 70 s. The per-attempt REST login budget (600 / 1,000 ms) is reported, not gated, in the login window: in a rush it is queue wait bound by the password-check rate of 2 vCPU (about 8 a second)."
     },
     {
       "id": "OC-0491",
@@ -11368,12 +11381,13 @@
       "evidence": "Run 39069195764, job 117503072275 (dev 59197a25, 2026-10-17): herd drops 1,000, readies 1,000, all ready 29,523 ms; ws_ready_time p50 / p95 / p99 9,049 / 13,918 / 15,071 ms; auth_ok 1,544 / 3,091 / 4,091 ms; ws_connect_time p95 7,535 ms; server CPU 0.22 avg / 0.47 peak, k6 0.91 / 2.02 of 2. Published in docs/capacity.md, Scale profile > Measured.",
       "suggestedFix": "Do not loosen the budget. Establish first where the time goes (connect, auth_ok or ready build) with the generator off the critical path, then decide whether the work is in the server (ready payload cost, upgrade admission) or in a lighter driver; both are the owner's and the next work package's call.",
       "confidence": "high",
-      "status": "open",
+      "status": "declined",
       "found": "2026-10-17",
       "hunt": "roadmap-wp-4.2-2026-10-17",
       "lens": "perf",
       "finder": "wp-4.2-scale-run",
-      "note": "Roadmap Phase 4, WP 4.2."
+      "note": "Roadmap Phase 4, WP 4.2.",
+      "rationale": "Owner decision 2026-11-21: the per-dial herd budgets cannot be measured on the current rig, where k6 saturates its 2 CPUs in the herd window (re-run 44902649604: all 1,000 ready in 25,769 ms, dial to ready p95 9,761 ms, k6 peak 2.03 of 2, server 0.25). A larger load generator is not planned; the budgets stay as they are."
     },
     {
       "id": "OC-0492",
@@ -11386,12 +11400,13 @@
       "evidence": "Run 39069193852, job 117503067669 (scale_connections=2000, dev 59197a25, 2026-10-17): 18 of 220 threshold expressions failed including the population gate; steady population min 1,917, ack p50 / p95 / p99 55.5 / 11,153 / 25,921 ms, delivery 62 / 8,756 / 21,285 ms; CPU server / k6 avg and peak: steady 0.50 / 0.67 and 1.42 / 2.03, burst 0.82 / 0.87 and 1.99 / 2.05 (generator-limited), herd 0.50 / 0.90 and 1.98 / 2.05 (generator-limited). topic_sheds_total 0, obs_ws_conn_rejects 0, queue disconnects 0. Published in docs/capacity.md, Scale profile > Measured.",
       "suggestedFix": "Do not make a 2,000 claim and do not change a budget. Establish whether the generator or the server is the limit before any 2,000 result is published: per the generator notes in docs/capacity.md (decision D6) a larger runner or a lighter driver is the owner's call, and the same constrained-server recipe must be kept.",
       "confidence": "medium",
-      "status": "open",
+      "status": "declined",
       "found": "2026-10-17",
       "hunt": "roadmap-wp-4.2-2026-10-17",
       "lens": "perf",
       "finder": "wp-4.2-scale-run",
-      "note": "Roadmap Phase 4, WP 4.2."
+      "note": "Roadmap Phase 4, WP 4.2.",
+      "rationale": "Owner decision 2026-11-21: a valid 2,000 run needs a load generator larger than the 2 CPUs the runner leaves k6; that rig is not planned. No 2,000 result is claimed and the 2,000 tier stays an estimate (4 vCPU / 8 GB) in docs/capacity.md."
     },
     {
       "id": "OC-0493",
@@ -13743,12 +13758,18 @@
       "evidence": "MessageController.ts installTail: setMessages(channelId, messages, hasMore, splice) with no anchor; historyWindows.ts capMerged keeps the head only when anchorId is in the overflow; readyResync.ts passes readingAnchor(activeAfterReady).",
       "suggestedFix": "Pass readingAnchor(channelId) from installTail when splice is true, as readyResync does, and add a unit test at the cap.",
       "confidence": "high",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-11-12",
       "hunt": "release-review-2.9.0",
       "lens": "client-state",
       "finder": "claude",
-      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
+      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release.",
+      "fixedDate": "2026-11-21",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/message-controller-revisit.test.ts (keeps the rows the reader is on when the kept older page passes the row cap)",
+        "revertProof": "fail (the kept rows 301..320 are trimmed)"
+      }
     },
     {
       "id": "OC-0596",
@@ -13761,12 +13782,18 @@
       "evidence": "historyWindows.ts olderThanPage returns previous.filter(sent && id < minSnapshotId); messages.store.ts setMessages doc: 'They may still show an edit, delete or reaction missed while offline until the next visit refetches them.'",
       "suggestedFix": "After the splice installs, revalidate the kept rows off the paint path (one around/before fetch over their id range), or drop kept rows older than what the refetch can reach.",
       "confidence": "high",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-11-12",
       "hunt": "release-review-2.9.0",
       "lens": "client-state",
       "finder": "claude",
-      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
+      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release.",
+      "fixedDate": "2026-11-21",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/dispatcher/readyResync.test.ts (revalidates the kept older rows, so an edit or delete made while down shows; drops a kept row deleted while down when the splice sits at the row cap); Client/tests/unit/message-controller-revisit.test.ts (leaves the kept rows alone when the revisit is aborted during their revalidation)",
+        "revertProof": "fail (the cached text and the deleted row stay)"
+      }
     },
     {
       "id": "OC-0597",
@@ -13779,12 +13806,18 @@
       "evidence": "Review note on #3353 (2.9.0 release prep, 2026-11-12). readyResync.ts calls setChannelLoading and invalidateLoadedMessageWindows before its own refetch; MessageController.installTail is skipped once that refetch marks the channel loaded.",
       "suggestedFix": "Write a unit test that interleaves the resync refetch with a pending revisit tail and an older page; if it drops rows, carry the older page through the resync splice the same way installTail does.",
       "confidence": "medium",
-      "status": "open",
+      "status": "fixed",
       "found": "2026-11-12",
       "hunt": "release-review-2.9.0",
       "lens": "client-state",
       "finder": "claude",
-      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release."
+      "note": "Follow-up from the review of the older-page fix (#3353) during 2.9.0 release prep; non-blocking for that release.",
+      "fixedDate": "2026-11-21",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/message-controller-revisit.test.ts (a full-ready resync during the revisit's refetch keeps the older page the reader loaded, whichever lands first)",
+        "revertProof": "fail (both orders drop the older page; reproduced before the fix)"
+      }
     },
     {
       "id": "OC-0601",
@@ -13878,6 +13911,627 @@
       "hunt": "release-review-2.9.0",
       "finder": "claude",
       "fixedDate": "2026-11-12"
+    },
+    {
+      "id": "OC-0611",
+      "title": "A notification's title or body is cut at whole characters, so a cut inside an emoji still shows the app's own notification",
+      "file": "Client/src/lib/notificationDelivery.ts",
+      "line": 19,
+      "severity": "low",
+      "why": "The notification text cap now counts whole characters, so the text sent to the native notification command never holds half an emoji; the command's JSON parser accepts it and the app's own notification (with its click-to-open target) shows instead of the web fallback.",
+      "repro": "Receive a message in an unfocused channel whose text has an emoji across the 100th character (or an author and channel title with one across the 80th).",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Cut by code points in sanitizeNotif (Array.from), as musicActivity's clip() does.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/notifications/formatting.test.ts (a title cut that lands inside an emoji keeps it whole, a body cut that lands inside an emoji keeps it whole)",
+        "revertProof": "fail (2 of 2 cases)"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0612",
+      "title": "The desktop watchdog does not count time the machine slept as a main-thread or webview freeze",
+      "file": "Client/src-tauri/src/exit_watch.rs",
+      "line": 274,
+      "severity": "low",
+      "why": "Windows' monotonic clock keeps counting while the machine sleeps. The watchdog now treats a tick that arrives HANG_AFTER or more after its previous one as a resume and moves the stored answer, webview-stop and probe times past the sleep, so the log and the run file judge only the seconds the machine was awake; a real freeze still logs after 5 s.",
+      "repro": "On Windows, put the machine to sleep for more than 5 s with the app open, then wake it and read the client log.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Detect a resume from the watchdog's own tick gap and shift the stored times past it (pure MainCheck::tick with an injected clock).",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/exit_watch.rs (a_tick_after_the_machine_slept_is_no_freeze, a_freeze_that_spans_a_sleep_does_not_count_the_sleep, a_real_freeze_is_logged_after_five_seconds_and_so_is_its_end)",
+        "revertProof": "fail (2 of 3 tests; Hang(3601) logged on the first tick after a 1 h sleep)"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0613",
+      "title": "Sharing a Store app's window with its sound captures the app's own process, or reports the app as not found",
+      "file": "Client/src-tauri/src/windows_app_audio/mod.rs",
+      "line": 187,
+      "severity": "low",
+      "why": "A Store (UWP) app's top-level window is a frame owned by ApplicationFrameHost. The share now resolves such a frame to the process that owns the Windows.UI.Core.CoreWindow inside it, and answers not_found (which shows the app-sound warning) when there is none, instead of capturing the frame host.",
+      "repro": "On Windows, share the window of Media Player or the Netflix app with Share the app's sound on.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "For an ApplicationFrameWindow, enumerate its child windows and use the CoreWindow owned by another process (pure window_sound_pid; thin GetClassNameW/EnumChildWindows glue).",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/windows_app_audio/mod.rs (a_store_app_window_plays_from_its_app_process)",
+        "revertProof": "fail (1 of 1 test; Some(100) instead of Some(300))"
+      },
+      "lens": "correctness",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0614",
+      "title": "OwnCord's own process tree and ancestors skip a parent id that names a process created after its child",
+      "file": "Client/src-tauri/src/windows_app_audio/mod.rs",
+      "line": 207,
+      "severity": "low",
+      "why": "Windows keeps a child's parent id after the parent exits and later reuses it. The ancestor and own-tree walks now drop a link whose parent was created after the child (creation times read only for the processes the walks reach); a link with an unreadable time stays as recorded, which can only refuse a share and never lets a capture include OwnCord's own sound.",
+      "repro": "On Windows, after a long session (or after an in-app restart), share a Chrome window with Share the app's sound on.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Check each parent link against GetProcessTimes creation times in own_process_ancestors and own_process_tree (pure walk with injected times).",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/windows_app_audio/mod.rs (a_parent_created_after_its_child_is_a_reused_id, an_app_whose_parent_id_was_reused_by_owncord_is_not_its_child)",
+        "revertProof": "fail (2 of 2 tests)"
+      },
+      "lens": "correctness",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0607",
+      "title": "A push-to-talk release closes the mic after the release delay on the audio clock, also while the window is hidden or minimised",
+      "file": "Client/src/platform/desktop/pushToTalkService.ts",
+      "line": 174,
+      "severity": "medium",
+      "why": "The release delay now runs on the mic processor's AudioContext clock (a scheduled gain close that a press cancels), so the gate closes on time while the window is hidden or minimised; the key edge reaches the gate as soon as its event arrives.",
+      "repro": "On Windows, minimise OwnCord in a quiet call with push-to-talk, press and release the key, and keep talking right after letting go.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Hand the release delay to the gate and schedule the close on the AudioContext clock instead of a page setTimeout; keep a timer only for the native room's gate.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/mic-processor.test.ts (push-to-talk release delay: closes on the graph's own clock once the delay has run, not before; a new press during the delay keeps the voice open; closes at once with no delay); Client/tests/unit/ptt/eventsAndRaces.test.ts (ptt release delay); Client/src/features/voice/native/nativeRoom/connection.test.ts (keeps the session's gate open through a release's delay); Client/tests/unit/voice.store.test.ts (a release's close with its delay); Client/tests/unit/voice-link-sounds.test.ts (a release with a delay: ticks off when the delay has run, no tick for a press inside it); Client/src/features/voice/talkButton.test.ts (hands a release its delay at once; switching to Voice activity during a release's delay opens the closing gate); Client/tests/unit/ptt/eventsAndRaces.test.ts (opens a gate still closing out a release's delay when the backend thread panics); Client/tests/unit/livekitSession/voiceState.test.ts (mode reconnect re-closes the gate when a release was still waiting out its delay); Client/tests/unit/mic-processor.test.ts (closes at once while the context is not running); Client/tests/unit/audioPipeline/pipelineAndVad.test.ts (a press or release while the SDK takes the processor reaches the new one)",
+        "revertProof": "fail (3 of 3 processor cases, 5 of 6 release-delay cases, 1 of 1 native gate case; 5 of 8 store and tick cases; 1 of 1 each for the panic, talk-button mode switch, reconnect and stopped-context cases; 2 of 2 attach cases)"
+      },
+      "lens": "flow-voice",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0608",
+      "title": "A Source screen share keeps the capture's own size at every frame rate",
+      "file": "Client/src/lib/voice/videoPresets.ts",
+      "line": 300,
+      "severity": "medium",
+      "why": "Source sends livekit's zero-size resolution at every frame rate, so the 1080p30 default is never filled in and the Linux host gets no size cap either.",
+      "repro": "Share a 2560x1440 or larger screen at Source with the default 30 fps.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Return the zero-size sentinel and the matching video frameRate for the Source preset at every frame rate.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/screen-share-fps.test.ts (gives source the zero-size sentinel at %i fps; sends source at the default frame rate to getDisplayMedia with no size cap; maps %s at %i fps to the Linux host's capture)",
+        "revertProof": "fail (3 of 7 cases)"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0609",
+      "title": "A Source GPU H.264 screen share stays within the encoder's size for the whole share",
+      "file": "Client/src/lib/voice/h264Profile.ts",
+      "line": 86,
+      "severity": "medium",
+      "why": "An uncapped GPU H.264 share now gets the encoder's size limit as max constraints even when its first frame fits, so a window that grows later is shrunk inside the limit instead of falling back to the software encoder.",
+      "repro": "Share a window at Source 60 fps with GPU H.264, then make it borderless full screen on a 5120x1440 monitor.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Always apply the gpuH264SizeCap max constraints to an uncapped GPU H.264 share; a capture opened with a quality's size already fits.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src/lib/voice/h264Profile.test.ts (caps a share %s that fits now; leaves a share held to a quality's size alone; keeps a window share that starts small and grows past 3840 px inside the encoder; keeps the rate a 60 fps Source share was opened with); Client/tests/unit/screen-share-republish.test.ts (a share switched up to the GPU H.264 encoder)",
+        "revertProof": "fail (3 of 4 cases; 2 of 2 frame-rate cases; 2 of 3 republish cases)"
+      },
+      "lens": "correctness",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0610",
+      "title": "Video grid tiles request their size at the grid window's own pixel ratio and again when it changes",
+      "file": "Client/src/features/voice/videoGrid/gridWatch.ts",
+      "line": 30,
+      "severity": "low",
+      "why": "Tile sizes use the device pixel ratio of the window the grid is shown in, and a resolution media query on that window re-sends the sizes when the ratio changes.",
+      "repro": "Pop out a call and move it to a monitor with a different display scale.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Read devicePixelRatio from the grid document's window and listen for a matchMedia resolution change there, owned by a Disposable.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/videoGrid/popout.test.ts (asks for tile sizes at the window's own pixel ratio, and again when that ratio changes)",
+        "revertProof": "fail (1 of 1 case)"
+      },
+      "lens": "client-state",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0606",
+      "title": "The desktop app's tunnels race the server's IPv6 and IPv4 addresses and keep the first that answers",
+      "file": "Client/src-tauri/src/proxy_common.rs",
+      "line": 102,
+      "severity": "medium",
+      "why": "The REST, LiveKit and chat-socket tunnels now dial through one shared dialer: it resolves the host inside the 10 s connect limit, alternates address families starting with the first address returned, starts the next address 250 ms after the previous one or at once when one fails, keeps the first connection and closes the others, and returns the last error when all fail. Before, one sequential connect spent the whole limit on an IPv6 address whose path drops packets (Windows gives up on it after about 21 s), so the IPv4 address was never tried and login, chat and voice timed out while a browser reached the server.",
+      "repro": "On a dual-stack PC, point the app at a server host name that has an AAAA record whose path drops packets (port forwarded or opened for IPv4 only) and a working A record, then log in.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Replace the single TcpStream::connect in proxy_common with an RFC 8305 dialer used by http_proxy, livekit_proxy and ws_proxy; ws_proxy dials the stream itself and hands it to tokio-tungstenite's client_async_tls_with_config with the same rustls connector.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/proxy_common.rs (a_silent_address_hands_over_to_the_next_one_well_inside_the_limit, when_every_address_fails_the_last_error_returns_inside_the_limit, each_address_starts_on_time_and_the_first_answer_wins, addresses_alternate_families_starting_with_the_first_returned, dial_tcp_reaches_a_listener_by_host_name); Client/src-tauri/src/ws_proxy.rs (the_dial_target_is_the_url_host_and_port, the_chat_socket_dials_by_name_and_starts_tls_on_that_stream)",
+        "revertProof": "fail (3 of 5 dialer tests: the dial does not finish inside the limit)"
+      },
+      "lens": "win-net-secrets",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0618",
+      "title": "On Linux, Play on a YouTube card opens the video in the browser instead of a player that YouTube refuses",
+      "file": "Client/src/features/messaging/content/mediaYouTube.ts",
+      "line": 240,
+      "severity": "medium",
+      "why": "The Linux app page is served from tauri://localhost, and WebKit sends no Referer from a page that is not http(s) (checked on WebKitGTK 2.52: a frame from a tauri: page got none, one from an http page got one). YouTube shows player error 153 for an embed without a Referer, so the in-page player could never play on Linux.",
+      "repro": "Linux desktop: open a channel with a YouTube link and press Play on its card.",
+      "evidence": "mediaYouTube.ts mounted https://www.youtube.com/embed/<id> straight into the page; Server/api/livekit_proxy.go lists tauri://localhost as the WebKitGTK origin.",
+      "suggestedFix": "When the page is not http(s), open the video with the desktop link opener instead of mounting the frame.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/media/lightboxAndYoutube.test.ts (on a page outside http(s), Play opens the video in the browser, not a frame)",
+        "revertProof": "fail (a frame is mounted and nothing opens)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0619",
+      "title": "A Linux page-process crash or out-of-memory kill is named in the diagnostics event log instead of unknown/unknown",
+      "file": "Client/src/lib/diagnostics/appEvents.ts",
+      "line": 80,
+      "severity": "low",
+      "why": "webviewFailureFields read only the Windows and Android wording; the Linux line \"[exit] webview process ended: Crashed; ...\" matched neither, so process and reason were both \"unknown\".",
+      "repro": "Linux: the WebKitGTK web process crashes or is killed for memory; the next page load copies the line into the event log.",
+      "evidence": "exit_watch/linux.rs logs \"[exit] webview process ended: {reason:?}\"; lastExit.ts accepts the line but appEvents.ts could not parse it.",
+      "suggestedFix": "Recognise \"webview process ended: <Reason>\" as the renderer and map WebKit's Crashed, ExceededMemoryLimit and TerminatedByApi.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src/lib/diagnostics/appEvents.test.ts (reads the Linux page process ending)",
+        "revertProof": "fail (unknown/unknown)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0620",
+      "title": "The Linux .deb requires a WebKitGTK that has AbortSignal.any, so Settings never opens empty on an old one",
+      "file": "Client/src-tauri/tauri.conf.json",
+      "line": 41,
+      "severity": "low",
+      "why": "Settings, the connection test and its panel call AbortSignal.any with no fallback, which WebKitGTK has from 2.44, while the .deb accepted any libwebkit2gtk-4.1-0. On a host not updated since early 2024 every Settings tab threw before drawing.",
+      "repro": ".deb install on a host with WebKitGTK older than 2.44, then open Settings.",
+      "evidence": "SettingsOverlay.ts:117, connectionDiagnostics.ts:185, ConnectionDiagnosticsPanel.ts:284; tauri.conf.json deb depends had no version.",
+      "suggestedFix": "Depend on libwebkit2gtk-4.1-0 (>= 2.44); apt and the in-app update (apt-get) pull the newer WebKitGTK.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/tauri-conf-deb-depends.test.ts (requires a WebKitGTK that runs the page)",
+        "revertProof": "fail (no version floor)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0621",
+      "title": "On Linux, a mic that never sends sound no longer hangs mute, input switch and Leave",
+      "file": "Client/src-tauri/src/native_voice/capture.rs",
+      "line": 1137,
+      "severity": "medium",
+      "why": "cpal's PulseAudio input was built with no timeout and its play() waits for the first audio data with no limit, while the capture lock that mute, input switch and close need was held. A source that accepts the stream but never delivers (a failed Bluetooth profile switch, a source busy elsewhere) left unmute unfinished and Leave unable to close the native room until the app restarted.",
+      "repro": "Linux native voice: join with an input that accepts the stream but sends nothing, then mute, switch input or leave.",
+      "evidence": "capture.rs open_input built the stream with timeout None and called play() inline; session/audio_line.rs and session.rs wait on the same lock.",
+      "suggestedFix": "Bound the whole open (build and play) by one deadline, give up with an error, silence an abandoned stream and cap the starts left waiting per device.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/native_voice/capture/tests.rs (a_start_that_never_plays_gives_up_within_its_limit, starts_left_waiting_are_capped)",
+        "revertProof": "n/a (new bounded start; the inline play() it replaces has no limit to test)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0622",
+      "title": "On Linux, your own camera and screen-share preview is scaled to the tile and sent at most 30 times a second",
+      "file": "Client/src-tauri/src/native_voice/video.rs",
+      "line": 300,
+      "severity": "medium",
+      "why": "The self-preview got every captured frame at full size and full rate over the loopback socket into WebKit: about 330 MB/s for a 1440p60 share and 750 MB/s at 4K60, on top of the software encode of the same frames.",
+      "repro": "Linux native voice: share a 1440p or 4K screen at 60 fps and watch the app's CPU and memory traffic.",
+      "evidence": "video.rs send_preview packed each frame as captured; the renderer acks every frame right after drawing it.",
+      "suggestedFix": "Scale the preview to fit 1280x720 on the sending side and send at most one frame per 33 ms, keeping only the newest frame.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/native_voice/video.rs (previews_fit_the_tile_size_and_keep_their_shape, previews_are_scaled_and_sent_at_most_30_times_a_second)",
+        "revertProof": "fail (full-size frame sent at once)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0623",
+      "title": "On Linux, turning the call camera on right after opening Voice & Video settings no longer fails",
+      "file": "Client/src-tauri/src/native_voice/mod.rs",
+      "line": 974,
+      "severity": "low",
+      "why": "The settings preview dropped the camera lock before its first frame and kept the capture in a local, so the call camera's step that frees the device could not reach it and its own start failed with \"camera capture failed to start\".",
+      "repro": "Linux: open Voice & Video settings and turn the camera on with its keybind within a second or two.",
+      "evidence": "mod.rs native_voice_start_camera_preview awaited the first frame with the capture held only in a local.",
+      "suggestedFix": "Keep the preview still waiting for its first frame in shared state, so the call camera and a newer preview stop it, and retake the lock before keeping it.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/native_voice/camera_preview.rs (clearing_takes_out_a_start_still_waiting_for_its_first_frame, a_stop_supersedes_a_start_in_flight)",
+        "revertProof": "n/a (new shared slot; the local it replaces could not be reached)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0624",
+      "title": "On Linux, a run started by an in-app restart keeps its stderr file for the next start's report",
+      "file": "Client/src-tauri/src/stderr_capture.rs",
+      "line": 104,
+      "severity": "medium",
+      "why": "Tauri's restart starts the new process with the old one's stderr, which is our own stderr-<pid>.log. The new run deleted that file as left by a dead process, then refused to capture because stderr was already a file, so a later silent close reported nothing and the hidden file lost its size cap.",
+      "repro": "Linux: Update and restart, or Clear & Restart, then have the new run close without a word; the next start reports nothing.",
+      "evidence": "stderr_capture.rs treated any regular-file stderr as a launcher's choice; report_previous deleted files of dead pids.",
+      "suggestedFix": "Treat an inherited stderr-<pid>.log of ours in the log directory (there or deleted) as ours and capture anew; keep this run's own file in the report sweep.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/stderr_capture.rs (a_restarts_inherited_file_is_captured_again_and_a_launchers_kept)",
+        "revertProof": "fail (outcome LauncherFile, no new file)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0625",
+      "title": "On Linux, an AppImage's Launch on login keeps working after it is renamed or moved, or sits in a folder with a space",
+      "file": "Client/src-tauri/src/autostart_entry.rs",
+      "line": 54,
+      "severity": "low",
+      "why": "tauri-plugin-autostart writes ~/.config/autostart/<name>.desktop with the path unquoted and never rewrites it. A renamed or moved AppImage left an entry that started nothing while Settings showed it on, and a path with a space never worked.",
+      "repro": "Linux AppImage: turn on Launch on login, rename or move the AppImage (or keep it in a folder with a space), log out and in.",
+      "evidence": "auto-launch 0.6 writes Exec={path} {args} unquoted from APPIMAGE or current_exe; nothing refreshes it.",
+      "suggestedFix": "After the webview turns the entry on, rewrite Exec with the path quoted per the Desktop Entry spec; at each start, point an entry whose program is gone at this app. Leave entries that still start something, symlinked entries and missing entries alone.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/autostart_entry.rs (at_start_only_an_entry_whose_program_is_gone_is_rewritten, the_program_is_read_back_as_written, a_symlinked_entry_is_left_alone)",
+        "revertProof": "n/a (new module)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0626",
+      "title": "On Linux, an AppImage's GStreamer keeps its own plugin registry instead of rewriting the host's",
+      "file": "Client/src-tauri/src/launch_env.rs",
+      "line": 45,
+      "severity": "low",
+      "why": "The AppImage's bundled GStreamer used the shared ~/.cache/gstreamer-1.0 registry while its plugins sit under a mount path that changes each launch, so every run rewrote the host's cache with paths gone by the next and the host's media apps rescanned every plugin after it.",
+      "repro": "Linux AppImage: start OwnCord, open the camera, then start a GStreamer app on the host and watch it rescan.",
+      "evidence": "tauri.conf.json bundles GStreamer media for the AppImage; nothing set GST_REGISTRY_1_0.",
+      "suggestedFix": "Set GST_REGISTRY_1_0 to a file in OwnCord's cache at launch inside an AppImage, unless the user chose one, and keep it out of the programs OwnCord starts.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/launch_env.rs (only_an_appimage_without_a_chosen_registry_gets_its_own), external_open.rs (only_the_registry_set_at_launch_is_removed)",
+        "revertProof": "n/a (new launch step)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0627",
+      "title": "On Linux, stderr is captured before GTK starts, so GLib's messages reach the stderr file",
+      "file": "Client/src-tauri/src/main.rs",
+      "line": 15,
+      "severity": "low",
+      "why": "GLib picks the journal or stderr at its first message and keeps that choice. The capture started inside Tauri's setup, after GTK; if GLib logged before it, GDK's last Wayland error on a menu-launched .deb went to the journal instead of the file the next start reports from.",
+      "repro": ".deb on Wayland started from the menu: GLib logs before setup, then the app ends on a display error.",
+      "evidence": "stderr_capture::start ran from setup; GLib's g_log_writer_default caches its journal choice.",
+      "suggestedFix": "Capture stderr first thing in main, before GTK, with the log directory worked out the way Tauri's path resolver does.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/launch_env.rs (the_identifier_is_the_bundle_identifier_with_no_directory_override, base_directories_follow_xdg_with_the_home_fallback)",
+        "revertProof": "n/a (call order in main)"
+      },
+      "lens": "linux-hunt",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "2026-11-22-linux",
+      "finder": "opus",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0615",
+      "title": "The full archive download leaves out the database's process lock file, so it builds while the server runs on Windows",
+      "file": "Server/admin/handlers_archive.go",
+      "line": 350,
+      "severity": "medium",
+      "why": "The archive walk now skips the database's lock file (db.LockFilePath) next to its WAL sidecars. The running server holds that file open for its whole life, on Windows with no sharing, and it holds no data a restore needs.",
+      "repro": "Windows host with the default database path: Admin panel > Server > Download full archive.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Export the lock-path helper from db and skip that path in the archive walk.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/handlers_archive_test.go (TestHandleArchive_LeavesOutTheDatabaseLock)",
+        "revertProof": "fail (archive carried data/chatserver.db.lock)"
+      },
+      "lens": "win-server-host",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0616",
+      "title": "Saved-log history returns the newest lines of a log file that is still being written",
+      "file": "Server/admin/handlers_log_history.go",
+      "line": 322,
+      "severity": "low",
+      "why": "Each file's scan now ends at the open file's own size (File.Stat), capped by the page cursor, instead of the size from the folder listing, which Windows updates late for a file still being written.",
+      "repro": "Windows host with file logging on: open the saved-log history while today's log file is open in the writer.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "In readLogFile, take the end from f.Stat() on the opened file and cap it by the cursor offset.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/admin/handlers_log_history_internal_test.go (TestLogHistory_ReturnsLinesWrittenAfterTheListing)",
+        "revertProof": "fail (1 of 2 entries returned)"
+      },
+      "lens": "win-server-host",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0617",
+      "title": "A server in the Windows services session keeps running when a user signs out of the machine",
+      "file": "Server/internal/app/lifecycle.go",
+      "line": 391,
+      "severity": "medium",
+      "why": "In session 0 (NSSM, or a scheduled task that runs whether a user is logged on or not) the server now registers a console control handler, after the Go runtime's, that consumes CTRL_LOGOFF_EVENT, so a sign-out no longer becomes SIGTERM. Ctrl+C, Ctrl+Break, closing the console and shutdown still stop it, and an interactive session's sign-out still drains it.",
+      "repro": "Run the server under NSSM, sign in to the host as another user (or over RDP) and sign out.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "On Windows, when the process session is 0, register a SetConsoleCtrlHandler that returns TRUE for CTRL_LOGOFF_EVENT only; keep the decision in a cross-platform function.",
+      "fix": {
+        "commit": "pending",
+        "test": "Server/internal/app/console_ctrl_test.go (TestConsumeConsoleCtrl); Server/internal/app/console_ctrl_windows_test.go (TestConsoleCtrlConstantsMatchWindows, TestInstallLogoffFilter)",
+        "revertProof": "fail (1 of 10 cases)"
+      },
+      "lens": "win-server-host",
+      "confidence": "medium",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0602",
+      "title": "A Windows update installer that does not start brings the window and tray icon back",
+      "file": "Client/src-tauri/src/update_commands.rs",
+      "line": 279,
+      "severity": "medium",
+      "why": "The app now sets its own pre-exit step for the installer launch: it hides the windows and the tray icon only, and when the launch returns an error (SmartScreen \"Don't run\", antivirus) the window and tray icon are shown again with the failed-update banner, so the app no longer keeps running unseen.",
+      "repro": "Windows: click Update Now, then choose \"Don't run\" on the \"Windows protected your PC\" prompt.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Set UpdaterBuilder::on_before_exit to a step that hides the windows and sets the tray invisible without AppHandle::cleanup_before_exit, and show them again when install() returns an error.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/update_commands/handoff.rs (a_launch_that_fails_after_the_pre_exit_step_brings_the_windows_and_tray_back, a_failure_before_the_pre_exit_step_leaves_the_screen_alone, a_launch_keeps_the_screen_hidden_until_the_process_exits, the_updater_runs_the_app_pre_exit_step_and_keeps_the_single_instance_lock)",
+        "revertProof": "fail (2 of 4 cases)"
+      },
+      "lens": "error-paths",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0603",
+      "title": "A launch made while the update installer starts is handed to the running app instead of starting a second copy",
+      "file": "Client/src-tauri/src/lib.rs",
+      "line": 182,
+      "severity": "low",
+      "why": "The app's pre-exit step keeps the single-instance lock until the process exits, so a shortcut click, toast or owncord:// link during the installer gap reaches the running app, which keeps its window hidden (installer_launching); the comments now say what holds.",
+      "repro": "Windows: click Update Now and open OwnCord from the Start menu while the installer is starting.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Do not release the single-instance lock in the pre-exit step (no AppHandle::cleanup_before_exit); process exit releases it.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/update_commands/handoff.rs (the_updater_runs_the_app_pre_exit_step_and_keeps_the_single_instance_lock)",
+        "revertProof": "fail (1 of 1 case)"
+      },
+      "lens": "concurrency",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0604",
+      "title": "An app restart does not open the start-up owncord:// link it copied from the old process; any other link still opens",
+      "file": "Client/src/platform/desktop/deepLinks.ts",
+      "line": 84,
+      "severity": "low",
+      "why": "An update or in-app restart starts the new process with the old command line. The restart marker now also keeps the old process's own start-up link (read from its argv the way the deep-link plugin reads it); the new process exposes it through restart_startup_link, and the deep-link start-up skips a getCurrent() link only when it equals that link. A stale marker, a newer link handed over before the listener is up, and a launch that is no restart all open their link.",
+      "repro": "Start OwnCord from an invite or toast link, then use Clear & Restart or install an update.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Store the restarting process's own start-up link with the show-next-launch marker, expose it to the new process, and skip only an equal getCurrent() link; keep onOpenUrl.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/deep-link-init.test.ts (the start-up link after an app restart: does not open the copied link again, while a link that arrives later still opens; opens a different link than the restart copied / a newer link handed over after the restart / a launch that is no restart / a restart of a process started without a link; opens the start-up link after a host that cannot answer / an answer that is not a link), Client/src-tauri/src/window_prefs.rs (a_start_up_link_is_read_the_way_the_deep_link_plugin_reads_it, the_link_scheme_is_the_one_the_desktop_app_registers)",
+        "revertProof": "fail (1 of 7 cases)"
+      },
+      "lens": "client-state",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0605",
+      "title": "The update download checks hosts other than the pinned server against the system trust store",
+      "file": "Client/src-tauri/src/tofu.rs",
+      "line": 123,
+      "severity": "low",
+      "why": "HostScopedVerifier now uses the operating system's verifier (rustls-platform-verifier, as the updater plugin does without a pin) for every host but the pinned server, with the bundled roots as the fallback and on Android, so an update downloads wherever the system and the browser trust the connection. The pinned server's check and the proxies' verifiers are unchanged.",
+      "repro": "Sign in to a server, then click Update Now on a computer whose HTTPS goes through a company proxy or antivirus HTTPS scanning.",
+      "evidence": "Windows bug hunt 2026-11-22.",
+      "suggestedFix": "Build HostScopedVerifier's default verifier from rustls_platform_verifier::Verifier, falling back to the webpki-roots verifier.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/src-tauri/src/tofu.rs (an_unpinned_host_is_checked_against_the_system_trust_store, the_bundled_roots_do_not_trust_the_test_root)",
+        "revertProof": "fail (1 of 2 cases)"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-22",
+      "hunt": "bug-hunt-2026-11-22-windows",
+      "finder": "claude",
+      "fixedDate": "2026-11-22"
+    },
+    {
+      "id": "OC-0628",
+      "title": "Server order and folders were not kept when changed before the saved server list loaded",
+      "file": "Client/src/features/server-rail/ServerRail.ts",
+      "line": 109,
+      "severity": "medium",
+      "why": "Until the saved servers were read, layout actions (menus, drops, the folder toggle) worked on a layout reduced to the current server; the result was saved once the read succeeded, so the other servers and their folders left the stored order in both layouts. Every action now keeps the hosts the stored layout names until the read succeeds, the saved servers after it, and the current server when it is not empty, and is saved at once.",
+      "repro": "With the saved server list not yet read (or the read failing), collapse a folder or move a server in the server rail; once the list loads, the other servers have left their folders.",
+      "evidence": "The rail reconciled against the current host alone before the read and held the pruned result until the read landed.",
+      "suggestedFix": "Reconcile every action against the stored layout hosts before the read (the saved hosts after), plus a non-empty current host, and save it at once.",
+      "fix": {
+        "commit": "pending",
+        "test": "Client/tests/unit/server-rail.test.ts (an action before the read keeps every stored folder and host once the read lands), Client/tests/unit/serverRail/railContract.test.ts (with the read failing and then succeeding, an action before the read leaves every stored folder and host in place)",
+        "revertProof": "fail (2 of 2 cases)"
+      },
+      "lens": "correctness",
+      "confidence": "high",
+      "status": "fixed",
+      "found": "2026-11-24",
+      "hunt": "client-review-2026-11-24",
+      "finder": "claude",
+      "fixedDate": "2026-11-24"
     }
   ]
 }

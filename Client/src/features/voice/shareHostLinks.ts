@@ -9,7 +9,7 @@ export {
   bumpLocalShareRev,
   voiceStore,
 } from "@stores/voice.store";
-export { isLinuxDesktop, PORTAL_NOT_STARTED, PICKER_DISMISSED } from "./native/platform";
+export { isLinuxDesktop, PORTAL_NOT_STARTED, PICKER_DISMISSED } from "@lib/hostOs";
 export { nativeCameraSupport } from "./native/devices";
 export { channelPeerDecode } from "./peerDecode";
 export { resolveCodecChoice, h264GpuPublish } from "./videoCodec";

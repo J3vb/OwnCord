@@ -6,20 +6,21 @@ For the people who cut releases. Everyone else wants
 The Linux checks every release must pass are in the
 [Linux release checklist](linux-release-checklist.md).
 
-## Fix-only period (2.9.x)
+## Maintenance mode (2.11.x)
 
-From 2.9.0 until the owner says the beta label can go, `main` takes **only
-fixes**. Releases in this period are patch releases cut from `main`: 2.9.1,
-2.9.2 and so on. `dev` keeps taking features as usual, but no `dev` → `main`
-feature release happens until the owner gives the go. The owner's server runs
-the 2.9.x line for two weeks before that decision.
+2.11.0 is the current release and 2.11.x is the maintained line. The project is
+in maintenance: reported bugs and security issues get fixed, and there is no
+planned feature work. `main` takes **only fixes**, shipped as patch releases cut
+from `main` (2.11.1, 2.11.2 and so on). Work already on `dev` reaches `main` in a
+feature release only when the owner says so.
 
 What counts as a fix:
 
 - a change that makes a shipped feature work as it should;
 - a security fix (neutral wording, as everywhere else);
 - a change the release pipeline needs to publish a patch release, such as a
-  supply-chain scan baseline entry for an advisory published after 2.9.0;
+  supply-chain scan baseline entry for an advisory published after the last
+  release;
 - a dependency update that closes a security advisory.
 
 What does not: new features, new settings, refactors, new database migrations,
@@ -34,7 +35,7 @@ the `main` copy is a cherry-pick of the `dev` commit, not a new version of it.
 ## Release procedure
 
 This is the end-to-end procedure for cutting a feature release from `dev`.
-During the [fix-only period](#fix-only-period-29x) use
+In [maintenance mode](#maintenance-mode-211x), a fix ships with
 [Patch release from `main`](#patch-release-from-main) instead. Every step runs on
 `main` or against it. The order matters, because the release workflow
 (`release.yml`) stops on any missing input. In the examples below,
@@ -224,7 +225,8 @@ images on the frozen `dev` head with `npm run screenshots:readme` (from
 `Client/`) and land them in a PR to `dev` before the release PR. The run starts
 a real server in a temporary folder, seeds a demo community through the normal
 HTTP and WebSocket routes, and writes `Client.png`, `loginpage.png` and
-`Admin_Panel.png` at 1440x900 in the default dark theme.
+`Admin_Panel.png` at 1333x934: the client in Command Deck and the login page in
+the Gunmetal theme, which is what a new desktop install shows.
 
 ### Update signing keys
 
@@ -236,6 +238,11 @@ needs these GitHub Actions secrets:
 - `SERVER_UPDATE_SIGNING_PRIVATE_KEY`
 - `SERVER_UPDATE_SIGNING_PRIVATE_KEY_PASSWORD`
 
-To rotate the server update key, update
-[Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt).
-Roll it over in stages so running servers keep accepting updates.
+Each side trusts exactly one key, and a release carries one signature per
+file. A server checks updates against the key embedded from
+[Server/updater/server_update_public_key.txt](../Server/updater/server_update_public_key.txt);
+the desktop app against `plugins.updater.pubkey` in
+`Client/src-tauri/tauri.conf.json`. Changing either key therefore cannot be
+staged: the first release signed with the new key is refused by every server
+or app still running a build with the old one. Those owners and users must
+install that release by hand; after that, updates work again.

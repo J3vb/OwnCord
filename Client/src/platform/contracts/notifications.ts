@@ -1,7 +1,7 @@
 /**
  * Desktop notifications and the taskbar flash. Which notification fires, and
  * the Web Notification fallback when this seam rejects, are the caller's
- * (`lib/notifications.ts`). The platform seam lifted the native calls out of its private
+ * (`features/notifications/notifications.ts`). The platform seam lifted the native calls out of its private
  * helpers in place, pinned them with `notifier.suite.ts`, then moved them to
  * `platform/desktop/notifications.ts`.
  */
@@ -36,6 +36,12 @@ export interface Notifier {
    * all for one it rejected.
    */
   readonly ringsCalls?: boolean;
+  /**
+   * Whether `flashTaskbar` can do anything here: false where there is no app
+   * window to flash (a browser tab, the Android app), so a settings surface
+   * leaves its switch out.
+   */
+  readonly canFlash: boolean;
   permissionGranted(): Promise<boolean>;
   requestPermission(): Promise<boolean>;
   show(title: string, body: string, options?: NotifierShowOptions): Promise<void>;

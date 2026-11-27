@@ -19,7 +19,7 @@ vi.mock("../../platform/desktop", () => ({
     },
   },
 }));
-vi.mock("../../lib/voice/livekitSession", () => ({
+vi.mock("./livekitSession", () => ({
   syncMicrophoneGate: host.syncMicrophoneGate,
 }));
 vi.mock("../../lib/voice/audioPipeline", () => ({

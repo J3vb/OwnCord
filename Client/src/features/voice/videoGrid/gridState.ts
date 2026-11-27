@@ -6,7 +6,7 @@ import type { TileSize } from "./packLayout";
 import type { VideoView } from "../remoteTracks";
 import type { PopoutWindow } from "../popout";
 import type { ViewToggle, CellEntry } from "./gridShared";
-import type { TileConfig, VideoGridCallbacks, GridPerson, CallState } from "./VideoGrid";
+import type { TileConfig, VideoGridCallbacks, GridPerson, GridMusic, CallState } from "./VideoGrid";
 
 export interface GridState {
   root: HTMLDivElement | null;
@@ -21,7 +21,13 @@ export interface GridState {
   readonly pinned: Set<number>;
   people: readonly GridPerson[];
   readonly personCells: Map<number, HTMLDivElement>;
+  /** The remote members sharing music, as the host last gave them, and
+   *  their cards (see gridMusicTile.ts). */
+  music: readonly GridMusic[];
+  readonly musicCells: Map<number, HTMLDivElement>;
   resizeObserver: ResizeObserver | null;
+  /** Owns the grid window's pixel-ratio change listener (observeGrid). */
+  pixelRatioWatch: Disposable | null;
   resizeRafId: number;
   /** The window `resizeRafId` was requested on. */
   rafWindow: Window;
@@ -93,6 +99,14 @@ export interface GridApi {
   /** The tile's size and pin controls. */
   buildTileArrange(tileId: number): HTMLElement;
   syncPeople(): void;
+  /** Bring the music cards in line with the sharers. */
+  syncMusic(): void;
+  setMusic(music: readonly GridMusic[]): void;
+  resetMusic(): void;
+  /** A Music volume changed: move the slider of that sharer's card. */
+  onMusicVolume(e: Event): void;
+  /** The music cards in layout order. */
+  musicTiles(): HTMLDivElement[];
   hiddenByView(el: HTMLDivElement, config: TileConfig | undefined): boolean;
   applyViewFilters(): void;
   shownTiles(): HTMLDivElement[];
@@ -115,6 +129,7 @@ export interface GridApi {
   onFullscreenChange(): void;
   syncFullscreenUi(): void;
   observeGrid(): void;
+  unobserveGrid(): void;
   windowFullscreen(on: boolean): void;
   dropFullscreen(): void;
   buildCallControls(

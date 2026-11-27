@@ -1,7 +1,7 @@
 /**
  * The video grid's tile menus and per-user volume, split from gridStreams.ts.
  */
-import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
+import { getUserLocalMute, getUserVolume } from "../livekitSession";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import type { CellEntry } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
@@ -51,7 +51,9 @@ export function createGridMenus(st: GridState, api: GridApi) {
       signal: entry.listeners.signal,
       onVolumeChange: (isScreenshare: boolean, level: number, muted: boolean) =>
         applyVolume(personId, isScreenshare, level, muted),
+      watching: !entry.el.classList.contains("video-cell--stopped"),
       onStopWatching: () => api.setWatching(tileId, false),
+      onWatch: () => api.setWatching(tileId, true),
       ...arrangeOf(tileId),
       view: {
         focused: st.focusedTileId === tileId,
@@ -111,7 +113,7 @@ export function createGridMenus(st: GridState, api: GridApi) {
     }
   }
 
-  /** The sidebar menu (or another tile) changed a user's local Mute. */
+  /** The sidebar menu (or another tile) changed a user's local Mute or level. */
   function onUserLocalMute(e: Event): void {
     const userId = (e as CustomEvent<{ userId: number }>).detail.userId;
     const volume = getUserVolume(userId);

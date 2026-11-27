@@ -21,6 +21,17 @@ func (s *AttentionService) readBackup(ctx context.Context, r *attentionReadings)
 	if s.src.LastBackup != nil {
 		r.lastBackup, r.lastBackupErr = s.src.LastBackup()
 	}
+	r.archive, r.backupDisk = nil, nil
+	if s.src.BackupArchive != nil {
+		if a, err := s.src.BackupArchive(ctx); err == nil {
+			r.archive = &a
+		}
+	}
+	if s.src.BackupDisk != nil {
+		if d, err := s.src.BackupDisk(ctx); err == nil {
+			r.backupDisk = &d
+		}
+	}
 }
 
 // RefreshBackup re-evaluates only the backup signal at now so a fresh backup shows at

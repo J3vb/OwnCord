@@ -20,7 +20,7 @@ import {
 import { clearHost, hostAndroidApp } from "../../helpers/androidHost";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 const {
   mockSetUserVolume,
@@ -233,7 +233,7 @@ describe("VideoGrid", () => {
       const camera = barButton("camera");
       const share = barButton("share");
       expect(camera.getAttribute("aria-pressed")).toBe("false");
-      expect(camera.getAttribute("aria-label")).toBe("Turn on camera");
+      expect(camera.getAttribute("aria-label")).toBe("Turn on camera (the call can see you)");
       expect(share.getAttribute("aria-label")).toBe("Share your screen");
 
       grid.setCallState({
@@ -280,6 +280,20 @@ describe("VideoGrid", () => {
       expect(barButton("deafen").disabled).toBe(true);
       expect(barButton("deafen").title).toBe("You were deafened by a moderator");
       expect(camera.disabled).toBe(false);
+
+      // The AFK channel is listen-only: the mic reads muted and is locked.
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false, afkLocked: true });
+      expect(barButton("mute").disabled).toBe(true);
+      expect(barButton("mute").getAttribute("aria-pressed")).toBe("true");
+      expect(barButton("mute").querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+      expect(barButton("mute").title).toBe("You can't speak in the AFK channel");
+
+      // A moderator's deafen without a mute closes the mic, which stays yours to mute.
+      grid.setCallState({ muted: false, deafened: true, listenOnly: false, serverDeafened: true });
+      expect(barButton("mute").disabled).toBe(false);
+      expect(barButton("mute").getAttribute("aria-pressed")).toBe("false");
+      expect(barButton("mute").querySelector("svg")!.getAttribute("data-icon")).toBe("mic-off");
+      expect(barButton("mute").title).toBe("Your mic is off while you're deafened");
 
       // No share permission or the video limit: share is inert with the reason.
       grid.setCallState({
@@ -800,6 +814,16 @@ describe("VideoGrid", () => {
       await openMenu(OTTO);
       item("stop-watching").click();
       expect(cell(OTTO).classList.contains("video-cell--stopped")).toBe(true);
+    });
+
+    it("offers Watch stream, not Stop watching, on a tile not being watched", async () => {
+      grid.addStream(OTTO, "Otto", fakeStream(), remote());
+      await openMenu(OTTO);
+      item("stop-watching").click();
+      await openMenu(OTTO);
+      expect(menu()!.querySelector("[data-action='stop-watching']")).toBeNull();
+      item("watch").click();
+      expect(cell(OTTO).classList.contains("video-cell--stopped")).toBe(false);
     });
 
     it("Mute silences the person for you only, and stays open", async () => {

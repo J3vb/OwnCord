@@ -199,6 +199,13 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
       }
       capturing = true;
       const attempt = ++captureGeneration;
+      // Starting a Keybinds row capture cancels this one: its late result is dropped.
+      const release = beginCapture(signal, () => {
+        if (attempt !== captureGeneration) return;
+        ++captureGeneration;
+        resetKeyButton();
+      });
+      releaseCapture = release;
       showNote(null);
       pttValue.textContent = t("keybinds.pressKey");
       pttValue.style.borderColor = "var(--accent)";
@@ -210,6 +217,7 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
         .captureKeyPress()
         .then((vk) => {
           if (signal.aborted || attempt !== captureGeneration) return;
+          release();
           capturing = false;
           pttValue.style.borderColor = "";
           pttValue.style.color = "";
@@ -231,6 +239,7 @@ export function buildPttControls(signal: AbortSignal): HTMLElement[] {
         })
         .catch(() => {
           if (signal.aborted || attempt !== captureGeneration) return;
+          release();
           // Fallback: capture via JS keydown (dev mode without Tauri)
           capturing = false;
           pttValue.style.borderColor = "";

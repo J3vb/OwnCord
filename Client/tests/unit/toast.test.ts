@@ -482,5 +482,45 @@ describe("ToastContainer", () => {
       expect(disconnect).toHaveBeenCalledTimes(1);
       disconnect.mockRestore();
     });
+
+    it("holds the countdown while a sheet opens over the toast, and runs the rest after it closes", async () => {
+      toast.show("Hi", "info", 5000);
+      vi.advanceTimersByTime(3000);
+      const sheet = addOverlay("bottom-sheet-overlay");
+      await microtask();
+      expect(root().classList.contains("toast-container--under-sheet")).toBe(true);
+      // Far past the 2 s it had left: the toast is still there.
+      vi.advanceTimersByTime(60_000);
+      expect(container.querySelectorAll(".toast")).toHaveLength(1);
+
+      sheet.remove();
+      await microtask();
+      expect(root().classList.contains("toast-container--under-sheet")).toBe(false);
+      vi.advanceTimersByTime(1900);
+      expect(container.querySelectorAll(".toast")).toHaveLength(1);
+      vi.advanceTimersByTime(100 + 400);
+      expect(container.querySelectorAll(".toast")).toHaveLength(0);
+    });
+
+    it("starts no countdown for a toast shown while a sheet is open, until the sheet closes", async () => {
+      const sheet = addOverlay("bottom-sheet-overlay");
+      toast.show("Hi", "info", 5000);
+      expect(root().classList.contains("toast-container--under-sheet")).toBe(true);
+      vi.advanceTimersByTime(30_000);
+      expect(container.querySelectorAll(".toast")).toHaveLength(1);
+
+      sheet.remove();
+      await microtask();
+      vi.advanceTimersByTime(5400);
+      expect(container.querySelectorAll(".toast")).toHaveLength(0);
+    });
+
+    it("leaves the countdown running under a dialog, which is not a sheet", async () => {
+      addOverlay("modal-overlay");
+      toast.show("Hi", "info", 5000);
+      expect(root().classList.contains("toast-container--under-sheet")).toBe(false);
+      vi.advanceTimersByTime(5400);
+      expect(container.querySelectorAll(".toast")).toHaveLength(0);
+    });
   });
 });

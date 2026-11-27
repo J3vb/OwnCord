@@ -16,7 +16,7 @@ import {
 } from "../../helpers/videoGridHarness";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 const { mockShowToast } = mocks;
 
@@ -385,6 +385,26 @@ describe("VideoGrid", () => {
       const calls = getStreamStats.mock.calls.length;
       await vi.advanceTimersByTimeAsync(6000);
       expect(getStreamStats.mock.calls.length).toBe(calls);
+      container.remove();
+    });
+
+    it("closes an open Stream info box when the stream leaves focus", async () => {
+      document.body.appendChild(container);
+      vi.useFakeTimers();
+      grid.setCallbacks({ getStreamStats: vi.fn(async () => null) });
+      grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+      grid.setFocusedTile(SCREEN);
+      await vi.advanceTimersByTimeAsync(0);
+      const chip = cell(SCREEN).querySelector<HTMLButtonElement>(".video-quality")!;
+      chip.click();
+      expect(cell(SCREEN).querySelector(".video-stats")).not.toBeNull();
+      expect(document.activeElement).toBe(cell(SCREEN).querySelector(".video-stats"));
+
+      grid.setFocusedTile(null);
+      expect(cell(SCREEN).querySelector(".video-stats")).toBeNull();
+      expect(chip.getAttribute("aria-expanded")).toBe("false");
+      // Focus stays on the tile rather than dropping to the page.
+      expect(document.activeElement).toBe(cell(SCREEN).querySelector(".video-cell-select"));
       container.remove();
     });
 

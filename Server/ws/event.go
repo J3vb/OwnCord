@@ -52,6 +52,9 @@ type Result struct {
 	// relays it (voice_watch) from the applier only if the slot is still in that
 	// channel.
 	SetVoiceWatching *voiceWatchSet
+	// RelayVoiceSpeaking relays the sender's own speaking ring (voice_speak) from the
+	// applier, only if the slot is still in that channel. Nothing is stored.
+	RelayVoiceSpeaking *voiceSpeakingRelay
 	// SetVoiceJoinToken caches the voice join token on the client
 	// (voice_token_refresh falls back to the DB).
 	SetVoiceJoinToken *string

@@ -103,8 +103,8 @@ platform invoke bindings, including all conditional platform/feature handlers:
 | Measure                                                    | Value |
 | ---------------------------------------------------------- | ----- |
 | Files under `Client/src/` importing `@tauri-apps/*`        | 32    |
-| Distinct `invoke` command names called from `Client/src/`  | 131   |
-| `#[tauri::command]` handlers in `Client/src-tauri/`        | 134   |
+| Distinct `invoke` command names called from `Client/src/`  | 133   |
+| `#[tauri::command]` handlers in `Client/src-tauri/`        | 136   |
 | TS calls with no matching Rust handler                     | 0     |
 | Uses of the `window.__TAURI__` global                      | 0     |
 | Environment-detection helper (`isDesktop()` or equivalent) | 1     |
@@ -169,7 +169,7 @@ the three call service commands in `call_service.rs` (`set_call_service`,
 to OwnCord), the five notification commands in `android_notifications.rs`,
 the three call audio commands in `mobile_audio.rs`, `system_idle_follow`
 in `idle_android.rs` and the four push commands in `push.rs`. The one environment-detection helper is
-`features/voice/native/platform.ts`'s `isLinuxDesktop()`, a Tauri-host plus
+`lib/hostOs.ts`'s `isLinuxDesktop()`, a Tauri-host plus
 Linux user-agent check that selects the native voice backend; it is not a
 desktop/browser seam.
 
@@ -194,6 +194,7 @@ android_notification_channels
 android_notification_permission
 android_notify
 app_audio_available
+autostart_fix_entry
 check_client_update
 clear_call_notification
 clear_call_ring
@@ -288,6 +289,7 @@ push_register
 push_status
 push_unregister
 read_staged_file
+restart_startup_link
 resume_saved_session
 save_credential
 save_file
@@ -431,7 +433,7 @@ call, so they reach the host side in the order they were made, and nothing
 loads outside the Android app.
 
 There is no `window.__TAURI__` access, and the only environment branching is
-the SDK `isTauri` guard in `lib/pendingMessages.ts` (imported, not global), which is
+the SDK `isTauri` guard in `features/messaging/pendingMessages.ts` (imported, not global), which is
 good news: every native dependency is a static or dynamic **import**, so a
 static check can find all of them. The only `typeof window` guards in
 `Client/src/lib/` are in `channel-mutes.ts` and `logger.ts`, and are unrelated
@@ -446,33 +448,33 @@ under `contracts/` (a few split across two or three), with matching implementati
 `browser/`. Since B7-5 the "Files today" column names the app-side callers; the
 native surface itself lives only in `platform/desktop/`.
 
-| Contract          | Files today                                                                                           | Native surface                                                                                                                                        | Browser outlook                                             |
-| ----------------- | ----------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| HTTP fetch        | `lib/api.ts`, `lib/presence/profiles.ts`, `features/messaging/content/attachments.ts` (server files)  | `plugin-http`                                                                                                                                         | native `fetch` — but CORS becomes a server concern          |
-| External content  | `message-list/{embeds,media,attachments}.ts`, `GifPicker.ts`                                          | `api/core`; 2 invokes (`external_*`)                                                                                                                  | ⚠ no equivalent — a page cannot classify resolved addresses |
-| WebSocket         | `lib/ws.ts`                                                                                           | `api/core`, `api/event`; 4 invokes, 4 event listens                                                                                                   | ⚠ see hard cases                                            |
-| Secret storage    | `lib/net/credentials.ts`, `lib/net/identity.ts`, `lib/pendingMessages.ts`                             | `api/core`; 12 invokes, plus the SDK `isTauri` guard                                                                                                  | ⚠ see hard cases                                            |
-| Settings          | `lib/presence/profiles.ts`                                                                            | `api/core` (`save_settings`, `get_settings`)                                                                                                          | `localStorage` / IndexedDB                                  |
-| Native proxies    | `lib/net/httpProxy.ts`, `lib/voice/livekitUrlResolver.ts`                                             | `api/core`; 3 invokes                                                                                                                                 | not needed — the proxies exist to work around desktop TLS   |
-| Notifications     | `lib/notifications.ts`, `main.ts`, `pages/MainPage.ts` (for the unread badge)                         | `plugin-notification`, `api/window`, `api/core` (`notify_message`, `clear_call_notification`, `set_unread_badge`), `api/event` (`notification-click`) | Notification API + Page Visibility                          |
-| Filesystem / logs | `lib/logPersistence.ts`, `settings/AdvancedTab.ts`, `settings/LogsTab.ts`                             | `api/path`, `plugin-fs`                                                                                                                               | in-memory ring buffer + download                            |
-| Window            | `lib/prefs/windowState.ts`, `lib/notifications.ts`, `features/zoom/`                                  | `api/window`, `api/webview` (`setZoom`)                                                                                                               | mostly unsupported; degrade                                 |
-| Updater / process | `lib/net/updater.ts`, `settings/AdvancedTab.ts`                                                       | `api/core`, `api/event` (`update-progress`, `update-installing`), `plugin-process`, `plugin-autostart`                                                | unsupported — the page reloads instead                      |
-| Tray status       | `main.ts`                                                                                             | `api/event` (`status-change`)                                                                                                                         | unsupported — there is no tray                              |
-| Shell / opener    | `lib/adminPanel.ts`, `main.ts`                                                                        | `api/core` (`open_external_url`)                                                                                                                      | `window.open`                                               |
-| File save / pick  | `features/messaging/content/attachments.ts`                                                           | `plugin-dialog`, `plugin-fs`                                                                                                                          | `<a download>` / File System Access API                     |
-| Input / PTT       | `lib/voice/ptt.ts`                                                                                    | `api/core`, `api/event`; 5 invokes                                                                                                                    | ⚠ see hard cases                                            |
-| Global shortcuts  | `pages/MainPage.ts`, `settings/{KeybindsTab,pttControls}.ts`, `platform/desktop/pushToTalkService.ts` | `api/core`, `api/event`; 6 invokes, 2 event listens                                                                                                   | unsupported — a page cannot observe keys outside itself     |
-| Deep links        | `lib/nav/deepLink.ts`                                                                                 | `plugin-deep-link`                                                                                                                                    | URL routing                                                 |
-| App metadata      | `settings/AboutTab.ts`                                                                                | `api/app`                                                                                                                                             | build-time constant                                         |
-| Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                                                  | `api/core` (`open_devtools`)                                                                                                                          | unsupported — the browser has its own devtools already      |
-| System idle       | `pages/MainPage.ts` (for `lib/presence/autoIdle.ts`)                                                  | `api/core` (`system_idle_ms`; on Android also `system_idle_follow` and the `owncord-idle` plugin's `look` event)                                      | unsupported — answers `null`; in-page activity decides      |
-| System region     | `main.ts` (for `lib/text/timeFormat.ts`)                                                              | `api/core` (`system_region_locale`)                                                                                                                   | unsupported — answers `null`; dates use the page language   |
-| Game activity     | `pages/MainPage.ts` (for `lib/presence/gameActivity.ts`), `settings/GameActivityRows.ts`              | `api/core` (`detect_game`, `list_running_programs`)                                                                                                   | unsupported — answers `null`; the setting is hidden         |
+| Contract          | Files today                                                                                                      | Native surface                                                                                                                                        | Browser outlook                                             |
+| ----------------- | ---------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| HTTP fetch        | `lib/api.ts`, `lib/presence/profiles.ts`, `features/messaging/content/attachments.ts` (server files)             | `plugin-http`                                                                                                                                         | native `fetch` — but CORS becomes a server concern          |
+| External content  | `message-list/{embeds,media,attachments}.ts`, `GifPicker.ts`                                                     | `api/core`; 2 invokes (`external_*`)                                                                                                                  | ⚠ no equivalent — a page cannot classify resolved addresses |
+| WebSocket         | `lib/ws.ts`                                                                                                      | `api/core`, `api/event`; 4 invokes, 4 event listens                                                                                                   | ⚠ see hard cases                                            |
+| Secret storage    | `features/connection/credentials.ts`, `features/connection/identity.ts`, `features/messaging/pendingMessages.ts` | `api/core`; 12 invokes, plus the SDK `isTauri` guard                                                                                                  | ⚠ see hard cases                                            |
+| Settings          | `lib/presence/profiles.ts`                                                                                       | `api/core` (`save_settings`, `get_settings`)                                                                                                          | `localStorage` / IndexedDB                                  |
+| Native proxies    | `lib/net/httpProxy.ts`, `lib/voice/livekitUrlResolver.ts`                                                        | `api/core`; 3 invokes                                                                                                                                 | not needed — the proxies exist to work around desktop TLS   |
+| Notifications     | `features/notifications/notifications.ts`, `main.ts`, `pages/MainPage.ts` (for the unread badge)                 | `plugin-notification`, `api/window`, `api/core` (`notify_message`, `clear_call_notification`, `set_unread_badge`), `api/event` (`notification-click`) | Notification API + Page Visibility                          |
+| Filesystem / logs | `lib/logPersistence.ts`, `settings/AdvancedTab.ts`, `settings/LogsTab.ts`                                        | `api/path`, `plugin-fs`                                                                                                                               | in-memory ring buffer + download                            |
+| Window            | `lib/prefs/windowState.ts`, `features/notifications/notifications.ts`, `features/zoom/`                          | `api/window`, `api/webview` (`setZoom`)                                                                                                               | mostly unsupported; degrade                                 |
+| Updater / process | `lib/net/updater.ts`, `settings/AdvancedTab.ts`                                                                  | `api/core`, `api/event` (`update-progress`, `update-installing`), `plugin-process`, `plugin-autostart`                                                | unsupported — the page reloads instead                      |
+| Tray status       | `main.ts`                                                                                                        | `api/event` (`status-change`)                                                                                                                         | unsupported — there is no tray                              |
+| Shell / opener    | `lib/adminPanel.ts`, `main.ts`                                                                                   | `api/core` (`open_external_url`)                                                                                                                      | `window.open`                                               |
+| File save / pick  | `features/messaging/content/attachments.ts`                                                                      | `plugin-dialog`, `plugin-fs`                                                                                                                          | `<a download>` / File System Access API                     |
+| Input / PTT       | `lib/voice/ptt.ts`                                                                                               | `api/core`, `api/event`; 5 invokes                                                                                                                    | ⚠ see hard cases                                            |
+| Global shortcuts  | `pages/MainPage.ts`, `settings/{KeybindsTab,pttControls}.ts`, `platform/desktop/pushToTalkService.ts`            | `api/core`, `api/event`; 6 invokes, 2 event listens                                                                                                   | unsupported — a page cannot observe keys outside itself     |
+| Deep links        | `lib/nav/deepLink.ts`                                                                                            | `plugin-deep-link`                                                                                                                                    | URL routing                                                 |
+| App metadata      | `settings/AboutTab.ts`                                                                                           | `api/app`                                                                                                                                             | build-time constant                                         |
+| Dev tools         | `main.ts`, `settings/AdvancedTab.ts`                                                                             | `api/core` (`open_devtools`)                                                                                                                          | unsupported — the browser has its own devtools already      |
+| System idle       | `pages/MainPage.ts` (for `lib/presence/autoIdle.ts`)                                                             | `api/core` (`system_idle_ms`; on Android also `system_idle_follow` and the `owncord-idle` plugin's `look` event)                                      | unsupported — answers `null`; in-page activity decides      |
+| System region     | `main.ts` (for `lib/text/timeFormat.ts`)                                                                         | `api/core` (`system_region_locale`)                                                                                                                   | unsupported — answers `null`; dates use the page language   |
+| Game activity     | `pages/MainPage.ts` (for `lib/presence/gameActivity.ts`), `settings/GameActivityRows.ts`                         | `api/core` (`detect_game`, `list_running_programs`)                                                                                                   | unsupported — answers `null`; the setting is hidden         |
 
 **Media devices are not on this map, deliberately.** No generic `@tauri-apps`
 surface exists for them: the cross-platform media-device call sites
-(`lib/voice/deviceManager.ts`, `lib/net/connectionDiagnostics.ts`,
+(`features/voice/deviceManager.ts`, `features/connection/connectionDiagnostics.ts`,
 `features/settings/VoiceAudioTab.ts`) use the Web API
 `navigator.mediaDevices`, while the Linux-native voice session lists its audio
 and camera devices through its own `native_voice_*` commands (the audio
@@ -498,7 +500,7 @@ publicly-trusted certificate and say so — not emulate the flow. This trust pat
 has been hardened twice already (identity TOFU, then a re-pin TOCTOU); do not
 let a browser adapter quietly reopen it.
 
-**`lib/net/credentials.ts` / `lib/net/identity.ts` — OS keychain.** Secrets live in
+**`features/connection/credentials.ts` / `features/connection/identity.ts` — OS keychain.** Secrets live in
 Windows Credential Manager / GNOME Keyring / macOS Keychain, and
 `Client/src-tauri/src/secret_store.rs` reads each write back before returning.
 The browser has no peer for this. Whatever the browser adapter stores, it is
@@ -539,7 +541,7 @@ half of `NativeProxies`.
 
 **B7-5 moved the rest**, and added two contracts the map lacked:
 `contracts/appProcess.ts` (`AppProcess.relaunch()`, for the Advanced tab's
-"Clear & Restart" — the updater's own relaunch is internal to
+"Clear & Restart" and the Screen layout row's Restart now — the updater's own relaunch is internal to
 `downloadAndInstallUpdate`) and `contracts/trayStatus.ts` (one named
 subscription to the tray's `status-change`, not a by-name event bus).
 `desktop/index.ts` is now a full `Platform`, and no file outside

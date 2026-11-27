@@ -78,6 +78,7 @@ export const settingsShellEntries = {
   "appearance.theme.dark": "Dark",
   "appearance.theme.neon-glow": "Neon glow",
   "appearance.theme.midnight": "Midnight",
+  "appearance.theme.gunmetal": "Gunmetal",
   "appearance.theme.light": "Light",
   "appearance.theme.system": "Match my computer",
   "appearance.theme.system.android": "Match my device",
@@ -100,6 +101,16 @@ export const settingsShellEntries = {
   "appearance.memberLayout.desc": "Show the member list beside the chat or under the channels",
   "appearance.memberLayout.right": "Right side",
   "appearance.memberLayout.left": "Under channels",
+  "appearance.screenLayout": "Screen layout",
+  "appearance.screenLayout.desc":
+    "Command Deck puts your channels, voice rooms and direct messages in one list, Buddies on the right, and you in the bottom bar. On a phone, the list and Buddies open from the sides. Classic shows a server rail on the left and the channel list beside it.",
+  "appearance.screenLayout.classic": "Classic",
+  "appearance.screenLayout.deck": "Command Deck",
+  "appearance.screenLayout.pending": "Applies the next time OwnCord starts or reloads.",
+  "appearance.screenLayout.restart": "Restart now",
+  "appearance.screenLayout.restartConfirm": "Leave the call and restart?",
+  "appearance.screenLayout.restartSignIn":
+    "If you did not save your sign-in, you will need to sign in again.",
   "appearance.accentColor": "Accent color",
   "appearance.accentAria": "Custom accent color (hex)",
   "appearance.accentNote":
@@ -109,6 +120,8 @@ export const settingsShellEntries = {
     "Your own CSS, painted on top of the theme above. Links to outside files (url(), @import, fonts) are not allowed. Ctrl+Shift+Backspace turns a custom theme off.",
   "appearance.customThemes.desc.android":
     "Your own CSS, painted on top of the theme above. Links to outside files (url(), @import, fonts) are not allowed.",
+  "appearance.customThemes.deckNote":
+    "Command Deck keeps your theme's colours. It sets its own panel shapes.",
   "appearance.customThemes.empty": "No custom themes yet.",
   "appearance.customThemes.new": "New theme",
   "appearance.customThemes.import": "Import .css",

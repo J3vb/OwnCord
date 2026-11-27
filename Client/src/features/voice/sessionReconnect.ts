@@ -11,9 +11,8 @@ import {
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { authStore } from "@stores/auth.store";
-import type { AudioElements } from "@lib/voice/audioElements";
-import { attemptAutoReconnect } from "@lib/voice/livekitReconnect";
-import { type RoomEventHandlers, createRoomEventHandlers } from "@lib/voice/roomEventHandlers";
+import { attemptAutoReconnect } from "./livekitReconnect";
+import { type RoomEventHandlers, createRoomEventHandlers } from "./roomEventHandlers";
 import {
   type CameraTrackState,
   bumpGeneration,
@@ -27,7 +26,7 @@ import { showToast } from "@lib/ui/toast";
 import { isDmKeptForCall } from "../direct-messages/keptCallDms";
 import { joinSequence, noteJoinSent } from "./joinRequest";
 import { restoreMediaAfterReconnect } from "./localVoiceRestore";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import { voiceText } from "../../i18n/voice";
 import { SessionTokens } from "./sessionTokens";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";
@@ -40,7 +39,6 @@ const log = createLogger("sessionReconnect");
 
 export abstract class SessionReconnect extends SessionTokens {
   protected abstract readonly _join: JoinOrchestration;
-  protected abstract readonly _audioElements: AudioElements;
   protected abstract readonly _cameraState: CameraTrackState;
   protected abstract _music: MusicShare | null;
   abstract startMusic(appId: string, options?: MusicStartOptions): Promise<MusicStartOutcome>;
@@ -75,6 +73,9 @@ export abstract class SessionReconnect extends SessionTokens {
       getOnRemoteVideoRemovedCallback: () => this.onRemoteVideoRemovedCallback,
       isWatched: (userId, isScreenshare) =>
         this._remoteTracks.isWatched(userId, isScreenshare ? "screenshare" : "camera"),
+      isListening: (userId) => this._remoteTracks.isListening(userId),
+      musicEnded: (userId) => this._remoteTracks.musicEnded(userId),
+      reviewListening: () => this._remoteTracks.reviewListening(),
       getOnErrorCallback: () => this.onErrorCallback,
       isConnecting: () => this._connecting,
       isReconnecting: () => this._state.type === "reconnecting",

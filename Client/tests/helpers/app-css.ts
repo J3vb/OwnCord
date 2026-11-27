@@ -25,7 +25,7 @@ const COMBINATORS: Record<string, string> = {
   "pseudo-element": "",
 };
 
-function selectorText(selector: Selector): string {
+export function selectorText(selector: Selector): string {
   return selector
     .map((c) => {
       switch (c.type) {
@@ -40,6 +40,10 @@ function selectorText(selector: Selector): string {
         case "combinator":
           return COMBINATORS[c.value] ?? ` ${c.value} `;
         case "pseudo-class":
+          // :is(...) and :where(...) print their selector lists the same way.
+          if (c.kind === "is" || c.kind === "where") {
+            return `:${c.kind}(${c.selectors.map(selectorText).join(", ")})`;
+          }
           // :has(...) and :not(...) carry a nested selector list; render it so a test can
           // pin the whole selector rather than just the pseudo-class name.
           if (c.kind === "has" || c.kind === "not") {

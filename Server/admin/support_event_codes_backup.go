@@ -10,6 +10,11 @@ import "maps"
 func init() {
 	maps.Copy(supportEventCodes, map[string]string{
 		"pre-migration backup written before applying migrations":                    "pre_migration_backup_written",
+		"scheduled archive failed":                                                   "scheduled_archive_failed",
+		"scheduled archive could not start":                                          "scheduled_archive_start_failed",
+		"scheduled archive retention: failed to remove expired archive":              "scheduled_archive_retention_remove_failed",
+		"scheduled archive retention: could not read backup_retention":               "scheduled_archive_retention_read_failed",
+		"scheduled archive did not stop before the shutdown timeout":                 "scheduled_archive_shutdown_timeout",
 		"backup archive build failed":                                                "backup_archive_build_failed",
 		"backup archive downloaded":                                                  "backup_archive_downloaded",
 		"backup archive download interrupted":                                        "backup_archive_download_interrupted",

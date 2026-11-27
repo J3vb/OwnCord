@@ -12,6 +12,7 @@ import {
   capturedConnectCallbacks,
   createdConnectPages,
   setStartupInvokes,
+  setStartupStorageWrites,
 } from "./mainMocks";
 import { readyFrame } from "./wsSuiteHarness";
 
@@ -72,7 +73,13 @@ export const clickDialog = (button: "confirm" | "cancel") =>
 export function useMainHarness(): void {
   beforeAll(async () => {
     document.body.innerHTML = '<div id="app"></div>';
+    // Record what the import writes, from empty storage, so a case can check
+    // the order of the startup writes (beforeEach clears storage afterwards).
+    localStorage.clear();
+    const setItem = vi.spyOn(Storage.prototype, "setItem");
     await import("../../src/main");
+    setStartupStorageWrites(setItem.mock.calls.map(([key, value]) => [key, value] as const));
+    setItem.mockRestore();
     // Flush the microtask the mocked (async) listen() call resolves on, so the
     // "status-change" handler main.ts registers at module load is actually in
     // eventHandlers before any test fires it.

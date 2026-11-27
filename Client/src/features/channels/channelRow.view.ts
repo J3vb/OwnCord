@@ -18,6 +18,14 @@ import { createElement, appendChildren } from "../../lib/dom";
 import { createIcon } from "../../lib/icons";
 import { shellText } from "../../i18n/shell";
 
+/** How a tree item is told apart to the tree's keys: a header folds, a row opens, a child hangs under the row before it. */
+export type TreeKind = "head" | "row" | "child";
+
+/** The attributes every tree item draws when it is created: its role, its kind and a roving tabindex the tree promotes. */
+export function treeItemAttrs(kind: TreeKind): Record<string, string> {
+  return { role: "treeitem", "data-tree-kind": kind, tabindex: "-1" };
+}
+
 /** What the signed-in user's role may do to channels, decided when a row's
  *  handlers are bound. Not drawn: a change rebinds the row. */
 export type ChannelAccess = {
@@ -162,21 +170,28 @@ export function mentionBadge(channelId: number, count: number): HTMLSpanElement 
   return badge;
 }
 
+/** `base` plus the state classes a text or thread row wears, in draw order. */
+function stateClasses(
+  base: string[],
+  model: Pick<TextChannelRowModel, "active" | "unread" | "mentionCount" | "muted">,
+): string[] {
+  if (model.active) base.push("active");
+  if (model.unread) base.push("unread");
+  if (model.mentionCount > 0) base.push("mentioned");
+  if (model.muted) base.push("muted");
+  return base;
+}
+
 /** Draw one text or announcement row, without handlers. */
-export function drawTextChannelRow(model: TextChannelRowModel): HTMLDivElement {
-  const classes = ["channel-item"];
-  if (model.active) classes.push("active");
-  if (model.unread) classes.push("unread");
-  if (model.mentionCount > 0) classes.push("mentioned");
-  if (model.muted) classes.push("muted");
+export function drawTextChannelRow(model: TextChannelRowModel, tree = false): HTMLDivElement {
+  const classes = stateClasses(["channel-item"], model);
   if (model.draggable) classes.push("channel-draggable");
 
   const item = createElement("div", {
     class: classes.join(" "),
     "data-testid": `channel-${model.channelId}`,
     // Roving list item: reachable by Tab once, then arrow-stepped.
-    role: "link",
-    tabindex: "-1",
+    ...(tree ? treeItemAttrs("row") : { role: "link", tabindex: "-1" }),
   });
   item.dataset.channelId = String(model.channelId);
   item.setAttribute("aria-current", model.active ? "page" : "false");
@@ -208,17 +223,12 @@ export function drawTextChannelRow(model: TextChannelRowModel): HTMLDivElement {
 }
 
 /** Draw one followed-thread row, without handlers. */
-export function drawThreadRow(model: ThreadRowModel): HTMLDivElement {
-  const classes = ["channel-item", "thread-item"];
-  if (model.active) classes.push("active");
-  if (model.unread) classes.push("unread");
-  if (model.mentionCount > 0) classes.push("mentioned");
-  if (model.muted) classes.push("muted");
+export function drawThreadRow(model: ThreadRowModel, tree = false): HTMLDivElement {
+  const classes = stateClasses(["channel-item", "thread-item"], model);
   const item = createElement("div", {
     class: classes.join(" "),
     "data-testid": `thread-row-${model.threadId}`,
-    role: "link",
-    tabindex: "-1",
+    ...(tree ? treeItemAttrs("child") : { role: "link", tabindex: "-1" }),
   });
   item.dataset.threadId = String(model.threadId);
   item.dataset.parentId = String(model.parentId);
@@ -238,12 +248,11 @@ export function drawThreadRow(model: ThreadRowModel): HTMLDivElement {
 }
 
 /** Draw a parent's "N more" row, without handlers. */
-export function drawThreadMoreRow(model: ThreadMoreRowModel): HTMLDivElement {
+export function drawThreadMoreRow(model: ThreadMoreRowModel, tree = false): HTMLDivElement {
   const item = createElement("div", {
     class: "channel-item thread-item thread-more",
     "data-testid": `thread-more-${model.parentId}`,
-    role: "link",
-    tabindex: "-1",
+    ...(tree ? treeItemAttrs("child") : { role: "link", tabindex: "-1" }),
   });
   item.dataset.moreParentId = String(model.parentId);
   appendChildren(
@@ -258,61 +267,85 @@ export function drawThreadMoreRow(model: ThreadMoreRowModel): HTMLDivElement {
   return item;
 }
 
+/** The header's collapse control: the keyboard-operated arrow button, or, in a
+ *  tree, a decorative chevron (the header itself is the tree item, and a click
+ *  on the chevron reaches the header's handler). */
+function drawCategoryArrow(model: CategoryGroupModel, labelId: string, tree: boolean): HTMLElement {
+  const icon = createIcon(model.collapsed ? "chevron-right" : "chevron-down", 12);
+  if (tree) {
+    const chevron = createElement("span", { class: "category-arrow", "aria-hidden": "true" });
+    chevron.appendChild(icon);
+    return chevron;
+  }
+  // A real <button> here (rather than making the whole header a button) keeps
+  // the header's own "+" from being an interactive element nested inside
+  // another one. The label names the arrow (aria-labelledby), so no second
+  // copy of the category name is needed.
+  const arrow = createElement("button", {
+    type: "button",
+    class: "category-arrow",
+    "aria-expanded": model.collapsed ? "false" : "true",
+    "aria-labelledby": labelId,
+  });
+  arrow.appendChild(icon);
+  return arrow;
+}
+
+/** The header's "+": out of the Tab order in a tree, where the category menu is its keyboard route. */
+function drawCategoryAdd(name: string, tree: boolean): HTMLButtonElement {
+  const add = createElement(
+    "button",
+    {
+      type: "button",
+      class: "category-add-btn",
+      title: shellText("channel.create"),
+      "aria-label": shellText("channel.create"),
+      "data-testid": `create-channel-${name.toLowerCase().replace(/\s+/g, "-")}`,
+    },
+    "+",
+  );
+  if (tree) add.tabIndex = -1;
+  return add;
+}
+
+function drawCategoryHeader(model: CategoryGroupModel, name: string, tree: boolean): HTMLElement {
+  const headerClasses = ["category"];
+  if (model.collapsed) headerClasses.push("collapsed");
+  if (model.draggable) headerClasses.push("category-draggable");
+  const header = createElement("div", { class: headerClasses.join(" ") });
+  header.dataset.category = name;
+  if (model.key !== null) header.dataset.categoryKey = model.key;
+  if (model.categoryId > 0) header.dataset.categoryId = String(model.categoryId);
+  // Unique per category even when two names slug alike (a rename can make one).
+  const labelId = `category-name-${name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}${
+    model.categoryId > 0 ? `-${model.categoryId}` : ""
+  }`;
+  if (tree) {
+    for (const [attr, value] of Object.entries(treeItemAttrs("head"))) {
+      header.setAttribute(attr, value);
+    }
+    header.setAttribute("aria-expanded", model.collapsed ? "false" : "true");
+    header.setAttribute("aria-labelledby", labelId);
+  }
+  const label = createElement("span", { class: "category-name", id: labelId }, model.label);
+  appendChildren(header, drawCategoryArrow(model, labelId, tree), label);
+  if (model.showCreate) header.appendChild(drawCategoryAdd(name, tree));
+  return header;
+}
+
 /**
  * Draw one category group, without handlers: the group `div`, its header (none
  * for the uncategorized group) and an empty `.category-channels-container`
- * the sidebar fills with rows.
+ * the sidebar fills with rows. In a tree the container of a headed group is
+ * marked `data-tree-group`, which is what puts its rows one level under the header.
  */
-export function drawCategoryGroup(model: CategoryGroupModel): HTMLDivElement {
+export function drawCategoryGroup(model: CategoryGroupModel, tree = false): HTMLDivElement {
   const group = createElement("div", {});
-  if (model.name !== null) {
-    const headerClasses = ["category"];
-    if (model.collapsed) headerClasses.push("collapsed");
-    if (model.draggable) headerClasses.push("category-draggable");
-    const header = createElement("div", { class: headerClasses.join(" ") });
-    header.dataset.category = model.name;
-    if (model.key !== null) header.dataset.categoryKey = model.key;
-    if (model.categoryId > 0) header.dataset.categoryId = String(model.categoryId);
-    // Unique per category even when two names slug alike (a rename can make one).
-    const labelId = `category-name-${model.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}${
-      model.categoryId > 0 ? `-${model.categoryId}` : ""
-    }`;
-
-    // The arrow is the keyboard-operated collapse control; the header div
-    // itself keeps its mouse click handler. A real <button> here (rather
-    // than making the whole header a button) keeps the header's own "+" from
-    // being an interactive element nested inside another one. The label
-    // names the arrow (aria-labelledby), so no second copy of the category
-    // name is needed.
-    const label = createElement("span", { class: "category-name", id: labelId }, model.label);
-    const arrow = createElement("button", {
-      type: "button",
-      class: "category-arrow",
-      "aria-expanded": model.collapsed ? "false" : "true",
-      "aria-labelledby": labelId,
-    });
-    arrow.appendChild(createIcon(model.collapsed ? "chevron-right" : "chevron-down", 12));
-    appendChildren(header, arrow, label);
-
-    if (model.showCreate) {
-      header.appendChild(
-        createElement(
-          "button",
-          {
-            type: "button",
-            class: "category-add-btn",
-            title: shellText("channel.create"),
-            "aria-label": shellText("channel.create"),
-            "data-testid": `create-channel-${model.name.toLowerCase().replace(/\s+/g, "-")}`,
-          },
-          "+",
-        ),
-      );
-    }
-    group.appendChild(header);
-  }
+  if (model.name !== null) group.appendChild(drawCategoryHeader(model, model.name, tree));
   // Built even when collapsed: the joined voice channel stays visible there,
   // and a later join or leave reconciles this container in place.
-  group.appendChild(createElement("div", { class: "category-channels-container" }));
+  const container = createElement("div", { class: "category-channels-container" });
+  if (tree && model.name !== null) container.setAttribute("data-tree-group", "");
+  group.appendChild(container);
   return group;
 }

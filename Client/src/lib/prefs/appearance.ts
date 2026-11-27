@@ -7,6 +7,7 @@
  */
 
 import { loadPref } from "@lib/prefs/preferences";
+import { loadScreenLayout, setRunningScreenLayout } from "@lib/prefs/screenLayout";
 import { applyThemeChoice, getActiveThemeName, restoreAccent } from "@lib/prefs/themes";
 import { SYNC_OS_MOTION_DEFAULT, syncOsMotionListener } from "@lib/ui/osMotion";
 
@@ -121,6 +122,9 @@ export function applyStoredAppearance(): void {
   );
   document.documentElement.classList.toggle("large-font", loadPref<boolean>("largeFont", false));
   applyMirrorSelfCamera();
+  const layout = loadScreenLayout();
+  setRunningScreenLayout(layout);
+  document.documentElement.classList.toggle("layout-deck", layout === "deck");
 
   syncOsMotionListener(loadPref<boolean>("syncOsMotion", SYNC_OS_MOTION_DEFAULT));
 }

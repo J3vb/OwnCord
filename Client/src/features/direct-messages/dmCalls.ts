@@ -11,7 +11,7 @@ import { uiStore } from "@stores/ui.store";
 import { getActiveChannel } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
 import { voiceStore } from "@stores/voice.store";
-import { enableCamera } from "@lib/voice/livekitSession";
+import { enableCamera } from "../voice/livekitSession";
 import { createLogger } from "@lib/logger";
 import type { WsClient } from "@lib/ws";
 import type { PageState, PageApi } from "../../pages/main-page/pageState";

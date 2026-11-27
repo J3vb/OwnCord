@@ -51,7 +51,7 @@ func newEvidenceFixture(t *testing.T, targetType string, labelled bool) *evidenc
 	r := chi.NewRouter()
 	api.MountReportRoutes(r, svc, &recordingModQueueBroadcaster{})
 	api.MountModerationQueueRoutes(r, svc, &recordingModQueueBroadcaster{})
-	api.MountNSFWRoutes(r, svc, &mockBroadcaster{})
+	api.MountNSFWRoutes(r, svc, &mockBroadcaster{}, nil)
 	api.MountUploadRoutes(r, svc.Sessions, newUploadTestStorage(t), auth.NewRateLimiter(), nil, svc.Uploads)
 	f := &evidenceFixture{t: t, h: r, database: database, svc: svc}
 	ctx := context.Background()

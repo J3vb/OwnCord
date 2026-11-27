@@ -13,7 +13,7 @@ import { createAvatarElement } from "../profiles/avatar";
 import { resolveDisplayName } from "@lib/ui/avatar";
 import { readAppVersion } from "../whats-new/appVersion";
 import { subscribeAvailableUpdate } from "../updates/availableUpdate";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import {
   ABOUT,
   ACCOUNT,

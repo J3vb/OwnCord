@@ -500,6 +500,28 @@ test("a Rust change reaches rust-tests and the native job, not the browser jobs"
   assert.equal(sel.browser, false);
 });
 
+test("the vendored livekit crate and the Rust lockfile select its test step", () => {
+  for (const path of [
+    "Client/src-tauri/vendor/livekit/src/room/mod.rs",
+    "Client/src-tauri/vendor/livekit/OWNCORD-PATCH.md",
+    "Client/src-tauri/Cargo.lock",
+  ]) {
+    const sel = picked(`M\t${path}`);
+    assert.equal(sel.livekitvendor, true, path);
+    assert.equal(sel.rust, true, `${path} must run rust-tests, which hosts the step`);
+  }
+});
+
+test("other Rust shell changes leave the vendored livekit step off", () => {
+  for (const path of [
+    "Client/src-tauri/src/lib.rs",
+    "Client/src-tauri/Cargo.toml",
+    "Client/src/lib/api.ts",
+  ]) {
+    assert.equal(runs(`M\t${path}`, "livekitvendor"), false, path);
+  }
+});
+
 test("client source and the Rust shell build the Android APK; tests do not", () => {
   assert.equal(runs("M\tClient/src/pages/MainPage.ts", "android"), true);
   assert.equal(runs("M\tClient/src-tauri/src/lib.rs", "android"), true);
@@ -539,7 +561,7 @@ test("every capability is a key of the result, so a missing output cannot skip a
 
 test("permissions.ts and the files that kill its mutants select the mutation hotspot", () => {
   for (const path of [
-    "Client/src/lib/permissions.ts",
+    "Client/src/stores/permissions.ts",
     "Client/tests/unit/permissions.test.ts",
     "Client/tests/unit/session-isolation.test.ts",
     "Client/tests/mutation/stryker.ci.config.mjs",

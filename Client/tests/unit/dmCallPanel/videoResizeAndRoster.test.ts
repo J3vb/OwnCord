@@ -26,7 +26,7 @@ import {
   anyShield,
 } from "../../helpers/dmCallPanelHarness";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("../../../src/features/voice/peerVerification", (importOriginal) =>
   mocks.voicePeerVerificationMock(importOriginal),
 );

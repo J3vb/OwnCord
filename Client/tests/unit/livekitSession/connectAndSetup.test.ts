@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import { Room } from "livekit-client";
-import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
+import { LiveKitSession } from "../../../src/features/voice/livekitSession";
 import { leaveVoiceChannel } from "@stores/voice.store";
 import { ensureLiveKitProxy } from "../../../src/platform/desktop/nativeProxies";
 import {
@@ -19,7 +19,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../../src/features/connection/identity", () => mocks.netIdentityMock());
 
 const { mockVoiceState, mockRoom, mockInvoke } = mocks;
 
@@ -87,11 +87,12 @@ describe("LiveKitSession", () => {
       expect(url).toBe("ws://127.0.0.1:7881/tun/livekit");
     });
 
-    it("passes through proxyPath that does not start with / for remote host", async () => {
+    it("refuses a proxyPath that does not start with / for remote host", async () => {
       session.setServerHost("example.com:443");
-      const url = await (session as any).resolveLiveKitUrl("wss://example.com/livekit");
+      await expect(
+        (session as any).resolveLiveKitUrl("wss://example.com/livekit"),
+      ).rejects.toMatchObject({ name: "LiveKitAddressError" });
       expect(mockInvoke).not.toHaveBeenCalled();
-      expect(url).toBe("wss://example.com/livekit");
     });
 
     it("does not return directUrl when serverHost is remote even if directUrl is provided", async () => {

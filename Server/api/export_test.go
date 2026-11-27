@@ -249,6 +249,39 @@ func ValidateHEICForTest(r io.ReaderAt, size int64) (quarterTurn bool, err error
 	return info.quarterTurn, err
 }
 
+// HEICItemForTest is an item the HEIC layout check found the decoder reads:
+// its extents in the file ({offset, length} each, none for data in idat) and,
+// for a coded item, its decoder configuration record.
+type HEICItemForTest struct {
+	ID      uint32
+	Extents [][2]uint64
+	HvcC    []byte
+}
+
+// HEICPlanForTest runs the layout check and returns the grids and coded items
+// it walked, in the order it walked them.
+func HEICPlanForTest(r io.ReaderAt, size int64) (grids, coded []HEICItemForTest, err error) {
+	_, m, plan, err := checkHEIC(r, size)
+	if err != nil {
+		return nil, nil, err
+	}
+	describe := func(ids []uint32) []HEICItemForTest {
+		out := make([]HEICItemForTest, 0, len(ids))
+		for _, id := range ids {
+			it := HEICItemForTest{ID: id}
+			if !m.inIdat[id] {
+				for _, e := range m.extents[id] {
+					it.Extents = append(it.Extents, [2]uint64{e.off, e.length})
+				}
+			}
+			it.HvcC, _ = m.property(id, "hvcC")
+			out = append(out, it)
+		}
+		return out
+	}
+	return describe(plan.grids), describe(plan.coded), nil
+}
+
 // SetFileLinkTTLForTest shortens the minted file-link lifetime and returns the
 // restore func.
 func SetFileLinkTTLForTest(d time.Duration) func() {

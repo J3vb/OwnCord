@@ -7,7 +7,7 @@
 import { ApiClientError, errorText } from "@lib/api";
 import type { ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { loadCredential, saveCredential } from "@lib/net/credentials";
+import { loadCredential, saveCredential } from "../connection/credentials";
 import type { UserStatus } from "@lib/types";
 import { createSettingsOverlay } from "./SettingsOverlay";
 import { showToast, showChangeOutcomeToast } from "@lib/ui/toast";

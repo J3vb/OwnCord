@@ -13,7 +13,7 @@ import { setSystemDateLocale } from "@lib/text/timeFormat";
 import { openNotificationTarget } from "@lib/notificationDelivery";
 import { initWindowState } from "@lib/prefs/windowState";
 import { saveUserStatus } from "@lib/presence/userStatus";
-import { getActivePresenceSender } from "@lib/presence/presence";
+import { getActivePresenceSender } from "../features/presence/presence";
 import type { ApiClient } from "@lib/api";
 import type { createLogger } from "@lib/logger";
 import {
@@ -44,7 +44,11 @@ export const beforeRenderSteps: readonly StartupStep[] = [
       applyStoredAppearance();
       applyStoredCustomTheme();
       // Native webview zoom: the stored level now, and the zoom keys everywhere.
-      startZoom(() => import("../features/zoom").then((m) => m.appZoom), new Disposable().signal);
+      startZoom(
+        () => import("../features/zoom").then((m) => m.appZoom),
+        new Disposable().signal,
+        desktop.window.available,
+      );
       // Ctrl+Shift+Backspace turns a custom CSS theme off, even one that hides the settings.
       installCustomThemeEscape(new Disposable().signal);
     },

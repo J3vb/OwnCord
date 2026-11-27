@@ -28,9 +28,10 @@ concurrency:
 
 jobs:
   pin:
-    # One dev revision for every shard and for the aggregation: dev can move
-    # during the up-to-90-minute matrix, and the score is only the full-surface
-    # score if the shard config and the reports come from the same commit.
+    # One dev revision for every job: dev can move during the up-to-90-minute
+    # matrix, the score is only the full-surface score if the shard config and
+    # the reports come from the same commit, and the summary names one commit
+    # for the whole night.
     name: Pin dev revision
     runs-on: ubuntu-latest
     timeout-minutes: 5
@@ -41,7 +42,14 @@ jobs:
       - id: dev
         env:
           REPO: ${{ github.repository }}
-        run: echo "sha=$(git ls-remote "https://github.com/${REPO}" refs/heads/dev | cut -f1)" >> "$GITHUB_OUTPUT"
+          EVENT: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        # A schedule runs main's workflow file against dev: say both, so a red
+        # night can be matched to the code and the workflow it ran.
+        run: |
+          sha=$(git ls-remote "https://github.com/${REPO}" refs/heads/dev | cut -f1)
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+          echo "Testing dev \`$sha\` with the workflow file from \`$WORKFLOW_SHA\` ($EVENT)." >> "$GITHUB_STEP_SUMMARY"
       # If a scheduled run still starts during working hours, the shard
       # matrix would hold most of the 20 runner slots and queue every PR, so
       # a schedule run that starts between 07:00 and 19:59 UTC skips the
@@ -182,6 +190,7 @@ jobs:
 
   mutation-permissions:
     name: Nightly permission mutation testing
+    needs: pin
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -189,6 +198,12 @@ jobs:
         with:
           ref: dev
           persist-credentials: false
+      - name: Check out the pinned dev revision
+        env:
+          PIN_SHA: ${{ needs.pin.outputs.sha }}
+        run: |
+          git fetch --depth=1 origin "$PIN_SHA"
+          git checkout --detach "$PIN_SHA"
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
           node-version: 26
@@ -207,6 +222,7 @@ jobs:
 
   fuzz-and-simulation:
     name: Nightly generated fuzzing and hub simulation
+    needs: pin
     runs-on: ubuntu-latest
     # Every Go fuzz target at 30 s each plus its build, then the simulation. The
     # script prints the target count and fuzz minutes in the job summary.
@@ -216,7 +232,13 @@ jobs:
         with:
           ref: dev
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Check out the pinned dev revision
+        env:
+          PIN_SHA: ${{ needs.pin.outputs.sha }}
+        run: |
+          git fetch --depth=1 origin "$PIN_SHA"
+          git checkout --detach "$PIN_SHA"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
@@ -234,6 +256,7 @@ jobs:
 
   rust-fuzz:
     name: Nightly Rust fuzzing (client parsers)
+    needs: pin
     runs-on: ubuntu-latest
     # Every cargo-fuzz target in Client/src-tauri/crates/owncord-parse/fuzz at
     # FUZZ_SECONDS each, plus a cold build of the small parser crate.
@@ -249,6 +272,12 @@ jobs:
         with:
           ref: dev
           persist-credentials: false
+      - name: Check out the pinned dev revision
+        env:
+          PIN_SHA: ${{ needs.pin.outputs.sha }}
+        run: |
+          git fetch --depth=1 origin "$PIN_SHA"
+          git checkout --detach "$PIN_SHA"
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: ${{ env.FUZZ_TOOLCHAIN }}
@@ -279,12 +308,51 @@ jobs:
       # No corpus or crash artifact, as for the Go targets: this repository is
       # public. A reproducer is committed only with its fix.
 
+  vendored-livekit-tests:
+    name: Nightly vendored livekit patch tests
+    runs-on: ubuntu-22.04
+    # A cold build of the client's native-voice dependency tree (libwebrtc
+    # bindings included), then a few seconds of tests.
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: dev
+          persist-credentials: false
+      # The same prerequisites as ci.yml's rust-tests job: the patched crate
+      # links webrtc-sys, which needs clang >= 21 and the prebuilt libwebrtc.
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get remove -y libunwind-14-dev || true
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            libsecret-1-dev \
+            libdbus-1-dev \
+            libasound2-dev \
+            libssl-dev \
+            librsvg2-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev
+      - name: Install native-voice build prerequisites
+        working-directory: Client/src-tauri
+        run: bash ../scripts/linux-webrtc-toolchain.sh
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      # Through the root workspace, so the root Cargo.lock and the pinned
+      # libwebrtc apply; never the vendored crate's upstream lockfile.
+      - name: Vendored livekit patch tests
+        working-directory: Client/src-tauri
+        run: cargo test -p livekit --lib -- signal_input stereo rtc_session
+
   query-benchmarks:
     # The read-path benchmarks on a synthetic 400k-message database, run at dev
     # and at the ref in Server/testdata/bench/query-baseline.json, alternating on
     # this one runner so both see the same machine. bench-gate.mjs fails on an
     # allocation increase or a median slowdown over 20 % against the ref.
     name: Nightly query benchmarks
+    needs: pin
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
@@ -293,7 +361,14 @@ jobs:
           ref: dev
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Check out the pinned dev revision
+        env:
+          PIN_SHA: ${{ needs.pin.outputs.sha }}
+        run: |
+          # Full history is already here for the baseline ref; --depth would
+          # make the clone shallow and lose it.
+          git checkout --detach "$PIN_SHA"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
@@ -341,6 +416,7 @@ jobs:
     # every client-fullstack run; this is the same spec at length. Setup mirrors
     # ci.yml's client-fullstack job.
     name: Nightly long-session soak
+    needs: pin
     runs-on: ubuntu-latest
     timeout-minutes: 90
     defaults:
@@ -351,7 +427,13 @@ jobs:
         with:
           ref: dev
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Check out the pinned dev revision
+        env:
+          PIN_SHA: ${{ needs.pin.outputs.sha }}
+        run: |
+          git fetch --depth=1 origin "$PIN_SHA"
+          git checkout --detach "$PIN_SHA"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum
@@ -384,6 +466,7 @@ jobs:
     # more than 10 % (Client/tests/e2e/fullstack/in-call-heap.spec.ts). Setup
     # mirrors the long-session soak above.
     name: Nightly in-call heap
+    needs: pin
     runs-on: ubuntu-latest
     timeout-minutes: 90
     defaults:
@@ -394,7 +477,13 @@ jobs:
         with:
           ref: dev
           persist-credentials: false
-      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+      - name: Check out the pinned dev revision
+        env:
+          PIN_SHA: ${{ needs.pin.outputs.sha }}
+        run: |
+          git fetch --depth=1 origin "$PIN_SHA"
+          git checkout --detach "$PIN_SHA"
+      - uses: actions/setup-go@d8cbb8045d7f43706b9177cceb36c1f91a6644d5 # v7.1.0
         with:
           go-version: "1.27"
           cache-dependency-path: Server/go.sum

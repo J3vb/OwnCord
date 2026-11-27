@@ -10,7 +10,7 @@ import type {
   TrackPublication,
   DisconnectReason,
 } from "livekit-client";
-import type { AudioElements } from "@lib/voice/audioElements";
+import type { AudioElements } from "../../features/voice/audioElements";
 import type {
   VoiceRemoteParticipant,
   VoiceRemotePublication,
@@ -38,6 +38,12 @@ export interface RoomEventDeps {
   getOnRemoteVideoRemovedCallback: () => RemoteVideoRemovedCallback | null;
   /** The viewer chose to watch this user's camera or screen share. */
   isWatched: (userId: number, isScreenshare: boolean) => boolean;
+  /** The viewer chose to listen to this user's music share. */
+  isListening: (userId: number) => boolean;
+  /** This user's music share was unpublished (a reconnect republishes it). */
+  musicEnded: (userId: number) => void;
+  /** A live room is back: decide the fate of a listened-to sharer whose music is gone. */
+  reviewListening: () => void;
   getOnErrorCallback: () => ((message: string) => void) | null;
   isConnecting: () => boolean;
   isReconnecting: () => boolean;
@@ -89,6 +95,8 @@ export interface RoomEventHandlers {
   readonly handleConnected: (room: VoiceRoom) => void;
   readonly handleActiveSpeakersChanged: (speakers: Participant[]) => void;
   readonly handleParticipantDisconnected: (participant: RemoteParticipant) => void;
+  /** The speaking ring a member reports for itself, relayed by the server. */
+  readonly handleRingAnnounced: (userId: number, speaking: boolean | null) => void;
   readonly handleTrackMuted: (publication: TrackPublication, participant: Participant) => void;
   readonly handleAudioPlaybackChanged: () => void;
   readonly handleDisconnected: (reason?: DisconnectReason) => void;

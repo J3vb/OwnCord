@@ -1,4 +1,5 @@
-//! Helpers shared by the two loopback TLS proxies (`http_proxy`, `livekit_proxy`).
+//! Helpers shared by the two loopback TLS proxies (`http_proxy`, `livekit_proxy`),
+//! and the upstream dialer the chat socket (`ws_proxy`) uses too.
 //!
 //! Each proxy keeps only what is genuinely different — its state type, its
 //! header-rewrite policy (REST wants `Connection: close`; the LiveKit signal
@@ -9,9 +10,11 @@
 //! wraps the same copy in [`copy_with_deadline`], which cuts it only after a
 //! stretch with no bytes moving.
 
+use futures_util::stream::{FuturesUnordered, StreamExt};
 use log::{debug, error, info, warn};
 use rustls::pki_types::ServerName;
-use std::net::IpAddr;
+use std::future::Future;
+use std::net::{IpAddr, SocketAddr};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -66,7 +69,8 @@ pub(crate) async fn connect_tls(
     connect_tls_over(connector, server_name, tcp, limit).await
 }
 
-/// Dial the upstream TCP connection, bounded by `limit`.
+/// Dial the upstream TCP connection through [`dial_any`], bounded by `limit`
+/// (name resolution included).
 ///
 /// Split from [`connect_tls`] so a caller that must configure the socket
 /// before the handshake (the REST tunnel sets TCP_NODELAY) can dial, adjust,
@@ -76,10 +80,112 @@ pub(crate) async fn dial_tcp(
     dial_target: &str,
     limit: Duration,
 ) -> Result<TcpStream, Box<dyn std::error::Error + Send + Sync>> {
-    let tcp = timeout(limit, TcpStream::connect(dial_target))
+    let tcp = timeout(limit, dial_any(dial_target))
         .await
         .map_err(|_| Box::<dyn std::error::Error + Send + Sync>::from("TCP connect timed out"))??;
     Ok(tcp)
+}
+
+/// How long a connection attempt runs alone before the next address starts
+/// beside it (RFC 8305's "Connection Attempt Delay").
+const CONNECTION_ATTEMPT_DELAY: Duration = Duration::from_millis(250);
+
+/// Resolve `dial_target` (`host:port`, an IPv6 literal in brackets) and
+/// connect to whichever of its addresses answers first, both address
+/// families raced as [`connect_first`] describes. An address whose network
+/// path drops packets therefore costs [`CONNECTION_ATTEMPT_DELAY`] instead of
+/// the system's whole connect timeout.
+///
+/// Not bounded on its own: every caller runs it inside its connect limit
+/// ([`dial_tcp`], the chat socket's handshake timeout), and dropping the
+/// future closes every attempt still in flight.
+pub(crate) async fn dial_any(dial_target: &str) -> io::Result<TcpStream> {
+    let addrs = tokio::net::lookup_host(dial_target).await?;
+    connect_first(
+        interleave_families(addrs),
+        CONNECTION_ATTEMPT_DELAY,
+        TcpStream::connect,
+    )
+    .await
+}
+
+/// Order resolved addresses so the two families alternate, starting with the
+/// family of the first address the resolver returned (RFC 8305 section 4).
+/// A repeated address is tried once.
+fn interleave_families(addrs: impl IntoIterator<Item = SocketAddr>) -> Vec<SocketAddr> {
+    let mut unique: Vec<SocketAddr> = Vec::new();
+    for addr in addrs {
+        if !unique.contains(&addr) {
+            unique.push(addr);
+        }
+    }
+    let lead_is_v6 = unique.first().is_some_and(SocketAddr::is_ipv6);
+    let mut ordered = Vec::with_capacity(unique.len());
+    let (lead, other): (Vec<SocketAddr>, Vec<SocketAddr>) = unique
+        .into_iter()
+        .partition(|addr| addr.is_ipv6() == lead_is_v6);
+    let (mut lead, mut other) = (lead.into_iter(), other.into_iter());
+    loop {
+        let (a, b) = (lead.next(), other.next());
+        if a.is_none() && b.is_none() {
+            return ordered;
+        }
+        ordered.extend(a);
+        ordered.extend(b);
+    }
+}
+
+/// The error for an address list with nothing in it, worded as tokio words a
+/// name that resolves to no address.
+fn no_address_error() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "could not resolve to any address",
+    )
+}
+
+/// Connect to the first of `addrs` that accepts, RFC 8305 style: the attempts
+/// start in order, each next one `attempt_delay` after the one before, or at
+/// once when an attempt fails. The first connection wins; every attempt
+/// still in flight is dropped (its socket closed) before this returns. When
+/// all fail, the error of the last one to fail comes back.
+///
+/// Generic over `connect` so a test can script how each address answers.
+async fn connect_first<T, F, Fut>(
+    addrs: Vec<SocketAddr>,
+    attempt_delay: Duration,
+    mut connect: F,
+) -> io::Result<T>
+where
+    F: FnMut(SocketAddr) -> Fut,
+    Fut: Future<Output = io::Result<T>>,
+{
+    let mut queue = addrs.into_iter();
+    let mut attempts = FuturesUnordered::new();
+    let mut last_error = None;
+    let next_start = tokio::time::sleep(attempt_delay);
+    tokio::pin!(next_start);
+    loop {
+        // Each pass starts the next address: the first one, the one after a
+        // failure, or the one whose delay is up.
+        if let Some(addr) = queue.next() {
+            attempts.push(connect(addr));
+            next_start
+                .as_mut()
+                .reset(tokio::time::Instant::now() + attempt_delay);
+        }
+        if attempts.is_empty() {
+            return Err(last_error.unwrap_or_else(no_address_error));
+        }
+        tokio::select! {
+            biased;
+            Some(result) = attempts.next() => match result {
+                Ok(conn) => return Ok(conn),
+                Err(e) => last_error = Some(e),
+            },
+            () = &mut next_start, if !queue.as_slice().is_empty() => {}
+        }
+    }
 }
 
 /// Complete the TLS handshake over an already-dialed `tcp`, bounded by
@@ -651,6 +757,209 @@ mod tests {
             resolve_remote_target("example.com:8443").expect("hostname:port must parse");
         assert!(matches!(server_name, ServerName::DnsName(_)));
         assert_eq!(dial_target, "example.com:8443");
+    }
+
+    // ── The upstream dialer ─────────────────────────────────────────────────
+
+    /// The connect limit the tunnels dial under.
+    const LIMIT: Duration = Duration::from_secs(10);
+
+    /// How a scripted address answers a connection attempt.
+    #[derive(Clone, Copy)]
+    enum Answer {
+        /// Never answers, like an address whose network path drops packets.
+        Silent,
+        Accepts,
+        /// Refuses after this long.
+        FailsAfter(Duration),
+    }
+
+    fn v6(n: u16) -> SocketAddr {
+        SocketAddr::from((
+            std::net::Ipv6Addr::new(0x2001, 0xdb8, 0, 0, 0, 0, 0, n),
+            443,
+        ))
+    }
+
+    fn v4(n: u8) -> SocketAddr {
+        SocketAddr::from(([192, 0, 2, n], 443))
+    }
+
+    /// Dial `script`'s addresses, in its order, under [`LIMIT`], each one
+    /// answering as scripted. Returns the outcome (`None` when the limit
+    /// fired) with a refusal as its message, the time it took, and how many
+    /// attempts were still running once the dial returned.
+    async fn dial_scripted(
+        script: &[(SocketAddr, Answer)],
+    ) -> (Option<Result<SocketAddr, String>>, Duration, usize) {
+        let running = Arc::new(());
+        let held = Arc::clone(&running);
+        let answers: std::collections::HashMap<SocketAddr, Answer> =
+            script.iter().copied().collect();
+        let connect = move |addr: SocketAddr| {
+            let attempt = Arc::clone(&held);
+            let answer = answers.get(&addr).copied();
+            async move {
+                let _attempt = attempt;
+                match answer.expect("every dialed address is scripted") {
+                    Answer::Accepts => Ok(addr),
+                    Answer::FailsAfter(after) => {
+                        tokio::time::sleep(after).await;
+                        Err(io::Error::other(format!("{addr} refused")))
+                    }
+                    Answer::Silent => std::future::pending().await,
+                }
+            }
+        };
+        let addrs = script.iter().map(|(addr, _)| *addr).collect();
+        let start = tokio::time::Instant::now();
+        let outcome = timeout(
+            LIMIT,
+            connect_first(addrs, CONNECTION_ATTEMPT_DELAY, connect),
+        )
+        .await
+        .ok()
+        .map(|result| result.map_err(|e| e.to_string()));
+        (outcome, start.elapsed(), Arc::strong_count(&running) - 1)
+    }
+
+    /// Whether `took` is `expected`, give or take the timer's 1 ms tick.
+    fn about(took: Duration, expected: Duration) -> bool {
+        took >= expected && took <= expected + Duration::from_millis(2)
+    }
+
+    // An address whose network path drops packets never answers, and the
+    // system takes longer than the limit to give up on it. The next address
+    // starts beside it after the attempt delay and wins.
+    #[tokio::test(start_paused = true)]
+    async fn a_silent_address_hands_over_to_the_next_one_well_inside_the_limit() {
+        let (outcome, took, running) =
+            dial_scripted(&[(v6(1), Answer::Silent), (v4(1), Answer::Accepts)]).await;
+        assert_eq!(
+            outcome.expect("the dial must finish inside the limit"),
+            Ok(v4(1))
+        );
+        assert!(
+            about(took, CONNECTION_ATTEMPT_DELAY),
+            "connected after {took:?}"
+        );
+        assert_eq!(running, 0, "the silent attempt is closed once another wins");
+    }
+
+    // One after another, two slow refusals would not fit in the limit; raced,
+    // the error of the last attempt to fail comes back inside it, and no
+    // attempt is left running.
+    #[tokio::test(start_paused = true)]
+    async fn when_every_address_fails_the_last_error_returns_inside_the_limit() {
+        let slow = Answer::FailsAfter(Duration::from_secs(8));
+        let (outcome, took, running) = dial_scripted(&[(v6(1), slow), (v4(1), slow)]).await;
+        assert_eq!(
+            outcome.expect("the dial must finish inside the limit"),
+            Err(format!("{} refused", v4(1)))
+        );
+        assert!(
+            about(took, Duration::from_secs(8) + CONNECTION_ATTEMPT_DELAY),
+            "failed after {took:?}"
+        );
+        assert_eq!(running, 0);
+    }
+
+    // When each next address starts, which answer wins, and that the limit
+    // closes every attempt it cuts off.
+    #[tokio::test(start_paused = true)]
+    async fn each_address_starts_on_time_and_the_first_answer_wins() {
+        let ms = Duration::from_millis;
+        let refused_now = Answer::FailsAfter(Duration::ZERO);
+        let cases = [
+            (
+                "a refusal starts the next address at once",
+                vec![(v6(1), refused_now), (v4(1), Answer::Accepts)],
+                Some(Ok(v4(1))),
+                Duration::ZERO,
+            ),
+            (
+                "each silent address adds one attempt delay",
+                vec![
+                    (v6(1), Answer::Silent),
+                    (v4(1), Answer::Silent),
+                    (v6(2), Answer::Accepts),
+                ],
+                Some(Ok(v6(2))),
+                ms(500),
+            ),
+            (
+                "a refusal starts the next address while an earlier one still waits",
+                vec![
+                    (v6(1), Answer::Silent),
+                    (v4(1), Answer::FailsAfter(ms(100))),
+                    (v6(2), Answer::Accepts),
+                ],
+                Some(Ok(v6(2))),
+                ms(350),
+            ),
+            (
+                "the limit closes every attempt still waiting",
+                vec![(v6(1), Answer::Silent), (v4(1), Answer::Silent)],
+                None,
+                LIMIT,
+            ),
+            (
+                "an empty address list fails at once",
+                vec![],
+                Some(Err("could not resolve to any address".to_string())),
+                Duration::ZERO,
+            ),
+        ];
+        for (name, script, expected, at) in cases {
+            let (outcome, took, running) = dial_scripted(&script).await;
+            assert_eq!(outcome, expected, "{name}");
+            assert!(about(took, at), "{name}: took {took:?}");
+            assert_eq!(running, 0, "{name}: attempts left running");
+        }
+    }
+
+    #[test]
+    fn addresses_alternate_families_starting_with_the_first_returned() {
+        for (resolved, expected) in [
+            (
+                vec![v6(1), v6(2), v4(1), v4(2)],
+                vec![v6(1), v4(1), v6(2), v4(2)],
+            ),
+            (
+                vec![v4(1), v6(1), v6(2), v6(3)],
+                vec![v4(1), v6(1), v6(2), v6(3)],
+            ),
+            (vec![v4(1), v4(1), v6(1), v4(2)], vec![v4(1), v6(1), v4(2)]),
+            (vec![], vec![]),
+        ] {
+            assert_eq!(
+                interleave_families(resolved.clone()),
+                expected,
+                "{resolved:?}"
+            );
+        }
+    }
+
+    // The tunnels dial a host name: it resolves, and the address with a
+    // listener is reached.
+    #[tokio::test]
+    async fn dial_tcp_reaches_a_listener_by_host_name() {
+        let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let accepted = tokio::spawn(async move { listener.accept().await.map(|_| ()) });
+
+        let tcp = dial_tcp(&format!("localhost:{port}"), Duration::from_secs(5))
+            .await
+            .expect("dial by name");
+        assert_eq!(
+            tcp.peer_addr().expect("peer").ip(),
+            IpAddr::from([127, 0, 0, 1])
+        );
+        timeout(Duration::from_secs(5), accepted)
+            .await
+            .expect("accepted")
+            .expect("join")
+            .expect("accept");
     }
 
     #[test]

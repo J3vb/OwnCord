@@ -345,7 +345,7 @@ test.describe("Removal, kick and ban (real server)", () => {
     await acts.getByRole("button", { name: "Ban member" }).click();
     await dialog.getByRole("button", { name: "Ban", exact: true }).click();
     await expect(status).toHaveText(
-      "Member banned. They were disconnected and can't sign in again.",
+      "Member banned. They were disconnected and can't sign in until unbanned.",
     );
     expect((await kinds()).toSorted()).toEqual(["ban", "kick", "removal"]);
     await expect(center.getByTestId("mod-history")).toContainText("You issued: Ban");

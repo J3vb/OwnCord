@@ -14,7 +14,7 @@ import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/android
 vi.mock("../../../src/features/whats-new/appVersion", () => mocks.newAppVersionMock());
 vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@stores/ui.store", () => mocks.uiStoreMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@stores/auth.store", () => mocks.authStoreMock());
 
 const { mockUiState, mockAuthState } = mocks;
@@ -421,8 +421,8 @@ describe("SettingsOverlay", () => {
     getTab(container, 1).click();
 
     const themeOptions = container.querySelectorAll(".theme-tiles [role='radio']");
-    // Four palettes plus Match my computer.
-    expect(themeOptions.length).toBe(5);
+    // Five palettes plus Match my computer.
+    expect(themeOptions.length).toBe(6);
 
     const midnight = themeOptions[2] as HTMLElement;
     midnight.click();

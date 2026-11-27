@@ -736,3 +736,108 @@ fn the_reference_follows_a_replaced_apm() {
     reference.feed(&buffer, 1);
     assert!(reference.apm.as_ref().is_some_and(|a| Arc::ptr_eq(a, &apm)));
 }
+
+/// A play that waits until `wait` closes (the test's end), like a source that
+/// takes the stream and never sends a sound.
+fn never_plays(
+    wait: std::sync::mpsc::Receiver<()>,
+) -> impl FnOnce(&u8) -> Result<(), String> + Send {
+    move |_| {
+        let _ = wait.recv();
+        Ok(())
+    }
+}
+
+/// A source that takes the stream but never sends a sound must not hold the
+/// capture forever: the start gives up within its limit.
+#[test]
+fn a_start_that_never_plays_gives_up_within_its_limit() {
+    let stuck = Arc::new(AtomicUsize::new(0));
+    let (release, wait) = std::sync::mpsc::channel::<()>();
+    let attempt = Arc::new(Attempt::default());
+    let began = std::time::Instant::now();
+    let started = start_within(
+        7u8,
+        Duration::from_millis(100),
+        &attempt,
+        stuck.clone(),
+        never_plays(wait),
+    );
+    assert_eq!(started, Err(TIMED_OUT.to_string()));
+    assert!(began.elapsed() < Duration::from_secs(2));
+    assert!(attempt.abandoned(), "a late sound feeds nothing");
+    assert_eq!(stuck.load(Ordering::Acquire), 1);
+    // The first sound comes after all: the thread drops the stream and is
+    // no longer counted.
+    drop(release);
+    while stuck.load(Ordering::Acquire) != 0 {
+        assert!(began.elapsed() < Duration::from_secs(5));
+        std::thread::yield_now();
+    }
+}
+
+/// A device that keeps not responding (the watcher retries every 2 s) leaves
+/// at most two threads waiting; later starts on it fail at once.
+#[test]
+fn starts_left_waiting_are_capped() {
+    let stuck = Arc::new(AtomicUsize::new(0));
+    let (release, wait) = std::sync::mpsc::channel::<()>();
+    let start = |limit, play| {
+        start_within(
+            7u8,
+            limit,
+            &Arc::new(Attempt::default()),
+            stuck.clone(),
+            play,
+        )
+    };
+    let mut held = Vec::new();
+    for _ in 0..MAX_STUCK {
+        let (tx, rx) = std::sync::mpsc::channel::<()>();
+        held.push(tx);
+        let started = start(Duration::from_millis(50), never_plays(rx));
+        assert_eq!(started, Err(TIMED_OUT.to_string()));
+    }
+    assert_eq!(stuck.load(Ordering::Acquire), MAX_STUCK);
+    let began = std::time::Instant::now();
+    let refused = start(Duration::from_secs(5), never_plays(wait));
+    assert_eq!(refused, Err(TIMED_OUT.to_string()));
+    assert!(began.elapsed() < Duration::from_secs(1), "refused at once");
+    drop((release, held));
+}
+
+#[test]
+fn a_start_returns_its_stream_or_the_driver_error() {
+    let stuck = Arc::new(AtomicUsize::new(0));
+    let start = |play: fn(&u8) -> Result<(), String>| {
+        start_within(
+            7u8,
+            Duration::from_secs(5),
+            &Arc::new(Attempt::default()),
+            stuck.clone(),
+            play,
+        )
+    };
+    assert_eq!(start(|_| Ok(())), Ok(7));
+    assert_eq!(
+        start(|_| Err("busy".to_string())),
+        Err("starting the capture stream: busy".to_string())
+    );
+    assert_eq!(stuck.load(Ordering::Acquire), 0);
+}
+
+/// A start thread that dies (a panic in the driver) is an error at once, and
+/// leaves nothing counted as waiting.
+#[test]
+fn a_start_thread_that_dies_is_not_counted_as_waiting() {
+    let stuck = Arc::new(AtomicUsize::new(0));
+    let started = start_within(
+        7u8,
+        Duration::from_secs(5),
+        &Arc::new(Attempt::default()),
+        stuck.clone(),
+        |_| panic!("driver fault"),
+    );
+    assert_eq!(started, Err("the capture start thread ended".to_string()));
+    assert_eq!(stuck.load(Ordering::Acquire), 0);
+}

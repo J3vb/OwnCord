@@ -102,7 +102,7 @@
   padding: 6px 14px;
   border-radius: var(--radius-sm);
   background: var(--accent);
-  color: var(--on-fill);
+  color: var(--on-accent);
   cursor: pointer;
 }
 .dm-empty-start:hover {

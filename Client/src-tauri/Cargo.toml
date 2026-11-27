@@ -1,6 +1,6 @@
 [package]
 name = "owncord-client"
-version = "2.10.0"
+version = "2.11.0"
 edition = "2021"
 # Effective minimum: tauri 2.12 declares rust-version = "1.90", so the crate
 # cannot build below it. Declaring it here enables Cargo's MSRV-aware resolver
@@ -30,7 +30,7 @@ expect_used = "deny"
 # and fuzzed on its own). The fuzz crate has its own lock file and nightly
 # toolchain, so it stays out.
 [workspace]
-members = [".", "crates/owncord-parse"]
+members = [".", "crates/owncord-parse", "vendor/livekit"]
 exclude = ["crates/owncord-parse/fuzz"]
 
 [lib]
@@ -79,9 +79,12 @@ tauri-plugin-fs = "2"
 tauri-plugin-deep-link = "2"
 # Minor-pinned per the plugin's own guidance: configure_client hands it a
 # preconfigured rustls ClientConfig, and a 2.x minor bump can change the
-# plugin's bundled reqwest/rustls and break that seam at runtime. 2.13 is the
-# floor: older releases ignore tauri.conf.json's `requireSignedVersion`.
-tauri-plugin-updater = "2.13"
+# plugin's bundled reqwest/rustls and break that seam at runtime. 2.14.1 is the
+# floor: older releases ignore tauri.conf.json's `requireSignedVersion`, and
+# update_commands/handoff.rs relies on its Windows install, where an app-set
+# on_before_exit replaces the default step and a failed installer launch
+# returns an error instead of exiting.
+tauri-plugin-updater = "2.14.1"
 # Read authenticated artifact metadata with the same verifier as the updater.
 # Already present transitively through tauri-plugin-updater.
 minisign-verify = "0.3"
@@ -97,8 +100,9 @@ tokio-rustls = { version = "0.26", default-features = false }
 # tokio exposes none. Already in the dependency tree through tokio.
 socket2 = { version = "0.6", features = ["all"] }
 rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
-# Mozilla root bundle for the updater's HostScopedVerifier: non-pinned hosts
-# (the GitHub installer download) get web-PKI validation.
+# Mozilla root bundle: the TOFU renewal rule's public-validity check, and the
+# updater's verifier for non-pinned hosts where the system store is not used
+# (Android, or a system store that cannot be read).
 webpki-roots = "1"
 ring = "0.17"
 log = "0.4"
@@ -145,6 +149,11 @@ rfd = { version = "0.17", default-features = false }
 # `secret_store::tests::compiled_keyring_backend_is_persistent` checks the
 # compiled store keeps secrets on disk.
 keyring-core = "1"
+# The system trust store for the updater's non-pinned hosts (tofu.rs), as the
+# updater plugin's own client uses it. Already in the tree through that
+# plugin's reqwest at this version; Android keeps the bundled roots, since its
+# verifier needs a JNI set-up the app does not do.
+rustls-platform-verifier = "0.7"
 
 [target.'cfg(windows)'.dependencies]
 # Win32_UI_Input_KeyboardAndMouse: push-to-talk key polling (ptt.rs) and,

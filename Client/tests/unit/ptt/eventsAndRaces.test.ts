@@ -2,13 +2,14 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as ptt from "../../helpers/pttHarness";
 import { loggerMock } from "../../helpers/loggerMock";
+import { registerTestVoiceSessionLoader } from "../../helpers/voiceSessionLoader";
 
 vi.mock("@tauri-apps/api/core", () => ptt.tauriCoreMock());
 vi.mock("@tauri-apps/api/event", () => ptt.tauriEventMock());
 vi.mock("@lib/prefs/preferences", () => ptt.preferencesMock());
 vi.mock("@stores/voice.store", () => ptt.voiceStoreMock());
 vi.mock("@lib/logger", () => loggerMock());
-vi.mock("../../../src/lib/voice/livekitSession", () => ptt.livekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => ptt.livekitSessionMock());
 
 const {
   mockInvoke,
@@ -26,6 +27,10 @@ const {
 // ---------------------------------------------------------------------------
 
 import { pushToTalk } from "../../../src/platform/desktop/pushToTalkService";
+import {
+  registerVoiceSessionLoader,
+  type VoiceSessionControls,
+} from "../../../src/lib/voice/voiceSessionLoader";
 
 const { init: initPtt, stop: stopPtt, updateKey: updatePttKey } = pushToTalk;
 
@@ -111,7 +116,8 @@ describe("ptt-state event listener", () => {
     press({ payload: false }); // key released
 
     await vi.waitFor(() => {
-      expect(mockSetPttGated).toHaveBeenCalledWith(true);
+      // With the default 20 ms release delay.
+      expect(mockSetPttGated).toHaveBeenCalledWith(true, 20);
     });
     expect(mockSetMuted).not.toHaveBeenCalled();
   });
@@ -234,6 +240,33 @@ describe("ptt-error event listener", () => {
     });
     expect(mockSetMuted).not.toHaveBeenCalled();
     expect(pttState.localMuted).toBe(true);
+  });
+
+  it("opens a gate still closing out a release's delay when the backend thread panics", async () => {
+    testPrefs.set("pttVk", 0x20);
+    const capturedHandlers = captureListeners();
+    await initPtt();
+    // Released: the mic is closing on the audio clock, the store not yet gated.
+    pttState.pttGated = false;
+    pttState.closePending = true;
+
+    capturedHandlers["ptt-error"]!({ payload: "PTT thread panicked" });
+
+    await vi.waitFor(() => {
+      expect(mockSetPttGated).toHaveBeenCalledWith(false);
+    });
+  });
+
+  it("leaves an open gate with no close pending alone when the backend thread panics", async () => {
+    testPrefs.set("pttVk", 0x20);
+    const capturedHandlers = captureListeners();
+    await initPtt();
+    mockSetPttGated.mockClear();
+
+    capturedHandlers["ptt-error"]!({ payload: "PTT thread panicked" });
+    await vi.dynamicImportSettled();
+
+    expect(mockSetPttGated).not.toHaveBeenCalled();
   });
 
   // Deleted the "after a PTT release applied the mute" and "deafened, even if a
@@ -503,6 +536,44 @@ describe("PTT binding lifecycle races", () => {
     expect(mockSetMuted).not.toHaveBeenCalled();
   });
 
+  describe("while the voice session facade is still loading", () => {
+    let finishLoad!: () => void;
+    /** Binds a key, then makes the next facade load wait for `finishLoad`. */
+    async function bindThenSlowLoad(): Promise<(e: { payload: unknown }) => void> {
+      const handlers = captureListeners();
+      await updatePttKey(0x20);
+      mockSetPttGated.mockClear();
+      registerVoiceSessionLoader(
+        () =>
+          new Promise<VoiceSessionControls>((resolve) => {
+            finishLoad = () => resolve(import("../../../src/features/voice/livekitSession"));
+          }),
+      );
+      return handlers["ptt-state"]!;
+    }
+    afterEach(() => {
+      registerVoiceSessionLoader(() => import("../../../src/features/voice/livekitSession"));
+    });
+
+    it("applies a press once the facade loads", async () => {
+      const onState = await bindThenSlowLoad();
+      onState({ payload: true });
+      await Promise.resolve();
+      expect(mockSetPttGated).not.toHaveBeenCalled();
+      finishLoad();
+      await vi.waitFor(() => expect(mockSetPttGated).toHaveBeenCalledWith(false));
+    });
+
+    it("drops a press whose call ended before the facade loaded", async () => {
+      const onState = await bindThenSlowLoad();
+      onState({ payload: true });
+      pttState.currentChannelId = null;
+      finishLoad();
+      await vi.dynamicImportSettled();
+      expect(mockSetPttGated).not.toHaveBeenCalled();
+    });
+  });
+
   it("ignores queued events from a removed binding and mic work for a previous call", async () => {
     mockInvoke.mockImplementation((command: string) =>
       Promise.resolve(command === "ptt_polling_supported" ? true : undefined),
@@ -525,9 +596,11 @@ describe("PTT binding lifecycle races", () => {
   });
 });
 
-// DP-30: a release keeps the gate open for the saved delay (D5: 20 ms by
+// DP-30: a release keeps transmitting for the saved delay (D5: 20 ms by
 // default, 0–2000 ms), and a press inside it cancels the close, so a short
-// pause between words never cuts the next one.
+// pause between words never cuts the next one. The delay runs on the mic
+// processor's own audio clock (micProcessor's setGate), never on a page timer:
+// a hidden or minimised window slows page timers down, the audio clock not.
 describe("ptt release delay", () => {
   beforeEach(() => {
     resetAll();
@@ -557,75 +630,52 @@ describe("ptt release delay", () => {
     await vi.dynamicImportSettled();
   }
 
-  const gateCalls = () => mockSetPttGated.mock.calls.map((c) => c[0]);
+  const gateCalls = () => mockSetPttGated.mock.calls;
 
-  it("a press after a release only toggles the gate and never touches mute", async () => {
+  it("a release reaches the gate at once with its delay, leaving no page timer to wait on", async () => {
     pttState.currentChannelId = 7;
     const key = await bind();
 
     await edgeOf(key, true);
     await edgeOf(key, false);
-    await vi.advanceTimersByTimeAsync(20);
-    await edgeOf(key, true);
 
-    expect(gateCalls()).toEqual([false, true, false]);
+    expect(gateCalls()).toEqual([[false], [true, 20]]);
+    expect(vi.getTimerCount()).toBe(0);
     expect(mockSetMuted).not.toHaveBeenCalled();
   });
 
-  it("release then press within the delay transmits continuously; release past the delay gates once", async () => {
+  it("a press during the delay opens the gate again at once, cancelling the close", async () => {
     pttState.currentChannelId = 7;
     const key = await bind();
 
     await edgeOf(key, true);
     await edgeOf(key, false);
-    await vi.advanceTimersByTimeAsync(10);
     await edgeOf(key, true);
-    await vi.advanceTimersByTimeAsync(100);
-    expect(gateCalls()).not.toContain(true);
 
-    await edgeOf(key, false);
-    await vi.advanceTimersByTimeAsync(19);
-    expect(gateCalls()).not.toContain(true);
-    await vi.advanceTimersByTimeAsync(1);
-    await vi.advanceTimersByTimeAsync(500);
-    expect(gateCalls().filter((g) => g)).toEqual([true]);
+    expect(gateCalls()).toEqual([[false], [true, 20], [false]]);
+    expect(pttState.pttGated).toBe(false);
   });
 
-  it("follows the saved delay, and a delay of 0 closes on the release itself", async () => {
+  it.each([
+    ["the saved delay", 300, 300],
+    ["a delay of 0, which closes on the release itself", 0, 0],
+    ["a saved delay capped at 2000 ms", 60_000, 2000],
+  ])("hands the gate %s", async (_, saved, sent) => {
     pttState.currentChannelId = 7;
-    testPrefs.set("pttReleaseDelayMs", 300);
+    testPrefs.set("pttReleaseDelayMs", saved);
     const key = await bind();
     await edgeOf(key, true);
     await edgeOf(key, false);
-    await vi.advanceTimersByTimeAsync(299);
-    expect(gateCalls()).toEqual([false]);
-    await vi.advanceTimersByTimeAsync(1);
-    expect(gateCalls()).toEqual([false, true]);
-
-    testPrefs.set("pttReleaseDelayMs", 0);
-    await edgeOf(key, true);
-    await edgeOf(key, false);
-    expect(gateCalls()).toEqual([false, true, false, true]);
+    expect(gateCalls()).toEqual([[false], [true, sent]]);
   });
 
-  it("caps a saved delay at 2000 ms", async () => {
-    pttState.currentChannelId = 7;
-    testPrefs.set("pttReleaseDelayMs", 60_000);
-    const key = await bind();
-    await edgeOf(key, true);
-    await edgeOf(key, false);
-    await vi.advanceTimersByTimeAsync(2000);
-    expect(gateCalls()).toEqual([false, true]);
-  });
-
-  it("a pending close is dropped when the call ends or the binding is cleared", async () => {
+  it("a release after the call ended gates nothing", async () => {
     pttState.currentChannelId = 7;
     const key = await bind();
     await edgeOf(key, true);
-    await edgeOf(key, false);
     pttState.currentChannelId = null;
-    await vi.advanceTimersByTimeAsync(100);
-    expect(gateCalls()).toEqual([false]);
+    await edgeOf(key, false);
+    expect(gateCalls()).toEqual([[false]]);
   });
 });
 
@@ -746,6 +796,7 @@ describe("PTT on the portal backend", () => {
   const starts = () => mockInvoke.mock.calls.filter((c) => c[0] === "ptt_start").length;
   const emit = (event: string, payload: unknown) => handlers.get(event)!({ payload });
   async function service() {
+    await registerTestVoiceSessionLoader();
     const mod = await import("../../../src/platform/desktop/pushToTalkService");
     return mod.pushToTalk;
   }

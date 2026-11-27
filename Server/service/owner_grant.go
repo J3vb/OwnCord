@@ -67,5 +67,23 @@ func (s *ModerationService) AuthorizeRoleChange(ctx context.Context, actorID, ta
 	if err := s.requireHeldRolesReplaceable(ctx, actorRole, targetID); err != nil {
 		return nil, nil, nil, err
 	}
+	if err := s.requireRoleGrantable(ctx, actorRole, targetID, newRole); err != nil {
+		return nil, nil, nil, err
+	}
 	return actorRole, target, newRole, nil
+}
+
+// requireRoleGrantable applies the role grant rule (requireGrantable) to an assignment: every bit
+// newRole adds over what the target holds now must be in the actor's own mask. An Administrator
+// may assign any bits, as for role edits. Removing a role is not gated by it.
+func (s *ModerationService) requireRoleGrantable(ctx context.Context, actor *db.Role, targetID int64, newRole *db.Role) error {
+	held, err := s.st.GetMemberRoles(ctx, targetID)
+	if err != nil {
+		return fmt.Errorf("%w: failed to read the member's roles: %w", ErrInternal, err)
+	}
+	var current int64
+	if held != nil {
+		current = held.Perms
+	}
+	return requireGrantable(actor, current, current|newRole.Permissions)
 }

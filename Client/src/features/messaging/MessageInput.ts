@@ -181,11 +181,11 @@ export type MessageInputComponent = MountableComponent & {
   /** Put the caret back in the composer (the inline editor closed). */
   focus(): void;
   /**
-   * Insert `@username ` at the caret (member menu's Mention). Returns false,
-   * and leaves the draft alone, when the composer is not mounted, disabled or
-   * read-only.
+   * Insert `@username ` at the caret (member menu's Mention), sent as the
+   * user's id token when `userId` is given. Returns false, and leaves the draft
+   * alone, when the composer is not mounted, disabled or read-only.
    */
-  insertMention(username: string): boolean;
+  insertMention(username: string, userId?: number): boolean;
   /** Capture the current unsent state so a channel switch can carry it. */
   getDraft(): ComposerDraft;
   /** Restore a previously captured draft into this (fresh) composer. */

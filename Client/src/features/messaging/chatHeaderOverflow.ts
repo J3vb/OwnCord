@@ -1,8 +1,9 @@
 /**
  * The chat header's More button. On a phone the header has room for search,
- * the call buttons and one more control, so the panel toggles (profile or
- * members, pins, media) move behind it; CSS hides them and shows this button
- * under the phone media query, and on a wider screen the button stays hidden.
+ * the voice call button and one more control beside the channel name, so
+ * Start video call and the panel toggles (profile or members, pins, threads,
+ * media) move behind it; CSS hides them and shows this button under the phone
+ * media query, and on a wider screen the button stays hidden.
  *
  * The sheet's rows are built at open time from the buttons that are showing
  * in this header mode, and a row clicks its button, so each button keeps its
@@ -40,6 +41,7 @@ function rowFor(btn: HTMLButtonElement): ContextMenuItem {
     ...(icon !== undefined ? { icon } : {}),
     testId: `chat-header-more-${btn.dataset["testid"] ?? ""}`,
     ...(pressed === null ? {} : { checked: pressed === "true" }),
+    ...(btn.disabled ? { disabled: true } : {}),
     onClick: () => btn.click(),
   };
 }

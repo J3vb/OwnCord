@@ -14,7 +14,7 @@ const connectionStatsMock = vi.hoisted(() => ({
   qualityListeners: [] as unknown[],
 }));
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 vi.mock("@lib/voice/connectionStats", () => ({
   createConnectionStatsPoller: vi.fn().mockReturnValue({
@@ -233,6 +233,22 @@ describe("VoiceWidget connection panel (Option C)", () => {
     expect(pane.classList.contains("visible")).toBe(false);
 
     widget.destroy?.();
+  });
+
+  it("reads the signal button as collapsed again after the call ends", () => {
+    const { widget, container } = mount();
+    try {
+      const signal = container.querySelector<HTMLButtonElement>(".vw-signal")!;
+      signal.click();
+      expect(signal.getAttribute("aria-expanded")).toBe("true");
+
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+      voiceStore.flush();
+      expect(container.querySelector(".vw-stats")!.classList.contains("visible")).toBe(false);
+      expect(signal.getAttribute("aria-expanded")).toBe("false");
+    } finally {
+      widget.destroy?.();
+    }
   });
 
   it("keeps four equal controls with the screen-share state on the button, no text label", () => {

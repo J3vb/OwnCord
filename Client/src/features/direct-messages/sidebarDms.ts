@@ -10,7 +10,7 @@ import type { DmMenuActions } from "./dmContextMenu";
 import { selectDmConversation, handleCreateDm, handleCreateGroupDm } from "./SidebarDmHelpers";
 import { createPromptModal } from "@lib/ui/modalFactory";
 import { muteChannel, toggleChannelMute, unmuteChannel } from "@lib/prefs/channelMutes";
-import { markChannelRead } from "@lib/readState";
+import { markChannelRead } from "@stores/readState";
 import { setSidebarMode } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
 import { channelsStore, setActiveChannel } from "@stores/channels.store";

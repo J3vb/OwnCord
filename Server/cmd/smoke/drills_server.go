@@ -30,6 +30,14 @@ type drill struct {
 	// skipped are phases that measured nothing because the machine could not give them what they assert on, so
 	// the last line cannot report a skip as a pass.
 	skipped []byte
+	// skipWhy is the reason a skipped phase gives, printed in the table and the summary; a skipped phase with
+	// none says no measurement was made.
+	skipWhy map[byte]string
+	// archiveSource is where phase B takes its full archive from: the owner's download route (the default and
+	// the nightly, a full pass) or the archive the schedule stores (local runs only, it waits for the tick).
+	archiveSource string
+	// fillerImage is the pinned busybox the container leg fills its volume with.
+	fillerImage string
 	// partial are steps within a phase that never ran, keyed by phase; the phase names them instead of choosing
 	// between passed and skipped.
 	partial map[byte][]string
@@ -282,9 +290,14 @@ func (d *drill) backupFile(name string) (string, error) {
 }
 
 const (
-	// drillTmpfsBytes is the filesystem phase D fills (24 MiB tmpfs standalone, --tmpfs size=24m in the
-	// container); declared, not measured, since a container's tmpfs cannot be stat'ed from the host.
+	// drillTmpfsBytes is the filesystem phase D fills (24 MiB tmpfs standalone, a size=24m tmpfs volume in the
+	// container). The container leg measures it with df through the filler before filling; standalone it is
+	// declared.
 	drillTmpfsBytes = 24 << 20
+
+	// drillFillerImage is the busybox Server/scripts/compose-smoke.sh already pins by digest; the workflow pulls
+	// it and passes it as -filler-image, so the drill needs no network of its own.
+	drillFillerImage = "busybox@sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e"
 
 	// drillMinFreeDiskMB is the boot's server.min_free_disk_mb floor, which /health reports and uploads reserve,
 	// so crossing it once makes both observable.

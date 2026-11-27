@@ -101,7 +101,7 @@ func (s *messageRemoval) deleteMessage(ctx context.Context, userID, msgID int64,
 	// GetMessage returns tombstones, so without this guard a second chat_delete reaches
 	// DecrementMentionCounts again and eats a mention raised by a different live message.
 	if msg.Deleted {
-		return nil, fmt.Errorf("%w: cannot delete this message", ErrDeletedMessage)
+		return nil, refuseDeletedMessage(ctx, s.st, s.perms, userID, msg, "delete")
 	}
 	// Call and group rows are read-only for everyone, moderators included.
 	if msg.Kind != db.MessageKindUser && msg.Kind != db.MessageKindPinAdd && msg.Kind != db.MessageKindMemberJoin {

@@ -12,7 +12,7 @@ import {
   type ContextMenuSeparator,
 } from "@lib/ui/contextMenu";
 import { voiceText } from "../../../i18n/voice";
-import { isAndroidApp } from "../native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 import type { ViewToggle } from "./gridShared";
 import type { GridState, GridApi } from "./gridState";
 

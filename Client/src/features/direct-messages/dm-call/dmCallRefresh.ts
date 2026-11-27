@@ -62,10 +62,12 @@ function refreshMute(btn: HTMLButtonElement, voice: VoiceState): void {
   const selfMuted = isSelfMuted(voice);
   const held = isPhoneCallHold(voice);
   const lock = micLockTitle(voice);
+  // A deafen closes the mic as well; a moderator's deafen leaves the mute as it was.
+  const deafened = voice.localDeafened && !selfMuted;
   btn.setAttribute("aria-pressed", String(selfMuted || held));
-  swapIcon(btn, selfMuted || voice.listenOnly || held ? "mic-off" : "mic", 20);
+  swapIcon(btn, selfMuted || voice.listenOnly || held || deafened ? "mic-off" : "mic", 20);
   btn.disabled = lock !== null;
-  btn.title = lock ?? t("widget.control.mute");
+  btn.title = lock ?? t(deafened ? "widget.control.deafenedMic" : "widget.control.mute");
 }
 
 function refreshDeafen(btn: HTMLButtonElement, voice: VoiceState): void {

@@ -21,7 +21,9 @@ You moderate from two places.
   list (with pending registrations and bans), Roles & permissions, Channels,
   Invites, Settings, Message retention and the Audit log. By default it only
   opens from the server itself and your home network; see
-  [First run](deployment.md#first-run).
+  [First run](deployment.md#first-run). Behind a reverse proxy that holds only
+  once `server.trusted_proxies` is set; see
+  [TLS and reverse proxies](hosting/tls-and-proxy.md).
 
 Each item in a menu or the admin panel only shows when your role has the
 permission it needs.
@@ -158,7 +160,10 @@ Some details worth knowing:
 Right-click someone in a voice channel for **Server Mute**, **Server
 Deafen**, **Move to** and **Disconnect**. These need Mute Members in that
 channel (or Move Members to move anyone). The member sees "Muted by a
-moderator" or "Deafened by a moderator".
+moderator" or "Deafened by a moderator". A server mute or deafen lasts while
+the member stays in voice, and moves with them to another voice channel. It
+ends when they leave voice, so leaving and joining again lifts it. To keep
+someone out of voice for a set time, use a timeout.
 
 ### Channels
 
@@ -166,7 +171,9 @@ In a channel's settings (channel menu › **Edit Channel**, or admin panel ›
 Channels):
 
 - **Slow Mode** makes each member wait between messages, from a few seconds
-  up to 6 hours.
+  up to 6 hours. Without it, the only limit is 10 messages a second per
+  member. There is no hourly or daily limit, and direct messages have no slow
+  mode.
 - **Age-restricted (NSFW)** shows each member a one-time warning before the
   channel's content loads. It is a label: the server does not filter content.
 - Channel and category **permissions** let you allow or deny any permission
@@ -259,7 +266,11 @@ most 100 waiting applications.
 
 Each member can also protect themselves: **Block** in the member menu stops
 direct messages both ways, and **Settings › Privacy & safety** controls who
-can send them direct messages and message requests.
+can send them direct messages and message requests. Being added to a group DM
+does not go through message requests: the group and its messages show up at
+once. A member who turns off **Allow direct messages from server members** can
+be added only by people whose messages they accepted, and a block stops it
+too.
 
 ## Records and how long they are kept
 

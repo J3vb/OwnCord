@@ -10,7 +10,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 vi.mock("../../src/platform/desktop", async () =>
   (await import("../helpers/appSoundHost")).soundHostDesktop(),
 );
-vi.mock("../../src/features/voice/native/platform", async () =>
+vi.mock("../../src/lib/hostOs", async () =>
   (await import("../helpers/appSoundHost")).soundHostPlatform(),
 );
 

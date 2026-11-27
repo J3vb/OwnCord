@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     switchInputDevice: vi.fn().mockResolvedValue(undefined),
     switchOutputDevice: vi.fn().mockResolvedValue(undefined),
@@ -32,7 +32,12 @@ import { channelsStore, setRoles } from "../../src/stores/channels.store";
 import { createMemberList } from "../../src/features/members/MemberList";
 import { Permission } from "../../src/lib/types";
 import { resetMembersState } from "../helpers/storeResets";
-import { signInAsAdmin } from "../helpers/storeSeeds";
+import { resetVoiceState, signInAsAdmin } from "../helpers/storeSeeds";
+import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
+import { activityItems } from "../../src/features/members/buddies/activityGroups";
+import { setConnectionStatus } from "../../src/stores/ui.store";
+import { makeChannel } from "../helpers/channelFactory";
+import { addVoiceUser } from "../helpers/voiceUsers";
 
 function resetStores(): void {
   signInAsAdmin("testuser", { token: null });
@@ -238,5 +243,63 @@ describe("memberPanel", () => {
       .map((row) => row.querySelector(".banned-name")?.textContent);
     expect(withButton).toEqual(["low"]);
     panel.destroy();
+  });
+
+  describe("under Command Deck", () => {
+    afterEach(() => setRunningScreenLayout("classic"));
+
+    it("builds the Buddies title before the list and passes the Deck options", () => {
+      setRunningScreenLayout("deck");
+      const panel = createMemberPanel(opts());
+      const children = Array.from(panel.element.children);
+      expect(children[0]?.getAttribute("data-testid")).toBe("buddies-title");
+      expect(children[1]?.getAttribute("data-testid")).toBe("member-list");
+      const listOpts = vi.mocked(createMemberList).mock.calls[0]![0];
+      expect(listOpts.flatten).toBe(activityItems);
+      expect(listOpts.view).toBeDefined();
+      panel.destroy();
+    });
+
+    it("Classic builds neither the title nor the Deck options", () => {
+      setRunningScreenLayout("classic");
+      const panel = createMemberPanel(opts());
+      expect(panel.element.querySelector('[data-testid="buddies-title"]')).toBeNull();
+      const listOpts = vi.mocked(createMemberList).mock.calls[0]![0];
+      expect(listOpts.flatten).toBeUndefined();
+      expect(listOpts.view).toBeUndefined();
+      panel.destroy();
+    });
+
+    it("forwards onJoinVoice to the Deck options only", () => {
+      const onJoinVoice = vi.fn();
+      setRunningScreenLayout("deck");
+      const deckPanel = createMemberPanel({ ...opts(), onJoinVoice });
+      const deckOpts = vi.mocked(createMemberList).mock.calls[0]![0];
+      // Member 2 is in voice room 6, and the socket is up: the join reaches onJoinVoice.
+      channelsStore.setState((p) => ({
+        ...p,
+        channels: new Map([[6, makeChannel({ id: 6, name: "Lounge", type: "voice" })]]),
+      }));
+      addVoiceUser(6, 2, "rin");
+      setConnectionStatus("connected");
+      const target = deckOpts.joinRoomFor?.(2);
+      expect(target?.label).toBe("Join Lounge");
+      target?.join();
+      expect(onJoinVoice).toHaveBeenCalledExactlyOnceWith(6);
+      onJoinVoice.mockClear();
+      setConnectionStatus("disconnected");
+      resetVoiceState();
+      deckPanel.destroy();
+
+      const bare = createMemberPanel(opts());
+      expect(vi.mocked(createMemberList).mock.calls[1]![0].joinRoomFor).toBeUndefined();
+      bare.destroy();
+
+      setRunningScreenLayout("classic");
+      const classic = createMemberPanel({ ...opts(), onJoinVoice });
+      expect(vi.mocked(createMemberList).mock.calls[2]![0].joinRoomFor).toBeUndefined();
+      classic.destroy();
+      expect(onJoinVoice).not.toHaveBeenCalled();
+    });
   });
 });

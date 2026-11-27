@@ -405,7 +405,8 @@ async function reloadAudit(page){
   const select=document.getElementById('auditAction');if(select)select.innerHTML=auditOptionsHtml();
   if(focused===null)return;
   const again=box.querySelector('button.page-btn[data-args="'+focused+'"]:not([disabled])');
-  (again||box.querySelector('button.page-btn:not([disabled])')||document.querySelector('.filter-search')).focus();
+  const next=again||box.querySelector('button.page-btn:not([disabled])')||document.querySelector('.filter-search');
+  if(next instanceof HTMLElement)next.focus();
 }
 
 function copyAuditLog(){
@@ -883,10 +884,12 @@ function openCreateTokenModal(){
 }
 
 async function createToken(){
-  const label=document.getElementById('tokLabel').value.trim();
+  const labelBox=document.getElementById('tokLabel');
+  const label=labelBox instanceof HTMLInputElement?labelBox.value.trim():'';
   const userBox=document.getElementById('tokUser');
-  const user=userBox?userBox.value.trim():'';
-  const expires=parseInt(document.getElementById('tokExpires').value,10)||0;
+  const user=userBox instanceof HTMLInputElement?userBox.value.trim():'';
+  const expiresBox=document.getElementById('tokExpires');
+  const expires=expiresBox instanceof HTMLInputElement?parseInt(expiresBox.value,10)||0:0;
   if(!label){showToast('Label is required','error');return}
   try{
     const d=await api('POST','/tokens',{label,username:user,expires_hours:expires});
@@ -1001,11 +1004,11 @@ async function renderPlugins(){
 async function installPlugin(){
   const input=document.getElementById('pluginFile');
   const btn=document.getElementById('pluginInstallBtn');
-  const file=input&&input.files&&input.files[0];
+  const file=input instanceof HTMLInputElement&&input.files&&input.files[0];
   if(!file){showToast('Choose a .zip package first','error');return}
   if(state.pluginBusy)return;
   state.pluginBusy=true;
-  if(btn){btn.disabled=true;btn.textContent='Installing...'}
+  if(btn instanceof HTMLButtonElement){btn.disabled=true;btn.textContent='Installing...'}
   const fd=new FormData();
   fd.append('plugin',file);
   try{
@@ -1018,7 +1021,7 @@ async function installPlugin(){
   }catch(e){
     state.pluginBusy=false;
     showToast(e.message,'error');
-    if(btn){btn.disabled=false;btn.textContent='Install'}
+    if(btn instanceof HTMLButtonElement){btn.disabled=false;btn.textContent='Install'}
   }
 }
 
@@ -1054,10 +1057,12 @@ Object.assign(ACTIONS,{clearLogs,downloadLogs,setLogMode,logHistoryOlder,logHist
   previewSupportBundle,revokeToken,setPluginEnabled,toggleLogAutoScroll,toggleLogLevel,toggleLogPause,uninstallPlugin,
   toggleServerLogLevel,
   turnAuditPage(delta){reloadAudit(Math.max(1,state.auditPage+delta))},
+  /** @this {HTMLInputElement} */
   setAuditSearch(){
     state.auditSearch=this.value;clearTimeout(auditSearchTimer);
     auditSearchTimer=setTimeout(()=>reloadAudit(1),300);
   },
+  /** @this {HTMLSelectElement} */
   setAuditActionFilter(){clearTimeout(auditSearchTimer);state.auditActionFilter=this.value;reloadAudit(1)},
   toggleAuditSignins(){
     clearTimeout(auditSearchTimer);state.auditShowSignins=!state.auditShowSignins;
@@ -1065,6 +1070,7 @@ Object.assign(ACTIONS,{clearLogs,downloadLogs,setLogMode,logHistoryOlder,logHist
     if(chip){chip.setAttribute('aria-pressed',String(state.auditShowSignins));chip.innerHTML=(state.auditShowSignins?I.check:'')+'Sign-ins'}
     reloadAudit(1);
   },
+  /** @this {HTMLInputElement} */
   setLogSearch(){state.logSearch=this.value;renderLogLines()},
   /** @this {HTMLInputElement} */
   setLogHistorySearch(){
@@ -1084,4 +1090,5 @@ Object.assign(ACTIONS,{clearLogs,downloadLogs,setLogMode,logHistoryOlder,logHist
   setLogHistoryFrom(){state.logHistory.from=this.value;newLogHistorySearch()},
   /** @this {HTMLInputElement} */
   setLogHistoryTo(){state.logHistory.to=this.value;newLogHistorySearch()},
-  pluginFileChosen(){document.getElementById('pluginInstallBtn').disabled=!this.files.length}});
+  /** @this {HTMLInputElement} */
+  pluginFileChosen(){const btn=document.getElementById('pluginInstallBtn');if(btn instanceof HTMLButtonElement)btn.disabled=!(this.files&&this.files.length)}});

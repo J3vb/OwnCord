@@ -94,6 +94,7 @@ gh api -X PUT "repos/${REPO}/branches/dev/protection" --input - <<'JSON'
       "Docs & Ledger Consistency",
       "Client E2E (Playwright)",
       "Client E2E (parity subset, blocking)",
+      "Client E2E (Deck)",
       "Admin Panel E2E (real server)",
       "Client E2E (real server and media)",
       "Client E2E (Windows native)",

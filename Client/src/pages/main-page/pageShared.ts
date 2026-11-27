@@ -50,15 +50,6 @@ export function getCurrentUserId(): number {
   return authStore.getState().user?.id ?? 0;
 }
 
-/**
- * The device's own network fact, apart from the server's reachability: a LAN
- * server with no internet still answers `onLine`. `undefined` where the host
- * does not expose the API, so a notice never claims the internet is required.
- */
-export function deviceNetworkOffline(): boolean | undefined {
-  return typeof navigator.onLine === "boolean" ? !navigator.onLine : undefined;
-}
-
 // The label shown on a video tile: memberDisplayName when known —
 // the same identity a rename shows everywhere else (ChannelSidebar's
 // voice roster, message rows, the member list) — falling back to the

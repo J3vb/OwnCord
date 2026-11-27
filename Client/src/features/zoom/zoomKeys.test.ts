@@ -51,7 +51,7 @@ describe("keys", () => {
     const setZoom = vi.fn().mockResolvedValue(true);
     const zoom = createZoomController({ setZoom });
     const ac = new AbortController();
-    startZoom(() => Promise.resolve(zoom), ac.signal);
+    startZoom(() => Promise.resolve(zoom), ac.signal, true);
     const input = document.createElement("input");
     document.body.appendChild(input);
 
@@ -80,7 +80,7 @@ describe("keys", () => {
     const setZoom = vi.fn().mockResolvedValue(true);
     const zoom = createZoomController({ setZoom });
     const ac = new AbortController();
-    startZoom(() => Promise.resolve(zoom), ac.signal);
+    startZoom(() => Promise.resolve(zoom), ac.signal, true);
     for (let i = 0; i < 4; i++) {
       document.dispatchEvent(key({ key: "=", ctrlKey: true }));
       // oxlint-disable-next-line no-await-in-loop -- let each step settle in order
@@ -99,7 +99,7 @@ describe("keys", () => {
     const { host, calls, release } = gatedHost();
     const zoom = createZoomController(host);
     const ac = new AbortController();
-    startZoom(() => Promise.resolve(zoom), ac.signal);
+    startZoom(() => Promise.resolve(zoom), ac.signal, true);
     for (let i = 0; i < 4; i++) document.dispatchEvent(key({ key: "=", ctrlKey: true }));
     await vi.waitFor(() => expect(zoom.current()).toBe(175));
     for (let i = 0; i < 5; i++) {
@@ -120,14 +120,32 @@ describe("startZoom", () => {
   it("applies a stored non-default level at startup, and skips the load at 100", async () => {
     const ac = new AbortController();
     const load = vi.fn();
-    startZoom(load, ac.signal);
+    startZoom(load, ac.signal, true);
     expect(load).not.toHaveBeenCalled();
 
     localStorage.setItem("owncord:settings:" + ZOOM_PREF_KEY, "125");
     const setZoom = vi.fn().mockResolvedValue(true);
     const zoom = createZoomController({ setZoom });
-    startZoom(() => Promise.resolve(zoom), ac.signal);
+    startZoom(() => Promise.resolve(zoom), ac.signal, true);
     await vi.waitFor(() => expect(setZoom).toHaveBeenCalledExactlyOnceWith(1.25));
+    ac.abort();
+  });
+
+  it("leaves the browser's own zoom keys and the stored level alone where the host cannot zoom", () => {
+    localStorage.setItem("owncord:settings:" + ZOOM_PREF_KEY, "125");
+    const ac = new AbortController();
+    const load = vi.fn();
+    startZoom(load, ac.signal, false);
+    for (const init of [
+      { key: "=", ctrlKey: true },
+      { key: "-", ctrlKey: true },
+      { key: "0", ctrlKey: true },
+    ]) {
+      const e = key(init);
+      document.dispatchEvent(e);
+      expect(e.defaultPrevented).toBe(false);
+    }
+    expect(load).not.toHaveBeenCalled();
     ac.abort();
   });
 
@@ -135,7 +153,7 @@ describe("startZoom", () => {
     localStorage.setItem("owncord:settings:" + ZOOM_PREF_KEY, "125");
     const ac = new AbortController();
     const load = vi.fn().mockRejectedValue(new Error("chunk failed"));
-    startZoom(load, ac.signal);
+    startZoom(load, ac.signal, true);
     const e = key({ key: "=", ctrlKey: true });
     document.dispatchEvent(e);
     await vi.waitFor(() => expect(load).toHaveBeenCalledTimes(2));

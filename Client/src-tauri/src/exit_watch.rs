@@ -65,8 +65,10 @@ struct Watch {
     run_file: PathBuf,
     started: i64,
     version: String,
-    /// Monotonic second ([`mono`]) of the last answered main-thread ping. A
-    /// suspended machine does not advance it, so a resume is no freeze.
+    /// Monotonic second ([`mono`]) of the last answered main-thread ping.
+    /// Windows' monotonic clock counts the time the machine sleeps, so the
+    /// watchdog moves this and the other times below past a sleep it notices
+    /// ([`MainCheck::tick`]): a resume is no freeze.
     main_answered: AtomicI64,
     /// A ping is queued and not yet answered: no second one is queued behind
     /// a frozen main thread.
@@ -111,11 +113,17 @@ impl Watch {
 
 static WATCH: OnceLock<Arc<Watch>> = OnceLock::new();
 
-/// Seconds on the monotonic clock since this module first asked.
+/// Seconds on the monotonic clock since this module first asked. On Windows
+/// it includes the time the machine sleeps; on Linux it does not.
 fn mono() -> i64 {
     static ORIGIN: OnceLock<Instant> = OnceLock::new();
     let origin = *ORIGIN.get_or_init(Instant::now);
     i64::try_from(origin.elapsed().as_secs()).unwrap_or(i64::MAX)
+}
+
+/// A duration in whole seconds, as [`mono`] counts.
+fn secs(d: Duration) -> i64 {
+    i64::try_from(d.as_secs()).unwrap_or(i64::MAX)
 }
 
 fn now() -> i64 {
@@ -173,14 +181,14 @@ pub fn note_exit(how: &str) {
 /// finds it reads it as the update handoff rather than an unexplained end.
 pub fn note_update_handoff() {
     if let Some(watch) = WATCH.get() {
-        write_run_file(watch);
+        write_run_file(watch, mono());
     }
 }
 
 fn watchdog<R: Runtime>(app: &AppHandle<R>, watch: &Arc<Watch>) {
     // The first beat writes the run file at once, off the main thread.
     let mut last_beat = i64::MIN / 2;
-    let mut hang_logged_at: Option<i64> = None;
+    let mut check = MainCheck::new(mono());
     while !watch.exited.load(Ordering::SeqCst) {
         if !watch.ping_pending.swap(true, Ordering::SeqCst) {
             let answered = watch.clone();
@@ -195,38 +203,115 @@ fn watchdog<R: Runtime>(app: &AppHandle<R>, watch: &Arc<Watch>) {
         }
         std::thread::sleep(PING_EVERY);
         let t = mono();
-        let silent_for = t - watch.main_answered.load(Ordering::SeqCst);
-        let hang_secs = i64::try_from(HANG_AFTER.as_secs()).unwrap_or(5);
-        match hang_logged_at {
-            None if silent_for >= hang_secs => {
+        match check.tick(watch, t) {
+            MainVerdict::Hang(silent_for) => {
                 log::warn!(
                     "[hang] main thread has not answered for {silent_for} s (window frozen); {}",
                     platform::memory_text()
                 );
                 log::logger().flush();
-                hang_logged_at = Some(t - silent_for);
-                write_run_file(watch);
+                write_run_file(watch, t);
             }
-            Some(since) if silent_for < hang_secs => {
+            MainVerdict::Answers(after) => {
                 log::warn!(
                     "[hang] main thread answers again after {}",
-                    duration_text(t - since)
+                    duration_text(after)
                 );
-                hang_logged_at = None;
             }
-            _ => {}
+            MainVerdict::Unchanged => {}
         }
         probe_webview(watch);
-        if t - last_beat >= i64::try_from(HEARTBEAT.as_secs()).unwrap_or(10) {
+        if t - last_beat >= secs(HEARTBEAT) {
             last_beat = t;
             log_memory_step(watch);
-            write_run_file(watch);
+            write_run_file(watch, t);
             #[cfg(target_os = "linux")]
             platform::trim_stderr();
             #[cfg(windows)]
             crate::exception_log::follow_rotation();
         }
     }
+}
+
+/// What the watchdog keeps about the main thread from one tick to the next.
+struct MainCheck {
+    /// Monotonic second of the previous tick.
+    prev_tick: i64,
+    /// The last answer before the hang that is logged now; `None` while no
+    /// hang is.
+    hang_since: Option<i64>,
+}
+
+/// What one watchdog tick concludes about the main thread.
+#[derive(Debug, PartialEq, Eq)]
+enum MainVerdict {
+    /// Nothing new to log.
+    Unchanged,
+    /// It has not answered for this many seconds: a hang begins.
+    Hang(i64),
+    /// It answers again after a hang of this many seconds.
+    Answers(i64),
+}
+
+impl MainCheck {
+    fn new(t: i64) -> Self {
+        Self {
+            prev_tick: t,
+            hang_since: None,
+        }
+    }
+
+    /// The watchdog's tick at monotonic second `t`.
+    ///
+    /// The watchdog sleeps with the rest of the machine, so a tick that comes
+    /// [`HANG_AFTER`] or more after the previous one, where [`PING_EVERY`] was
+    /// due, follows a sleep. The times stored up to the previous tick move
+    /// past it, so the main thread and the webview are judged on the seconds
+    /// the machine was awake, and a frozen main thread is still frozen after
+    /// it. A watchdog held up as long for another reason (a stalled disk
+    /// write) is judged the same way. A real freeze still shows, since the
+    /// watchdog keeps ticking on time while the main thread is stuck.
+    fn tick(&mut self, watch: &Watch, t: i64) -> MainVerdict {
+        let prev = self.prev_tick;
+        self.prev_tick = t;
+        if t - prev >= secs(HANG_AFTER) {
+            for stored in [
+                &watch.main_answered,
+                &watch.webview_unresponsive_since,
+                &watch.webview_probe_sent,
+            ] {
+                // Err: nothing to move.
+                let _ = stored.fetch_update(Ordering::SeqCst, Ordering::SeqCst, |since| {
+                    past_sleep(since, prev, t)
+                });
+            }
+            self.hang_since = self
+                .hang_since
+                .map(|since| past_sleep(since, prev, t).unwrap_or(since));
+        }
+        let silent_for = t - watch.main_answered.load(Ordering::SeqCst);
+        match self.hang_since {
+            None if silent_for >= secs(HANG_AFTER) => {
+                self.hang_since = Some(t - silent_for);
+                MainVerdict::Hang(silent_for)
+            }
+            Some(since) if silent_for < secs(HANG_AFTER) => {
+                self.hang_since = None;
+                MainVerdict::Answers(t - since)
+            }
+            _ => MainVerdict::Unchanged,
+        }
+    }
+}
+
+/// `since`, a monotonic second stored before a sleep that fell between the
+/// watchdog's ticks at `prev` and `t`, moved past that sleep (never past
+/// `t`). `None` when there is nothing to move: no time (-1), or one stored
+/// after the resume, such as a main thread's answer that came first, which
+/// is nearer this tick than the previous one.
+fn past_sleep(since: i64, prev: i64, t: i64) -> Option<i64> {
+    let asleep = t - prev - secs(PING_EVERY);
+    (since >= 0 && since - prev < t - since).then(|| (since + asleep).min(t))
 }
 
 /// Watch the webview's helper processes: log their end and the page's
@@ -311,7 +396,8 @@ fn run_file_path(dir: &Path, pid: u32) -> PathBuf {
     dir.join(format!("{RUN_FILE_PREFIX}{pid}{RUN_FILE_SUFFIX}"))
 }
 
-fn write_run_file(watch: &Watch) {
+/// Write the run file as of monotonic second `m`.
+fn write_run_file(watch: &Watch, m: i64) {
     // Kept on every heartbeat while the installer runs, so a process the
     // installer ends reads as the update handoff, not an unexplained end.
     let state = if crate::update_commands::installer_launching() {
@@ -324,9 +410,8 @@ fn write_run_file(watch: &Watch) {
         return;
     }
     let t = now();
-    let m = mono();
     let main_silent = m - watch.main_answered.load(Ordering::SeqCst);
-    let main = if main_silent >= i64::try_from(HANG_AFTER.as_secs()).unwrap_or(5) {
+    let main = if main_silent >= secs(HANG_AFTER) {
         format!("not answering for {}", duration_text(main_silent))
     } else {
         "answering".to_string()
@@ -535,15 +620,102 @@ mod tests {
     fn no_write_lands_after_a_normal_exit() {
         let dir = TempDir::new("exit");
         let watch = Watch::new(run_file_path(&dir.0, 1), "test");
-        write_run_file(&watch);
+        write_run_file(&watch, mono());
         assert!(watch.run_file.exists());
         watch.exited.store(true, Ordering::SeqCst);
         std::fs::remove_file(&watch.run_file).unwrap();
-        write_run_file(&watch);
+        write_run_file(&watch, mono());
         assert!(
             !watch.run_file.exists(),
             "a late heartbeat must not recreate it"
         );
+    }
+
+    /// A watch whose main thread last answered at monotonic second `answered`,
+    /// and the watchdog's check with its previous tick at `prev_tick`.
+    fn watch_at(dir: &TempDir, answered: i64, prev_tick: i64) -> (Watch, MainCheck) {
+        let watch = Watch::new(run_file_path(&dir.0, 1), "test");
+        watch.main_answered.store(answered, Ordering::SeqCst);
+        (watch, MainCheck::new(prev_tick))
+    }
+
+    fn run_file_at(watch: &Watch, t: i64) -> String {
+        write_run_file(watch, t);
+        std::fs::read_to_string(&watch.run_file).unwrap()
+    }
+
+    #[test]
+    fn a_tick_after_the_machine_slept_is_no_freeze() {
+        let dir = TempDir::new("slept");
+        // The tick at 100 pinged the main thread, which answered in that
+        // second or the next; the webview stopped answering at 99 and a probe
+        // went out. Then the machine sleeps for an hour (Windows' clock
+        // counts it), so the next tick comes at 3701.
+        for answered in [100, 101] {
+            let (watch, mut check) = watch_at(&dir, answered, 100);
+            watch.webview_unresponsive_since.store(99, Ordering::SeqCst);
+            watch.webview_probe_sent.store(99, Ordering::SeqCst);
+            assert_eq!(check.tick(&watch, 3701), MainVerdict::Unchanged);
+            let text = run_file_at(&watch, 3701);
+            assert!(text.contains("main_thread=answering\n"), "{text}");
+            assert!(text.contains("webview=not answering for 2 s\n"), "{text}");
+            let probe_age = 3701 - watch.webview_probe_sent.load(Ordering::SeqCst);
+            assert!(probe_age < PROBE_GIVE_UP_SECS);
+            // The ticks that follow are on time again.
+            watch.main_answered.store(3701, Ordering::SeqCst);
+            assert_eq!(check.tick(&watch, 3702), MainVerdict::Unchanged);
+        }
+        // An answer that came after the resume is not moved.
+        let (watch, mut check) = watch_at(&dir, 3700, 100);
+        assert_eq!(check.tick(&watch, 3701), MainVerdict::Unchanged);
+        assert_eq!(watch.main_answered.load(Ordering::SeqCst), 3700);
+        assert_eq!(watch.webview_unresponsive_since.load(Ordering::SeqCst), -1);
+    }
+
+    #[test]
+    fn a_real_freeze_is_logged_after_five_seconds_and_so_is_its_end() {
+        let dir = TempDir::new("frozen");
+        let (watch, mut check) = watch_at(&dir, 100, 100);
+        let verdicts: Vec<MainVerdict> = (101..=106).map(|t| check.tick(&watch, t)).collect();
+        assert_eq!(
+            verdicts,
+            [
+                MainVerdict::Unchanged,
+                MainVerdict::Unchanged,
+                MainVerdict::Unchanged,
+                MainVerdict::Unchanged,
+                MainVerdict::Hang(5),
+                MainVerdict::Unchanged,
+            ]
+        );
+        let text = run_file_at(&watch, 106);
+        assert!(
+            text.contains("main_thread=not answering for 6 s\n"),
+            "{text}"
+        );
+        assert_eq!(check.tick(&watch, 107), MainVerdict::Unchanged);
+        watch.main_answered.store(108, Ordering::SeqCst);
+        assert_eq!(check.tick(&watch, 108), MainVerdict::Answers(8));
+    }
+
+    #[test]
+    fn a_freeze_that_spans_a_sleep_does_not_count_the_sleep() {
+        let dir = TempDir::new("frozen-slept");
+        let (watch, mut check) = watch_at(&dir, 100, 100);
+        for t in 101..=105 {
+            check.tick(&watch, t);
+        }
+        // Still frozen after an hour asleep: no end is logged, and the run
+        // file counts awake seconds only: 5 before the sleep, and 1 for the
+        // tick it interrupted.
+        assert_eq!(check.tick(&watch, 3706), MainVerdict::Unchanged);
+        let text = run_file_at(&watch, 3706);
+        assert!(
+            text.contains("main_thread=not answering for 6 s\n"),
+            "{text}"
+        );
+        watch.main_answered.store(3708, Ordering::SeqCst);
+        assert_eq!(check.tick(&watch, 3708), MainVerdict::Answers(8));
     }
 
     #[test]

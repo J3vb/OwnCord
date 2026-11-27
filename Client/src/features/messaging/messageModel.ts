@@ -4,6 +4,7 @@
 // stays the only import path consumers use.
 import type { JournalEntry } from "./loadJournal";
 import { linkPreviewFields } from "../../lib/linkPreviewState";
+import { boundInboundText } from "../../lib/text/inboundText";
 import type {
   CallInfo,
   GroupEventInfo,
@@ -191,7 +192,7 @@ export function chatPayloadToMessage(payload: ChatMessagePayload): Message {
     id: payload.id,
     channelId: payload.channel_id,
     user: payload.user,
-    content: payload.content,
+    content: boundInboundText(payload.content),
     replyTo: payload.reply_to,
     ...(payload.referenced_message !== undefined && {
       referencedMessage: payload.referenced_message,
@@ -224,7 +225,7 @@ export function messageResponseToMessage(response: MessageResponse): Message {
     id: response.id,
     channelId: response.channel_id,
     user: response.user,
-    content: response.content,
+    content: boundInboundText(response.content),
     replyTo: response.reply_to,
     ...(response.referenced_message !== undefined && {
       referencedMessage: response.referenced_message,

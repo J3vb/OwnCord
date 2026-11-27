@@ -218,6 +218,26 @@ describe("trapFocus", () => {
 });
 
 describe("focusDialog", () => {
+  it("the restorer falls back when the opener is connected but does not take focus", () => {
+    const opener = document.createElement("button");
+    const fallback = document.createElement("button");
+    container.append(opener, fallback);
+    opener.focus();
+
+    const dialog = document.createElement("div");
+    applyDialogSemantics(dialog);
+    dialog.appendChild(document.createElement("button"));
+    container.appendChild(dialog);
+    const restore = focusDialog(dialog, () => fallback);
+
+    // A disabled opener stands in for one a refit hid: connected, not inert, unfocusable.
+    opener.disabled = true;
+    dialog.remove();
+    restore();
+    expect(opener.isConnected).toBe(true);
+    expect(document.activeElement).toBe(fallback);
+  });
+
   it("focuses the first focusable control and restores on close", () => {
     const outside = document.createElement("button");
     container.appendChild(outside);

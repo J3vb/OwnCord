@@ -1,5 +1,5 @@
 // The native notifier: the notification plugin and the window's attention
-// request. Lifted verbatim from `lib/notifications.ts`, where the Web
+// request. Lifted verbatim from `features/notifications/notifications.ts`, where the Web
 // Notification fallback stays — it is the caller's, not the seam's.
 //
 // The plugins stay dynamic `import()`s: neither is part of the startup chunk
@@ -39,6 +39,7 @@ export const notifier: Notifier = {
   // tauri-plugin-notification's desktop backend hard-codes both the
   // permission state and the request answer to "granted".
   readsOsPermission: false,
+  canFlash: true,
   async permissionGranted(): Promise<boolean> {
     const { isPermissionGranted } = await import("@tauri-apps/plugin-notification");
     return isPermissionGranted();
@@ -60,7 +61,7 @@ export const notifier: Notifier = {
   // activation and emits `notification-click`; on Windows it shows a
   // protocol-activation toast whose click comes back as an `owncord://message`
   // deep link instead, so this event never fires there.
-  // A refusal still rejects: `lib/notifications.ts` falls back to a Web
+  // A refusal still rejects: `features/notifications/notifications.ts` falls back to a Web
   // Notification on it.
   async showMessage(title: string, body: string, target: NotificationTarget): Promise<void> {
     await invokeOrThrow("notify_message", {

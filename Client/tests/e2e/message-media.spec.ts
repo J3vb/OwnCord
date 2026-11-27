@@ -428,7 +428,7 @@ test.describe("YouTube embed box", () => {
 // ---------------------------------------------------------------------------
 
 test.describe("Link preview", () => {
-  test("renders the OG title, site, description and broker image from the preview", async ({
+  test("renders the OG title, host, description and broker image from the preview", async ({
     page,
   }) => {
     await bootMedia(page, {
@@ -449,7 +449,8 @@ test.describe("Link preview", () => {
       timeout: 5_000,
     });
     await expect(card.locator(".msg-embed-link-title")).toHaveAttribute("href", LINK_URL);
-    await expect(card.locator(".msg-embed-host")).toHaveText("Example");
+    // The host line names the link's own host, never the site name the page gives.
+    await expect(card.locator(".msg-embed-host")).toHaveText("example.com");
     await expect(card.locator(".msg-embed-link-desc")).toHaveText(
       "A short summary of the linked page.",
     );

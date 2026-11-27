@@ -21,7 +21,7 @@ export const soundHostDesktop = () => ({
   },
 });
 
-/** `features/voice/native/platform`, following `soundHost.linux`. */
+/** `lib/hostOs`, following `soundHost.linux`. */
 export const soundHostPlatform = () => ({
   isLinuxDesktop: () => soundHost.linux,
   isWindowsDesktop: () => false,

@@ -11,25 +11,45 @@ export interface ModeratorAudioPlan {
   readonly releaseDeafen: boolean;
 }
 
+/** The member's own moderator flags as the store held them before the frame
+ *  was applied: the update itself rewrites them, so they are read first. */
+export interface PrevModeratorFlags {
+  readonly serverMuted: boolean;
+  readonly serverDeafened: boolean;
+  /** The local mute was the one the moderator's mute laid over an open mic
+   *  (VoiceState.moderatorMuted). Only that mute is the moderator's to lift. */
+  readonly moderatorMuted: boolean;
+}
+
+/** Read the pre-update moderator flags from `state`. */
+export function prevModeratorFlags(state: VoiceState): PrevModeratorFlags {
+  return {
+    serverMuted: state.localServerMuted ?? false,
+    serverDeafened: state.localServerDeafened ?? false,
+    moderatorMuted: state.moderatorMuted === true,
+  };
+}
+
 /** What `enforceModeratorAudioState` does for one frame, decided from the
  *  store snapshot taken before any of it is applied. */
 export function moderatorAudioPlan(
   voice: VoiceState,
   serverMuted: boolean,
   serverDeafened: boolean,
-  prevServerMuted: boolean,
-  prevServerDeafened: boolean,
+  prev: PrevModeratorFlags,
   selfMuted: boolean,
   selfDeafened: boolean,
 ): ModeratorAudioPlan {
-  const deafenLifted = prevServerDeafened && !serverDeafened;
+  const deafenLifted = prev.serverDeafened && !serverDeafened;
   const keepOwnDeafen = deafenLifted && voice.localDeafened && voice.moderatorDeafened !== true;
+  const muteLifted = prev.serverMuted && !serverMuted;
   return {
     applyDeafen: serverDeafened && !voice.localDeafened,
     deafenLifted,
     keepOwnDeafen,
     applyMute: serverMuted && !voice.localMuted,
-    releaseMute: prevServerMuted && !serverMuted && voice.localMuted && !selfMuted,
+    // A mute the member set themselves stays: only the moderator's own mute is released.
+    releaseMute: muteLifted && prev.moderatorMuted && voice.localMuted && !selfMuted,
     releaseDeafen: deafenLifted && !keepOwnDeafen && voice.localDeafened && !selfDeafened,
   };
 }

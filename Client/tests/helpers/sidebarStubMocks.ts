@@ -1,6 +1,6 @@
 import { vi } from "vitest";
 
-/** Factory body for `vi.mock("@lib/voice/livekitSession", ...)` in sidebar suites. */
+/** Factory body for `vi.mock("../../src/features/voice/livekitSession", ...)` in sidebar suites. */
 export function rePinOnlySessionMock() {
   return { rePinPeerIdentity: vi.fn() };
 }

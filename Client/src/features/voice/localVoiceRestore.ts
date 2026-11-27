@@ -5,6 +5,7 @@
 import {
   voiceStore,
   isPttPollingLive,
+  isPttClosePending,
   setPttGated as setPttGatedState,
   setListenOnly,
   type VoiceState,
@@ -12,11 +13,11 @@ import {
 import { pttGates } from "@lib/ui/inputMode";
 import { createLogger } from "@lib/logger";
 import type { AudioPipeline } from "@lib/voice/audioPipeline";
-import type { AudioElements } from "@lib/voice/audioElements";
+import type { AudioElements } from "./audioElements";
 import { type MediaControl, syncShareGrant } from "./mediaControl";
 import { voiceText } from "../../i18n/voice";
 import { type LostMedia, restoreLostMedia } from "./mediaLostNotice";
-import { isLinuxDesktop } from "./native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 import type { SessionState } from "./sessionState";
 import type { VoiceRoom } from "@lib/voice/voiceRoom";
 
@@ -58,7 +59,9 @@ function armPttGate(
   // gate is still supposed to be closed; reading it back here (instead of
   // silently reopening the mic) is what keeps that promise across a
   // reconnect.
-  const pttArmed = mode === "join" ? pttGates(isPttPollingLive()) : state.pttGated === true;
+  // A release still waiting out its delay counts as closed: its close is due.
+  const pttArmed =
+    mode === "join" ? pttGates(isPttPollingLive()) : state.pttGated === true || isPttClosePending();
   if (mode === "join") setPttGatedState(pttArmed);
   host.audioPipeline.setPttGated(pttArmed);
 }

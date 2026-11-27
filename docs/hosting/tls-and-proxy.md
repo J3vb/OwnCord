@@ -95,8 +95,17 @@ Set `tls.mode: "off"` and let the proxy do HTTPS. Then three things:
      must fail.
 2. **Tell OwnCord where the proxy is.** Set `server.trusted_proxies` to the
    proxy's address, for example `["127.0.0.1/32", "::1/128"]` for a proxy on
-   the same machine. Without it, every visitor looks like the proxy, and rate
-   limits hit everyone at once. List only proxies, never client networks.
+   the same machine. Without it, every visitor looks like the proxy: rate
+   limits hit everyone at once, and the address lists for the admin panel and
+   the metrics pages (`server.admin_allowed_cidrs`,
+   `server.metrics_allowed_cidrs`), whose default includes the local machine
+   and private networks, let every visitor through. The admin panel still
+   needs a staff sign-in; the metrics pages need none. List only proxies, never
+   client networks.
+   From a listed proxy OwnCord reads `X-Forwarded-For` (the recipes below set
+   it), and only when that header is missing falls back to `X-Real-IP`. A proxy
+   or tunnel that does not set `X-Forwarded-For` must set `X-Real-IP` itself or
+   strip it, so a visitor cannot choose their own address.
 3. **Voice does not go through the proxy.** Chat, the admin panel, uploads and
    voice sign-in all go over 8443. The voice media ports (`7881/TCP` and the UDP
    port or range) must still reach the server directly.

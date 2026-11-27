@@ -29,11 +29,11 @@ vi.mock("../../../src/platform/desktop", () => ({ desktop: { notifier } }));
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
   mocks.prefsPreferencesMock(importOriginal),
 );
-vi.mock("../../../src/lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 
 await import("../../../src/lib/text/markdown");
 const { notifyIncomingMessage, notifyChannelActivity } =
-  await import("../../../src/lib/notifications");
+  await import("../../../src/features/notifications/notifications");
 
 const settle = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 40));
 

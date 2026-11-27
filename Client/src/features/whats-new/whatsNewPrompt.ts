@@ -14,14 +14,28 @@ import type { WhatsNewDialog } from "./WhatsNewDialog";
 const log = createLogger("whats-new");
 
 /** `onOpenHistory` opens Settings › About; the page passes it so the lazy
- *  dialog chunk does not pull the UI store into a shared startup chunk. */
-export function createWhatsNewPrompt(onOpenHistory: () => void): MountableComponent {
+ *  dialog chunk does not pull the UI store into a shared startup chunk.
+ *  `onSettled` runs once, when this start shows no notes, the check fails, or
+ *  the person closes the dialog; never after `destroy()`, and not when Version
+ *  history closes it, since Settings then opens over the page. */
+export function createWhatsNewPrompt(
+  onOpenHistory: () => void,
+  onSettled: (container: Element) => void = () => {},
+): MountableComponent {
   const owner = new Disposable();
   let dialog: WhatsNewDialog | null = null;
+  let settled = false;
 
-  async function run(container: Element): Promise<void> {
+  const settle = (container: Element): void => {
+    if (settled || owner.signal.aborted) return;
+    settled = true;
+    onSettled(container);
+  };
+
+  /** Shows the notes when this start has some; false when it shows nothing. */
+  async function run(container: Element): Promise<boolean> {
     const version = await readAppVersion();
-    if (version === null || owner.signal.aborted || !isNewVersion(version)) return;
+    if (version === null || owner.signal.aborted || !isNewVersion(version)) return false;
     // The changelog and the dialog load only on the start that needs them.
     const [{ loadChangelog }, { findVersion }, { showWhatsNewDialog }] = await Promise.all([
       import("./changelogSource"),
@@ -29,19 +43,27 @@ export function createWhatsNewPrompt(onOpenHistory: () => void): MountableCompon
       import("./WhatsNewDialog"),
     ]);
     const entry = findVersion(await loadChangelog(), version);
-    if (owner.signal.aborted) return;
+    if (owner.signal.aborted) return false;
     markVersionSeen(version);
-    if (entry === null) return;
-    dialog = showWhatsNewDialog(container, entry, onOpenHistory, () => {
+    if (entry === null) return false;
+    dialog = showWhatsNewDialog(container, entry, onOpenHistory, (toHistory) => {
       dialog = null;
+      if (!toHistory) settle(container);
     });
+    return true;
   }
 
   return {
     mount(container: Element): void {
-      void run(container).catch((err: unknown) => {
-        log.warn("What's new check failed", { error: String(err) });
-      });
+      void run(container).then(
+        (shown) => {
+          if (!shown) settle(container);
+        },
+        (err: unknown) => {
+          log.warn("What's new check failed", { error: String(err) });
+          settle(container);
+        },
+      );
     },
     destroy(): void {
       owner.destroy();

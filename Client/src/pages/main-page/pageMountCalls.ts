@@ -30,7 +30,10 @@ import {
   setRemoteVideoView,
   setRemoteVideoWatched,
   forgetRemoteVideoWatch,
-} from "@lib/voice/livekitSession";
+  listenToMusic,
+  getMusicVolume,
+  setMusicVolume,
+} from "../../features/voice/livekitSession";
 import { createSidebarVoiceCallbacks } from "./VoiceCallbacks";
 import { createIncomingCallBanner } from "../../features/direct-messages/IncomingCallBanner";
 import { createRingController, createOutgoingCall } from "@lib/voice/callRing";
@@ -370,6 +373,7 @@ export function mountVideo(st: PageState, pg: PageApi, ms: MountScope): void {
   ms.prevAudioState = "";
 
   ms.prevViewers = "";
+  ms.prevMusic = "";
 
   ms.prevCallState = "";
 
@@ -398,6 +402,8 @@ export function mountVideo(st: PageState, pg: PageApi, ms: MountScope): void {
     tileLabel,
     personName,
     syncCallState: (state) => ms.syncCallState(state),
+    selfId: getCurrentUserId,
+    music: { listen: listenToMusic, volume: getMusicVolume, setVolume: setMusicVolume },
   };
   st.unsubscribers.push(
     voiceStore.subscribe((state) => {

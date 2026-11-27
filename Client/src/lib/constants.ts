@@ -12,3 +12,7 @@ export const MAX_GROUP_DM_PARTICIPANTS = 10;
  *  changes, so the sidebar row and the video tile that show it redraw
  *  (mirrors CHANNEL_MUTE_CHANGED). Detail: `{ userId }`. */
 export const USER_LOCAL_MUTE_CHANGED = "owncord:user-local-mute-changed";
+
+/** Window event fired after a voice user's local volume level changes, from
+ *  any surface, so the video tiles that show it redraw. Detail: `{ userId }`. */
+export const USER_VOLUME_CHANGED = "owncord:user-volume-changed";

@@ -4,6 +4,7 @@ import { defineCatalog } from "./format";
  *  copy loads with the main page chunk, not the startup closure. */
 export const serverRailText = defineCatalog("serverRail", {
   label: "Servers",
+  serversNamed: "Servers, {name}",
   home: "Home",
   homeUnread: {
     one: "Home, {count} unread direct message",
@@ -28,6 +29,18 @@ export const serverRailText = defineCatalog("serverRail", {
     other: "In a call with {name}, {count} unread messages",
   },
   homeDirect: "Direct messages",
+  directUnread: {
+    one: "Direct messages, {count} unread",
+    other: "Direct messages, {count} unread",
+  },
+  directRequests: {
+    one: "Direct messages, {count} message request waiting",
+    other: "Direct messages, {count} message requests waiting",
+  },
+  directUnreadRequests: {
+    one: "Direct messages, {unread} unread, {count} message request waiting",
+    other: "Direct messages, {unread} unread, {count} message requests waiting",
+  },
   add: "Add a server",
   join: "Join with an invite link",
   folder: "Folder",
@@ -35,6 +48,10 @@ export const serverRailText = defineCatalog("serverRail", {
   currentSuffix: "{name} (current server)",
   moveUp: "Move up",
   moveDown: "Move down",
+  moveLeft: "Move left",
+  moveRight: "Move right",
+  moveToStart: "Move to start",
+  moveToFolder: "Move to {name}",
   groupNext: "Create folder with next server",
   removeFromFolder: "Remove from folder",
   renameFolder: "Rename folder",
@@ -50,6 +67,15 @@ export const serverRailText = defineCatalog("serverRail", {
   expand: "Expand folder",
   collapse: "Collapse folder",
   menu: "Server options",
+  tabsLabel: "Server tabs",
+  folderTab: {
+    one: "Folder: {name}, {count} server",
+    other: "Folder: {name}, {count} servers",
+  },
+  holdsCurrent: "{label}, holds the current server",
+  moreTabs: "+{count} more",
+  moreMark: "+{count}",
+  addMenu: "Add or join a server",
   folderMenu: "Folder options",
   joinTitle: "Join with an invite link",
   joinLabel: "Paste an invite link",

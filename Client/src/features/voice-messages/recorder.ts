@@ -25,7 +25,7 @@ import {
 } from "./recorderDevices";
 import { encodeWaveform, reducePeaks, WAVEFORM_BARS } from "./waveform";
 import { encodeWav } from "./wav";
-import { isLinuxDesktop } from "../voice/native/platform";
+import { isLinuxDesktop } from "@lib/hostOs";
 
 /** A recording ends on its own here. */
 export const MAX_DURATION_MS = 300_000;

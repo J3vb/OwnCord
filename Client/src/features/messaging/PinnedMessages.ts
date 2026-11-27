@@ -5,7 +5,7 @@ import { createElement, appendChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import { createSidePanelFrame } from "@lib/ui/sidePanelFrame";
 import type { MountableComponent } from "@lib/text/safeRender";
-import { parseTimestamp } from "@lib/text/formatting";
+import { parseTimestamp } from "./formatting";
 import { messagingText } from "../../i18n/messaging";
 import { formatDate } from "../../i18n/format";
 import { createAvatarElement } from "../profiles/avatar";

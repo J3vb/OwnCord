@@ -44,10 +44,17 @@ function makeOptions(overrides?: Partial<SettingsOverlayOptions>): SettingsOverl
   });
 }
 
+/** Owns the listeners of every tab `build` makes; aborted after each test. */
+let buildScope = new AbortController();
+afterEach(() => {
+  buildScope.abort();
+  buildScope = new AbortController();
+});
+
 function build(opts: SettingsOverlayOptions): HTMLElement {
   const container = document.createElement("div");
   document.body.appendChild(container);
-  container.appendChild(buildAccountTab(opts, new AbortController().signal));
+  container.appendChild(buildAccountTab(opts, buildScope.signal));
   return container;
 }
 

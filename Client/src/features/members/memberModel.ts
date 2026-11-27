@@ -23,6 +23,10 @@ export type ListItem =
       readonly key: string;
       readonly text: string;
       readonly offline: boolean;
+      /** The group can be folded; absent means it cannot. */
+      readonly collapsible?: boolean;
+      /** The group is folded: its rows are left out. */
+      readonly collapsed?: boolean;
     }
   | {
       readonly kind: "row";
@@ -124,6 +128,14 @@ function searchText(member: Member): string {
     foldCache.set(member, text);
   }
   return text;
+}
+
+/** The search box's test for one member: case-, accent- and `@`-insensitive,
+ *  on the username and the display name. An empty query matches everyone. */
+export function memberMatcher(query: string): (member: Member) => boolean {
+  const needle = fold(query.trim().replace(/^@\s*/, ""));
+  if (needle === "") return () => true;
+  return (member) => searchText(member).includes(needle);
 }
 
 /** Bucket keys of the OFFLINE and ONLINE groups; role buckets are keyed by
@@ -410,9 +422,9 @@ export function flattenModel(model: MemberModel, query: string): ListItem[] {
   if (model.members.size === 0) {
     return [{ kind: "empty", key: "empty", text: shellText("members.empty") }];
   }
-  const needle = fold(query.trim().replace(/^@\s*/, ""));
+  const matches = memberMatcher(query);
   const matching = (entries: readonly Entry[]): readonly Entry[] =>
-    needle === "" ? entries : entries.filter((e) => searchText(e.member).includes(needle));
+    entries.filter((e) => matches(e.member));
 
   // A role missing from the server's list (deleted mid-session) still renders,
   // in a gray group, after the listed ones.

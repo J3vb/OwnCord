@@ -15,7 +15,7 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   `[target.'cfg(target_os = "linux")'.dependencies]`. Design:
   [docs/architecture/voice-e2ee.md](voice-e2ee.md).
 - Linux voice runs in that backend (`src-tauri/src/native_voice/`) behind the
-  `livekitSession` facade: `features/voice/native/platform.ts`'s
+  `livekitSession` facade: `lib/hostOs.ts`'s
   `isLinuxDesktop()` (the Tauri host on a Linux, non-Android user agent) is the
   only switch, `RoomLifecycle.createRoom` builds a `NativeRoom` adapter there,
   `E2EEWorker.applyRoomKey` sends the key over the `NativeVoice` platform
@@ -33,7 +33,9 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   `GstDeviceMonitor`/`v4l2src`/`pipewiresrc` → `decodebin` → I420 `appsink`),
   so the camera keeps working while the window is hidden; the
   `NativeCameraTrack` (`native/nativeCameraTrack.ts`) is its preview, read
-  back over the frame socket. Screen share captures in the backend
+  back over the frame socket. The camera and screen-share previews are scaled
+  to fit 1280x720 and sent at most 30 times a second; the published tracks keep
+  the capture's size and rate. Screen share captures in the backend
   (`src-tauri/src/native_voice/screen.rs`, libwebrtc's `DesktopCapturer`):
   `native/screenPicker.ts` picks on X11, the xdg-desktop-portal dialog picks
   on Wayland, and `features/voice/screenShare.ts`'s one `isLinuxDesktop()` branch swaps
@@ -104,6 +106,19 @@ touch Linux voice do not load it. `Client/CLAUDE.md` keeps the short rule.
   waits (publishes, the microphone steps, share audio) through the same slot,
   so it gets `inner` at once.
 
+## No realtime scheduling for the app's own threads
+
+libwebrtc requests `SCHED_FIFO` for every thread it starts and gets it where
+the session's `RLIMIT_RTPRIO` allows. A portal screen share loads PipeWire's
+realtime module into the process, which on some hosts caps `RLIMIT_RTTIME` at
+RTKit's 200 ms for the whole process; the kernel then ends the process once a
+realtime thread, such as a busy software encoder, runs that long without
+sleeping. `realtime_limits.rs` lowers the soft `RLIMIT_RTPRIO` to 0 at launch
+(`prepare_linux_launch`), so those threads stay on the normal scheduler.
+PipeWire's own data thread still becomes realtime through RTKit or the portal.
+The `[startup] session:` log line ends with the limits found
+(`rtprio=soft/hard`, `rttime_us=soft/hard`).
+
 ## Share music
 
 The Linux room shares one app's sound as a second audio track named `music`
@@ -115,6 +130,13 @@ The host's `musicShareEnded` event ends a share the host dropped on its own.
 
 - A listener tells music from a screen share's sound by the track name alone
   (`lib/voice/musicTrack.ts`), in the native roster as on the web path.
+- A music track is subscribed only for the one sharer the viewer listens to
+  (`RemoteTracks.listen`, mirrored in `voiceStore.listeningTo`), through the
+  same `setSubscribed` switch as a watched screen share. The host
+  auto-subscribes every track and the native room raises no `TrackSubscribed`
+  for audio, so the music gain is the gate there: `AudioElements.getMusicGain`
+  is 0 for every sharer but the one listened to, and that gain is pushed to the
+  mixer when a participant appears and whenever the listen changes.
 - Music has its own per-user volume and Mute music, folded into one gain
   together with deafen and the output volume (`AudioElements.getMusicGain`);
   the room pushes that gain to the playout mixer with

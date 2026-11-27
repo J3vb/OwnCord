@@ -14,31 +14,30 @@ import { reconcileModels, sameModel } from "@lib/net/reconcile";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
 import { createLazyScreen } from "../../lib/ui/lazyScreen";
-import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
+import { getUserLocalMute, getUserVolume, listenToMusic } from "../voice/livekitSession";
 import { loadPref } from "@lib/prefs/preferences";
-import { userMusicMuteKey } from "@lib/voice/audioVolumePrefs";
+import { userMusicMuteKey, userMusicVolumeKey } from "@lib/voice/audioVolumePrefs";
 import { SCREENSHARE_TILE_ID_OFFSET } from "@lib/constants";
 import type { Channel } from "@stores/channels.store";
-import { uiStore } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
 import type { VoiceUser } from "@stores/voice.store";
 import { safetyStore } from "../safety/store";
 import { attachVoiceUserDrag, markVoiceDropTarget } from "../voice/dragMove";
 import { openPeerShield } from "../voice/peerVerification";
-import { joinRetryInMs } from "../voice/joinBackoff";
+import { joinRetryInMs } from "@lib/voice/joinBackoff";
 import { createAvatarElement, pickAvatarColor } from "../profiles/avatar";
 import { openUserProfilePopup } from "../profiles/openUserProfilePopup";
 import { shellText } from "../../i18n/shell";
 import type { ChannelSidebarOptions } from "./channelSidebarTypes";
+import { drawVoiceChannelChrome, patchVoiceChannelChrome } from "./voiceRow.view";
+import type { VoiceChannelChromeModel } from "./voiceRow.view";
 import {
-  drawVoiceChannelChrome,
   drawVoiceUserRow,
-  patchVoiceChannelChrome,
   patchVoiceUserRow,
   VOICE_USER_PATCH_FIELDS,
-  type VoiceChannelChromeModel,
   type VoiceUserRowModel,
-} from "./voiceRow.view";
+} from "./voiceUserRow.view";
+import { voiceChannelClick } from "./voiceChannelClick";
 import {
   channelVoiceUsers,
   voiceChannelChrome,
@@ -47,6 +46,7 @@ import {
   type VoiceUserContext,
 } from "./voiceRowModel";
 import { buildVoiceModOptions } from "./voiceModOptions";
+import type { VoiceListenOption } from "./sidebar/volumeMenu";
 
 // The per-user volume menu loads on its first open.
 const volumeMenuScreen = createLazyScreen("user-volume-menu", () => import("./sidebar/volumeMenu"));
@@ -66,7 +66,7 @@ export interface VoiceFocus {
 /** The callbacks the voice rows act through. */
 export type VoiceRowOptions = Pick<
   ChannelSidebarOptions,
-  "onVoiceJoin" | "onOpenCall" | "onVoiceModerate" | "onWatchStream"
+  "onVoiceJoin" | "onOpenCall" | "onVoiceModerate" | "onWatchStream" | "tree"
 >;
 
 export interface VoiceRows {
@@ -113,6 +113,7 @@ function openVolumeMenu(
   lifetimeSignal: AbortSignal,
   x: number,
   y: number,
+  listen?: VoiceListenOption,
 ): void {
   const user = atEvent();
   const mod = buildVoiceModOptions(channelId, user, onVoiceModerate);
@@ -128,7 +129,7 @@ function openVolumeMenu(
         lifetimeSignal.aborted
       )
         return;
-      m.showUserVolumeMenu(user.userId, username, x, y, lifetimeSignal, mod);
+      m.showUserVolumeMenu(user.userId, username, x, y, lifetimeSignal, mod, listen);
       return;
     });
 }
@@ -159,8 +160,12 @@ export function createVoiceRows(
     // Muted for this client only (the volume menu's Mute, a tile mute, or an
     // older build's volume of 0); the select reruns on USER_LOCAL_MUTE_CHANGED.
     localSilenced: (userId) => getUserLocalMute(userId) || getUserVolume(userId) === 0,
-    musicMuted: (userId) => loadPref<boolean>(userMusicMuteKey(userId), false) === true,
+    // Mute music, or a Music volume of 0 (announced like the Mute).
+    musicMuted: (userId) =>
+      loadPref<boolean>(userMusicMuteKey(userId), false) === true ||
+      loadPref<number>(userMusicVolumeKey(userId), 100) <= 0,
     moderation: onVoiceModerate !== undefined,
+    tree: options.tree === true,
   };
 
   /** Open a voice user's profile beside their row. The popup lives on
@@ -258,8 +263,17 @@ export function createVoiceRows(
     atEvent: () => VoiceUser,
     signal: AbortSignal,
   ): void {
+    // A tree takes the pill out of the Tab order, so the menu carries Listen.
+    const listen: VoiceListenOption | undefined =
+      voiceCtx.tree === true && model.listen !== undefined
+        ? {
+            on: model.listen === "on",
+            name: model.name,
+            toggle: () => listenToMusic(model.listen === "on" ? null : model.userId),
+          }
+        : undefined;
     const open = (x: number, y: number): void =>
-      openVolumeMenu(channelId, atEvent, onVoiceModerate, lifetimeSignal, x, y);
+      openVolumeMenu(channelId, atEvent, onVoiceModerate, lifetimeSignal, x, y, listen);
     row.addEventListener(
       "contextmenu",
       (e) => {
@@ -293,7 +307,7 @@ export function createVoiceRows(
     channelId: number,
     atEvent: () => VoiceUser,
   ): HTMLDivElement {
-    const row = drawVoiceUserRow(model, createAvatarElement);
+    const row = drawVoiceUserRow(model, createAvatarElement, voiceCtx.tree === true);
     const owner = new Disposable();
     ownerByEl.set(row, owner);
     const { signal } = owner;
@@ -318,6 +332,14 @@ export function createVoiceRows(
       );
     }
 
+    row.querySelector(":scope > .vu-listen")?.addEventListener(
+      "click",
+      (e) => {
+        e.stopPropagation();
+        listenToMusic(model.listen === "on" ? null : model.userId);
+      },
+      { signal },
+    );
     // Right-click (or Shift+F10 / the Menu key, A11Y-01) for the per-user
     // volume and moderation menu; never on the local user's own row.
     if (!model.self) bindOtherUserHandlers(row, model, channelId, atEvent, signal);
@@ -353,7 +375,7 @@ export function createVoiceRows(
   function updateVoiceRow(el: Element, ch: Channel): void {
     const inputs = voiceInputs();
     if (inputs === undefined) return;
-    const chrome = voiceChannelChrome(ch, inputs);
+    const chrome = voiceChannelChrome(ch, inputs, voiceCtx.tree === true);
     const prev = chromeByEl.get(el);
     if (prev !== undefined && !sameModel(prev, chrome)) patchVoiceChannelChrome(el, chrome);
     chromeByEl.set(el, chrome);
@@ -376,34 +398,6 @@ export function createVoiceRows(
     if (users.length === 0) list.remove();
   }
 
-  /** A click on a voice channel's own row: open the call when joined, else
-   *  join (on a phone, after a confirming sheet). Everything is read now, at
-   *  click time: the wrapper is reused across joins and leaves. */
-  function onChannelClick(channelId: number, wrapper: HTMLElement): void {
-    // Frozen while the WS socket is down or timed out: a no-op, the reason
-    // is the row's title.
-    const joined = voiceStore.getState().currentChannelId === channelId;
-    if (uiStore.getState().connectionStatus !== "connected") return;
-    if (!joined && safetyStore.getState().timeout !== null) return;
-    if (joined) {
-      // A repeat click while this join is still in progress (a double-click,
-      // or retrying a slow "securing") must not cancel it: toggling here
-      // cycled voice_join/voice_leave several times a second. The voice
-      // widget's Disconnect still ends a join in progress.
-      const status = voiceStore.getState().voiceStatus;
-      if (status === "joining" || status === "securing") return;
-      onOpenCall();
-    } else if (isPhoneLayout()) {
-      openJoinSheet(
-        channelId,
-        wrapper.querySelector<HTMLElement>(":scope > .channel-item") ?? wrapper,
-        () => onVoiceJoin(channelId),
-      );
-    } else {
-      onVoiceJoin(channelId);
-    }
-  }
-
   /** A voice channel's wrapper: the chrome, the drop target, the channel
    *  click, then its participant rows, built now so the outer reconcile can
    *  restore focus into them by key. */
@@ -412,11 +406,18 @@ export function createVoiceRows(
     const inputs = voiceInputs();
     // i18n-exempt: developer-facing invariant error, never shown to a user
     if (inputs === undefined) throw new Error("voice row built before the sidebar mounted");
-    const wrapper = drawVoiceChannelChrome(voiceChannelChrome(channel, inputs));
+    const wrapper = drawVoiceChannelChrome(
+      voiceChannelChrome(channel, inputs, voiceCtx.tree === true),
+      voiceCtx.tree === true,
+    );
     if (onVoiceModerate !== undefined) markVoiceDropTarget(wrapper, channel.id);
     wrapper
       .querySelector(":scope > .channel-item")
-      ?.addEventListener("click", () => onChannelClick(channel.id, wrapper), { signal });
+      ?.addEventListener(
+        "click",
+        () => voiceChannelClick(channel.id, wrapper, { onVoiceJoin, onOpenCall, openJoinSheet }),
+        { signal },
+      );
     updateVoiceRow(wrapper, channel);
     return wrapper;
   }

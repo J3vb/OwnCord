@@ -138,6 +138,54 @@ func journeyVoiceWatch(t *testing.T, r *epochRig) {
 	b.barrier()
 }
 
+// journeyVoiceSpeak records the speaking ring a client reports for itself:
+// alice lights hers, darkens it, then reports she has no verdict of her own
+// (null), and bob receives each as an unsequenced voice_speaking relay. The
+// sender never gets its own frame, and a report from outside a voice channel
+// (alice after leaving) produces nothing at all.
+func journeyVoiceSpeak(t *testing.T, r *epochRig) {
+	_, _, aliceTok, bobTok := r.seedBaseline(t)
+
+	a, b := r.recordedPair(t, aliceTok, bobTok)
+
+	a.send(map[string]any{
+		"type":    "voice_join",
+		"payload": map[string]any{"channel_id": voiceChannelID},
+	})
+	a.expect("voice_token")
+	a.expect("voice_state")
+	a.expect("voice_config")
+	b.expect("voice_state")
+
+	b.send(map[string]any{
+		"type":    "voice_join",
+		"payload": map[string]any{"channel_id": voiceChannelID},
+	})
+	b.expect("voice_token")
+	b.expect("voice_state")
+	b.expect("voice_state")
+	b.expect("voice_config")
+	a.expect("voice_state")
+
+	for _, speaking := range []any{true, false, nil} {
+		a.send(map[string]any{
+			"type":    "voice_speak",
+			"payload": map[string]any{"speaking": speaking},
+		})
+		b.expect("voice_speaking")
+	}
+
+	a.send(map[string]any{"type": "voice_leave", "payload": map[string]any{}})
+	a.expect("voice_leave")
+	b.expect("voice_leave")
+	a.send(map[string]any{
+		"type":    "voice_speak",
+		"payload": map[string]any{"speaking": true},
+	})
+	a.barrier()
+	b.barrier()
+}
+
 // ─── voice and call slice (WP 7.3a) ──────────────────────────────────────────
 
 // voiceJoinPair joins alice ("a") then bob ("b") to channel id, recording both

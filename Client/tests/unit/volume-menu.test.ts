@@ -14,17 +14,25 @@ const setUserVolume = vi.fn();
 const getUserVolume = vi.fn();
 const setUserLocalMute = vi.fn();
 const getUserLocalMute = vi.fn((..._args: unknown[]) => false);
+const music = { volume: 100, muted: false };
+const setMusicVolume = vi.fn((_id: number, v: number) => void (music.volume = v));
+const setMusicMuted = vi.fn((_id: number, m: boolean) => void (music.muted = m));
 
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     setUserVolume: (...args: unknown[]) => setUserVolume(...args) as unknown,
     getUserVolume: (...args: unknown[]) => getUserVolume(...args) as unknown,
     setUserLocalMute: (...args: unknown[]) => setUserLocalMute(...args) as unknown,
     getUserLocalMute: (...args: unknown[]) => getUserLocalMute(...args) as unknown,
+    setMusicVolume: (id: number, v: number) => setMusicVolume(id, v),
+    getMusicVolume: () => music.volume,
+    setMusicMuted: (id: number, m: boolean) => setMusicMuted(id, m),
+    getMusicMuted: () => music.muted,
   }),
 );
 
 const { showUserVolumeMenu } = await import("../../src/features/channels/sidebar/volumeMenu");
+const { setMusicSharer } = await import("../../src/stores/voice.store");
 
 function menuEl(): HTMLElement | null {
   return document.querySelector(".user-vol-menu");
@@ -229,6 +237,43 @@ describe("local Mute", () => {
     getUserLocalMute.mockReturnValue(true);
     showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
     expect(muteItem()?.getAttribute("aria-checked")).toBe("true");
+  });
+});
+
+describe("Mute music", () => {
+  const musicMute = (): HTMLElement =>
+    document.querySelector<HTMLElement>('.user-vol-menu [data-action="music-mute"]')!;
+  const musicSlider = (): HTMLInputElement =>
+    document.querySelector<HTMLInputElement>('[data-testid="music-volume-slider"]')!;
+
+  beforeEach(() => {
+    music.volume = 100;
+    music.muted = false;
+    setMusicVolume.mockClear();
+    setMusicSharer(7, true);
+  });
+  afterEach(() => setMusicSharer(7, false));
+
+  it("checks itself when the Music volume is dragged to 0, and unchecks on the way back", () => {
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    expect(musicMute().getAttribute("aria-checked")).toBe("false");
+    musicSlider().value = "0";
+    musicSlider().dispatchEvent(new Event("input"));
+    expect(musicMute().getAttribute("aria-checked")).toBe("true");
+    musicSlider().value = "40";
+    musicSlider().dispatchEvent(new Event("input"));
+    expect(musicMute().getAttribute("aria-checked")).toBe("false");
+  });
+
+  it("opens checked at 0%, and unchecking brings the music back at 100%", () => {
+    music.volume = 0;
+    showUserVolumeMenu(7, "alice", 0, 0, new AbortController().signal);
+    expect(musicMute().getAttribute("aria-checked")).toBe("true");
+    musicMute().dispatchEvent(new MouseEvent("click", { bubbles: true }));
+    expect(setMusicVolume).toHaveBeenLastCalledWith(7, 100);
+    expect(musicSlider().value).toBe("100");
+    expect(musicMute().getAttribute("aria-checked")).toBe("false");
+    expect(music.muted).toBe(false);
   });
 });
 

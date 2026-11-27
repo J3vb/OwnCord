@@ -7,7 +7,7 @@
 import { describe, it, expect, vi } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   renderInlineContent,
@@ -157,14 +157,34 @@ describe("spoilers", () => {
     expect(spoiler.classList.contains("revealed")).toBe(false);
     spoiler.click();
     expect(spoiler.classList.contains("revealed")).toBe(true);
-    expect(spoiler.getAttribute("aria-pressed")).toBe("true");
+  });
+
+  it("is plain readable text once revealed: no button role, label or tab stop", () => {
+    const el = inline("||boo||");
+    const spoiler = el.querySelector(".msg-spoiler") as HTMLElement;
+    spoiler.click();
+    for (const attr of ["role", "aria-pressed", "aria-label", "tabindex"]) {
+      expect(spoiler.hasAttribute(attr)).toBe(false);
+    }
+    expect(spoiler.textContent).toBe("boo");
+  });
+
+  it("keeps focus on a spoiler revealed from the keyboard, without a tab stop", () => {
+    const el = inline("||boo||");
+    document.body.appendChild(el);
+    const spoiler = el.querySelector(".msg-spoiler") as HTMLElement;
+    spoiler.focus();
+    spoiler.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+    expect(document.activeElement).toBe(spoiler);
+    expect(spoiler.getAttribute("tabindex")).toBe("-1");
+    el.remove();
   });
 
   it("reveals on Enter", () => {
     const el = inline("||boo||");
     const spoiler = el.querySelector(".msg-spoiler") as HTMLElement;
     spoiler.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
-    expect(spoiler.getAttribute("aria-pressed")).toBe("true");
+    expect(spoiler.classList.contains("revealed")).toBe(true);
   });
 
   it("reveals each spoiler independently", () => {

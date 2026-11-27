@@ -19,12 +19,12 @@ const sharedWindow = {
   ],
 };
 const mockShareStream = vi.fn<() => unknown>(() => sharedWindow);
-vi.mock("../../src/features/voice/native/platform", () => ({
+vi.mock("../../src/lib/hostOs", () => ({
   isLinuxDesktop: () => mockIsLinuxDesktop(),
   isWindowsDesktop: () => false,
   canPublishScreen: () => true,
 }));
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     getLocalScreenshareStream: () => mockShareStream(),
     getScreenshareQuality: () => mockShareQuality(),
@@ -39,6 +39,7 @@ vi.mock("@lib/voice/livekitSession", () =>
 vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true));
 
 import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
+import { CALL_ROW_CLASS } from "../../src/features/voice/callRowMark";
 import { createConnectionStatsPoller } from "@lib/voice/connectionStats";
 import { voiceStore, type VoiceStatus } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
@@ -96,6 +97,8 @@ function seedVoiceLobby(id = 1, voiceMaxVideo = 0): void {
     return { ...prev, channels };
   });
 }
+
+const CAMERA_ON = "Turn on camera (the call can see you)";
 
 describe("VoiceWidget", () => {
   let container: HTMLDivElement;
@@ -159,6 +162,24 @@ describe("VoiceWidget", () => {
     expect(root!.classList.contains("visible")).toBe(true);
 
     widget.destroy?.();
+  });
+
+  it("marks <html> while it shows a call, so phone Deck hides the other Leave buttons only then", () => {
+    const up = (): boolean => document.documentElement.classList.contains(CALL_ROW_CLASS);
+    const widget = mountVoiceWidget();
+    expect(up()).toBe(false);
+    seedVoiceLobby(1);
+    setVoiceChannel(1, []);
+    voiceStore.flush();
+    expect(up()).toBe(true);
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+    voiceStore.flush();
+    expect(up()).toBe(false);
+    setVoiceChannel(1, []);
+    voiceStore.flush();
+    expect(up()).toBe(true);
+    widget.destroy?.();
+    expect(up()).toBe(false);
   });
 
   it("displays channel name", () => {
@@ -464,7 +485,7 @@ describe("VoiceWidget", () => {
     const widget = mountVoiceWidget();
     const cameraBtn = container.querySelector('[aria-label="Camera"]') as HTMLButtonElement;
     const shareBtn = container.querySelector('[aria-label="Screenshare"]') as HTMLButtonElement;
-    expect(cameraBtn.title).toBe("Turn on camera");
+    expect(cameraBtn.title).toBe(CAMERA_ON);
     expect(shareBtn.title).toBe("Share your screen");
 
     voiceStore.setState((prev) => ({ ...prev, localCamera: true, localScreenshare: true }));
@@ -711,6 +732,7 @@ describe("VoiceWidget", () => {
     const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
     expect(status.textContent).toBe("Securing…");
     expect(status.classList.contains("vw-securing")).toBe(true);
+    expect(status.classList.contains("vw-steady")).toBe(false);
     expect(secured.style.display).toBe("none");
 
     widget.destroy?.();
@@ -726,6 +748,7 @@ describe("VoiceWidget", () => {
     const status = container.querySelector('[data-testid="vw-status"]');
     const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
     expect(status?.textContent).toBe("Voice Connected");
+    expect(status?.classList.contains("vw-steady")).toBe(true);
     expect(secured.style.display).toBe("inline-flex");
     expect(secured.textContent).toContain("Secured");
 
@@ -767,6 +790,7 @@ describe("VoiceWidget", () => {
     const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
     expect(status.textContent).toBe("Reconnecting voice…");
     expect(status.classList.contains("vw-reconnecting")).toBe(true);
+    expect(status.classList.contains("vw-steady")).toBe(false);
     expect(secured.style.display).toBe("none");
 
     widget.destroy?.();
@@ -783,11 +807,13 @@ describe("VoiceWidget", () => {
     voiceStore.flush();
     expect(status.textContent).toBe("Call paused");
     expect(status.classList.contains("vw-paused")).toBe(true);
+    expect(status.classList.contains("vw-steady")).toBe(false);
 
     voiceStore.setState((prev) => ({ ...prev, phoneCallHold: false }));
     voiceStore.flush();
     expect(status.textContent).toBe("Voice Connected");
     expect(status.classList.contains("vw-paused")).toBe(false);
+    expect(status.classList.contains("vw-steady")).toBe(true);
 
     widget.destroy?.();
   });
@@ -841,7 +867,7 @@ describe("VoiceWidget", () => {
     setConnectionStatus("connected");
     uiStore.flush();
     expect(cameraBtn.disabled).toBe(false);
-    expect(cameraBtn.title).toBe("Turn on camera");
+    expect(cameraBtn.title).toBe(CAMERA_ON);
 
     widget.destroy?.();
   });
@@ -858,7 +884,7 @@ describe("VoiceWidget", () => {
 
     setVoiceStatus("connected");
     expect(cameraBtn.disabled).toBe(false);
-    expect(cameraBtn.title).toBe("Turn on camera");
+    expect(cameraBtn.title).toBe(CAMERA_ON);
 
     widget.destroy?.();
   });

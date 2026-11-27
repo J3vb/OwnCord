@@ -221,6 +221,7 @@ export const androidNotifier: Notifier = {
   // shows as one.
   readsOsPermission: true,
   ringsCalls: true,
+  canFlash: false,
   async permissionGranted(): Promise<boolean> {
     const state = await invokeOrThrow<string>("android_notification_permission", { ask: false });
     return state === "granted";

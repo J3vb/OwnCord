@@ -17,7 +17,7 @@ export default defineConfig({
     baseURL: "http://localhost:4173",
     userAgent: devices["Desktop Chrome"].userAgent,
     colorScheme: "dark",
-    viewport: { width: 1440, height: 900 },
+    viewport: { width: 1333, height: 934 },
     deviceScaleFactor: 1,
     contextOptions: { reducedMotion: "reduce" },
     ...(process.env.OWNCORD_SCREENSHOTS_CHROMIUM

@@ -1,26 +1,34 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import {
   parseUserId,
   LiveKitSession,
   getRoomForStats,
-} from "../../../src/lib/voice/livekitSession";
+} from "../../../src/features/voice/livekitSession";
 import {
   setLocalMuted,
   setLocalDeafened,
   setLocalCamera,
   setLocalScreenshare,
+  getLocalRing,
+  onLocalRingChange,
+  setSpeakers,
 } from "@stores/voice.store";
+import {
+  applyReadyCapabilities,
+  resetServerCapabilities,
+} from "../../../src/lib/net/serverCapabilities";
 import {
   leaveVoice as boundLeaveVoice,
   setMuted as boundSetMuted,
   setDeafened as boundSetDeafened,
   cleanupAll as boundCleanupAll,
-} from "../../../src/lib/voice/livekitSession";
+} from "../../../src/features/voice/livekitSession";
 import {
   useLiveKitSessionHarness,
   stubPrefs,
   joinSession,
+  enterConnected,
 } from "../../helpers/livekitSessionHarness";
 
 vi.mock("livekit-client", () => mocks.livekitClientMock());
@@ -31,7 +39,7 @@ vi.mock("@lib/logger", () => mocks.loggerMock());
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../../src/features/connection/identity", () => mocks.netIdentityMock());
 
 const { mockRoom, mockSavePref } = mocks;
 
@@ -575,6 +583,92 @@ describe("LiveKitSession", () => {
         type: "voice_screenshare",
         payload: { enabled: false },
       });
+    });
+  });
+
+  describe("speaking ring", () => {
+    let ws: { send: ReturnType<typeof vi.fn>; getState: () => string; ping: () => Promise<void> };
+    let wsState: string;
+
+    const reports = (): unknown[] =>
+      ws.send.mock.calls
+        .map(([message]) => message as { type: string; payload: { speaking: unknown } })
+        .filter((message) => message.type === "voice_speak")
+        .map((message) => message.payload.speaking);
+
+    /** The own ring changes, as the voice store's subscription reports it. */
+    function setRing(ring: boolean | null): void {
+      vi.mocked(getLocalRing).mockReturnValue(ring);
+      const listener = vi.mocked(onLocalRingChange).mock.calls.at(-1)?.[0];
+      listener?.();
+    }
+
+    beforeEach(() => {
+      wsState = "connected";
+      ws = { send: vi.fn(), getState: () => wsState, ping: async () => {} };
+      session.setWsClient(ws as never);
+      applyReadyCapabilities({ voice_speaking: true });
+      enterConnected(session);
+    });
+    afterEach(() => {
+      setRing(null);
+      resetServerCapabilities();
+    });
+
+    it("reports the own ring to the server as it changes", () => {
+      setRing(true);
+      setRing(false);
+
+      expect(reports()).toEqual([true, false]);
+    });
+
+    it("repeats a lit ring every second", () => {
+      setRing(true);
+
+      vi.advanceTimersByTime(2000);
+
+      expect(reports()).toEqual([true, true, true]);
+    });
+
+    it("sends nothing to a server that does not relay it", () => {
+      applyReadyCapabilities({});
+
+      setRing(true);
+      vi.advanceTimersByTime(2000);
+
+      expect(reports()).toEqual([]);
+    });
+
+    it("sends nothing while the socket is down, and the stop it missed on the resume", () => {
+      setRing(true);
+      wsState = "reconnecting";
+      setRing(false);
+      expect(reports()).toEqual([true]);
+
+      wsState = "connected";
+      session.resendWatching();
+
+      expect(reports()).toEqual([true, false]);
+    });
+
+    it("sends nothing outside a call", () => {
+      (session as unknown as { _state: { type: string } })._state = { type: "idle" };
+
+      setRing(true);
+      vi.advanceTimersByTime(2000);
+
+      expect(reports()).toEqual([]);
+    });
+
+    it("hands a relayed ring to the room's speaker list", () => {
+      const mic = { isMuted: false };
+      mockRoom.remoteParticipants = new Map([
+        ["user-7:tok", { identity: "user-7:tok", getTrackPublication: () => mic }],
+      ]) as never;
+
+      session.handleRingAnnounced(7, true);
+
+      expect(setSpeakers).toHaveBeenCalledWith({ channel_id: 1, speakers: [7] });
     });
   });
 

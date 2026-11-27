@@ -8,7 +8,7 @@ unpacked verbatim except for the files below and the removal of cargo's
 Its own `Cargo.toml` is untouched, so every dependency resolves to the same
 crates.io version `Cargo.lock` pins. Only the `livekit` crate is vendored.
 
-## Why (WP LP-8d)
+## Why (stereo publish)
 
 Upstream (still in 0.10.0) never sets `AddTrackRequest.stereo` or
 `AudioTrackFeature::TfStereo`, so livekit-server strips `stereo=1` from the publisher's answer and libwebrtc
@@ -30,7 +30,7 @@ All changes are marked `OWNCORD-PATCH`. Diff against the pristine package
      /// - Screen share: `MaintainResolution` (clarity is critical for text/UI)
      /// - Other/unknown: `Balanced`
      pub degradation_preference: Option<DegradationPreference>,
-+    // OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
++    // OWNCORD-PATCH (stereo publish): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
 +    /// Audio only; signals TF_STEREO (and `AddTrackRequest.stereo`) so the SFU
 +    /// negotiates stereo Opus (`stereo=1`) for the published track. Ignored
 +    /// for video tracks.
@@ -42,7 +42,7 @@ All changes are marked `OWNCORD-PATCH`. Diff against the pristine package
              video_encoder: VideoEncoderBackend::Auto,
              scalability_mode: None,
              degradation_preference: None,
-+            stereo: false, // OWNCORD-PATCH (WP LP-8d)
++            stereo: false, // OWNCORD-PATCH (stereo publish)
          }
      }
  }
@@ -52,7 +52,7 @@ All changes are marked `OWNCORD-PATCH`. Diff against the pristine package
              req.audio_features.push(proto::AudioTrackFeature::TfPreconnectBuffer as i32);
          }
  
-+        // OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.10.0.
++        // OWNCORD-PATCH (stereo publish): not in upstream livekit 0.10.0.
 +        apply_stereo_request(&mut req, &options, matches!(track, LocalTrack::Audio(_)));
 +
          req.packet_trailer_features =
@@ -62,7 +62,7 @@ All changes are marked `OWNCORD-PATCH`. Diff against the pristine package
      }
  }
  
-+// OWNCORD-PATCH (WP LP-8d): not in upstream livekit 0.10.0. Marks an audio
++// OWNCORD-PATCH (stereo publish): not in upstream livekit 0.10.0. Marks an audio
 +// track's AddTrackRequest as stereo, both ways livekit-client does, so the
 +// SFU's publisher answer carries `stereo=1`. Video tracks are left alone.
 +// `AddTrackRequest.stereo` is deprecated in favour of TF_STEREO, but the
@@ -212,16 +212,15 @@ full-size layer first, so callers find it by scale) and
 `set_sender_max_bitrates` writes the rates
 back in place, built like the SDK's own dynacast `set_parameters` call (a
 length mismatch or a missing transceiver is a no-op). Marked
-`OWNCORD-PATCH (WP VB-2)` in `src/room/track/local_video_track.rs`. No C++ or
+`OWNCORD-PATCH (video bitrate)` in `src/room/track/local_video_track.rs`. No C++ or
 ABI change. The rule that decides the rates is
-`native_voice/session/video_bitrate.rs` (`capped_layers`), which has unit tests;
-CI does not run the vendored crate's own tests.
+`native_voice/session/video_bitrate.rs` (`capped_layers`), which has unit tests.
 
 ```diff
 --- src/room/track/local_video_track.rs
 +++ src/room/track/local_video_track.rs
 @@ -361,6 +361,41 @@
-+    // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
++    // OWNCORD-PATCH (video bitrate): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
 +    pub fn sender_layers(&self) -> Vec<(Option<u64>, f64)> {
 +        let Some(transceiver) = self.transceiver() else {
 +            return Vec::new();
@@ -235,7 +234,7 @@ CI does not run the vendored crate's own tests.
 +            .collect()
 +    }
 +
-+    // OWNCORD-PATCH (WP VB-2): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
++    // OWNCORD-PATCH (video bitrate): not in upstream livekit 0.10.0. See OWNCORD-PATCH.md.
 +    pub fn set_sender_max_bitrates(&self, rates: &[Option<u64>]) -> RoomResult<()> {
 +        // no transceiver or a length mismatch: Ok(()), nothing changed;
 +        // otherwise write each encoding's max_bitrate and set_parameters
@@ -269,20 +268,112 @@ handler. Marked `OWNCORD-PATCH (signal input)` in
   invalid sid are skipped; non-finite speaker levels count as 0 and speakers
   sort with `total_cmp`. A restarted join response missing a part skips that
   part and still completes the restart.
+- A participant's track entry with an invalid track sid or an unsupported
+  type (`Data`) is skipped by `RemoteParticipant::update_info`.
+  `checked_track_ids` (`src/room/publication/mod.rs`) is the one check:
+  `new_inner` and both publication constructors return an error on such an
+  entry, the publication and track `update_info` keep their previous values,
+  a local publish whose reply carries one fails with `RoomError::Internal`,
+  and a participant update with an invalid participant sid keeps the previous
+  sid. Tests: `publication::signal_input_tests`.
 - Pure helpers (`parse_sdp_type`, `parse_remote_description`,
   `parse_ice_candidate_json`, `split_join_response`, `sanitize_audio_level`)
   have unit tests in both files.
+
+## Marker index
+
+Every marker in the source reads `OWNCORD-PATCH (tag)`. The tag is the key:
+`scripts/checks/check-vendor-patches.test.mjs` fails when a tag in `src` has no
+entry here, when an entry here has no marker left, or when a marker has no tag.
+Add the entry in the same change as the marker. Each entry says where the patch
+is, why it exists, the test that covers it and when it can go. The bullets
+below must stay in this form, one per tag.
+
+- `OWNCORD-PATCH (stereo publish)`
+  - Where: `src/room/options.rs` (`TrackPublishOptions::stereo` and its default);
+    `src/room/participant/local_participant.rs` (the `apply_stereo_request` call
+    in the add-track path, and the function itself).
+  - Why: upstream never signals stereo, so the SFU strips `stereo=1` and a share's
+    audio is sent mono. See "Why (stereo publish)" above.
+  - Test: `stereo_is_signalled_for_audio_only` in `local_participant.rs`; the
+    publish-options tests in `src/native_voice/session/tests.rs`; the native-voice
+    interop case "a native share's audio reaches the browser as stereo with the
+    channels apart".
+  - Drop when: a livekit release sets `TfStereo` and `AddTrackRequest.stereo` from
+    a publish option. None known yet.
+- `OWNCORD-PATCH (dual PC stereo receive)`
+  - Where: `src/rtc_engine/peer_transport.rs` (`create_anwser` and
+    `stereo_receive_answer`).
+  - Why: dual PC mode answers without `stereo=1`, so the receive decoder is mono.
+    See "Dual PC stereo receive" above.
+  - Test: the stereo munge tests in `peer_transport.rs`
+    (`stereo_is_added_for_opus_fmtp_only_once` and the idempotence one) cover
+    `munge_stereo_for_audio`, not `stereo_receive_answer` itself; the native-voice
+    interop case "native and browser peers decode each other's audio with the same
+    key" covers the whole path.
+  - Drop when: upstream munges the subscriber answer in dual PC mode. None known yet.
+- `OWNCORD-PATCH (key slots)`
+  - Where: `src/room/e2ee/manager.rs` (the `sender_key_index` field,
+    `set_sender_key_index`, and where a sender frame cryptor is created and stored).
+  - Why: OwnCord stages a new room key in its own index and switches sending to it
+    later; upstream always encrypts with index 0. See "Key slots" above.
+  - Test: none in the vendored crate. `src/native_voice/tests.rs` covers the slot
+    bookkeeping on our side; the native-voice interop cases cover the encryption.
+  - Drop when: upstream lets the sender key index be set for a room's local tracks.
+    None known yet.
+- `OWNCORD-PATCH (video bitrate)`
+  - Where: `src/room/track/local_video_track.rs` (`sender_layers` and
+    `set_sender_max_bitrates`).
+  - Why: a live bitrate cap change must reach the encoder without a republish, and
+    upstream keeps the sender `pub(crate)`. See "Video bitrate in place" above.
+  - Test: none for the two methods. `capped_layers` in
+    `src/native_voice/session/video_bitrate.rs`, which decides the rates, has unit
+    tests.
+  - Drop when: upstream exposes the video sender or its encoding parameters. None
+    known yet.
+- `OWNCORD-PATCH (signal input)`
+  - Where: `src/room/mod.rs` (join, update, speaker, connection quality,
+    track-subscribed, transcription and restart handling, `sanitize_audio_level`,
+    `split_join_response`); `src/rtc_engine/rtc_session.rs` (SDP and candidate
+    parsing helpers, answer and offer handling, trickle, track-published response,
+    the `add_track` wait, the terminal disconnect path).
+  - Why: a bad or incomplete server message must not stop the handler or panic. See
+    "Signal input" above.
+  - Test: `signal_input_tests` in `room/mod.rs`; in `rtc_session.rs`
+    `sdp_type_accepts_known_values_and_rejects_others`,
+    `remote_description_with_unknown_type_is_an_error` and
+    `ice_candidate_json_requires_all_fields`. The terminal disconnect and the
+    dropped sender wait have no test.
+  - Drop when: upstream handles these inputs without unwrap or panic. Check each
+    site; some may already be fixed.
+
+- `OWNCORD-PATCH (lint scope)`
+  - Where: `src/lib.rs` (the crate-level `#![allow(warnings, clippy::...)]`).
+  - Why: the crate is a workspace member so its tests can run against the root
+    `Cargo.lock`, and that puts it under the root `cargo clippy --all-targets --
+    -D warnings` run. Upstream code is linted upstream; this keeps the root lint
+    run about OwnCord's own code. Our patches are reviewed through their tests.
+  - Test: the Rust Unit Tests job's clippy step stays green with the crate in the
+    workspace.
+  - Drop when: the vendored crate leaves the workspace.
 
 ## Dropping it
 
 Remove `vendor/livekit` and the `[patch.crates-io]` table once a livekit
 release ships an equivalent option (upstream PR to livekit/rust-sdks pending).
+Upstream livekit 0.11.0 is the candidate to re-check every marker against when the crate is next bumped.
 That is an SDK bump: re-verify the libwebrtc pin per the comment in
 `Cargo.toml`. On any bump, re-apply the diff above and the `OWNCORD-PATCH (signal input)`
-markers (`grep -rn 'signal input' src`), and the two `OWNCORD-PATCH (WP VB-2)` methods (`grep -rn 'WP VB-2' src`) to the new package.
+markers (`grep -rn 'signal input' src`), and the two `OWNCORD-PATCH (video bitrate)` methods (`grep -rn 'video bitrate' src`) to the new package.
 
 ## Tests
 
-The signal input helpers are covered by `cargo test --manifest-path vendor/livekit/Cargo.toml --lib signal_input` and the `rtc_session` tests, also run by hand. `stereo_is_signalled_for_audio_only` (in the patched `local_participant.rs`) covers the helper, but CI does not run it: the Rust job tests only the root package. Run it by hand with `cargo test --manifest-path vendor/livekit/Cargo.toml --lib stereo` after re-applying the patch. CI covers the behaviour through `session.rs`'s publish-options tests and the native-voice interop case "a native share's audio reaches the browser as stereo with the channels apart".
+The patched crate is a member of the root workspace, so its tests build against the root `Cargo.lock` and the pinned libwebrtc. From `Client/src-tauri/` (after the Linux toolchain step in `CLAUDE.md`):
 
-The crate's own `Cargo.lock` is upstream's, kept verbatim; nothing builds from it.
+```
+cargo test -p livekit --lib -- signal_input stereo rtc_session
+```
+
+This runs the signal input helpers (`signal_input_tests`), the `rtc_session` tests and `stereo_is_signalled_for_audio_only`. CI runs it in the Rust Unit Tests job when anything under `vendor/livekit/` or `Cargo.lock` changes (the `livekitvendor` selection in `scripts/ci-select.mjs`), and every night in `nightly-test-depth.yml`. Run it after re-applying the patch to a new upstream version. CI also covers the behaviour through `session.rs`'s publish-options tests and the native-voice interop case "a native share's audio reaches the browser as stereo with the channels apart".
+
+The crate's own `Cargo.lock` is upstream's, kept verbatim; nothing builds from it. The workspace membership, the crate-level lint allow and the three formatting-only edits that keep `cargo fmt --all -- --check` clean (`sanitize_audio_level`, `parse_remote_description`, the subscriber answer in `rtc_session.rs`) are part of the patch.

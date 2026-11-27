@@ -8,7 +8,7 @@ import { isPhoneLayout, openBottomSheet, type BottomSheet } from "@lib/ui/bottom
 import { setOwnedTimeout } from "@lib/dom";
 import { listCustomEmoji } from "@stores/emoji.store";
 import { composerButtonShown } from "../composerButtons";
-import { currentUserRoleHasPermission } from "@lib/permissions";
+import { currentUserRoleHasPermission } from "@stores/permissions";
 import { Permission } from "@lib/types";
 import {
   createExpressionPopup,

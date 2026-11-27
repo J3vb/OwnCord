@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { wireDispatcher } from "../../src/app/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { expectConsole } from "../helpers/console";
 import { makeThread } from "../helpers/thread-fixtures";
@@ -19,12 +19,12 @@ import {
 } from "../../src/stores/messages.store";
 import { setThreadResume } from "../../src/stores/threadsLoader";
 import { resumeThreadFocus } from "../../src/features/messaging/threadResume";
-import { claimForwardRequest } from "../../src/features/messaging/forwardRequests";
+import { claimRequest } from "../../src/lib/net/requestClaims";
 import { ApiClientError } from "../../src/lib/api";
 import type { WsClient } from "../../src/lib/ws";
 import type { ChatMessagePayload, MessageResponse } from "../../src/lib/types";
 
-vi.mock("@lib/notifications", () => ({
+vi.mock("../../src/features/notifications/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
   notifyMention: vi.fn(),
   notifyChannelActivity: vi.fn(),
@@ -116,7 +116,8 @@ describe("thread frames through the dispatcher", () => {
   });
 
   it("judges a reply in a watched thread by its parent channel for notifications", async () => {
-    const { notifyIncomingMessage } = await import("@lib/notifications");
+    const { notifyIncomingMessage } =
+      await import("../../src/features/notifications/notifications");
     const notify = vi.mocked(notifyIncomingMessage);
     notify.mockClear();
     ws.simulateMessage("thread_changed", { thread: makeThread({ id: 91, parent_id: 4 }) });
@@ -144,7 +145,7 @@ describe("thread frames through the dispatcher", () => {
   });
 
   it("skips the generic error toast for a claimed thread_create", () => {
-    claimForwardRequest("req-1");
+    claimRequest("req-1");
     ws.simulateMessage("error", { code: "FORBIDDEN", message: "no" }, "req-1");
     expect(showToast).not.toHaveBeenCalled();
     ws.simulateMessage("error", { code: "FORBIDDEN", message: "no" }, "req-2");

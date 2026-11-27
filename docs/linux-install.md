@@ -18,7 +18,7 @@ use the AppImage.
 | --------- | ----------------------------------------------------------------------------------- |
 | CPU       | x86-64 (`amd64`) or ARM64 (`arm64`, also called `aarch64`)                          |
 | C library | glibc 2.35 or newer. This is the version in Ubuntu 22.04, which builds the release. |
-| Web view  | WebKitGTK 4.1 (`libwebkit2gtk-4.1-0` on Debian and Ubuntu)                          |
+| Web view  | WebKitGTK 4.1, version 2.44 or newer (`libwebkit2gtk-4.1-0` on Debian and Ubuntu)   |
 | Desktop   | GNOME, KDE Plasma or another desktop, on X11 or Wayland                             |
 | Sound     | PulseAudio or PipeWire. Sharing a screen with audio needs one of them.              |
 

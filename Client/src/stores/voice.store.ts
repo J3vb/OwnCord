@@ -16,14 +16,16 @@ import { membersStore } from "@stores/members.store";
 import { channelsStore, isAfkChannel } from "@stores/channels.store";
 import { authStore, registerVoiceLogoutTeardown } from "@stores/auth.store";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
-import { noteJoinSucceeded } from "../features/voice/joinBackoff";
+import { noteJoinSucceeded } from "@lib/voice/joinBackoff";
 import { setVoiceDeafened, setVoiceInSession } from "@lib/voice/voiceDeafened";
 import type { VoiceState, VoiceUser, PeerVerification, VoiceStatus } from "./voiceModel";
 import { createVoiceState } from "./voiceModel";
+import { cancelPttClose, schedulePttClose } from "./voicePttClose";
 import { saveSelfVoicePrefs, loadSelfVoicePrefs } from "./voiceSelfPrefs";
 import {
   rosterFromReady,
   ownReadyRow,
+  withReadyVoice,
   withVoiceState,
   withVoiceUsername,
   withoutVoiceUser,
@@ -32,12 +34,14 @@ import {
   withSwitchingTo,
   withLocalRing,
   withSpeakers,
+  localRing,
 } from "./voiceRoster";
 import {
   withPeerVideoDecode,
   withPeerKeySlots,
   withPeerBoundOffers,
   withPeerWatching,
+  withoutPeerWatching,
   withMusicSharer,
   withRemoteMusicSharers,
   withLocalMusic,
@@ -49,6 +53,7 @@ import {
 } from "./voicePeers";
 
 export { setPttPollingLive, onPttPollingLiveChange, isPttPollingLive } from "./voicePttLive";
+export { isPttClosePending, cancelPttClose } from "./voicePttClose";
 
 export type {
   VoiceUser,
@@ -101,6 +106,7 @@ export function getVoiceRosterRevision(): number {
 /** Reset voice store to initial state (e.g. on logout). */
 export function resetVoiceStore(): void {
   watchingResyncAt = Number.NEGATIVE_INFINITY;
+  cancelPttClose();
   setVoiceDeafened(false);
   setVoiceInSession(false);
   voiceStore.setState(() => ({ ...createVoiceState(), inAfkChannel: false }));
@@ -124,25 +130,9 @@ export function setVoiceStates(states: readonly ReadyVoiceState[]): void {
     (userId) => membersStore.getState().members.get(userId)?.username ?? "",
   );
 
-  // Capture the user's own row so the moderator-imposed flags below can be
-  // derived from it — a full-ready reconnect (mustFullResync / replay-buffer
-  // miss) that preserves a live voice session must not leave localServerMuted/
-  // localServerDeafened stuck at their pre-reconnect values.
   const currentUserId = authStore.getState().user?.id ?? 0;
   const selfState = ownReadyRow(states, currentUserId, voiceStore.getState().voiceStatus);
-  const autoJoinChannel = selfState?.channel_id ?? null;
-
-  voiceStore.setState((prev) => ({
-    ...prev,
-    voiceUsers: channelMap,
-    // If user is in a voice channel per ready payload, use that channel.
-    // Otherwise preserve prev — user may be mid-join and server hasn't
-    // registered them yet. Stale IDs are cleared by leaveVoiceChannel()
-    // or resetVoiceStore() on logout.
-    currentChannelId: autoJoinChannel ?? prev.currentChannelId,
-    localServerMuted: selfState?.server_muted ?? false,
-    localServerDeafened: selfState?.server_deafened ?? false,
-  }));
+  voiceStore.setState((prev) => withReadyVoice(prev, channelMap, selfState));
 }
 
 /** Update or add a user's voice state from a voice_state event. When the event
@@ -199,7 +189,9 @@ export function setSwitchingTo(channelId: number | null): void {
 
 /** Clear the current voice channel and remove current user from voice users. */
 export function leaveVoiceChannel(): void {
+  cancelPttClose();
   voiceStore.setState((prev) => withLeftChannel(prev, ownUserId()));
+  setVoiceDeafened(voiceStore.getState().localDeafened);
 }
 
 /** Set the voice-session lifecycle status. Single-writer from livekitSession.ts
@@ -266,12 +258,22 @@ export function restoreSavedSelfVoiceState(): void {
   voiceStore.setState((prev) => ({ ...prev, ...saved, moderatorDeafened: false }));
 }
 
-/** Record whether push-to-talk is currently gating (silencing) the mic —
- *  i.e. the bound key is not held. Written through livekitSession.setPttGated,
- *  which also closes or opens the mic processor's gate. Deliberately separate
- *  from localMuted so PTT can never write the flag that represents the user's
- *  own explicit mute (see the VoiceState.pttGated doc comment). */
-export function setPttGated(gated: boolean): void {
+/** Record whether push-to-talk is currently gating (silencing) the mic.
+ *  Written through livekitSession.setPttGated, which also closes or opens the
+ *  mic processor's gate; a release's close lands once its delay (`afterMs`)
+ *  has run, in the same call, unless a newer write cancels it (voicePttClose).
+ *  Separate from localMuted so PTT can never write the user's own explicit
+ *  mute (see the VoiceState.pttGated doc comment). */
+export function setPttGated(gated: boolean, afterMs = 0): void {
+  cancelPttClose();
+  if (gated && afterMs > 0) {
+    const { currentChannelId, joinedAt } = voiceStore.getState();
+    schedulePttClose(() => {
+      const now = voiceStore.getState();
+      if (now.currentChannelId === currentChannelId && now.joinedAt === joinedAt) setPttGated(true);
+    }, afterMs);
+    return;
+  }
   voiceStore.setState((prev) =>
     prev.pttGated === gated ? prev : withLocalRing({ ...prev, pttGated: gated }, ownUserId()),
   );
@@ -358,6 +360,13 @@ export function setLocalGateSpeaking(speaking: boolean | null): void {
   );
 }
 
+/** The gate-decided local ring (null when no gate runs): what this client announces to the call. */
+export const getLocalRing = (): boolean | null => localRing(voiceStore.getState());
+
+/** Run `listener` whenever that ring changes. Returns the unsubscribe. */
+export const onLocalRingChange = (listener: () => void): (() => void) =>
+  voiceStore.subscribeSelector(localRing, listener);
+
 /** Update speaking state for users from LiveKit's ActiveSpeakersChanged.
  *  Updates every remote user. The local user too, unless the input-sensitivity
  *  gate runs: then the gate decides (see setLocalGateSpeaking). */
@@ -427,9 +436,7 @@ export function noteWatchingResync(): void {
  *  resume or full resync): a member who stopped while we were away sends no
  *  frame, so the old entry must not outlive the re-sync. */
 export function clearPeerWatching(): void {
-  voiceStore.setState((prev) =>
-    (prev.peerWatching?.size ?? 0) === 0 ? prev : { ...prev, peerWatching: new Map() },
-  );
+  voiceStore.setState(withoutPeerWatching);
 }
 
 /** True for a short while after `noteWatchingResync`. */
@@ -441,8 +448,8 @@ export function isWatchingResync(windowMs = 2000): boolean {
  *  frame for a user who is not in that channel's roster (one that already
  *  left, or another channel's) is ignored; an empty list clears the entry.
  *  Single writer: the dispatcher's voice_watching handler. */
-export function setPeerWatching(userId: number, watching: readonly number[]): void {
-  voiceStore.setState((prev) => withPeerWatching(prev, userId, watching));
+export function setPeerWatching(userId: number, watching: readonly number[], musicId = 0): void {
+  voiceStore.setState((prev) => withPeerWatching(prev, userId, watching, musicId));
 }
 
 /** Who watches a member's screen share, as user ids: the channel members

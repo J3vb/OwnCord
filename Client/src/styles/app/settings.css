@@ -195,6 +195,13 @@
   color: var(--text-muted);
   margin-top: 4px;
 }
+.setting-note {
+  font-size: var(--font-size-sm);
+  color: var(--text-muted);
+}
+.setting-note:not(:empty) {
+  margin-top: 4px;
+}
 .toggle {
   width: 40px;
   height: 24px;
@@ -999,7 +1006,7 @@ details.disclose[open] > summary .icon {
   margin-left: 8px;
   padding: 1px 6px;
   border-radius: var(--radius-sm);
-  background: var(--green);
+  background: var(--success-fill);
   color: var(--on-fill);
   font-size: var(--font-size-xs);
   font-weight: 600;
@@ -1994,4 +2001,12 @@ details.disclose[open] > summary .icon {
 .my-uploads__more {
   display: block;
   margin: var(--space-3) auto 0;
+}
+
+/* Phones: the Settings buttons (Account's Change password, Upload, Sign out
+   and the rest) are 44px to hit. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .ac-btn {
+    min-height: 44px;
+  }
 }

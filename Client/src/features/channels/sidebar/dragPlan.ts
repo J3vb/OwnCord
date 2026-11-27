@@ -17,7 +17,7 @@ import {
   UNCATEGORIZED_VOICE_CATEGORY,
 } from "@stores/channels.store";
 import type { Channel } from "@stores/channels.store";
-import { visibleCategories } from "@lib/permissions";
+import { visibleCategories } from "@stores/permissions";
 import type { ChannelReorderData } from "../channelSidebarTypes";
 import { groupOfContainer, type ChannelDrag, type DropTarget, type GroupInfo } from "./dragHitTest";
 

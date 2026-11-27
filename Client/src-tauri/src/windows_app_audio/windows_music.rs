@@ -32,8 +32,7 @@ use super::music::{
     assemble_apps, check_music_target, exe_file_name, exe_stem, exe_unchanged, group_sessions,
     AudioSession, Listing,
 };
-use super::windows_impl::parent_map;
-use super::{own_process_ancestors, own_process_tree};
+use super::windows_impl::{own_family, parent_map};
 
 // -- music share: sessions, names, icons ----------------------------------
 
@@ -318,9 +317,7 @@ pub fn list_apps() -> Result<Listing, String> {
         "internal".to_string()
     })?;
     let parents = parent_map()?;
-    let me = std::process::id();
-    let own = own_process_tree(me, &parents);
-    let ancestors = own_process_ancestors(me, &parents);
+    let (own, ancestors) = own_family(&parents);
     let paths = ExePaths::default();
     let groups = group_sessions(
         &sessions,
@@ -348,9 +345,7 @@ pub fn list_apps() -> Result<Listing, String> {
 /// quit may have been reused by another program).
 pub fn resolve_music_pid(pid: u32, listed: Option<String>) -> Result<u32, String> {
     let parents = parent_map()?;
-    let me = std::process::id();
-    let own = own_process_tree(me, &parents);
-    let ancestors = own_process_ancestors(me, &parents);
+    let (own, ancestors) = own_family(&parents);
     check_music_target(pid, &parents, &own, &ancestors).map_err(str::to_string)?;
     let current = exe_path(pid)
         .as_deref()

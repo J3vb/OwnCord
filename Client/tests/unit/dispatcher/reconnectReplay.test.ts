@@ -4,7 +4,7 @@ import { restoreTZ, tzPinHonored } from "../../helpers/tz-pin";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { dmStore } from "../../../src/stores/dm.store";
 import { setUserBlockedByMe } from "../../../src/stores/blocks.store";
-import { notifyIncomingMessage as mockNotifyIncomingMessage } from "../../../src/lib/notifications";
+import { notifyIncomingMessage as mockNotifyIncomingMessage } from "../../../src/features/notifications/notifications";
 import {
   useDispatcherHarness,
   authOkEvent,
@@ -17,11 +17,11 @@ import {
   mock,
 } from "../../helpers/dispatcherHarness";
 
-vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
-vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
+vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notificationsMock());
+vi.mock("../../../src/features/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
-vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
+vi.mock("../../../src/features/connection/identity", () => dispatcherMocks.identityMock());
 vi.mock("../../../src/features/connection/dispatchContext", async (importOriginal) =>
   dispatcherMocks.dispatchContextMock(await importOriginal<object>()),
 );

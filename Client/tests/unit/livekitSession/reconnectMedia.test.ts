@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import * as mocks from "../../helpers/livekitSessionMocks";
 import { createLocalVideoTrack } from "livekit-client";
-import { LiveKitSession } from "../../../src/lib/voice/livekitSession";
+import { LiveKitSession } from "../../../src/features/voice/livekitSession";
 import { desktop } from "../../../src/platform/desktop";
 import { showToast } from "@lib/ui/toast";
 import { setLocalCamera, setLocalScreenshare } from "@stores/voice.store";
@@ -25,7 +25,7 @@ vi.mock("@lib/voice/appAudioTrack", () => ({
 }));
 vi.mock("@lib/voice/noiseSuppression", () => mocks.voiceNoiseSuppressionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.netE2eeCryptoMock());
-vi.mock("@lib/net/identity", () => mocks.netIdentityMock());
+vi.mock("../../../src/features/connection/identity", () => mocks.netIdentityMock());
 
 const { mockVoiceState, mockRoom, mockShowActionToast } = mocks;
 

@@ -4,7 +4,7 @@
  * read_state for a followed thread id versus one nobody follows.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { wireDispatcher } from "../../src/app/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import { makeThread } from "../helpers/thread-fixtures";
 import { channelsStore, resetChannelsStore, setChannels } from "../../src/stores/channels.store";
@@ -17,7 +17,7 @@ import type { ReadyChannel, ReadyPayload, ReadyThread } from "../../src/lib/type
 
 const notifyMention = vi.hoisted(() => vi.fn());
 const notifyChannelActivity = vi.hoisted(() => vi.fn());
-vi.mock("@lib/notifications", () => ({
+vi.mock("../../src/features/notifications/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
   notifyMention,
   notifyChannelActivity,

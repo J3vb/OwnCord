@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { openPopout, openPopoutWindow, type Popout } from "../../src/features/voice/popout";
+import { onPopoutDocument } from "../../src/features/voice/popoutDocuments";
 
 /**
  * A stand-in for the desktop window `window.open` returns: an event target
@@ -57,8 +58,10 @@ afterEach(() => {
   openSpy.mockRestore();
   vi.useRealTimers();
   document.head.replaceChildren();
-  document.documentElement.removeAttribute("data-theme");
+  document.documentElement.removeAttribute("style");
   document.documentElement.removeAttribute("class");
+  document.body.removeAttribute("style");
+  document.body.removeAttribute("class");
 });
 
 function content(): HTMLElement {
@@ -91,7 +94,8 @@ describe("openPopoutWindow", () => {
   });
 
   it("moves the content into the window's document with its title, theme and styles", () => {
-    document.documentElement.setAttribute("data-theme", "dark");
+    // A built-in theme paints its palette inline on the root.
+    document.documentElement.style.setProperty("--bg-primary", "#101010");
     document.documentElement.className = "app-root";
     const link = document.createElement("link");
     link.rel = "stylesheet";
@@ -109,7 +113,7 @@ describe("openPopoutWindow", () => {
     const doc = wins[0]!.document;
 
     expect(doc.title).toBe("Stream of Ann");
-    expect(doc.documentElement.getAttribute("data-theme")).toBe("dark");
+    expect(doc.documentElement.style.getPropertyValue("--bg-primary")).toBe("#101010");
     expect(doc.documentElement.className).toBe("app-root");
     expect(doc.body.contains(el)).toBe(true);
     const copiedLink = doc.head.querySelector("link[rel='stylesheet']");
@@ -123,17 +127,17 @@ describe("openPopoutWindow", () => {
   });
 
   it("follows the app's root attributes while the window is open, and stops once it closes", async () => {
-    document.documentElement.setAttribute("data-theme", "dark");
+    document.documentElement.style.setProperty("--bg-primary", "#101010");
     const p = openPopoutWindow({ title: "A", content: content(), onClosed: vi.fn() })!;
     const root = wins[0]!.document.documentElement;
-    expect(root.getAttribute("data-theme")).toBe("dark");
+    expect(root.style.getPropertyValue("--bg-primary")).toBe("#101010");
     expect(root.classList.contains("mirror-self-camera")).toBe(false);
 
     document.documentElement.classList.add("mirror-self-camera");
-    document.documentElement.setAttribute("data-theme", "light");
+    document.documentElement.style.setProperty("--bg-primary", "#ffffff");
     await Promise.resolve();
     expect(root.classList.contains("mirror-self-camera")).toBe(true);
-    expect(root.getAttribute("data-theme")).toBe("light");
+    expect(root.style.getPropertyValue("--bg-primary")).toBe("#ffffff");
 
     document.documentElement.removeAttribute("class");
     await Promise.resolve();
@@ -143,6 +147,77 @@ describe("openPopoutWindow", () => {
     document.documentElement.classList.add("mirror-self-camera");
     await Promise.resolve();
     expect(root.hasAttribute("class")).toBe(false);
+  });
+
+  it("takes the theme's body class and body tokens, and follows them until it closes", async () => {
+    document.body.classList.add("theme-neon-glow", "voice-user-moving");
+    document.body.style.setProperty("--focus-ring", "#00c8ff");
+    const p = openPopoutWindow({ title: "A", content: content(), onClosed: vi.fn() })!;
+    const body = wins[0]!.document.body;
+    expect(body.classList.contains("theme-neon-glow")).toBe(true);
+    expect(body.classList.contains("voice-user-moving")).toBe(false);
+    expect(body.style.getPropertyValue("--focus-ring")).toBe("#00c8ff");
+
+    document.body.classList.replace("theme-neon-glow", "theme-light");
+    document.body.style.removeProperty("--focus-ring");
+    document.body.style.setProperty("--accent", "#ff0000");
+    await Promise.resolve();
+    expect(body.classList.contains("theme-neon-glow")).toBe(false);
+    expect(body.classList.contains("theme-light")).toBe(true);
+    expect(body.style.getPropertyValue("--focus-ring")).toBe("");
+    expect(body.style.getPropertyValue("--accent")).toBe("#ff0000");
+
+    p.close();
+    document.body.classList.add("theme-dark");
+    await Promise.resolve();
+    expect(body.classList.contains("theme-dark")).toBe(false);
+  });
+
+  it("follows a custom theme painted, edited or removed while it is open", async () => {
+    const link = document.createElement("link");
+    link.rel = "stylesheet";
+    link.href = "https://app.test/styles.css";
+    document.head.append(link);
+    const p = openPopoutWindow({ title: "A", content: content(), onClosed: vi.fn() })!;
+    const head = wins[0]!.document.head;
+    const copiedLink = head.querySelector("link[rel='stylesheet']");
+
+    const theme = document.createElement("style");
+    theme.textContent = ":root { --accent: red; }";
+    document.head.append(theme);
+    await Promise.resolve();
+    expect(head.querySelector("style")?.textContent).toBe(":root { --accent: red; }");
+
+    theme.textContent = ":root { --accent: blue; }";
+    await Promise.resolve();
+    expect(head.querySelector("style")?.textContent).toBe(":root { --accent: blue; }");
+    // The unchanged stylesheet keeps its copy: it is not loaded again.
+    expect(head.querySelector("link[rel='stylesheet']")).toBe(copiedLink);
+
+    theme.remove();
+    await Promise.resolve();
+    expect(head.querySelector("style")).toBeNull();
+
+    p.close();
+    document.head.append(theme);
+    await Promise.resolve();
+    expect(head.querySelector("style")).toBeNull();
+  });
+
+  it("runs the document hooks on each drawn document until their owner aborts", () => {
+    const owner = new AbortController();
+    const hook = vi.fn();
+    onPopoutDocument(hook, owner.signal);
+    track(openPopoutWindow({ title: "A", content: content(), onClosed: vi.fn() }));
+    expect(hook).toHaveBeenCalledTimes(1);
+    expect(hook.mock.calls[0]![0]).toBe(wins[0]!.document);
+    wins[0]!.reload();
+    expect(hook).toHaveBeenCalledTimes(2);
+    expect(hook.mock.calls[1]![0]).toBe(wins[0]!.document);
+
+    owner.abort();
+    track(openPopoutWindow({ title: "B", content: content(), onClosed: vi.fn() }));
+    expect(hook).toHaveBeenCalledTimes(2);
   });
 
   it("does not draw twice into a document that already holds the content", () => {
@@ -352,7 +427,7 @@ describe("openPopout", () => {
     expect(setWindowFullscreen).not.toHaveBeenCalled();
   });
 
-  it("releases the zoom bindings when no window could open", () => {
+  it("leaves no zoom bindings when no window could open", () => {
     const wheelSignals: AbortSignal[] = [];
     const add = EventTarget.prototype.addEventListener;
     const spy = vi.spyOn(EventTarget.prototype, "addEventListener").mockImplementation(function (
@@ -372,8 +447,7 @@ describe("openPopout", () => {
     } finally {
       spy.mockRestore();
     }
-    expect(wheelSignals).toHaveLength(1);
-    expect(wheelSignals[0]!.aborted).toBe(true);
+    expect(wheelSignals.filter((signal) => !signal.aborted)).toEqual([]);
   });
 
   it("ignores F with a modifier and other keys", () => {
@@ -412,6 +486,19 @@ describe("openPopout", () => {
     root.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
     expect(setWindowFullscreen).toHaveBeenLastCalledWith(false, expect.any(String));
     expect(setWindowFullscreen).toHaveBeenCalledTimes(2);
+  });
+
+  it("leaves a double click on a control to the control", () => {
+    const controls = document.createElement("div");
+    const mute = document.createElement("button");
+    const slider = document.createElement("input");
+    slider.type = "range";
+    controls.append(mute, slider);
+    const { button, setWindowFullscreen } = setupPopout({ controls });
+    for (const target of [mute, slider, button]) {
+      target.dispatchEvent(new MouseEvent("dblclick", { bubbles: true }));
+    }
+    expect(setWindowFullscreen).not.toHaveBeenCalled();
   });
 
   it("asks the page for HTML full screen first and does not touch the window until it fails", async () => {
@@ -500,6 +587,27 @@ describe("openPopout", () => {
     const second = setupPopout();
     second.popout.close();
     expect(second.onClosed).toHaveBeenCalledWith(false);
+  });
+
+  it("wires the page again each time the window draws it, once each time", () => {
+    const rewireControls = vi.fn();
+    const v = video();
+    const setWindowFullscreen = vi.fn(() => Promise.resolve());
+    track(
+      openPopout({ title: "x", video: v, rewireControls, onClosed: vi.fn(), setWindowFullscreen }),
+    );
+    expect(rewireControls).toHaveBeenCalledTimes(1);
+    wins[0]!.reload();
+    expect(rewireControls).toHaveBeenCalledTimes(2);
+
+    const root = wins[0]!.document.querySelector<HTMLElement>(".video-popout")!;
+    const button = root.querySelector<HTMLButtonElement>("[data-popout-control='fullscreen']")!;
+    button.click();
+    expect(setWindowFullscreen).toHaveBeenLastCalledWith(true, expect.any(String));
+    const wheel = new WheelEvent("wheel", { ctrlKey: true, deltaY: -100, cancelable: true });
+    root.dispatchEvent(wheel);
+    expect(wheel.defaultPrevented).toBe(true);
+    expect(root.classList.contains("video-zoomed")).toBe(true);
   });
 
   it("stops zooming the picture once the window is closed", () => {

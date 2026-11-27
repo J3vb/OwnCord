@@ -4,6 +4,7 @@ import { cascadedDeclaration, keyword } from "../../helpers/app-css";
 import { expectConsole } from "../../helpers/console";
 import { clearHost, hostAndroidApp } from "../../helpers/androidHost";
 import { registerVideoSurface } from "../../../src/lib/voice/videoSurface";
+import { voiceStore } from "../../../src/stores/voice.store";
 import {
   createVideoGrid,
   type VideoGridComponent,
@@ -14,6 +15,7 @@ import {
   fakePopup,
   SCREEN_TILE,
   screenTileConfig,
+  stubTileSizes,
   tileLookups,
   makeTileConfig,
   useVideoGridHarness,
@@ -22,7 +24,13 @@ import {
 } from "../../helpers/videoGridHarness";
 
 vi.mock("@lib/ui/toast", () => mocks.uiToastMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+const mockToggleMusicShare = vi.fn(() => Promise.resolve());
+vi.mock("../../../src/features/voice/musicControl", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/features/voice/musicControl")>()),
+  toggleMusicShare: () => mockToggleMusicShare(),
+  cachedMusicSupport: () => ({ ok: true }),
+}));
 
 const { mockMuteScreenshareAudio, mockSetScreenshareAudioVolume, mockShowToast } = mocks;
 
@@ -105,6 +113,25 @@ describe("VideoGrid", () => {
       expect(root.classList.contains("video-panning")).toBe(true);
       popup.doc.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
       expect(root.classList.contains("video-panning")).toBe(false);
+    });
+
+    it("offers no tile Pop out in the Android app, nor on your own screen share", () => {
+      hostAndroidApp();
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+        expect(cell(SCREEN).querySelector("[data-tile-control='pip']")).toBeNull();
+        expect(cell(SCREEN).querySelector("[data-tile-control='fullscreen']")).not.toBeNull();
+      } finally {
+        clearHost();
+      }
+      const OWN = SCREEN + 1;
+      grid.addStream(
+        OWN,
+        "Me (Screen)",
+        fakeStream(),
+        makeTileConfig({ isSelf: true, isScreenshare: true }),
+      );
+      expect(cell(OWN).querySelector("[data-tile-control='pip']")).toBeNull();
     });
 
     it("offers Pop out where picture-in-picture is missing too (WebKitGTK)", () => {
@@ -228,7 +255,7 @@ describe("VideoGrid", () => {
       control(SCREEN, "pip").click();
       control(SCREEN, "pop-in").click();
       popup = fakePopup();
-      open.mockReturnValue(popup.win as unknown as Window);
+      open.mockReturnValue(popup.win);
       control(SCREEN, "pip").click();
 
       expect(open).toHaveBeenCalledTimes(2);
@@ -285,6 +312,52 @@ describe("VideoGrid", () => {
       vi.advanceTimersByTime(1000);
       expect(cell(SCREEN).querySelector(".video-tile-overlay")).toBe(overlay);
       expect(popup.doc.querySelector(".video-tile-overlay")).toBeNull();
+    });
+
+    it("keeps the stream's volume and mute working when the window drops their listeners on load", () => {
+      // WebView2 drops the listeners of nodes drawn into the window before
+      // its page loaded: record them, and strip them as it does.
+      const added: Array<[EventTarget, string, EventListenerOrEventListenerObject, boolean]> = [];
+      const add = EventTarget.prototype.addEventListener;
+      const spy = vi.spyOn(EventTarget.prototype, "addEventListener").mockImplementation(function (
+        this: EventTarget,
+        type,
+        listener,
+        options,
+      ) {
+        const capture = typeof options === "boolean" ? options : options?.capture === true;
+        if (listener !== null) added.push([this, type, listener, capture]);
+        return add.call(this, type, listener, options);
+      });
+      try {
+        grid.addStream(SCREEN, "Otto (Screen)", fakeStream(), screenCfg);
+        control(SCREEN, "pip").click();
+        const drawnInto = popup.doc;
+        for (const [target, type, listener, capture] of added) {
+          if (target instanceof Node && drawnInto.contains(target)) {
+            target.removeEventListener(type, listener, capture);
+          }
+        }
+        popup.reload();
+      } finally {
+        spy.mockRestore();
+      }
+
+      const overlay = popup.doc.querySelector<HTMLElement>(".video-tile-overlay")!;
+      const slider = overlay.querySelector<HTMLInputElement>(".tile-volume-slider")!;
+      const mute = overlay.querySelector<HTMLButtonElement>(".tile-mute-btn")!;
+      slider.value = "0";
+      slider.dispatchEvent(new Event("input"));
+      expect(mockMuteScreenshareAudio).toHaveBeenLastCalledWith(2, true);
+      expect(overlay.querySelector(".tile-volume-value")!.textContent).toBe("0%");
+      expect(mute.getAttribute("aria-label")).toBe("Unmute");
+      expect(overlay.classList.contains("muted")).toBe(true);
+
+      // Wired once: a click toggles the mute once, not back and forth.
+      mute.click();
+      expect(mute.getAttribute("aria-label")).toBe("Mute");
+      expect(overlay.querySelector(".tile-volume-value")!.textContent).toBe("100%");
+      expect(mockMuteScreenshareAudio).toHaveBeenLastCalledWith(2, false);
     });
 
     it("hides a muted track's stalled frame in the window too", () => {
@@ -621,6 +694,34 @@ describe("VideoGrid", () => {
       expect(cc.onScreenshareToggle).toHaveBeenCalledTimes(1);
     });
 
+    it("brings the call back to the app window before the music picker opens there", () => {
+      const { onCallPopout } = startCall();
+      popRow().click();
+      const grid0 = root();
+      mockToggleMusicShare.mockClear();
+
+      barButton("music").click();
+
+      expect(container.contains(grid0)).toBe(true);
+      expect(onCallPopout).toHaveBeenLastCalledWith(false, true);
+      expect(mockToggleMusicShare).toHaveBeenCalledTimes(1);
+    });
+
+    it("stops music from the pop-out without leaving it", () => {
+      startCall();
+      popRow().click();
+      voiceStore.setState((prev) => ({ ...prev, localMusic: true }));
+      grid.setCallState({ muted: false, deafened: false, listenOnly: false, music: true });
+      mockToggleMusicShare.mockClear();
+      try {
+        barButton("music").click();
+        expect(popup.doc.body.contains(root())).toBe(true);
+        expect(mockToggleMusicShare).toHaveBeenCalledTimes(1);
+      } finally {
+        voiceStore.setState((prev) => ({ ...prev, localMusic: false }));
+      }
+    });
+
     it("stops a share from the pop-out without leaving it", () => {
       const { cc } = startCall();
       grid.setCallState({ muted: false, deafened: false, listenOnly: false, screenshare: true });
@@ -696,6 +797,50 @@ describe("VideoGrid", () => {
       popRow().click();
       grid.destroy?.();
       expect(popup.win.close).toHaveBeenCalled();
+    });
+
+    it("asks for tile sizes at the window's own pixel ratio, and again when that ratio changes", () => {
+      const { resize } = stubTileSizes();
+      const queries: Array<EventTarget & { media: string }> = [];
+      // The pop-out sits on a 200% monitor; the app window (jsdom) is at 100%.
+      const popWin = {
+        devicePixelRatio: 2,
+        matchMedia: (media: string) => {
+          const query = Object.assign(new EventTarget(), { media, matches: true });
+          queries.push(query);
+          return query;
+        },
+        requestAnimationFrame: (cb: FrameRequestCallback) => window.requestAnimationFrame(cb),
+        cancelAnimationFrame: (id: number) => window.cancelAnimationFrame(id),
+      };
+      Object.defineProperty(popup.doc, "defaultView", { configurable: true, value: popWin });
+      Object.defineProperty(popup.doc, "hidden", { configurable: true, value: false });
+      const setStreamView = vi.fn();
+      try {
+        grid.setCallbacks({ callControls: controls(), setStreamView, onExitGrid: vi.fn() });
+        grid.setExitVisible(true);
+        grid.addStream(OTTO, "Otto", fakeStream(), makeTileConfig({ audioUserId: OTTO }));
+        popRow().click();
+
+        resize({ [OTTO]: [640, 360] });
+        expect(setStreamView).toHaveBeenLastCalledWith(OTTO, {
+          enabled: true,
+          size: { width: 1280, height: 720 },
+        });
+
+        // Dragged onto a 150% monitor: the ratio changes, the CSS size does not.
+        popWin.devicePixelRatio = 1.5;
+        queries.at(-1)!.dispatchEvent(new Event("change"));
+        vi.advanceTimersByTime(150);
+        expect(setStreamView).toHaveBeenLastCalledWith(OTTO, {
+          enabled: true,
+          size: { width: 960, height: 540 },
+        });
+        // The next change is watched at the new ratio.
+        expect(queries.at(-1)!.media).toBe("(resolution: 1.5dppx)");
+      } finally {
+        vi.restoreAllMocks();
+      }
     });
 
     it("stays in the app window, with a toast, when no window opens", () => {

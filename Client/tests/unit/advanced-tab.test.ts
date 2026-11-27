@@ -274,10 +274,13 @@ describe("AdvancedTab — Clear All Cache", () => {
     "owncord:settings:inputMode",
     "owncord:settings:pttVk",
     "owncord:settings:mutedChannels:a.example",
+    "owncord:settings:channelNotificationLevels:a.example",
     "owncord:drafts:a.example:1",
     "owncord:dm-note:7",
     "owncord:dm-note-kept:7",
     "owncord:server-rail-layout",
+    "owncord:settings:screenLayout",
+    "owncord:settings:buddiesCollapsed",
   ])("keeps %s across Clear All, since it is not cache", async (key) => {
     localStorage.setItem(key, "kept");
     localStorage.setItem("owncord:settings:compactMode", "true");

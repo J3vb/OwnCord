@@ -6,7 +6,7 @@
 import type { UserStatus } from "@lib/types";
 import { formatDate } from "../../i18n/format";
 import { shellText } from "../../i18n/shell";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
 
 export interface StatusDef {
   readonly value: UserStatus;

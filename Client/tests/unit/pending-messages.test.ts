@@ -10,7 +10,7 @@ import {
   type PendingMessageOwner,
   type PendingMessagePersistence,
   type PendingTextMessage,
-} from "@lib/pendingMessages";
+} from "../../src/features/messaging/pendingMessages";
 
 const owner = { host: "chat.example:55000", userId: 7 };
 const key = (scope: PendingMessageOwner) => JSON.stringify(scope);

@@ -11,6 +11,7 @@ import type {
 } from "../../lib/types";
 import type { ReferencedMessage } from "../../lib/types";
 import { isPinRowKind } from "../../lib/text/messageKind";
+import { boundInboundText } from "../../lib/text/inboundText";
 import type { Message, MessagesState } from "./messageModel";
 import { recordLoadJournal } from "./loadJournal";
 import { reduceLinkPreviews } from "../../lib/linkPreviewState";
@@ -77,13 +78,14 @@ export function reduceEditMessage(prev: MessagesState, payload: ChatEditedPayloa
 function editRows(prev: MessagesState, payload: ChatEditedPayload): MessagesState {
   const channelMessages = prev.messagesByChannel.get(payload.channel_id);
   if (!channelMessages) return prev;
+  const content = boundInboundText(payload.content);
 
   const updatedList = refreshReplies(
     channelMessages.map((msg) =>
       msg.id === payload.message_id
         ? {
             ...msg,
-            content: payload.content,
+            content,
             editedAt: payload.edited_at,
             mentions: payload.mentions,
             mentionsEveryone: payload.mentions_everyone,
@@ -96,7 +98,7 @@ function editRows(prev: MessagesState, payload: ChatEditedPayload): MessagesStat
         : msg,
     ),
     payload.message_id,
-    payload.content,
+    content,
   );
 
   const updatedMessages = new Map(prev.messagesByChannel);

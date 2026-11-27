@@ -3,7 +3,7 @@
 // each delegating to MediaControl or AudioPipeline.
 import type { MediaControl } from "./mediaControl";
 import type { AudioPipeline } from "@lib/voice/audioPipeline";
-import { isMicPolicyGated } from "@lib/voice/deviceManager";
+import { isMicPolicyGated } from "./deviceManager";
 import { createLogger } from "@lib/logger";
 import type { StreamQuality } from "./screenShare";
 import { voiceStore, setPttGated as setPttGatedState } from "@stores/voice.store";
@@ -159,11 +159,14 @@ export abstract class SessionMedia extends SessionShare {
 
   /** Push-to-talk: close (key up) or open (key down) the gate — the mic
    *  processor's, or the native room's own (AudioPipeline.setPttGated).
-   *  Recorded in the store for the widget, applied to the live processor and
-   *  to every one attached later. */
-  setPttGated(gated: boolean): void {
-    setPttGatedState(gated);
-    this._media.setPttGated(gated);
+   *  Applied to the live processor and to every one attached later, and
+   *  recorded in the store for the widget and the ticks. A key-up's
+   *  `releaseDelayMs` keeps the voice going that long: the processor closes
+   *  on its own audio clock, and the store records the close once the delay
+   *  has run. */
+  setPttGated(gated: boolean, releaseDelayMs = 0): void {
+    setPttGatedState(gated, releaseDelayMs);
+    this._media.setPttGated(gated, releaseDelayMs);
   }
 
   async reapplyAudioProcessing(): Promise<void> {

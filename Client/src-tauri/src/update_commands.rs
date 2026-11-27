@@ -15,6 +15,8 @@ use crate::tofu::{cert_store_key, load_stored_fingerprint, HostScopedVerifier};
 
 #[cfg(target_os = "android")]
 pub(crate) mod android;
+#[cfg(desktop)]
+mod handoff;
 
 const UPDATE_CONNECT_TIMEOUT: Duration = Duration::from_secs(15);
 const UPDATE_READ_TIMEOUT: Duration = Duration::from_secs(30);
@@ -24,11 +26,14 @@ const UPDATE_READ_TIMEOUT: Duration = Duration::from_secs(30);
 // installer against the same executable.
 static UPDATE_IN_PROGRESS: AtomicBool = AtomicBool::new(false);
 
-// Set once the download is done and `install()` is about to be called. From
-// that point the old process still owns the single-instance mutex while
-// `ShellExecuteW` waits for the installer, so the single-instance callback must
-// stop restoring the old window for any forwarded launch (shortcut click,
-// owncord:// link, autostart): doing so puts the old UI back for the whole gap.
+// Set once the download is done and `install()` is about to be called. The
+// app's pre-exit step (`handoff.rs`) hides the window and the tray icon but
+// keeps the single-instance lock, so while `ShellExecuteW` waits for the
+// installer a new launch (shortcut click, owncord:// link, autostart) is
+// handed to this process instead of starting a second copy. The
+// single-instance callback must then not restore the old window: that puts the
+// old UI back for the whole gap. A failed launch clears the flag and brings the
+// window and tray back itself.
 #[cfg(desktop)]
 static INSTALLER_LAUNCHING: AtomicBool = AtomicBool::new(false);
 
@@ -201,6 +206,10 @@ struct BuiltUpdater {
     /// Set by the version comparator when the server sent a release at all,
     /// even one this client is already at or past.
     answered: Arc<AtomicBool>,
+    /// The pre-exit step the Windows installer launch runs, kept so a failed
+    /// launch can bring the window and tray back.
+    #[cfg(desktop)]
+    handoff: Arc<handoff::Handoff<handoff::LiveUi>>,
 }
 
 /// Record in `answered` that the server sent a release, and otherwise decide
@@ -260,6 +269,15 @@ fn build_updater(app: &AppHandle, server_url: &str) -> Result<BuiltUpdater, Stri
         .map_err(|e| format!("failed to set endpoints: {e}"))?;
     #[cfg(target_os = "android")]
     let builder = android::configure(app, builder)?;
+    // Replaces the plugin's default pre-exit step, which also releases the
+    // single-instance lock and drops the tray icon (handoff.rs).
+    #[cfg(desktop)]
+    let handoff = Arc::new(handoff::Handoff::new(handoff::LiveUi(app.clone())));
+    #[cfg(desktop)]
+    let builder = {
+        let step = Arc::clone(&handoff);
+        builder.on_before_exit(move || step.before_launch())
+    };
     let updater = track_offers(builder, &answered)
         .configure_client(move |client| {
             // This callback applies to both metadata checks and downloads.
@@ -280,6 +298,8 @@ fn build_updater(app: &AppHandle, server_url: &str) -> Result<BuiltUpdater, Stri
         updater,
         deb_ready,
         answered,
+        #[cfg(desktop)]
+        handoff,
     })
 }
 
@@ -592,7 +612,9 @@ pub async fn download_and_install_update(
     expected_version: Option<String>,
 ) -> Result<(), String> {
     let install_guard = InstallGuard::acquire(&UPDATE_IN_PROGRESS)?;
-    let updater = build_updater(&app, &server_url)?.updater;
+    let BuiltUpdater {
+        updater, handoff, ..
+    } = build_updater(&app, &server_url)?;
 
     let update = updater
         .check()
@@ -650,10 +672,10 @@ pub async fn download_and_install_update(
             }
 
             // The split from `download_and_install` exists for this point: from
-            // here the old process may still be alive (the plugin hides the
-            // window, then blocks in ShellExecuteW on Windows) while any
-            // forwarded launch would otherwise restore the old UI. Set the flag
-            // and install.
+            // here the old process may still be alive (the pre-exit step hides
+            // the window and tray, then the plugin blocks in ShellExecuteW on
+            // Windows) while any forwarded launch would otherwise restore the
+            // old UI. Set the flag and install.
             INSTALLER_LAUNCHING.store(true, Ordering::SeqCst);
             log::info!(
                 "[update] installer launching for version {} (old window will ignore forwarded launches)",
@@ -672,6 +694,9 @@ pub async fn download_and_install_update(
             INSTALLER_LAUNCHING.store(false, Ordering::SeqCst);
             #[cfg(desktop)]
             if installed.is_err() {
+                // An installer that did not start leaves this process running:
+                // its window and tray come back, and no restart follows.
+                handoff.launch_failed();
                 crate::window_prefs::set_show_next_launch(&app, false);
             }
             installed.map_err(|e| format!("download/install failed: {e}"))?;

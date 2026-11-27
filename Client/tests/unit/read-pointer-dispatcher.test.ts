@@ -7,7 +7,7 @@ import { describe, it, expect, vi, beforeAll, beforeEach, afterEach } from "vite
 import * as dispatcherMocks from "../helpers/dispatcherMocks";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-import { wireDispatcher } from "../../src/lib/dispatcher";
+import { wireDispatcher } from "../../src/app/dispatcher";
 import { createMockWsClient } from "../helpers/mock-ws";
 import {
   channelsStore,
@@ -21,13 +21,13 @@ import {
   noteMessageSeen,
   setLiveTailInView,
   setMarkReadSender,
-} from "../../src/lib/readState";
+} from "../../src/stores/readState";
 import type { WsClient } from "../../src/lib/ws";
 import {
   markMessageUnread,
   setMarkUnreadSender,
 } from "../../src/features/messaging/message-list/markUnread";
-import { viewChannel } from "../../src/lib/prefs/lastChannel";
+import { viewChannel } from "../../src/features/channels/viewChannel";
 import { readPointerEnabled } from "../../src/lib/net/serverCapabilities";
 import type { ReadyChannel, ReadyPayload } from "../../src/lib/types";
 import type { WsErrorCodeValue } from "../../src/lib/protocolTypes";
@@ -36,8 +36,10 @@ import { resetMessagesState } from "../helpers/storeResets";
 import { resetChannelsState } from "../helpers/storeSeeds";
 import { makeDmRow, pointerMessage, seedLoadedMessages } from "../helpers/readPointerFixtures";
 
-vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/notifications/notifications", () =>
+  dispatcherMocks.notificationsMock(),
+);
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     disableCamera: vi.fn(async () => {}),
     disableScreenshare: vi.fn(async () => {}),
@@ -49,7 +51,7 @@ vi.mock("@lib/voice/livekitSession", () =>
 // environment.
 vi.mock("../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
-vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
+vi.mock("../../src/features/connection/identity", () => dispatcherMocks.identityMock());
 
 function ch(id: number, unread: number, mentions: number, pointer?: number): ReadyChannel {
   return {

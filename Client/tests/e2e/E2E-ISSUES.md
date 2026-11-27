@@ -63,6 +63,7 @@ by file. This run had neither.
 | ------------------- | ------------------------------------------ | ---------------------------------------- |
 | `client-e2e`        | **Yes** (blocking since 2026-08-05, DC-07) | Full web suite, every PR                 |
 | `client-e2e-parity` | **Yes**                                    | The `@parity` subset                     |
+| `client-e2e-deck`   | No (not required yet)                      | The shell specs under Command Deck       |
 | `admin-e2e`         | No (`continue-on-error`, earning its soak) | The admin-panel journey vs a real server |
 | native config       | not in CI                                  | Windows-only; run manually               |
 

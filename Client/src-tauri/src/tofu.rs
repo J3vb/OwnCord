@@ -90,8 +90,9 @@ pub(crate) fn default_verify_schemes() -> Vec<rustls::SignatureScheme> {
 
 // ── verifiers ───────────────────────────────────────────────────────────────
 
-/// The public web-PKI verifier (the webpki-roots bundle, as the updater uses),
-/// built once. `None` only if rustls refuses to build it, which then marks no
+/// The public web-PKI verifier (the webpki-roots bundle), built once. It
+/// decides whether a server's certificate is publicly valid for the TOFU
+/// renewal rule. `None` only if rustls refuses to build it, which then marks no
 /// certificate publicly valid, so every change prompts.
 fn web_pki_verifier() -> Option<Arc<dyn rustls::client::danger::ServerCertVerifier>> {
     static VERIFIER: std::sync::OnceLock<
@@ -110,6 +111,24 @@ fn web_pki_verifier() -> Option<Arc<dyn rustls::client::danger::ServerCertVerifi
             .map(|v| v as Arc<dyn rustls::client::danger::ServerCertVerifier>)
         })
         .clone()
+}
+
+/// The verifier for the hosts the updater does not pin (the installer
+/// download): the operating system's trust store, which the updater plugin's
+/// own client also uses when no pin is stored, so a root the system trusts
+/// (a company proxy, antivirus HTTPS scanning) is honoured as it is by the
+/// browser. The bundled roots stand in when the system store cannot be read,
+/// and on Android, whose system verifier needs a JNI set-up this app does not
+/// do. The pinned server never reaches this verifier.
+fn unpinned_host_verifier() -> Option<Arc<dyn rustls::client::danger::ServerCertVerifier>> {
+    #[cfg(not(target_os = "android"))]
+    match rustls_platform_verifier::Verifier::new(
+        Arc::new(rustls::crypto::ring::default_provider()),
+    ) {
+        Ok(system) => return Some(Arc::new(system)),
+        Err(e) => log::warn!("[tofu] system trust store unavailable, using bundled roots: {e}"),
+    }
+    web_pki_verifier()
 }
 
 /// A rustls verifier that ACCEPTS any leaf cert but records its fingerprint,
@@ -259,10 +278,11 @@ impl rustls::client::danger::ServerCertVerifier for PinnedVerifier {
 }
 
 /// A rustls verifier that applies the pinned-fingerprint check ONLY to the
-/// named host and normal web-PKI validation to every other host. Used by the
-/// updater, whose single HTTP client talks both to the (possibly self-signed,
-/// TOFU-pinned) OwnCord server for update metadata and to GitHub for the
-/// installer download — a client-wide pin would reject GitHub's certificate.
+/// named host and normal certificate validation to every other host. Used by
+/// the updater, whose single HTTP client talks both to the (possibly
+/// self-signed, TOFU-pinned) OwnCord server for update metadata and to GitHub
+/// for the installer download — a client-wide pin would reject GitHub's
+/// certificate.
 #[derive(Debug)]
 pub(crate) struct HostScopedVerifier {
     pinned_host: String,
@@ -272,7 +292,7 @@ pub(crate) struct HostScopedVerifier {
 
 impl HostScopedVerifier {
     pub(crate) fn new(pinned_host: String, expected_fingerprint: String) -> Result<Self, String> {
-        let default = web_pki_verifier().ok_or("failed to build web-PKI verifier")?;
+        let default = unpinned_host_verifier().ok_or("failed to build certificate verifier")?;
         Ok(Self::with_default(
             pinned_host,
             expected_fingerprint,
@@ -852,5 +872,120 @@ mod tests {
     fn host_scoped_matches_ip_pinned_host() {
         let v = host_scoped("192.168.1.10", b"server-cert", false);
         assert!(verify(&v, "192.168.1.10", b"server-cert").is_ok());
+    }
+
+    // ── the system trust store for hosts that are not pinned ────────────────
+
+    /// A root that only a test trust store holds (it is in no public bundle).
+    #[cfg(target_os = "linux")]
+    const SYSTEM_ROOT_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIBrDCCAVOgAwIBAgIUWS7ihSbKsr281+m2iJjDKuFkvokwCgYIKoZIzj0EAwIw
+IzEhMB8GA1UEAwwYT3duQ29yZCBUZXN0IFN5c3RlbSBSb290MCAXDTI2MTEyMjA3
+MTc0NVoYDzIxMjYxMDI5MDcxNzQ1WjAjMSEwHwYDVQQDDBhPd25Db3JkIFRlc3Qg
+U3lzdGVtIFJvb3QwWTATBgcqhkjOPQIBBggqhkjOPQMBBwNCAASlBcf49PfCeCY8
+dgL5JfzAdV0cdBBnpC5B14JjjiowjPjCgSqo1gRlFW0v2BWy4Xvle06jfaoWpqgi
+64vKEAKMo2MwYTAdBgNVHQ4EFgQUIBlYd44sdIGa2EItsXvnjunIT5AwHwYDVR0j
+BBgwFoAUIBlYd44sdIGa2EItsXvnjunIT5AwDwYDVR0TAQH/BAUwAwEB/zAOBgNV
+HQ8BAf8EBAMCAQYwCgYIKoZIzj0EAwIDRwAwRAIgahdD4u1p4xYrHManbzB28dbh
+YwrJfi2jA0XpjoZZW2ACIAGMKCbMsXSITcmDxYYSbVzopa2OOl1/3KmBrGwyVUMm
+-----END CERTIFICATE-----
+";
+
+    /// A server certificate that root signed, for `updates.example.net` and
+    /// `chat.example.com`.
+    const SYSTEM_LEAF_PEM: &str = "-----BEGIN CERTIFICATE-----
+MIIB7zCCAZSgAwIBAgIUMSN0RajLlBggYvz+i9TmcOHurJMwCgYIKoZIzj0EAwIw
+IzEhMB8GA1UEAwwYT3duQ29yZCBUZXN0IFN5c3RlbSBSb290MCAXDTI2MTEyMjA3
+MTc1MFoYDzIxMDkwMTExMDcxNzUwWjAeMRwwGgYDVQQDDBN1cGRhdGVzLmV4YW1w
+bGUubmV0MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAERfEUtuitw9PyyJj7YWae
+yQfZFD73MWB4CJ1mTDAvQYXWwYvAJiRMdvX2oww+ZGdmfTMZEJSCJeqYcOVFjKWO
+/KOBqDCBpTAMBgNVHRMBAf8EAjAAMA4GA1UdDwEB/wQEAwIHgDATBgNVHSUEDDAK
+BggrBgEFBQcDATAwBgNVHREEKTAnghN1cGRhdGVzLmV4YW1wbGUubmV0ghBjaGF0
+LmV4YW1wbGUuY29tMB0GA1UdDgQWBBRc6wT7nAINfxBZO08biFO0OMZyczAfBgNV
+HSMEGDAWgBQgGVh3jix0gZrYQi2xe+eO6chPkDAKBggqhkjOPQQDAgNJADBGAiEA
++b5gvJutxZ0AnWi1aPHlGLbJqdGbEt2Grfb5Ax59anICIQCKtk/SRlr0xUJnxqQ/
+sg6z3JB7keWtQGFbG61pj1bwmQ==
+-----END CERTIFICATE-----
+";
+
+    /// 2027-01-01, inside both certificates' validity.
+    const SYSTEM_CERTS_VALID_AT: u64 = 1_798_761_600;
+
+    fn verify_system_leaf(
+        v: &dyn rustls::client::danger::ServerCertVerifier,
+        host: &str,
+    ) -> Result<rustls::client::danger::ServerCertVerified, rustls::Error> {
+        use rustls::pki_types::pem::PemObject;
+        let leaf = rustls::pki_types::CertificateDer::from_pem_slice(SYSTEM_LEAF_PEM.as_bytes())
+            .expect("leaf certificate");
+        let name = rustls::pki_types::ServerName::try_from(host.to_string()).unwrap();
+        v.verify_server_cert(
+            &leaf,
+            &[],
+            &name,
+            &[],
+            rustls::pki_types::UnixTime::since_unix_epoch(std::time::Duration::from_secs(
+                SYSTEM_CERTS_VALID_AT,
+            )),
+        )
+    }
+
+    #[test]
+    fn the_bundled_roots_do_not_trust_the_test_root() {
+        // Keeps the test below honest: its server certificate passes only
+        // through the system trust store.
+        let bundled = web_pki_verifier().expect("bundled roots");
+        let err = verify_system_leaf(bundled.as_ref(), "updates.example.net").unwrap_err();
+        assert!(
+            matches!(
+                err,
+                rustls::Error::InvalidCertificate(rustls::CertificateError::UnknownIssuer)
+            ),
+            "{err:?}"
+        );
+    }
+
+    /// On Linux the system trust store can be pointed at one file
+    /// (`SSL_CERT_FILE`). The environment is process-wide, so the check runs
+    /// in a child test process started with it set.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn an_unpinned_host_is_checked_against_the_system_trust_store() {
+        const CHILD: &str = "OWNCORD_TEST_SYSTEM_TRUST_STORE";
+        const NAME: &str =
+            "tofu::tests::an_unpinned_host_is_checked_against_the_system_trust_store";
+        if std::env::var_os(CHILD).is_some() {
+            let v = HostScopedVerifier::new(
+                "chat.example.com".into(),
+                fingerprint_hex(b"pinned-server-cert"),
+            )
+            .expect("verifier");
+            // The update download: a host the system trusts through a root
+            // the public bundle does not have.
+            let download = verify_system_leaf(&v, "updates.example.net");
+            assert!(download.is_ok(), "{download:?}");
+            // The pinned server answers to its pin alone, whatever the system
+            // trusts.
+            let err = verify_system_leaf(&v, "chat.example.com").unwrap_err();
+            assert!(err.to_string().contains("fingerprint mismatch"), "{err}");
+            return;
+        }
+        let dir = std::env::temp_dir().join(format!("owncord-trust-store-{}", std::process::id()));
+        let store = dir.join("roots.pem");
+        crate::json_store::write_atomic(&store, SYSTEM_ROOT_PEM.as_bytes()).expect("store file");
+        let out = std::process::Command::new(std::env::current_exe().expect("test binary"))
+            .args(["--exact", NAME, "--test-threads=1"])
+            .env(CHILD, "1")
+            .env("SSL_CERT_FILE", &store)
+            .env_remove("SSL_CERT_DIR")
+            .output()
+            .expect("run the test binary");
+        let _ = std::fs::remove_dir_all(&dir);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert!(
+            out.status.success() && stdout.contains("1 passed"),
+            "{stdout}\n{}",
+            String::from_utf8_lossy(&out.stderr)
+        );
     }
 }

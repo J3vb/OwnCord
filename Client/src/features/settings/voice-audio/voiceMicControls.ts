@@ -5,7 +5,7 @@
  */
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { loadPref, savePref, createToggle } from "../helpers";
-import { applyInputMode, setInputVolume } from "@lib/voice/livekitSession";
+import { applyInputMode, setInputVolume } from "../../voice/livekitSession";
 import { vadLevelPosition, vadThreshold } from "@lib/voice/audioPipeline";
 import { desktop } from "../../../platform/desktop";
 import { settingsText as t } from "../../../i18n/settings";

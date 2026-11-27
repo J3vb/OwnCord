@@ -22,6 +22,7 @@
 //! logged.
 pub mod app_sound;
 pub mod camera;
+mod camera_preview;
 pub mod capture;
 mod codecs;
 mod hotplug;
@@ -66,15 +67,6 @@ struct Envelope {
     event: Event,
 }
 
-/// A camera preview outside any room (the settings tab): its own frame socket
-/// and a capture, kept alive until stopped or replaced. The socket is dropped
-/// (and so closed) with the preview; `Drop` holds it only for that side effect.
-struct Standalone {
-    #[allow(dead_code)]
-    frames: video::FrameServer,
-    _capture: camera::CameraCapture,
-}
-
 #[derive(Default)]
 struct Inner {
     /// Key material for the next/current room. Set before connect by the TS
@@ -85,11 +77,9 @@ struct Inner {
     /// A key staged in the other slot (received with, not sent with yet).
     staged: Option<(i32, Vec<u8>)>,
     session: Option<(u64, NativeSession)>,
-    /// The out-of-call camera preview (settings tab).
-    standalone: Option<Standalone>,
-    /// The latest out-of-call camera preview start, so overlapping starts
-    /// cannot leave an older capture owning the single slot.
-    standalone_generation: u64,
+    /// The out-of-call camera preview (settings tab), and its start still
+    /// waiting for a first frame.
+    standalone: camera_preview::Slot<camera_preview::Standalone>,
     next_id: u64,
     /// The settings tab's mic test, under the id its events carry. Never
     /// filled while `session` is.
@@ -128,17 +118,6 @@ impl Inner {
                 ..Default::default()
             },
         }
-    }
-    /// Start a new out-of-call camera preview; returns its generation. A
-    /// later [`Inner::standalone_is_latest`] with an older generation is false.
-    fn begin_standalone(&mut self) -> u64 {
-        self.standalone_generation += 1;
-        self.standalone_generation
-    }
-    /// Whether `generation` is still the latest preview start. A superseded
-    /// start must drop its own capture instead of claiming the slot.
-    fn standalone_is_latest(&self, generation: u64) -> bool {
-        self.standalone_generation == generation
     }
     /// Supersede any in-flight mic test start and take the current test out
     /// (to be released off the lock).
@@ -179,12 +158,6 @@ impl Inner {
     /// The call camera's preview, when a call has its camera running.
     fn call_camera_preview(&self) -> Option<(String, (u32, u32))> {
         self.session.as_ref().and_then(|(_, s)| s.camera_preview())
-    }
-    /// Supersede any in-flight start and take the current preview out, for
-    /// the caller to release off the runtime.
-    fn clear_standalone(&mut self) -> Option<Standalone> {
-        self.standalone_generation += 1;
-        self.standalone.take()
     }
 }
 
@@ -326,6 +299,10 @@ pub async fn native_voice_connect<R: Runtime>(
     token: String,
     audio: AudioOptions,
 ) -> Result<Connected, String> {
+    // Only an address on this machine (the client's own tunnel, or a local
+    // server's loopback LiveKit) is dialed. Checked before anything else, so a
+    // refused address leaves a live session as it was.
+    owncord_parse::voice::validate_voice_url(&url).map_err(|e| e.to_string())?;
     // A publish of the old session may hold the lock on the SFU: end it.
     state.quick.begin_close(None);
     let (id, key, superseded, test) = {
@@ -788,9 +765,10 @@ pub async fn native_voice_start_camera(
         let (standalone, retired) = {
             let mut inner = state.inner.lock().await;
             let retired = inner.current(session)?.release_camera().await;
-            // The settings preview may hold the device: free it for the call,
-            // whose camera the preview then shows.
-            (inner.clear_standalone(), retired)
+            // The settings preview, or its start still waiting for a first
+            // frame, may hold the device: free it for the call, whose camera
+            // the preview then shows.
+            (inner.standalone.clear(), retired)
         };
         release_blocking(standalone).await;
         retired.release().await;
@@ -978,12 +956,6 @@ async fn stop_camera_capture(state: &NativeVoiceState, session: u64, capture: u6
     retired.release().await;
 }
 
-/// Release `value` (a preview's capture) under the camera gate.
-async fn release_preview<T: Send + 'static>(state: &NativeVoiceState, value: T) {
-    let _gate = state.camera_gate.lock().await;
-    release_blocking(value).await;
-}
-
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CameraPreviewStarted {
@@ -996,10 +968,12 @@ pub struct CameraPreviewStarted {
 
 /// Start a camera capture and preview with no room (the settings tab), since
 /// WebKitGTK cannot keep a camera alive while the window is hidden. Replaces
-/// any earlier preview. Resolves once the first frame arrives; a start a newer
-/// one superseded while it started rejects after releasing its own capture.
-/// While a call's camera runs, the device is the call's: the preview is that
-/// camera's own socket and no second capture starts.
+/// any earlier preview. Resolves once the first frame arrives. While a call's
+/// camera runs, the device is the call's: the preview is that camera's own
+/// socket and no second capture starts, including when the call camera took
+/// the device from this start while it waited for its first frame. A start
+/// otherwise superseded meanwhile rejects; its capture was released by the
+/// command that superseded it.
 #[tauri::command]
 pub async fn native_voice_start_camera_preview(
     state: tauri::State<'_, NativeVoiceState>,
@@ -1007,60 +981,73 @@ pub async fn native_voice_start_camera_preview(
     capture: camera::CaptureOptions,
 ) -> Result<CameraPreviewStarted, String> {
     let target = camera::Target::parse(&source)?;
-    let (generation, capturer, started) = {
+    let (generation, url, started) = {
         let _gate = state.camera_gate.lock().await;
         let generation = {
             let mut inner = state.inner.lock().await;
-            let generation = inner.begin_standalone();
-            if let Some((frames, (width, height))) = inner.call_camera_preview() {
-                let old = inner.standalone.take();
+            let (generation, older) = inner.standalone.begin();
+            if let Some(call) = inner.call_camera_preview() {
+                let old = (inner.standalone.take_live(), older);
                 drop(inner);
                 release_blocking(old).await;
-                return Ok(CameraPreviewStarted {
-                    width,
-                    height,
-                    frames,
-                });
+                return Ok(camera_preview::call_preview(call));
             }
+            drop(inner);
+            release_blocking(older).await;
             generation
         };
         let (capturer, started) = camera::CameraCapture::start(target, capture, || {})?;
-        (generation, capturer, started)
+        let frames = match video::FrameServer::bind().await {
+            Ok(frames) => frames,
+            Err(e) => {
+                release_blocking(capturer).await;
+                return Err(e);
+            }
+        };
+        frames.set_camera(Some(capturer.preview()));
+        let url = frames.url().to_string();
+        // Parked before the gate drops, so a command behind it can take the
+        // capture out while this waits for the first frame.
+        let preview = camera_preview::Standalone {
+            frames,
+            _capture: capturer,
+        };
+        let stale = state
+            .inner
+            .lock()
+            .await
+            .standalone
+            .park(generation, preview);
+        release_blocking(stale).await;
+        (generation, url, started)
     };
-    let frames = match video::FrameServer::bind().await {
-        Ok(frames) => frames,
-        Err(e) => {
-            release_preview(&state, capturer).await;
-            return Err(e);
-        }
-    };
-    frames.set_camera(Some(capturer.preview()));
-    let url = frames.url().to_string();
     let started = started
         .await
         .map_err(|_| "camera preview stopped before it started".to_string())
         .and_then(|r| r);
-    let (width, height) = match started {
-        Ok(size) => size,
-        Err(e) => {
-            release_preview(&state, (capturer, frames)).await;
-            return Err(e);
-        }
-    };
+    // Under the gate again: a call camera start that took this capture has
+    // finished, so its preview is there to show, and none can take the device
+    // between the swap and the release of the preview it replaces.
+    let _gate = state.camera_gate.lock().await;
     let mut inner = state.inner.lock().await;
-    // A newer start or a stop superseded this one while it started: release
-    // the capture here rather than replacing the slot the newer request owns.
-    if !inner.standalone_is_latest(generation) {
-        drop(inner);
-        release_preview(&state, (capturer, frames)).await;
-        return Err("camera preview superseded by a newer request".to_string());
-    }
-    let replaced = inner.standalone.replace(Standalone {
-        frames,
-        _capture: capturer,
-    });
-    drop(inner);
-    release_preview(&state, replaced).await;
+    let (width, height) = match started {
+        Ok(size) => match inner.standalone.promote(generation) {
+            Ok(replaced) => {
+                drop(inner);
+                release_blocking(replaced).await;
+                size
+            }
+            Err(()) => return camera_preview::superseded(&inner),
+        },
+        Err(e) => match inner.standalone.abandon(generation) {
+            Some(own) => {
+                drop(inner);
+                release_blocking(own).await;
+                return Err(e);
+            }
+            None => return camera_preview::superseded(&inner),
+        },
+    };
     Ok(CameraPreviewStarted {
         width,
         height,
@@ -1076,7 +1063,7 @@ pub async fn native_voice_stop_camera_preview(
     state: tauri::State<'_, NativeVoiceState>,
 ) -> Result<(), String> {
     let _gate = state.camera_gate.lock().await;
-    let stopped = state.inner.lock().await.clear_standalone();
+    let stopped = state.inner.lock().await.standalone.clear();
     release_blocking(stopped).await;
     Ok(())
 }

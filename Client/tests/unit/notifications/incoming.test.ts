@@ -1,6 +1,9 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/notificationsMocks";
-import { notifyIncomingMessage, resetNotificationCoalescing } from "../../../src/lib/notifications";
+import {
+  notifyIncomingMessage,
+  resetNotificationCoalescing,
+} from "../../../src/features/notifications/notifications";
 import { authStore } from "../../../src/stores/auth.store";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { dmStore } from "../../../src/stores/dm.store";
@@ -20,7 +23,7 @@ import { resetAuthState } from "../../helpers/storeSeeds";
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
   mocks.prefsPreferencesMock(importOriginal),
 );
-vi.mock("../../../src/lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@tauri-apps/plugin-notification", () => mocks.pluginNotificationMock());
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());

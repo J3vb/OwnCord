@@ -270,10 +270,10 @@ export function screenVideoPublishOptions(
  *  options object in place (it injects a default 1080p30 resolution when none
  *  is set), which would otherwise corrupt the shared presets.
  *
- *  For "source" (no resolution cap) with an explicit 60/120 override, a
- *  zero-size resolution suppresses the library's 1080p30 default (the
- *  constraint translation treats 0 as uncapped) and the frame rate is passed
- *  through the raw video constraints instead. */
+ *  For "source" (no resolution cap), at every frame rate, a zero-size
+ *  resolution suppresses the library's 1080p30 default (the constraint
+ *  translation treats 0 as uncapped) and the frame rate is passed through the
+ *  raw video constraints instead. */
 export function getScreenShareCaptureOptions(
   quality: StreamQuality,
   fps: number,
@@ -304,16 +304,13 @@ function baseScreenShareCaptureOptions(
   const preset = SCREENSHARE_PRESETS[quality];
   const effectiveFps = getEffectiveScreenShareFps(quality, fps);
   if (preset.resolution === undefined) {
-    if (fps === 60 || fps === 120) {
-      return {
-        ...preset,
-        resolution: { width: 0, height: 0, frameRate: effectiveFps },
-        // Runtime passes this object verbatim to getDisplayMedia; the declared
-        // type is narrower than what the library actually accepts.
-        video: { frameRate: effectiveFps } as ScreenShareCaptureOptions["video"],
-      };
-    }
-    return { ...preset };
+    return {
+      ...preset,
+      resolution: { width: 0, height: 0, frameRate: effectiveFps },
+      // Runtime passes this object verbatim to getDisplayMedia; the declared
+      // type is narrower than what the library actually accepts.
+      video: { frameRate: effectiveFps } as ScreenShareCaptureOptions["video"],
+    };
   }
   return {
     ...preset,

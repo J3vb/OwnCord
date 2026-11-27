@@ -7,10 +7,10 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
 
 - `src/stores/` observable stores · `src/lib/` protocol, WS, voice, E2EE ·
   `src/pages/` wiring only (screens live in `src/features/`, shared UI in `src/lib/ui/`; there is no `components/`) · `src/features/voice/` modules
-  extracted from `lib/voice/livekitSession.ts` and `lib/voice/livekitE2EE.ts` (the
+  extracted from `features/voice/livekitSession.ts` and `features/voice/livekitE2EE.ts` (the
   facades; the `e2ee*.ts` files are `E2EEManager`'s), with colocated
   `*.test.ts`; `src/features/{connection,direct-messages,message-requests,channels,messaging,voice,safety,moderation}/wsHandlers.ts`
-  hold the WebSocket handler bodies extracted from `lib/dispatcher.ts`;
+  hold the WebSocket handler bodies extracted from `app/dispatcher.ts`;
   `src/features/messaging/` also holds `stores/messages.store.ts`'s pure
   reducers and message model — the store stays the facade, so import its
   mutators from `@stores/messages.store`, never from the reducer modules; new
@@ -19,7 +19,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   `voiceModel`/`voiceRoster`/`voicePeers`/`voiceSelfPrefs`), which stay in
   `src/stores/` so the store adds no upward import to `scripts/layer-baseline.json`,
   and the pieces of a `lib/` module that other `lib/` or `stores/` code still
-  imports (`lib/text/markdownScan.ts`, since `lib/notifications.ts` imports the
+  imports (`lib/text/markdownScan.ts`, since `lib/notificationDelivery.ts` imports the
   markdown facade), which stay in `src/lib/` for the same reason
 - `src/app/` is the composition layer above `pages/` (`main.ts`'s siblings, the
   only code besides `main.ts` that may import `pages/`; enforced from 7.4b:
@@ -74,7 +74,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   list in `vitest.config.ts`, which runs as the `desktop-node` project on
   `forks`. Each test has a 2 s budget (`testTimeout`): wait on fake timers,
   never on the real clock.
-- `src/lib/dispatcher.ts` is the single WS-event entry point **into the
+- `src/app/dispatcher.ts` is the single WS-event entry point **into the
   stores**: server events reach domain stores only through a `ws.on(...)`
   subscription registered there. The handler bodies live in
   `src/features/*/wsHandlers.ts` as plain functions that only `dispatcher.ts`
@@ -95,7 +95,12 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   then `features/`, then `stores/`, then `lib/`, `platform/`
   and `i18n/`, then `styles/` and `assets/`. A static import, `export … from`
   or dynamic `import()` of a higher layer fails lint; `import type` does not
-  count. The imports that predate the rule are listed in
+  count. Two kinds of upward edge are sanctioned on purpose: `messages.store`
+  over its reducer modules, and `lib/api.ts` reading the NSFW consent gate
+  (`features/content-consent/nsfw.ts`, `channels.store`) so every channel-content
+  call passes it, and the native push-to-talk service
+  (`platform/desktop/pushToTalkService.ts`) reading `voice.store`, because its
+  key-edge generation checks run against the live call state. The other imports that predate the rule are listed in
   `scripts/layer-baseline.json`, which only shrinks
   (`tests/unit/layer-baseline.test.ts` fails on a stale entry): when you remove
   one, delete its entry and lower the cap in that test. The rank list and the
@@ -111,10 +116,14 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   runs at `--max-warnings=0`, so a new cycle fails `npm run lint`. When a
   lower-level module has to trigger a higher one, invert the edge rather than
   import upward: `stores/auth.store.ts` imports neither `voice.store` nor
-  `lib/notifications` — `voice.store.ts` registers its logout teardown through
-  `registerVoiceLogoutTeardown` at load, and `lib/notifications.ts` registers the
+  `features/notifications/notifications` — `voice.store.ts` registers its logout teardown through
+  `registerVoiceLogoutTeardown` at load, and `features/notifications/notifications.ts` registers the
   notification-audio cleanup through `registerSessionReset`
-  (`lib/net/sessionRegistry.ts`, the leaf every per-server reset registers with). In
+  (`lib/net/sessionRegistry.ts`, the leaf every per-server reset registers with).
+  `auth.store` and the desktop push-to-talk service reach the voice session
+  facade (`features/voice/livekitSession.ts`) only through
+  `lib/voice/voiceSessionLoader.ts`, whose lazy loader `main.ts` registers at
+  boot (a test that resets modules registers it again). In
   `features/messaging/content/`, `attachments.ts` is the leaf every renderer
   imports (it also owns the image lightbox, which `media.ts` re-exports), so it
   must not import a sibling renderer. `madge` still lists cycles that close only
@@ -129,7 +138,7 @@ Rust backend in `src-tauri/` for native APIs only. LiveKit handles voice/video.
   unverified peer as verified.
 - **Linux voice/video runs in the Rust backend** (`src-tauri/src/native_voice/`,
   LiveKit's Rust SDK; WebKitGTK has no WebRTC) behind the `livekitSession`
-  facade. `isLinuxDesktop()` (`features/voice/native/platform.ts`) is the only
+  facade. `isLinuxDesktop()` (`lib/hostOs.ts`) is the only
   switch; keep `joinOrchestration`/`mediaControl` platform-blind and choose by
   capability (`inPlaceSourceChange`, `globalShortcuts.status().backend`), never
   a new `isLinuxDesktop()` branch. Building it needs clang >= 21 (root

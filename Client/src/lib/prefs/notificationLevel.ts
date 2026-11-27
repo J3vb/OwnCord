@@ -33,7 +33,8 @@
  * DM; muting that DM still does, through the mute gate.
  */
 
-import { loadPref, savePref, storedKeys } from "./preferences";
+import { hasInstallEvidence } from "./installEvidence";
+import { loadPref, savePref } from "./preferences";
 import { getChannelMutesHost } from "./channelMutes";
 
 export const DEFAULT_NOTIFICATION_LEVEL = "mentions" as const;
@@ -74,22 +75,18 @@ export function getGlobalNotificationLevel(): NotificationLevel {
 }
 
 /**
- * Records the global level once, at startup, before this session writes any
- * storage. A new install gets `mentions` (owner Q8: "Mentions-only for new
- * installs"). Any `owncord:` key already present — a last channel, a status,
- * a theme, a toggle — means the install predates the level and lived with
- * All, so it keeps `all` instead of silently losing channel notifications it
- * used to receive; the user can change it. Recording the new-install default
- * too is what stops a later launch, which will find this session's keys,
- * from mistaking it for an old install.
+ * Records the global level once, at startup. A new install gets `mentions`
+ * (owner Q8: "Mentions-only for new installs"). An install with earlier state
+ * (`hasInstallEvidence()`) lived with All, so it keeps `all` instead of
+ * silently losing channel notifications it used to receive; the user can
+ * change it. The caller reads the evidence before any startup write and
+ * passes it. Recording the new-install default too is what stops a later
+ * launch, which will find this session's keys, from mistaking it for an old
+ * install.
  */
-export function settleNotificationLevelDefault(): void {
+export function settleNotificationLevelDefault(evidence: boolean = hasInstallEvidence()): void {
   if (readLevel(GLOBAL_KEY) !== null) return;
-  savePref(GLOBAL_KEY, hasOwnCordState() ? "all" : DEFAULT_NOTIFICATION_LEVEL);
-}
-
-function hasOwnCordState(): boolean {
-  return storedKeys().some((key) => key.startsWith("owncord:"));
+  savePref(GLOBAL_KEY, evidence ? "all" : DEFAULT_NOTIFICATION_LEVEL);
 }
 
 export function setGlobalNotificationLevel(level: NotificationLevel): void {

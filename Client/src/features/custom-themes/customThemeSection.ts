@@ -30,7 +30,8 @@ import {
 import { createConfirmModal } from "../dialogs/confirmModal";
 import { desktop } from "../../platform/desktop";
 import { settingsText as t } from "../../i18n/settings";
-import { isAndroidApp } from "../voice/native/platform";
+import { isAndroidApp } from "@lib/hostOs";
+import { runningScreenLayout } from "../../lib/prefs/screenLayout";
 import { buildBackgroundEditor } from "./themeBackgroundEditor";
 
 const log = createLogger("custom-theme");
@@ -124,6 +125,10 @@ export function buildCustomThemeSection(
     { class: "setting-desc" },
     t(isAndroidApp() ? "appearance.customThemes.desc.android" : "appearance.customThemes.desc"),
   );
+  const deckNote =
+    runningScreenLayout() === "deck"
+      ? [createElement("p", { class: "setting-note" }, t("appearance.customThemes.deckNote"))]
+      : [];
   const list = createElement("ul", { class: "custom-theme-list" });
   const actions = createElement("div", { class: "custom-theme-actions" });
   const newBtn = createElement(
@@ -433,6 +438,6 @@ export function buildCustomThemeSection(
   onCustomThemeChange(render, signal);
 
   render();
-  appendChildren(card, desc, list, actions, editor);
+  appendChildren(card, desc, ...deckNote, list, actions, editor);
   return section;
 }

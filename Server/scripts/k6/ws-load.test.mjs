@@ -753,6 +753,48 @@ test("scale gives every VU its own X-Forwarded-For address and starts from a min
   assert.equal(burst.metrics.login_giveups.length, 0);
 });
 
+test("login burst retries a busy refusal on the app's schedule, within 70 s", () => {
+  // Two AUTH_BUSY refusals, then a token: past the 12-attempt bound's 45 s.
+  const busy = harness(scaleEnv(), 2400);
+  busy.evaluate(`
+    var clock = 0;
+    var refusals = 2;
+    Date.now = () => clock;
+    sleep = (s) => { clock += s * 1000; };
+    http.post = () => refusals-- > 0
+      ? { status: 429, headers: { "Retry-After": "20" }, json: () => "AUTH_BUSY" }
+      : { status: 200, body: '{"token":"t"}', headers: {} };
+    loginBurstScenario();
+  `);
+  assert.equal(busy.metrics.login_burst_ok.length, 1);
+  assert.equal(busy.metrics.login_burst_giveups.length, 0);
+  const waited = busy.metrics.login_burst_time[0].value;
+  assert.ok(waited >= 40000 && waited <= 42000, `waited ${waited} ms`);
+
+  // A wait that would overrun 70 s is where the app shows the refusal.
+  const late = harness(scaleEnv(), 2400);
+  late.evaluate(`
+    var clock = 0;
+    var calls = 0;
+    Date.now = () => clock;
+    sleep = (s) => { clock += s * 1000; };
+    http.post = () => { calls++; return { status: 429, headers: { "Retry-After": "30" }, json: () => "AUTH_BUSY" }; };
+    loginBurstScenario();
+  `);
+  assert.equal(late.metrics.login_burst_giveups.length, 1);
+  assert.equal(late.evaluate("calls"), 3);
+
+  // The app does not retry a per-address refusal.
+  const limited = harness(scaleEnv(), 2400);
+  limited.evaluate(`
+    var calls = 0;
+    http.post = () => { calls++; return { status: 429, headers: {}, json: () => "RATE_LIMITED" }; };
+    loginBurstScenario();
+  `);
+  assert.equal(limited.metrics.login_burst_giveups.length, 1);
+  assert.equal(limited.evaluate("calls"), 1);
+});
+
 test("scale traffic: active users type then send keyed messages, burst raises the rate, presence flips", () => {
   const env = scaleEnv();
   // Channel = vu % 20 and activity is spread within each channel, so VU 5 is
@@ -895,7 +937,8 @@ test("scale thresholds: existing budgets per phase, D3 herd and login-burst gate
   assert.deepEqual([...t("ws_message_success{phase:burst}")], ["rate>0.95"]);
   assert.ok(t("ws_connect_time{phase:ramp}").includes("p(95)<2000"));
   assert.ok(t("ws_connect_time{phase:herd}").includes("p(95)<2000"));
-  has("auth_time{phase:login}", "p(95)<600", "p(99)<1000");
+  // Reported, not gated: in a rush the attempt time is queue wait.
+  assert.deepEqual([...t("auth_time{phase:login}")], ["med>=0", "p(95)>=0", "p(99)>=0"]);
   // Validity floors: 30% of 200 active users' planned sends (25/s steady for
   // 180 s, 100/s burst for 60 s), each delivered to 99 other members.
   assert.deepEqual([...t("ws_messages_sent{phase:steady}")], ["count>=1350"]);

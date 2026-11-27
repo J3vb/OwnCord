@@ -15,8 +15,8 @@ import (
 )
 
 // phase is one drill phase: the letter -phases selects it by, and what it covers (printed so a green run says
-// what it ran). The phases are R (backup, restore, deletion markers; drills 1, 2), C (corrupt operator input;
-// drill 5), D (headroom, full, recovery; drills 3, 4) and S (the SFU; drill 6). Nothing relaunches the
+// what it ran). The phases are R (backup, restore, deletion markers; drills 1, 2), B (a full archive,
+// restored into a fresh install), C (corrupt operator input; drill 5), D (headroom, full, recovery; drills 3, 4) and S (the SFU; drill 6). Nothing relaunches the
 // server: a phase that needs a restart asks for one through the owner's endpoint, so the restart is the
 // behaviour under test.
 type phase struct {
@@ -26,6 +26,7 @@ type phase struct {
 
 var drillPhases = []phase{
 	{'R', "backup, restore, deletion markers"},
+	{'B', "full archive, restore into a fresh install"},
 	{'C', "corrupt operator input"},
 	{'D', "headroom, then full, then recovery"},
 	{'S', "the SFU"},
@@ -209,8 +210,8 @@ func (k known) triage(failures []failure) (fail, warn []failure) {
 
 // runDrills runs the selected phases in one process, in numbered order, each in its own install directory so
 // a broken credential or full filesystem is not left for the next.
-func runDrills(binRef string, useDocker bool, phases []phase, dataFS string, k known) error {
-	d := &drill{bin: binRef, dataFS: dataFS, known: k, docker: useDocker}
+func runDrills(binRef string, useDocker bool, phases []phase, dataFS, fillerImage, archiveSource string, k known) error {
+	d := &drill{bin: binRef, dataFS: dataFS, known: k, docker: useDocker, fillerImage: fillerImage, archiveSource: archiveSource}
 
 	if useDocker {
 		fmt.Printf("drills: container leg, phase %s, image %s\n", phaseLetters(phases), binRef)
@@ -235,6 +236,7 @@ func runDrills(binRef string, useDocker bool, phases []phase, dataFS string, k k
 		}
 		return err
 	})
+	results = d.containerLegResults(results)
 	fmt.Print(d.table(results))
 	if err := failedPhases(results); err != nil {
 		return err
@@ -243,6 +245,22 @@ func runDrills(binRef string, useDocker bool, phases []phase, dataFS string, k k
 	// last line must say so.
 	fmt.Println(d.summary(phases))
 	return nil
+}
+
+// containerLegResults turns a skipped phase D in the container leg into a failure: that leg exists to fill a
+// real volume, so a skip there is a leg that measured nothing and must not read as green. Standalone keeps the
+// skip, which is a machine without a size-limited filesystem.
+func (d *drill) containerLegResults(results []phaseResult) []phaseResult {
+	if !d.docker || !slices.Contains(d.skipped, 'D') {
+		return results
+	}
+	out := slices.Clone(results)
+	for i, r := range out {
+		if r.phase.letter == 'D' && r.err == nil {
+			out[i].err = errors.New("phase D unmeasured in the container leg: it was skipped, and the container leg exists to fill a real volume")
+		}
+	}
+	return out
 }
 
 type phaseResult struct {
@@ -285,7 +303,7 @@ func (d *drill) table(results []phaseResult) string {
 			result = "FAILED"
 			reason, _, _ = strings.Cut(r.err.Error(), "\n")
 		case slices.Contains(d.skipped, r.phase.letter):
-			result, reason = "skipped", "no measurement was made"
+			result, reason = "skipped", d.skipReason(r.phase.letter)
 		case len(d.partial[r.phase.letter]) > 0:
 			reason = "except " + strings.Join(d.partial[r.phase.letter], "; except ")
 		}
@@ -341,7 +359,7 @@ func (d *drill) summary(phases []phase) string {
 		summary += ": phase " + string(ran)
 	}
 	if len(d.skipped) > 0 {
-		summary += fmt.Sprintf(" (%s skipped — no measurement was made)", string(d.skipped))
+		summary += d.skippedSummary()
 	}
 	// A step-level skip is not a pass, so the last line carries it too: a reader of only this line still learns
 	// part of a phase never ran.
@@ -355,6 +373,44 @@ func (d *drill) summary(phases []phase) string {
 		summary += " (" + strings.Join(never, "; ") + ")"
 	}
 	return summary
+}
+
+const defaultSkipReason = "no measurement was made"
+
+func (d *drill) skipReason(letter byte) string {
+	if why := d.skipWhy[letter]; why != "" {
+		return why
+	}
+	return defaultSkipReason
+}
+
+// skippedSummary is the skip clause of the last line: the letters and one shared reason when none gave its
+// own, otherwise each phase with its reason.
+func (d *drill) skippedSummary() string {
+	custom := false
+	for _, letter := range d.skipped {
+		if d.skipWhy[letter] != "" {
+			custom = true
+		}
+	}
+	if !custom {
+		return fmt.Sprintf(" (%s skipped — %s)", string(d.skipped), defaultSkipReason)
+	}
+	parts := make([]string, 0, len(d.skipped))
+	for _, letter := range d.skipped {
+		parts = append(parts, fmt.Sprintf("%c skipped — %s", letter, d.skipReason(letter)))
+	}
+	return " (" + strings.Join(parts, "; ") + ")"
+}
+
+// skipPhase records a whole phase that measured nothing and prints why, so it is never scored as a pass.
+func (d *drill) skipPhase(letter byte, reason string) {
+	d.skipped = append(d.skipped, letter)
+	if d.skipWhy == nil {
+		d.skipWhy = make(map[byte]string)
+	}
+	d.skipWhy[letter] = reason
+	fmt.Printf("%s: skipped (%s)\n", d.phase, reason)
 }
 
 func (d *drill) runPhase(p phase) error {
@@ -374,6 +430,8 @@ func (d *drill) runPhase(p phase) error {
 	switch p.letter {
 	case 'R':
 		runErr = d.phaseR()
+	case 'B':
+		runErr = d.phaseB()
 	case 'C':
 		runErr = d.phaseC()
 	case 'D':

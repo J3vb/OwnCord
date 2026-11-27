@@ -60,15 +60,15 @@ export const overlayFeatures: readonly PageFeature[] = [
     updateNotifier.mount(root);
     st.children.push(updateNotifier);
   },
-  // Release notes, once, on the first start after an update. Loaded on demand
-  // so the prompt stays out of the eager MainPage chunk (bundle budget).
+  // Release notes, once, on the first start after an update, then the
+  // one-time Command Deck notice. Loaded on demand so the prompts stay out of
+  // the eager MainPage chunk (bundle budget).
   (st, root) => {
-    void import("../../features/whats-new/whatsNewPrompt").then(({ createWhatsNewPrompt }) => {
+    void import("../../features/layout-notice/startupNotices").then(({ createStartupNotices }) => {
       if (st.tornDown) return;
-      // i18n-exempt: settings tab key, not shown text
-      const whatsNewPrompt = createWhatsNewPrompt(() => openSettings("About"));
-      whatsNewPrompt.mount(root);
-      st.unsubscribers.push(() => whatsNewPrompt.destroy?.());
+      const notices = createStartupNotices(openSettings);
+      notices.mount(root);
+      st.unsubscribers.push(() => notices.destroy?.());
     });
   },
 ];

@@ -8,7 +8,8 @@
  * row that owns a `submenu` (Mute Channel, Notification Settings) has no
  * hover flyout here: tapping it opens a second page in the same sheet, with a
  * back arrow that returns to the first. A row with a check state is a
- * checkbox, or a radio inside a group on the second page.
+ * checkbox, or a radio inside a group on the second page; a row there that is
+ * not a radio gets a card of its own, outside the group.
  *
  * Android Back and a swipe down close the whole sheet (bottomSheet.ts); Escape
  * on the second page goes back one page first.
@@ -141,8 +142,9 @@ export function openMenuSheet(req: MenuSheetRequest): BottomSheet {
     const iconed = hasIcons(rows);
     return sectionsOf(rows).map((section) => {
       const card = createElement("div", { class: "msg-sheet-section" });
-      if (radio) card.setAttribute("role", "radiogroup");
-      for (const item of section) card.appendChild(actionButton(item, radio, iconed));
+      const group = radio && section.some((r) => r.radio === true);
+      if (group) card.setAttribute("role", "radiogroup");
+      for (const item of section) card.appendChild(actionButton(item, group, iconed));
       return card;
     });
   }
@@ -174,7 +176,12 @@ export function openMenuSheet(req: MenuSheetRequest): BottomSheet {
     const head = createElement("div", { class: "menu-sheet-head" });
     head.append(back, createElement("span", { class: "menu-sheet-title" }, from.label));
     const radio = rows.some((r) => r.radio === true);
-    content.replaceChildren(head, ...cards(rows, radio));
+    const split = rows.flatMap((row, i): MenuRow[] =>
+      i > 0 && (row.radio === true) !== (rows[i - 1]?.radio === true)
+        ? [{ separator: true }, row]
+        : [row],
+    );
+    content.replaceChildren(head, ...cards(split, radio));
     (content.querySelector<HTMLElement>(".menu-sheet-row") ?? back).focus();
   }
 

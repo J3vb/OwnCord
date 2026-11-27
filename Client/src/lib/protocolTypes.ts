@@ -79,6 +79,7 @@ export const ServerMessageType = {
   CALL_INCOMING: "call_incoming",
   CALL_DECLINED: "call_declined",
   VOICE_WATCHING: "voice_watching",
+  VOICE_SPEAKING: "voice_speaking",
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce", // broadcast (same string as client msg)
   VOICE_E2EE_OFFER: "voice_e2ee_offer", // relay (same string as client msg)
   COMMAND_REPLY: "command_reply", // ephemeral plugin reply, sent only to the invoking client
@@ -131,6 +132,7 @@ export const ClientMessageType = {
   VOICE_E2EE_ANNOUNCE: "voice_e2ee_announce",
   VOICE_E2EE_OFFER: "voice_e2ee_offer",
   VOICE_WATCH: "voice_watch",
+  VOICE_SPEAK: "voice_speak",
   CALL_RING: "call_ring",
   CALL_DECLINE: "call_decline",
   CHAT_COMMAND: "chat_command", // plugin slash-command dispatch (Phase C)

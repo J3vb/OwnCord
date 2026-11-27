@@ -199,6 +199,48 @@ describe("push-to-talk ticks", () => {
     expect(sounds()).toEqual(["pttOn", "pttOff"]);
   });
 
+  describe("a release with a delay", () => {
+    /** A release whose close the store records once `ms` has run. */
+    const releaseAfter = (ms: number): void => apply(() => setPttGated(true, ms));
+    /** Run the page's timers on and deliver what they wrote. */
+    const wait = (ms: number): void => {
+      vi.advanceTimersByTime(ms);
+      voiceStore.flush();
+    };
+
+    it("ticks off when the delay has run and the mic closes, not at key-up", () => {
+      pttCall();
+      press();
+      releaseAfter(300);
+      wait(299);
+      expect(sounds()).toEqual(["pttOn"]);
+      wait(1);
+      expect(sounds()).toEqual(["pttOn", "pttOff"]);
+    });
+
+    it("makes no tick for a press inside the delay, where the voice never stopped", () => {
+      pttCall();
+      press();
+      releaseAfter(300);
+      wait(100);
+      press();
+      wait(1_000);
+      expect(sounds()).toEqual(["pttOn"]);
+      expect(voiceStore.getState().pttGated).toBe(false);
+    });
+
+    it("writes nothing once the call it was made in has ended", () => {
+      pttCall();
+      press();
+      releaseAfter(300);
+      apply(() => leaveVoiceChannel());
+      apply(() => joinVoiceChannel(11));
+      wait(1_000);
+      expect(voiceStore.getState().pttGated).toBe(false);
+      expect(sounds()).not.toContain("pttOff");
+    });
+  });
+
   it("is off by default", () => {
     pttCall(false);
     press();

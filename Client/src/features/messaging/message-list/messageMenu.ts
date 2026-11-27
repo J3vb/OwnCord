@@ -32,8 +32,6 @@ import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { openMessageSheet } from "./messageSheet";
 import { buildItems, rowOf, type MessageMenuRequest } from "./messageMenuItems";
 
-export type { MessageMenuRequest } from "./messageMenuItems";
-
 /** The phone sheet's quick row has room for one more emoji than the menu's. */
 const PHONE_QUICK_REACTIONS = QUICK_REACTIONS + 1;
 /** Marks the row a phone sheet is acting on, so it stands out behind the backdrop. */

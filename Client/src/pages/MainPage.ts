@@ -13,7 +13,7 @@ import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
 import { Disposable } from "@lib/disposable";
 import { onAuthCleared } from "@stores/auth.store";
 import { closeSettings, openSettings, uiStore } from "@stores/ui.store";
-import { createPresenceSender } from "@lib/presence/presence";
+import { createPresenceSender } from "../features/presence/presence";
 import { channelsStore, getActiveChannel } from "@stores/channels.store";
 import { voiceStore, restoreSavedSelfVoiceState } from "@stores/voice.store";
 import {
@@ -21,14 +21,14 @@ import {
   setWsClient,
   setServerHost as setLiveKitServerHost,
   setOnError as setVoiceOnError,
-} from "@lib/voice/livekitSession";
+} from "../features/voice/livekitSession";
 import { setServerHost } from "../features/messaging/message-list/renderers";
 import { setAttachmentCacheScope } from "../features/messaging/content/attachments";
 import { closeActiveLightbox } from "../features/messaging/content/media";
-import { markAllRead } from "@lib/readState";
-import { onChannelReselect, stepChannel } from "@lib/nav/channelNavigation";
+import { markAllRead } from "@stores/readState";
+import { onChannelReselect, stepChannel } from "../features/navigation/channelNavigation";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
-import { setAudioVolumeHost } from "@lib/voice/audioElements";
+import { setAudioVolumeHost } from "../features/voice/audioElements";
 import { attachGlobalKeybinds } from "../features/settings/GlobalKeybinds";
 import { createVoiceWidgetCallbacks } from "./main-page/VoiceCallbacks";
 import { createMessageController } from "../features/messaging/MessageController";
@@ -39,7 +39,7 @@ import type { PageState, PageApi } from "./main-page/pageState";
 import { createDmProfilePanel } from "../features/direct-messages/dmProfilePanel";
 import { createPageDmCalls } from "./main-page/pageDmCalls";
 import { createPagePresence } from "./main-page/pagePresence";
-import { mountConnectionBanner, mountLayout } from "./main-page/pageMountShell";
+import { mountConnectionBanner, mountDeck, mountLayout } from "./main-page/pageMountShell";
 import { mountSettings } from "./main-page/pageMountSettings";
 import { mountCalls, mountVideo } from "./main-page/pageMountCalls";
 import type { MountScope } from "./main-page/pageState";
@@ -245,6 +245,7 @@ export function createMainPage(options: MainPageOptions): MountableComponent {
     st.toast.anchorTo(ms.chatAreaResult.slots.inputSlot);
     st.children.push(st.toast);
     initToast(st.toast);
+    mountDeck(st, ms);
     mountCalls(st, pg, ms);
 
     // Message loading controller

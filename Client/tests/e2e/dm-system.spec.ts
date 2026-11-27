@@ -14,6 +14,9 @@ import {
   submitLogin,
   waitForWsReady,
   openHome,
+  openPeople,
+  leaveDmMode,
+  expectDirectReachable,
   dmRows,
   emitWsMessage,
   BASE_SESSION_ROUTES,
@@ -65,7 +68,7 @@ async function navigateToMainPageWithDms(page: import("@playwright/test").Page):
   await expect(appLayout).toBeVisible({ timeout: 15_000 });
   await waitForWsReady(page);
   // At desktop width DMs live behind the server rail's Home button.
-  await expect(page.getByTestId("server-rail-home")).toBeVisible({ timeout: 5_000 });
+  await expectDirectReachable(page);
 }
 
 // ---------------------------------------------------------------------------
@@ -101,7 +104,11 @@ test.describe("DM System — Sidebar Mode", () => {
     }).toPass({ timeout: 5_000 });
   });
 
-  test("opening a DM from Home marks it active in DM mode", async ({ page }) => {
+  test("opening a DM from Home marks it active in DM mode", async ({ page, screenLayout }) => {
+    test.skip(
+      screenLayout === "deck",
+      "Classic's DM mode and its back header; covered by deck-direct",
+    );
     const dmItem = await openFirstDm(page);
     await expect(dmItem).toHaveClass(/active/);
 
@@ -110,7 +117,8 @@ test.describe("DM System — Sidebar Mode", () => {
     await expect(backHeader).toBeVisible({ timeout: 5_000 });
   });
 
-  test("DM sidebar shows 'Back to Server' header", async ({ page }) => {
+  test("DM sidebar shows 'Back to Server' header", async ({ page, screenLayout }) => {
+    test.skip(screenLayout === "deck", "Classic's DM mode back header; covered by deck-direct");
     await openFirstDm(page);
 
     const backHeader = page.locator("[data-testid='dm-back-header']");
@@ -121,7 +129,8 @@ test.describe("DM System — Sidebar Mode", () => {
     await expect(backTitle).toContainText("Back to");
   });
 
-  test("'Back to Server' returns to channel sidebar", async ({ page }) => {
+  test("'Back to Server' returns to channel sidebar", async ({ page, screenLayout }) => {
+    test.skip(screenLayout === "deck", "Classic's DM mode back header; covered by deck-direct");
     await openFirstDm(page);
 
     const backHeader = page.locator("[data-testid='dm-back-header']");
@@ -148,7 +157,7 @@ test.describe("DM System — People home", () => {
 
   test("Home replaces the channel on screen with People", async ({ page }) => {
     await expect(page.getByTestId("chat-area")).toBeVisible();
-    await openHome(page);
+    await openPeople(page);
 
     const view = page.getByTestId("feature-view");
     await expect(view.getByRole("heading", { name: "People" })).toBeVisible({ timeout: 5_000 });
@@ -159,7 +168,11 @@ test.describe("DM System — People home", () => {
     await expect(page.getByTestId("dm-people-entry")).toHaveAttribute("aria-current", "page");
   });
 
-  test("Message on People opens that DM", async ({ page }) => {
+  test("Message on People opens that DM", async ({ page, screenLayout }) => {
+    test.skip(
+      screenLayout === "deck",
+      "asserts Classic's active row class; Deck's row state is covered by deck-direct",
+    );
     await openHome(page);
     await page.getByTestId("people-message-2").click();
 
@@ -169,9 +182,9 @@ test.describe("DM System — People home", () => {
   });
 
   test("Back to Server from People shows the channel again", async ({ page }) => {
-    await openHome(page);
+    await openPeople(page);
     await expect(page.getByTestId("people-home")).toBeVisible({ timeout: 5_000 });
-    await page.getByTestId("dm-back-header").click();
+    await leaveDmMode(page);
 
     await expect(page.getByTestId("feature-view")).toBeHidden({ timeout: 5_000 });
     await expect(page.getByTestId("chat-area")).toBeVisible();
@@ -235,7 +248,11 @@ test.describe("DM System — WS Events", () => {
     }).toPass({ timeout: 5_000 });
   });
 
-  test("incoming chat_message in DM updates unread count", async ({ page }) => {
+  test("incoming chat_message in DM updates unread count", async ({ page, screenLayout }) => {
+    test.skip(
+      screenLayout === "deck",
+      "Classic's Home badge on the server rail; Deck's unread DMs are covered by deck-direct",
+    );
     const homeBadge = page.getByTestId("server-rail-home-badge");
     const before = (await homeBadge.isVisible()) ? Number(await homeBadge.textContent()) : 0;
     // Send a message to a DM channel that is not active

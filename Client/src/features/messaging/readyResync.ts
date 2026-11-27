@@ -10,12 +10,12 @@ import {
   setChannelLoadError,
   isWindowDetached,
 } from "../../stores/messages.store";
-import { recoverAfterReattach } from "./historyFetch";
+import { pageBackTo, recoverAfterReattach, revalidateOlderRows } from "./historyFetch";
 import { clearReactionUsersCache } from "./reactionUsers";
 import { showToast } from "../../lib/ui/toast";
 import { connectText } from "../../i18n/connect";
 import { readingAnchor } from "./readingAnchor";
-import { activatePendingMessages } from "../../lib/pendingMessages";
+import { activatePendingMessages } from "./pendingMessages";
 import type { DispatchApi, Payload, ReconnectClock } from "../connection/dispatchContext";
 import { log } from "../connection/dispatchContext";
 
@@ -63,6 +63,12 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
       // with no list showing it, the tail is refetched instead.
       const wasDetached = isWindowDetached(activeAfterReady);
       const anchor = wasDetached ? readingAnchor(activeAfterReady) : null;
+      // The tail refetch pages back to the newest loaded row, so the splice
+      // keeps the rows above it however much arrived meanwhile.
+      const newestLoaded = getChannelMessages(activeAfterReady).reduce(
+        (max, m) => (m.status === "sent" ? Math.max(max, m.id) : max),
+        0,
+      );
       // Mark the active channel loading BEFORE invalidating: it records the
       // watermark the splice checks the page against, and a channel with no
       // rows shows the in-region spinner instead of reading as a genuinely
@@ -90,18 +96,27 @@ export function applyReadyMessageResync(api: DispatchApi | undefined, clock: Rec
                 true,
               );
               recoverAfterReattach({ getMessages }, activeAfterReady, wasDetached);
-            })
-          : getMessages(activeAfterReady, { limit: 50 }).then((resp) => {
-              if (!stillActive()) return;
-              setMessages(
+              void revalidateOlderRows(
+                { getMessages },
                 activeAfterReady,
-                resp.messages,
-                resp.has_more,
-                true,
-                readingAnchor(activeAfterReady),
+                resp.messages[0]?.id ?? 0,
               );
-              recoverAfterReattach({ getMessages }, activeAfterReady, wasDetached);
-            });
+            })
+          : getMessages(activeAfterReady, { limit: 50 })
+              .then((first) => pageBackTo({ getMessages }, activeAfterReady, first, newestLoaded))
+              .then(({ fetched, hasMoreBefore }) => {
+                if (!stillActive()) return;
+                setMessages(
+                  activeAfterReady,
+                  fetched,
+                  hasMoreBefore,
+                  true,
+                  readingAnchor(activeAfterReady),
+                );
+                recoverAfterReattach({ getMessages }, activeAfterReady, wasDetached);
+                const oldestFetched = fetched.at(-1)?.id ?? 0;
+                void revalidateOlderRows({ getMessages }, activeAfterReady, oldestFetched);
+              });
       refetch.catch((err: unknown) => {
         log.warn("Failed to reload message history after resync", { error: String(err) });
         // Same staleness guard as above — a rejection for a channel the user

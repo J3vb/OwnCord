@@ -12,7 +12,7 @@ import {
 } from "@lib/logger";
 import type { LogEntry, LogLevel } from "@lib/logger";
 import type { TabName } from "./SettingsOverlay";
-import { getSessionDebugInfo, getShareDiagnostics } from "@lib/voice/livekitSession";
+import { getSessionDebugInfo, getShareDiagnostics } from "../voice/livekitSession";
 import { savePref, readMigratedStringPref, appendToggleRows } from "./helpers";
 import {
   SHARE_DIAGNOSTICS_KEY,
@@ -25,7 +25,7 @@ import { createDisclosure } from "./status";
 import { buildSettingsSection } from "./settingsSection";
 import { createConnectionDiagnosticsPanel } from "./ConnectionDiagnosticsPanel";
 import { desktop } from "../../platform/desktop";
-import { isAndroidApp, isLinuxDesktop } from "../voice/native/platform";
+import { isAndroidApp, isLinuxDesktop } from "@lib/hostOs";
 import { settingsText as t } from "../../i18n/settings";
 import { copyThenRelabel } from "@lib/ui/clipboard";
 import { EVENT_LOG_PREF_KEY, setEventSinkEnabled } from "@lib/diagnostics/eventSink";

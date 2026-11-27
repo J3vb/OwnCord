@@ -108,6 +108,99 @@ describe("createMicProcessor", () => {
     expect(constants.slice(-2)).toEqual([0.015, 0.005]);
   });
 
+  describe("push-to-talk release delay", () => {
+    /** Gain automation held on a clock the test moves (`currentTime`), so an
+     *  event scheduled ahead takes effect only once the clock reaches it. */
+    class ClockedAudioContext extends FakeAudioContext {
+      override createGain() {
+        const made = super.createGain();
+        const param = made.gain;
+        const events: Array<{ at: number; value: number }> = [];
+        const schedule = (value: number, at: number) => void events.push({ at, value });
+        param.setValueAtTime.mockImplementation(schedule);
+        param.setTargetAtTime.mockImplementation(schedule);
+        param.cancelScheduledValues.mockImplementation((from: number) => {
+          for (let i = events.length - 1; i >= 0; i--)
+            if (events[i]!.at >= from) events.splice(i, 1);
+        });
+        Object.defineProperty(param, "value", {
+          get: () =>
+            events
+              .filter((e) => e.at <= this.currentTime)
+              .reduce<{ at: number; value: number } | null>(
+                (last, e) => (last === null || e.at >= last.at ? e : last),
+                null,
+              )?.value ?? 1,
+        });
+        return made;
+      }
+    }
+
+    async function startedOnClock() {
+      vi.stubGlobal("AudioContext", ClockedAudioContext);
+      return started();
+    }
+
+    it("closes on the graph's own clock once the delay has run, not before", async () => {
+      const { processor, ctx, output } = await startedOnClock();
+      processor.setGate("ptt", true, 0.3);
+      expect(processor.isGateClosed("ptt")).toBe(true);
+      expect(output.gain.value).toBe(1);
+      ctx.currentTime = 0.299;
+      expect(output.gain.value).toBe(1);
+      ctx.currentTime = 0.3;
+      expect(output.gain.value).toBe(0);
+    });
+
+    it("closes at once while the context is not running, whose stopped clock would hold the close", async () => {
+      const { processor, ctx, output } = await startedOnClock();
+      ctx.state = "suspended";
+      processor.setGate("ptt", true, 0.3);
+      expect(output.gain.value).toBe(0);
+
+      // Once it runs, a release waits out its delay again.
+      ctx.state = "running";
+      processor.setGate("ptt", false);
+      processor.setGate("ptt", true, 0.3);
+      expect(output.gain.value).toBe(1);
+      ctx.currentTime = 0.3;
+      expect(output.gain.value).toBe(0);
+    });
+
+    it("a new press during the delay keeps the voice open; the next release closes", async () => {
+      const { processor, ctx, output } = await startedOnClock();
+      processor.setGate("ptt", true, 0.02);
+      ctx.currentTime = 0.01;
+      processor.setGate("ptt", false);
+      ctx.currentTime = 1;
+      expect(output.gain.value).toBe(1);
+
+      processor.setGate("ptt", true, 0.02);
+      ctx.currentTime = 1.019;
+      expect(output.gain.value).toBe(1);
+      ctx.currentTime = 1.02;
+      expect(output.gain.value).toBe(0);
+    });
+
+    it("closes at once with no delay, and a voice gate change inside a delay keeps its end", async () => {
+      const { processor, ctx, output } = await startedOnClock();
+      processor.setGate("ptt", true);
+      expect(output.gain.value).toBe(0);
+      processor.setGate("ptt", false);
+      expect(output.gain.value).toBe(1);
+
+      processor.setGate("ptt", true, 0.5);
+      ctx.currentTime = 0.1;
+      processor.setGate("vad", true);
+      expect(output.gain.value).toBe(0);
+      ctx.currentTime = 0.2;
+      processor.setGate("vad", false);
+      expect(output.gain.value).toBe(1);
+      ctx.currentTime = 0.5;
+      expect(output.gain.value).toBe(0);
+    });
+  });
+
   it("starts with the gates it was given before init", async () => {
     const processor = createMicProcessor();
     processor.setGate("ptt", true);

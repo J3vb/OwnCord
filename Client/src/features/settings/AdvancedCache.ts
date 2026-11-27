@@ -79,8 +79,8 @@ export async function clearImageCache(): Promise<void> {
  * Clear localStorage but preserve what is not a cache: server profiles, saved
  * credentials, the active theme and custom themes, notification levels, the
  * microphone mode and Push to Talk key, muted channels, unsent drafts, notes
- * kept on this device and the server rail layout. Other appearance and
- * behaviour settings are reset.
+ * kept on this device, the server rail layout, the screen layout, the record
+ * that the one-time move to Command Deck is settled, and folded Buddies groups. Other appearance and behaviour settings are reset.
  */
 export function clearLocalStoragePreservingUserData(): void {
   const PRESERVE_PREFIXES = [
@@ -89,12 +89,16 @@ export function clearLocalStoragePreservingUserData(): void {
     "owncord:theme:active",
     "owncord:theme:custom:",
     "owncord:settings:notificationLevel",
+    "owncord:settings:channelNotificationLevels",
     "owncord:settings:inputMode",
     "owncord:settings:pttVk",
     "owncord:settings:mutedChannels",
     "owncord:drafts:",
     "owncord:dm-note",
     "owncord:server-rail-layout",
+    "owncord:settings:screenLayout",
+    "owncord:settings:deckSwitchDone",
+    "owncord:settings:buddiesCollapsed",
   ];
   for (const key of storedKeys()) {
     if (!PRESERVE_PREFIXES.some((p) => key.startsWith(p))) removeStored(key);

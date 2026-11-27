@@ -1,5 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
+import { clearHost, hostAndroidApp } from "../helpers/androidHost";
+import { usePhone } from "../helpers/phoneMedia";
+import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
 import { buildAppearanceTab } from "../../src/features/settings/AppearanceTab";
 import { refreshTimeFormat, refreshDateFormat, getDateFormat } from "@lib/text/timeFormat";
 import {
@@ -50,8 +53,8 @@ describe("AppearanceTab — Accessibility", () => {
     container.appendChild(section);
 
     const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
-    // Four palettes plus Match my computer.
-    expect(tiles.length).toBe(5);
+    // Five palettes plus Match my computer.
+    expect(tiles.length).toBe(6);
 
     for (const tile of tiles) {
       expect(tile.tagName).toBe("BUTTON");
@@ -140,6 +143,18 @@ describe("AppearanceTab — Accessibility", () => {
     expect(hexInput.placeholder).toBe("00c8ff");
   });
 
+  it("picking Gunmetal sets the body class and shows its orange as the default accent", () => {
+    container.appendChild(buildAppearanceTab(ac.signal));
+    container.querySelector<HTMLElement>("[data-testid='theme-gunmetal']")!.click();
+    expect(document.body.classList.contains("theme-gunmetal")).toBe(true);
+    expect(localStorage.getItem("owncord:theme:active")).toBe("gunmetal");
+    expect(document.documentElement.style.getPropertyValue("--bg-primary")).toBe("#181d24");
+    const preview = container.querySelector<HTMLElement>(
+      "[data-testid='theme-gunmetal'] .theme-preview",
+    )!;
+    expect(preview.style.getPropertyValue("--pv-accent")).toBe("#ff7a45");
+  });
+
   it("uses blurple as the displayed default accent for non-neon built-in themes", () => {
     mockGetActiveThemeName.mockReturnValue("dark");
 
@@ -152,6 +167,25 @@ describe("AppearanceTab — Accessibility", () => {
     expect(activeSwatch).not.toBeNull();
     expect(activeSwatch.title).toBe("#5865f2");
     expect(hexInput.placeholder).toBe("5865f2");
+  });
+
+  it("checks the Ember swatch under Gunmetal, and picking it again returns to Ember", () => {
+    mockGetActiveThemeName.mockReturnValue("gunmetal");
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const checked = (): string[] =>
+      Array.from(
+        container.querySelectorAll<HTMLElement>(".accent-swatch[aria-checked='true']"),
+        (s) => s.title,
+      );
+    expect(checked()).toEqual(["#ff7a45"]);
+
+    container.querySelector<HTMLElement>(".accent-swatch[title='#57f287']")!.click();
+    expect(checked()).toEqual(["#57f287"]);
+
+    container.querySelector<HTMLElement>(".accent-swatch[title='#ff7a45']")!.click();
+    expect(checked()).toEqual(["#ff7a45"]);
+    expect(localStorage.getItem("owncord:settings:accentColor")).toBe('"#ff7a45"');
+    expect(document.body.style.getPropertyValue("--accent")).toBe("#ff7a45");
   });
 
   it("updates the displayed default accent when switching built-in themes without an override", () => {
@@ -212,7 +246,14 @@ describe("AppearanceTab — Accessibility", () => {
     const names = Array.from(group.querySelectorAll("[role='radio']")).map((tile) =>
       tile.textContent?.trim(),
     );
-    expect(names).toEqual(["Dark", "Neon glow", "Midnight", "Light", "Match my computer"]);
+    expect(names).toEqual([
+      "Dark",
+      "Neon glow",
+      "Midnight",
+      "Gunmetal",
+      "Light",
+      "Match my computer",
+    ]);
     // The preview is a picture only: the tile's name is its label text.
     for (const preview of group.querySelectorAll(".radio-card-preview")) {
       expect(preview.getAttribute("aria-hidden")).toBe("true");
@@ -418,6 +459,28 @@ describe("AppearanceTab — Accessibility", () => {
     expect(document.documentElement.style.getPropertyValue("--accent")).toBe("#ff00ff");
   });
 
+  it("saves a typed upper-case accent in lower case and selects its swatch on reopen", () => {
+    const first = buildAppearanceTab(ac.signal);
+    container.appendChild(first);
+    const hexInput = container.querySelector(".accent-hex-row input") as HTMLInputElement;
+    hexInput.value = "5865F2";
+    hexInput.dispatchEvent(new Event("input", { bubbles: true }));
+    expect(localStorage.getItem("owncord:settings:accentColor")).toBe('"#5865f2"');
+    first.remove();
+
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const active = container.querySelector(".accent-swatch.active") as HTMLElement;
+    expect(active.getAttribute("aria-label")).toBe("#5865f2");
+  });
+
+  it("selects the swatch of an accent stored in upper case", () => {
+    localStorage.setItem("owncord:settings:accentColor", '"#5865F2"');
+    container.appendChild(buildAppearanceTab(ac.signal));
+    const active = container.querySelector(".accent-swatch.active") as HTMLElement;
+    expect(active.getAttribute("aria-checked")).toBe("true");
+    expect(active.getAttribute("aria-label")).toBe("#5865f2");
+  });
+
   it("strips invalid hex characters from input", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
@@ -532,7 +595,7 @@ describe("AppearanceTab — Accessibility", () => {
     container.appendChild(section);
 
     const tiles = container.querySelectorAll(".theme-tiles [role='radio']");
-    const light = tiles[3] as HTMLElement;
+    const light = tiles[4] as HTMLElement;
 
     light.click();
 
@@ -581,12 +644,12 @@ describe("AppearanceTab — Accessibility", () => {
     );
   });
 
-  it("renders all 10 accent color swatches", () => {
+  it("renders all 11 accent color swatches", () => {
     const section = buildAppearanceTab(ac.signal);
     container.appendChild(section);
 
     const swatches = container.querySelectorAll(".accent-swatch");
-    expect(swatches.length).toBe(10);
+    expect(swatches.length).toBe(11);
   });
 
   // --- Swatches have proper ARIA ---
@@ -726,6 +789,135 @@ describe("AppearanceTab - member list position (3C-6b)", () => {
       .querySelector('[data-testid="member-layout"]')!
       .querySelector<HTMLElement>("[aria-checked='true']")!;
     expect(selected.dataset["value"]).toBe("right");
+  });
+});
+
+describe("AppearanceTab - screen layout", () => {
+  let container: HTMLDivElement;
+  const ac = new AbortController();
+  useMountContainer(
+    (mounted) => {
+      container = mounted;
+      localStorage.clear();
+    },
+    () => {
+      clearHost();
+      setRunningScreenLayout("classic");
+    },
+  );
+
+  const KEY = "owncord:settings:screenLayout";
+  const q = (id: string): HTMLElement | null => container.querySelector(`[data-testid="${id}"]`);
+  const selected = (): string | undefined =>
+    q("screen-layout")!.querySelector<HTMLElement>("[aria-checked='true']")!.dataset["value"];
+  const note = (): HTMLElement => container.querySelector<HTMLElement>("[role='status']")!;
+  const mount = (dev: boolean, stored: string | null, running: "classic" | "deck"): void => {
+    if (dev) localStorage.setItem("owncord:settings:developerMode", "true");
+    if (stored !== null) localStorage.setItem(KEY, stored);
+    setRunningScreenLayout(running);
+    container.appendChild(buildAppearanceTab(ac.signal));
+  };
+
+  it("shows the row with Developer mode off, and shows the member position row", () => {
+    mount(false, '"deck"', "classic");
+    expect(q("screen-layout")).not.toBeNull();
+    expect(q("member-layout")).not.toBeNull();
+  });
+
+  it("shows the row in the Android app with Developer mode off", () => {
+    hostAndroidApp();
+    mount(false, null, "classic");
+    expect(q("screen-layout")).not.toBeNull();
+  });
+
+  it("shows the row without (preview) in the Android app with Developer mode on", () => {
+    hostAndroidApp();
+    mount(true, null, "classic");
+    expect(q("screen-layout")).not.toBeNull();
+    expect(q("screen-layout-deck")!.textContent).toBe("Command Deck");
+  });
+
+  it("shows the row without (preview) on a phone-sized screen with Developer mode on", () => {
+    usePhone();
+    try {
+      mount(true, null, "classic");
+      expect(q("screen-layout-deck")!.textContent).toBe("Command Deck");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("shows the row on a phone-sized screen with Developer mode off", () => {
+    usePhone();
+    try {
+      mount(false, null, "classic");
+      expect(q("screen-layout")).not.toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("labels Command Deck without (preview) off a phone host", () => {
+    mount(true, null, "classic");
+    expect(q("screen-layout-deck")!.textContent).toBe("Command Deck");
+  });
+
+  it.each(['"classic"', '"xyz"', null])(
+    "shows Classic selected and no note for stored %s",
+    (stored) => {
+      mount(true, stored, "classic");
+      expect(q("screen-layout")!.getAttribute("role")).toBe("radiogroup");
+      expect(selected()).toBe("classic");
+      expect(note().textContent).toBe("");
+      expect(q("member-layout")).not.toBeNull();
+    },
+  );
+
+  it("places the row right after the member list position row", () => {
+    mount(true, null, "classic");
+    const member = q("member-layout")!.closest(".setting-row")!;
+    expect(member.nextElementSibling).toBe(q("screen-layout")!.closest(".setting-row"));
+  });
+
+  it("picking Command Deck stores it, shows the note and keeps the running layout", () => {
+    mount(true, null, "classic");
+    q("screen-layout-deck")!.click();
+    expect(localStorage.getItem(KEY)).toBe('"deck"');
+    expect(selected()).toBe("deck");
+    expect(note().textContent).toBe("Applies the next time OwnCord starts or reloads.");
+    expect(note().closest(".setting-desc")).toBeNull();
+    expect(document.documentElement.classList.contains("layout-deck")).toBe(false);
+    // Picking Classic again clears the note.
+    q("screen-layout-classic")!.click();
+    expect(note().textContent).toBe("");
+  });
+
+  it("shows Command Deck with no note while it runs, and hides the member position row", () => {
+    mount(true, '"deck"', "deck");
+    expect(selected()).toBe("deck");
+    expect(note().textContent).toBe("");
+    expect(q("member-layout")).toBeNull();
+  });
+
+  it("picking Classic while Deck runs shows the note and keeps the member row hidden", () => {
+    mount(true, '"deck"', "deck");
+    q("screen-layout-classic")!.click();
+    expect(localStorage.getItem(KEY)).toBe('"classic"');
+    expect(note().textContent).toBe("Applies the next time OwnCord starts or reloads.");
+    expect(q("member-layout")).toBeNull();
+  });
+
+  it("deck stored but Developer mode turned on later: Deck selected, note shown", () => {
+    mount(true, '"deck"', "classic");
+    expect(selected()).toBe("deck");
+    expect(note().textContent).not.toBe("");
+    expect(q("member-layout")).not.toBeNull();
+  });
+
+  it("Developer mode turned off while Deck runs: row shown, member row still hidden", () => {
+    mount(false, '"deck"', "deck");
+    expect(q("screen-layout")).not.toBeNull();
+    expect(q("member-layout")).toBeNull();
   });
 });
 

@@ -4,8 +4,8 @@ import { mockInvoke, eventHandlers, emitTauriEvent } from "../helpers/ws-mocks";
 import { PREAUTH_CONNECT_TIMEOUT_MS } from "@lib/ws";
 import { expectConsole } from "../../helpers/console";
 import { clearAuth } from "@stores/auth.store";
-import { deactivatePendingMessages } from "@lib/pendingMessages";
-import { setMarkReadSender } from "@lib/readState";
+import { deactivatePendingMessages } from "../../../src/features/messaging/pendingMessages";
+import { setMarkReadSender } from "../../../src/stores/readState";
 import type { ReadyChannel } from "@lib/types";
 import { setChannels, setActiveChannel } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
@@ -16,8 +16,11 @@ import {
   createCertMismatchModal,
 } from "../../../src/features/connection/CertMismatchModal";
 import { reconnectAfterCertAccept } from "@lib/net/certReconnect";
-import { setActivePresenceSender, type PresenceSender } from "@lib/presence/presence";
-import { startupInvokes } from "../../helpers/mainMocks";
+import {
+  setActivePresenceSender,
+  type PresenceSender,
+} from "../../../src/features/presence/presence";
+import { startupInvokes, startupStorageWrites } from "../../helpers/mainMocks";
 import {
   latestConnectPage,
   startupApiClient,
@@ -29,15 +32,17 @@ import { resetChannelsState } from "../../helpers/storeSeeds";
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
 vi.mock("@lib/prefs/appearance", () => mocks.prefsAppearanceMock());
-vi.mock("@lib/net/connectionDiagnostics", () => mocks.netConnectionDiagnosticsMock());
+vi.mock("../../../src/features/connection/connectionDiagnostics", () =>
+  mocks.netConnectionDiagnosticsMock(),
+);
 vi.mock("@pages/mainPagePrefetch", () => mocks.pagesMainPagePrefetchMock());
-vi.mock("@lib/pendingMessages", () => mocks.pendingMessagesMock());
+vi.mock("../../../src/features/messaging/pendingMessages", () => mocks.pendingMessagesMock());
 vi.mock("../../../src/platform/desktop/pushToTalk", () => mocks.desktopPushToTalkMock());
 vi.mock("@lib/logPersistence", () => mocks.logPersistenceMock());
-vi.mock("@lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../../src/features/connection/credentials", () => mocks.netCredentialsMock());
 vi.mock("@lib/prefs/windowState", () => mocks.prefsWindowStateMock());
 vi.mock("@tauri-apps/plugin-deep-link", () => mocks.deepLinkMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/nav/messageNavigation", () => mocks.navMessageNavigationMock());
 vi.mock("../../../src/features/connection/CertMismatchModal", () => mocks.certMismatchModalMock());
 vi.mock("@lib/net/certReconnect", () => mocks.netCertReconnectMock());
@@ -46,7 +51,7 @@ vi.mock("@lib/net/updater", () => mocks.netUpdaterMock());
 vi.mock("@lib/api", (importOriginal) => mocks.apiMock(importOriginal));
 vi.mock("@pages/ConnectPage", () => mocks.pagesConnectPageMock());
 vi.mock("@pages/MainPage", () => mocks.pagesMainPageMock());
-vi.mock("@lib/dispatcher", () => mocks.dispatcherMock());
+vi.mock("../../../src/app/dispatcher", () => mocks.dispatcherMock());
 
 const { mockPrefetchMainPage, mockLogin, capturedConnectCallbacks } = mocks;
 
@@ -55,6 +60,23 @@ useMainHarness();
 describe("main.ts startup", () => {
   it("tells the native host once that the first page rendered", () => {
     expect(startupInvokes.filter((cmd) => cmd === "frontend_ready")).toHaveLength(1);
+  });
+
+  it("settles a new install from one evidence read made before any write", () => {
+    const writes = startupStorageWrites;
+    // The new-install defaults come first: the theme raw, the layout as JSON.
+    expect(writes.slice(0, 2)).toEqual([
+      ["owncord:theme:active", "gunmetal"],
+      ["owncord:settings:screenLayout", JSON.stringify("deck")],
+    ]);
+    // Two keys were written before it, yet the level is the new-install one:
+    // both settles were given the same answer.
+    const levelAt = writes.findIndex(([key]) => key === "owncord:settings:notificationLevel");
+    expect(levelAt).toBeGreaterThan(1);
+    expect(writes[levelAt]).toEqual([
+      "owncord:settings:notificationLevel",
+      JSON.stringify("mentions"),
+    ]);
   });
 });
 

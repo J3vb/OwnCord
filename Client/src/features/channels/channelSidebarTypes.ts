@@ -41,7 +41,28 @@ export interface VoiceModerationCallbacks {
   readonly onDisconnect: (userId: number) => void;
 }
 
+/**
+ * A group of tree rows that another feature owns and the tree mounts after the
+ * channel list (the Direct folder). It draws itself when built and calls the
+ * `onRender` callbacks only on later redraws; the sidebar's own `refresh()`
+ * after its first render stamps the first draw.
+ */
+export interface TreeSection {
+  readonly element: HTMLElement;
+  readonly destroy: () => void;
+  /** Register a callback for every redraw after the first. */
+  readonly onRender: (cb: () => void) => void;
+}
+
 export interface ChannelSidebarOptions {
+  /**
+   * Draw the list as a tree: the rows take tree roles, the list sits in a
+   * `.server-tree` and arrow keys walk it like a file tree. Absent is the
+   * classic list, drawn exactly as before.
+   */
+  readonly tree?: boolean;
+  /** Tree mode only: builds the group mounted under the channel list. */
+  readonly direct?: () => TreeSection;
   readonly onVoiceJoin: (channelId: number) => void;
   /** Called when the user clicks the voice channel they are already in. Leaving
    *  is the voice widget's Disconnect, never a channel click. */

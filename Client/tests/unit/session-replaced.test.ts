@@ -20,13 +20,15 @@ vi.mock("@tauri-apps/api/core", async () => ({
 vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
-vi.mock("@lib/voice/livekitSession", () => ({ leaveVoice: vi.fn() }));
+vi.mock("../../src/features/voice/livekitSession", () => ({ leaveVoice: vi.fn() }));
 vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
-vi.mock("@lib/net/identity", () => ({ ensureIdentityKeyPublished: vi.fn(async () => true) }));
+vi.mock("../../src/features/connection/identity", () => ({
+  ensureIdentityKeyPublished: vi.fn(async () => true),
+}));
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient } from "../../src/lib/ws";
-import { wireDispatcher, wireConnectionStatus } from "../../src/lib/dispatcher";
+import { wireDispatcher, wireConnectionStatus } from "../../src/app/dispatcher";
 import { authStore } from "../../src/stores/auth.store";
 import { uiStore, setConnectionStatus, setSessionReplaced } from "../../src/stores/ui.store";
 import { expectConsole } from "../helpers/console";

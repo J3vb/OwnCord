@@ -18,7 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 use tokio::sync::{mpsc, Mutex};
-use tokio::task::JoinSet;
+use tokio::task::{AbortHandle, JoinError, JoinSet};
 use tokio_tungstenite::tungstenite::Message;
 
 /// Maximum time to wait for the WebSocket handshake to complete.
@@ -49,6 +49,11 @@ pub struct WsState {
     /// without awaiting the first, so an attempt must prove it is still the
     /// current generation before it may touch the shared sender slot.
     generation: Arc<AtomicU64>,
+    /// Abort handle of the live connection's task (which owns its reader and
+    /// writer). A newer attempt or a disconnect aborts it directly: a writer
+    /// blocked in a send to a peer that stopped reading would never see its
+    /// channel close, and the reader beside it would keep running.
+    task: std::sync::Mutex<Option<AbortHandle>>,
 }
 
 impl WsState {
@@ -56,6 +61,7 @@ impl WsState {
         Self {
             tx: Arc::new(Mutex::new(None)),
             generation: Arc::new(AtomicU64::new(0)),
+            task: std::sync::Mutex::new(None),
         }
     }
 
@@ -76,6 +82,12 @@ impl WsState {
             debug!("[ws_proxy] dropping existing connection");
         }
         *tx_lock = None;
+        // Stop the previous connection's reader and writer now, whatever they
+        // are waiting on. Dropping its task drops its JoinSet, which aborts
+        // both workers and closes the socket.
+        if let Some(previous) = crate::sync::lock(&self.task).take() {
+            previous.abort();
+        }
         // Bump first: the read task's auth_ok activation checks the generation
         // under the session lock, so once on_claimed's clear has run, a
         // superseded attempt's set_if already sees the newer generation.
@@ -101,6 +113,20 @@ impl WsState {
             return false;
         }
         *tx_lock = Some(tx);
+        true
+    }
+
+    /// Record `task` as the live connection's task if `generation` is still
+    /// current; otherwise abort it at once. Checked under the slot lock, like
+    /// `install_sender`, so a `begin_connection` cannot slip between the check
+    /// and the store and leave a superseded task running.
+    async fn install_task(&self, generation: u64, task: AbortHandle) -> bool {
+        let _tx_lock = self.tx.lock().await;
+        if self.generation.load(Ordering::SeqCst) != generation {
+            task.abort();
+            return false;
+        }
+        *crate::sync::lock(&self.task) = Some(task);
         true
     }
 }
@@ -189,8 +215,7 @@ pub async fn ws_connect<R: Runtime>(
 
     let connector = tokio_tungstenite::Connector::Rustls(Arc::new(tls_config));
 
-    let connect_future =
-        tokio_tungstenite::connect_async_tls_with_config(&url, None, false, Some(connector));
+    let connect_future = connect_ws(&url, connector);
 
     let (ws_stream, _response) = tokio::time::timeout(CONNECT_TIMEOUT, connect_future)
         .await
@@ -309,6 +334,7 @@ pub async fn ws_connect<R: Runtime>(
     // only when the server answers with `auth_ok` (see the read task below).
 
     let app_read = app.clone();
+    let app_error = app.clone();
     let app_state = app.clone();
     // Clone the Arcs so the monitoring closure can clear tx on any exit path,
     // including worker task panics, without needing tauri::State.
@@ -316,49 +342,36 @@ pub async fn ws_connect<R: Runtime>(
     let generation_arc = Arc::clone(&state.generation);
     let host_read = host.clone();
     let generation_read = Arc::clone(&state.generation);
+    let generation_current = Arc::clone(&state.generation);
 
-    // Single outer task owns a JoinSet containing read and write workers.
-    // join_next() blocks until the first worker finishes (normally or via panic),
-    // then abort_all() + drain guarantees both workers and their sockets are
-    // cleaned up before the closed event is emitted.
-    tokio::spawn(async move {
-        let mut set = JoinSet::new();
-
-        // Task: forward server → JS
-        set.spawn(async move {
-            read_frames(
-                stream,
-                LIVENESS_TIMEOUT,
-                |text| {
-                    // Native-side authenticated event: the server answered the
-                    // auth message over this pinned socket. Set the host before
-                    // relaying so it is active by the time the page sees it.
-                    if is_auth_ok(&text) {
-                        app_read
-                            .state::<crate::active_session::ActiveSession>()
-                            .set_if(&host_read, || {
-                                generation_read.load(Ordering::SeqCst) == my_generation
-                            });
-                    }
-                    let _ = app_read.emit("ws-message", text);
-                },
-                |err| {
-                    let _ = app_read.emit("ws-error", err);
-                },
-            )
-            .await;
-        });
-
-        // Task: forward JS → server, plus the liveness pings
-        set.spawn(write_frames(sink, rx, PING_INTERVAL));
-
-        // Block until the first worker finishes (normal exit or panic).
-        let first = set.join_next().await;
-
-        // Cancel the sibling and drain it so sockets close cleanly before
-        // emitting state. abort_all() is a no-op if only one task remains.
-        set.abort_all();
-        while set.join_next().await.is_some() {}
+    // Single outer task owns a JoinSet containing read and write workers
+    // (`run_workers`). A newer attempt or a disconnect aborts this task through
+    // its recorded handle (`begin_connection_with`), which drops the JoinSet
+    // and so aborts both workers, whatever they are waiting on.
+    let task = tokio::spawn(async move {
+        let first = run_workers(
+            stream,
+            sink,
+            rx,
+            move || generation_current.load(Ordering::SeqCst) == my_generation,
+            move |text| {
+                // Native-side authenticated event: the server answered the
+                // auth message over this pinned socket. Set the host before
+                // relaying so it is active by the time the page sees it.
+                if is_auth_ok(&text) {
+                    app_read
+                        .state::<crate::active_session::ActiveSession>()
+                        .set_if(&host_read, || {
+                            generation_read.load(Ordering::SeqCst) == my_generation
+                        });
+                }
+                let _ = app_read.emit("ws-message", text);
+            },
+            move |err| {
+                let _ = app_error.emit("ws-error", err);
+            },
+        )
+        .await;
 
         match first {
             Some(Err(ref e)) if e.is_panic() => {
@@ -387,6 +400,9 @@ pub async fn ws_connect<R: Runtime>(
             debug!("[ws_proxy] superseded connection torn down; leaving live sender in place");
         }
     });
+    if !state.install_task(my_generation, task.abort_handle()).await {
+        debug!("[ws_proxy] connection superseded before its task was recorded; stopped it");
+    }
 
     Ok(())
 }
@@ -438,6 +454,102 @@ pub(crate) fn is_tls_failure(error: &tokio_tungstenite::tungstenite::Error) -> b
         Error::Io(e) => e.kind() == std::io::ErrorKind::InvalidData,
         _ => false,
     }
+}
+
+/// The chat socket's stream once its TLS and WebSocket handshakes are done.
+type WsStream =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+/// Open the chat socket to `url`: dial the server with the dialer the REST and
+/// LiveKit tunnels share (both address families raced), then run the TLS and
+/// WebSocket handshakes over that stream with `connector`, whose verifier
+/// captures the certificate for the TOFU check. TLS names the server by the
+/// URL's host. Errors keep tungstenite's shape: a failed dial is
+/// `Error::Io`, as when tungstenite dialed itself.
+async fn connect_ws(
+    url: &str,
+    connector: tokio_tungstenite::Connector,
+) -> Result<
+    (
+        WsStream,
+        tokio_tungstenite::tungstenite::handshake::client::Response,
+    ),
+    tokio_tungstenite::tungstenite::Error,
+> {
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    let request = url.into_client_request()?;
+    let dial_target = ws_dial_target(request.uri())?;
+    let socket = crate::proxy_common::dial_any(&dial_target)
+        .await
+        .map_err(tokio_tungstenite::tungstenite::Error::Io)?;
+    tokio_tungstenite::client_async_tls_with_config(request, socket, None, Some(connector)).await
+}
+
+/// The `host:port` to dial for a WebSocket URI, an IPv6 host in brackets, with
+/// the scheme's default port when the URI names none.
+fn ws_dial_target(
+    uri: &tokio_tungstenite::tungstenite::http::Uri,
+) -> Result<String, tokio_tungstenite::tungstenite::Error> {
+    use tokio_tungstenite::tungstenite::error::{Error, UrlError};
+    let host = uri.host().ok_or(Error::Url(UrlError::NoHostName))?;
+    let port = uri
+        .port_u16()
+        .or_else(|| match uri.scheme_str() {
+            Some("wss") => Some(443),
+            Some("ws") => Some(80),
+            _ => None,
+        })
+        .ok_or(Error::Url(UrlError::UnsupportedUrlScheme))?;
+    Ok(format!("{host}:{port}"))
+}
+
+/// Run one connection's reader and writer until either ends, then stop the
+/// other and wait for it. Returns how the first one ended. `is_current` gates
+/// every frame: once a newer attempt (or a disconnect) has claimed the
+/// generation, nothing more reaches `on_text`, even before the abort lands.
+async fn run_workers<St, Si>(
+    stream: St,
+    sink: Si,
+    rx: mpsc::Receiver<String>,
+    is_current: impl Fn() -> bool + Send + 'static,
+    mut on_text: impl FnMut(String) + Send + 'static,
+    on_error: impl Fn(String) + Send + 'static,
+) -> Option<Result<(), JoinError>>
+where
+    St: futures_util::Stream<Item = Result<Message, tokio_tungstenite::tungstenite::Error>>
+        + Unpin
+        + Send
+        + 'static,
+    Si: futures_util::Sink<Message> + Unpin + Send + 'static,
+{
+    let mut set = JoinSet::new();
+
+    // Task: forward server → JS, only while this connection is current.
+    set.spawn(async move {
+        read_frames(
+            stream,
+            LIVENESS_TIMEOUT,
+            move |text| {
+                if is_current() {
+                    on_text(text);
+                }
+            },
+            on_error,
+        )
+        .await;
+    });
+
+    // Task: forward JS → server, plus the liveness pings
+    set.spawn(write_frames(sink, rx, PING_INTERVAL));
+
+    // Block until the first worker finishes (normal exit or panic).
+    let first = set.join_next().await;
+
+    // Cancel the sibling and drain it so sockets close cleanly before the
+    // caller emits state. abort_all() is a no-op if only one task remains.
+    set.abort_all();
+    while set.join_next().await.is_some() {}
+    first
 }
 
 /// Why [`read_frames`] stopped.
@@ -543,8 +655,8 @@ pub async fn ws_disconnect(
     state: tauri::State<'_, WsState>,
     session: tauri::State<'_, crate::active_session::ActiveSession>,
 ) -> Result<(), String> {
-    // begin_connection() both clears the sender slot (dropping it closes the
-    // channel so the write task ends) AND bumps the generation counter, so a
+    // begin_connection() clears the sender slot, aborts the live connection's
+    // reader and writer, AND bumps the generation counter, so a
     // handshake still pending from before this disconnect fails install_sender
     // instead of installing itself afterward — reusing the same invalidation
     // path a superseding connect() already has. The returned generation is
@@ -769,6 +881,66 @@ mod tests {
             std::io::ErrorKind::ConnectionRefused,
             "Connection refused",
         ))));
+    }
+
+    #[test]
+    fn the_dial_target_is_the_url_host_and_port() {
+        use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+        for (url, expected) in [
+            ("wss://chat.example.com/api/v1/ws", "chat.example.com:443"),
+            (
+                "wss://chat.example.com:8443/api/v1/ws",
+                "chat.example.com:8443",
+            ),
+            ("wss://127.0.0.1/api/v1/ws", "127.0.0.1:443"),
+            ("wss://[2001:db8::7]:8443/api/v1/ws", "[2001:db8::7]:8443"),
+            ("ws://chat.example.com/api/v1/ws", "chat.example.com:80"),
+        ] {
+            let request = url.into_client_request().expect("request");
+            assert_eq!(
+                ws_dial_target(request.uri()).expect("dial target"),
+                expected,
+                "{url}"
+            );
+        }
+    }
+
+    // The chat socket dials a host name through the shared dialer and starts
+    // TLS on the stream it gets back.
+    #[tokio::test]
+    async fn the_chat_socket_dials_by_name_and_starts_tls_on_that_stream() {
+        use tokio::io::AsyncReadExt;
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind");
+        let port = listener.local_addr().expect("addr").port();
+        let server = tokio::spawn(async move {
+            let (mut conn, _) = listener.accept().await.expect("accept");
+            let mut record = [0u8; 2];
+            conn.read_exact(&mut record).await.expect("read");
+            record
+        });
+        let (verifier, _captured) = tofu::CaptureVerifier::new();
+        let config = rustls::ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(verifier))
+            .with_no_client_auth();
+
+        let outcome = tokio::time::timeout(
+            Duration::from_secs(5),
+            connect_ws(
+                &format!("wss://localhost:{port}/api/v1/ws"),
+                tokio_tungstenite::Connector::Rustls(Arc::new(config)),
+            ),
+        )
+        .await
+        .expect("the connect ends once the server hangs up");
+        assert!(outcome.is_err(), "the server hung up without a handshake");
+        assert_eq!(
+            server.await.expect("server"),
+            [0x16, 0x03],
+            "the first bytes on the dialed stream are a TLS handshake record"
+        );
     }
 
     #[test]
@@ -997,7 +1169,13 @@ mod tests {
     use tokio_tungstenite::WebSocketStream;
 
     async fn socket_pair() -> (WebSocketStream<DuplexStream>, WebSocketStream<DuplexStream>) {
-        let (client, server) = tokio::io::duplex(64 * 1024);
+        socket_pair_buffered(64 * 1024).await
+    }
+
+    async fn socket_pair_buffered(
+        buffer: usize,
+    ) -> (WebSocketStream<DuplexStream>, WebSocketStream<DuplexStream>) {
+        let (client, server) = tokio::io::duplex(buffer);
         (
             WebSocketStream::from_raw_socket(client, Role::Client, None).await,
             WebSocketStream::from_raw_socket(server, Role::Server, None).await,
@@ -1092,5 +1270,126 @@ mod tests {
             !state.install_sender(gen_a, tx_a).await,
             "a handshake pending during disconnect must not be able to install after it"
         );
+    }
+
+    // ── A replaced connection stops at once ─────────────────────────────────
+    //
+    // A peer that stops reading leaves the writer blocked inside a send, where
+    // it never sees its channel close. The next attempt must still stop that
+    // connection's reader and writer, and nothing more from its socket may
+    // reach the page.
+
+    #[tokio::test]
+    async fn a_replaced_connection_delivers_nothing_more_and_its_reader_ends() {
+        let state = WsState::new();
+        let gen_a = state.begin_connection().await;
+        // A 1 KiB pipe: the writer blocks as soon as the peer stops reading.
+        let (client, mut server) = socket_pair_buffered(1024).await;
+        let (sink, stream) = client.split();
+        let (tx, rx) = mpsc::channel::<String>(256);
+        assert!(state.install_sender(gen_a, tx.clone()).await);
+        let (seen_tx, mut seen) = mpsc::unbounded_channel::<String>();
+        let generation = Arc::clone(&state.generation);
+        let task = tokio::spawn(run_workers(
+            stream,
+            sink,
+            rx,
+            move || generation.load(Ordering::SeqCst) == gen_a,
+            move |text| {
+                let _ = seen_tx.send(text);
+            },
+            |_| {},
+        ));
+        assert!(state.install_task(gen_a, task.abort_handle()).await);
+
+        // The peer never reads, so these frames fill the pipe and the writer
+        // stays inside its send; `tx` is kept, so its channel never closes.
+        for _ in 0..8 {
+            tx.send("x".repeat(4096)).await.expect("queued");
+        }
+        server
+            .send(Message::Text("before".into()))
+            .await
+            .expect("peer send");
+        let first = tokio::time::timeout(Duration::from_secs(5), seen.recv())
+            .await
+            .expect("the live connection delivers");
+        assert_eq!(first.as_deref(), Some("before"));
+        assert!(!task.is_finished(), "the writer is blocked on the peer");
+
+        // The user switches servers: a newer attempt claims the slot.
+        state.begin_connection().await;
+        let _ = server.send(Message::Text("after".into())).await;
+
+        let ended = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("the replaced connection's task must end without the writer's help");
+        assert!(
+            ended.is_err_and(|e| e.is_cancelled()),
+            "the replaced connection is aborted, not left to finish"
+        );
+        let rest = tokio::time::timeout(Duration::from_secs(5), seen.recv())
+            .await
+            .expect("the reader is gone, so its frame sink is dropped");
+        assert_eq!(rest, None, "no frame of a replaced connection is delivered");
+
+        // Its socket is closed: the peer reads to the end of the stream.
+        let drained = tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(Ok(_)) = server.next().await {}
+        })
+        .await;
+        assert!(
+            drained.is_ok(),
+            "the replaced connection's socket must close"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_task_recorded_after_its_attempt_was_replaced_is_stopped() {
+        let state = WsState::new();
+        let gen_a = state.begin_connection().await;
+        state.begin_connection().await;
+        let task = tokio::spawn(std::future::pending::<()>());
+        assert!(!state.install_task(gen_a, task.abort_handle()).await);
+        let ended = tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("a stale task is aborted at once");
+        assert!(ended.is_err_and(|e| e.is_cancelled()));
+    }
+
+    #[tokio::test]
+    async fn frames_are_dropped_once_the_connection_is_no_longer_current() {
+        use std::sync::atomic::AtomicBool;
+        let (client, mut server) = socket_pair().await;
+        let (sink, stream) = client.split();
+        let (_tx, rx) = mpsc::channel::<String>(4);
+        let current = Arc::new(AtomicBool::new(true));
+        let gate = Arc::clone(&current);
+        let (seen_tx, mut seen) = mpsc::unbounded_channel::<String>();
+        let task = tokio::spawn(run_workers(
+            stream,
+            sink,
+            rx,
+            move || gate.load(Ordering::SeqCst),
+            move |text| {
+                let _ = seen_tx.send(text);
+            },
+            |_| {},
+        ));
+
+        server.send(Message::Text("first".into())).await.unwrap();
+        let first = tokio::time::timeout(Duration::from_secs(5), seen.recv())
+            .await
+            .expect("delivered");
+        assert_eq!(first.as_deref(), Some("first"));
+
+        current.store(false, Ordering::SeqCst);
+        server.send(Message::Text("second".into())).await.unwrap();
+        server.close(None).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("the close ends the connection")
+            .expect("no worker panicked");
+        assert_eq!(seen.recv().await, None, "the stale frame was not delivered");
     }
 }

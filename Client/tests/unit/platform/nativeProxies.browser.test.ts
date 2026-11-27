@@ -7,6 +7,7 @@
 import { describe, expect, it } from "vitest";
 import type { NativeProxies } from "../../../src/platform/contracts/nativeProxies";
 import { nativeProxies } from "../../../src/platform/browser/nativeProxies";
+import { LiveKitAddressError } from "../../../src/lib/voice/livekitAddress";
 
 const subject: NativeProxies = nativeProxies;
 const socketScheme = location.protocol === "https:" ? "wss:" : "ws:";
@@ -52,9 +53,9 @@ describe("browser nativeProxies: LiveKit", () => {
     );
   });
 
-  it("passes an absolute URL through", async () => {
-    await expect(subject.resolveLiveKitUrl("wss://sfu.example/rtc")).resolves.toBe(
-      "wss://sfu.example/rtc",
+  it("refuses an address that is not the server's proxy path", async () => {
+    await expect(subject.resolveLiveKitUrl("wss://sfu.example/rtc")).rejects.toBeInstanceOf(
+      LiveKitAddressError,
     );
   });
 

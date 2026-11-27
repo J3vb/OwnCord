@@ -22,7 +22,7 @@ const { localMuted, volumes } = vi.hoisted(() => ({
   localMuted: new Set<number>(),
   volumes: new Map<number, number>(),
 }));
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     getUserVolume: (userId: number) => volumes.get(userId) ?? 1,
     getUserLocalMute: (userId: number) => localMuted.has(userId),
@@ -48,7 +48,7 @@ import { voiceStore, type PeerVerification, type VoiceUser } from "../../src/sto
 import { resetSafetyStore, safetyStore, setActiveTimeout } from "../../src/features/safety/store";
 import { markVoiceDropTarget } from "../../src/features/voice/dragMove";
 import { createAvatarElement, pickAvatarColor } from "../../src/features/profiles/avatar";
-import { getUserLocalMute, getUserVolume } from "@lib/voice/livekitSession";
+import { getUserLocalMute, getUserVolume } from "../../src/features/voice/livekitSession";
 import {
   drawVoiceChannelChrome,
   drawVoiceUserRow,

@@ -11,8 +11,8 @@
  */
 
 import { Disposable } from "@lib/disposable";
-import { navigateToChannel } from "@lib/nav/channelNavigation";
-import { attachPressWarm } from "@lib/nav/pressWarm";
+import { navigateToChannel } from "../navigation/channelNavigation";
+import { attachPressWarm } from "../navigation/pressWarm";
 import {
   NO_CATEGORY,
   UNCATEGORIZED_VOICE_CATEGORY,
@@ -46,12 +46,14 @@ export interface RowEnv {
   /** Listener owners for every keyed group and row. */
   readonly ownerByEl: WeakMap<Element, Disposable>;
   readonly voice: VoiceRows;
+  /** Tree mode (Command Deck): the views draw tree items, and a category's menu gains Create channel. */
+  readonly tree: boolean;
 }
 
 /** A followed thread's row: a click opens its parent and the panel; the menu offers Mark as Read and Unfollow. */
 export function createThreadRow(env: RowEnv, model: ThreadRowModel): HTMLDivElement {
   const { onOpenThread, onMarkThreadRead, onUnfollowThread } = env.options;
-  const el = drawThreadRow(model);
+  const el = drawThreadRow(model, env.tree);
   const owner = new Disposable();
   env.ownerByEl.set(el, owner);
   const { signal } = owner;
@@ -78,7 +80,7 @@ export function createThreadRow(env: RowEnv, model: ThreadRowModel): HTMLDivElem
 
 /** A parent's "N more" row: opens its channel and the Threads list. */
 export function createThreadMoreRow(env: RowEnv, model: ThreadMoreRowModel): HTMLDivElement {
-  const el = drawThreadMoreRow(model);
+  const el = drawThreadMoreRow(model, env.tree);
   const owner = new Disposable();
   env.ownerByEl.set(el, owner);
   el.addEventListener("click", () => env.options.onOpenThreadList?.(model.parentId), {
@@ -110,7 +112,8 @@ export function createChannelRow(
   };
   const owner = new Disposable();
   const { signal } = owner;
-  const el = model.kind === "voice" ? env.voice.create(ch, signal) : drawTextChannelRow(model);
+  const el =
+    model.kind === "voice" ? env.voice.create(ch, signal) : drawTextChannelRow(model, env.tree);
   if (model.kind !== "voice") {
     el.addEventListener("click", () => navigateToChannel(model.channelId), { signal });
     attachPressWarm(el, model.channelId, signal);
@@ -162,16 +165,19 @@ function bindCategoryHeader(
 ): void {
   const { onCreateChannel, onCreateCategory, onRenameCategory, onDeleteCategory, onMoveCategory } =
     env.options;
+  // The synthetic Voice group files nothing: no category, a voice channel.
+  const createChannel = (): void => {
+    if (key === UNCATEGORIZED_VOICE_CATEGORY && model.categoryId === 0) {
+      onCreateChannel?.(NO_CATEGORY, "voice");
+    } else {
+      onCreateChannel?.(category);
+    }
+  };
   header.querySelector(":scope > .category-add-btn")?.addEventListener(
     "click",
     (e) => {
       e.stopPropagation();
-      // The synthetic Voice group files nothing: no category, a voice channel.
-      if (key === UNCATEGORIZED_VOICE_CATEGORY && model.categoryId === 0) {
-        onCreateChannel?.(NO_CATEGORY, "voice");
-      } else {
-        onCreateChannel?.(category);
-      }
+      createChannel();
     },
     { signal },
   );
@@ -190,9 +196,12 @@ function bindCategoryHeader(
   header.addEventListener("click", () => toggleCategory(key), { signal });
   attachCategoryContextMenu(
     header,
-    arrow,
+    // A tree item is the header itself; the arrow is a decorative chevron there.
+    env.tree ? header : arrow,
     { key, ...category },
     {
+      // The "+" leaves the Tab order in a tree, so the menu is its keyboard route.
+      onCreateChannel: env.tree && onCreateChannel !== undefined ? createChannel : undefined,
       onCreateCategory,
       onRenameCategory,
       onDeleteCategory,
@@ -210,7 +219,7 @@ export function buildCategoryGroup(
   g: ChannelGroup,
   reconcileRows: (container: HTMLElement, g: ChannelGroup) => void,
 ): HTMLDivElement {
-  const group = drawCategoryGroup(model);
+  const group = drawCategoryGroup(model, env.tree);
   const owner = new Disposable();
   env.ownerByEl.set(group, owner);
   const { key, name } = model;

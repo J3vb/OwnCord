@@ -4,7 +4,7 @@ import * as mocks from "../helpers/sidebarStubMocks";
 import * as stubs from "../helpers/sidebarStubs";
 import { resetChannelsState, signInAs } from "../helpers/storeSeeds";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.rePinOnlySessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => mocks.rePinOnlySessionMock());
 vi.mock("@lib/net/e2eeCrypto", () => mocks.inertE2eeCryptoMock());
 
 import { createChannelSidebar } from "../../src/features/channels/ChannelSidebar";
@@ -16,7 +16,7 @@ import {
   type Channel,
 } from "../../src/stores/channels.store";
 import { isCategoryCollapsed } from "../../src/stores/ui.store";
-import { setMarkReadSender } from "@lib/readState";
+import { setMarkReadSender } from "../../src/stores/readState";
 import type { ReadyChannel } from "../../src/lib/types";
 
 const CHANNELS: ReadyChannel[] = [
@@ -95,6 +95,17 @@ describe("category context menu", () => {
     expect(sent).toHaveLength(4);
     vi.advanceTimersByTime(1100);
     expect(sent).toHaveLength(6);
+  });
+
+  it("clears a voice channel's mention badge, leaving its plain unread alone", () => {
+    remount([
+      { id: 20, name: "talk", type: "voice", category: "Mix", position: 0, mention_count: 1 },
+      { id: 21, name: "chat", type: "voice", category: "Mix", position: 1, unread_count: 3 },
+    ]);
+    const mark = item(openMenu("Mix"), "ctx-category-mark-read");
+    expect(mark.classList.contains("disabled")).toBe(false);
+    mark.click();
+    expect(sent).toEqual([20]);
   });
 
   it("disables Mark Category as Read when nothing in it is unread", () => {

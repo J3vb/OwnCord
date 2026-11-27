@@ -7,6 +7,7 @@ import {
   toHex,
   type Rgb,
 } from "../../src/lib/text/colorContrast";
+import { THEMES as PALETTES } from "../../src/lib/prefs/themes";
 
 const DARK_SURFACES: Rgb[] = ["#313338", "#2b2d31", "#1e1f22", "#383a40"].map((c) =>
   parseColor(c)!,
@@ -44,6 +45,16 @@ describe("deriveAccentTokens (Q8)", () => {
     expect(t.hover).toBe("#26d0ff");
     expect(t.active).toBe("#4dd9ff");
     expect(t.text).toBe("#00c8ff");
+  });
+
+  it("derives gunmetal's orange accent tokens, the literals in theme-gunmetal.css", () => {
+    const surfaces = ["#181d24", "#12161b", "#0c0f13", "#202731"].map((c) => parseColor(c)!);
+    const t = deriveAccentTokens(parseColor("#ff7a45")!, surfaces);
+    expect(t.onAccent).toBe("#000000");
+    expect(t.hover).toBe("#ff8e61");
+    expect(t.active).toBe("#ffa27d");
+    expect(t.text).toBe("#ff7a45");
+    expect(t.focus).toBe("#ff7a45");
   });
 
   it("puts white on a dark accent and darkens hover/active", () => {
@@ -179,5 +190,89 @@ describe("clampTextColor", () => {
 
   it("fails closed with nothing to measure", () => {
     expect(clampTextColor(parseColor("#ff0000")!, [])).toBeNull();
+  });
+});
+
+describe("Gunmetal palette contrast", () => {
+  const g: Record<string, string> = PALETTES.gunmetal;
+  const rgb = (token: string): Rgb => parseColor(g[token]!)!;
+  const ratio = (fg: string, bg: string): number => contrastRatio(rgb(fg), rgb(bg));
+  const SURFACES = ["--bg-primary", "--bg-secondary", "--bg-tertiary", "--bg-input"];
+  const SIDES = ["--bg-primary", "--bg-secondary"];
+
+  it("keeps every qualified text token at 4.5:1 on all four surfaces", () => {
+    for (const text of [
+      "--text-normal",
+      "--text-muted",
+      "--header-primary",
+      "--header-secondary",
+      "--text-link",
+    ]) {
+      for (const bg of SURFACES) {
+        expect(ratio(text, bg), `${text} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("reads --text-faint headings and --role-member names at 4.5:1 on the main and side columns", () => {
+    for (const text of ["--text-faint", "--role-member"]) {
+      for (const bg of SIDES) {
+        expect(ratio(text, bg), `${text} on ${bg}`).toBeGreaterThanOrEqual(4.5);
+      }
+    }
+  });
+
+  it("keeps --text-micro a step below --text-faint, and above neon-glow's ratio", () => {
+    // neon-glow inherits tokens.css's --text-micro.
+    const neonMicro = parseColor("#6d6f78")!;
+    const neon: Record<string, string> = PALETTES["neon-glow"];
+    for (const bg of SIDES) {
+      const micro = ratio("--text-micro", bg);
+      expect(micro, bg).toBeLessThan(ratio("--text-faint", bg));
+      expect(micro, bg).toBeGreaterThan(contrastRatio(neonMicro, parseColor(neon[bg]!)!));
+    }
+  });
+
+  it("draws icons and the scrollbar thumb at 3:1 where they sit", () => {
+    for (const bg of SURFACES) {
+      expect(ratio("--interactive-normal", bg), bg).toBeGreaterThanOrEqual(3);
+    }
+    for (const thumb of ["--scrollbar-thin-thumb", "--scrollbar-auto-thumb"]) {
+      for (const bg of SIDES) {
+        expect(ratio(thumb, bg), `${thumb} on ${bg}`).toBeGreaterThanOrEqual(3);
+      }
+    }
+  });
+
+  it("tints its neutral tokens blue-grey rather than inheriting the dark greys", () => {
+    for (const token of [
+      "--text-micro",
+      "--interactive-normal",
+      "--interactive-muted",
+      "--scrollbar-thin-thumb",
+      "--role-member",
+    ]) {
+      const [r, , b] = rgb(token);
+      expect(b, token).toBeGreaterThan(r);
+    }
+    expect(g["--bg-modifier-selected"]).toBe("rgba(76, 89, 107, 0.32)");
+  });
+});
+
+describe("text on each built-in accent fill", () => {
+  // Each theme's default --accent with its --on-accent (tokens.css, theme-*.css).
+  it.each([
+    ["dark and midnight", "#5865f2", "#ffffff"],
+    ["neon-glow", "#00c8ff", "#000000"],
+    ["gunmetal", "#ff7a45", "#000000"],
+    ["light", "#4f5bd5", "#ffffff"],
+  ])("reads at 4.5:1 on %s", (_theme, accent, onAccent) => {
+    expect(contrastRatio(parseColor(onAccent)!, parseColor(accent)!)).toBeGreaterThanOrEqual(4.5);
+  });
+
+  it("is why --on-fill (white) is wrong there: it misses on Ember and cyan", () => {
+    const white = parseColor("#ffffff")!;
+    expect(contrastRatio(white, parseColor("#ff7a45")!)).toBeLessThan(3);
+    expect(contrastRatio(white, parseColor("#00c8ff")!)).toBeLessThan(3);
   });
 });

@@ -90,7 +90,7 @@ func TestBuildVoiceWatching_ShapeNeverNull(t *testing.T) {
 				UserIDs []int64 `json:"user_ids"`
 			} `json:"payload"`
 		}
-		raw := buildVoiceWatching(7, ids)
+		raw := buildVoiceWatching(7, ids, 0)
 		if err := json.Unmarshal(raw, &env); err != nil {
 			t.Fatal(err)
 		}
@@ -198,9 +198,9 @@ func TestSendVoicePeerWatching_OnlyNonEmptyPeers(t *testing.T) {
 	p2, _ := voiceWatchClient(h, 2, 50)
 	voiceWatchClient(h, 3, 50) // watches nothing
 	p4, _ := voiceWatchClient(h, 4, 60)
-	p2.voice.setWatchingIfChannel(50, []int64{1, 3})
-	p4.voice.setWatchingIfChannel(60, []int64{1})
-	joiner.voice.setWatchingIfChannel(50, []int64{2})
+	p2.voice.setWatchingIfChannel(50, []int64{1, 3}, 0)
+	p4.voice.setWatchingIfChannel(60, []int64{1}, 0)
+	joiner.voice.setWatchingIfChannel(50, []int64{2}, 0)
 
 	h.sendVoicePeerWatching(joiner, 50)
 
@@ -217,7 +217,7 @@ func TestVoiceJoin_SendsPeerWatching(t *testing.T) {
 	h := newTestHubWith(t, HubOptions{DB: database, LiveKit: healthyTestLiveKit(t)})
 
 	peer, _ := voiceWatchClient(h, uid+1000, chID)
-	peer.voice.setWatchingIfChannel(chID, []int64{uid, 77})
+	peer.voice.setWatchingIfChannel(chID, []int64{uid, 77}, 0)
 
 	send := make(chan []byte, 32)
 	c := NewTestClient(h, uid, send)
@@ -235,7 +235,7 @@ func TestVoiceJoin_SendsPeerWatching(t *testing.T) {
 	}
 }
 
-func TestResume_KeepsWatchingAndResendsPeers(t *testing.T) {
+func TestResume_KeepsWatchingAndMusicAndResendsPeers(t *testing.T) {
 	database := newTeardownTestDB(t)
 	hub := newTestHub(t, database, auth.NewRateLimiter(), nil)
 	const chanID = int64(500)
@@ -244,6 +244,7 @@ func TestResume_KeepsWatchingAndResendsPeers(t *testing.T) {
 	peer := &Client{userID: 1, send: peerSend, sendHigh: peerSend, sendLow: peerSend}
 	peer.voice.voiceChID = chanID
 	peer.voice.watching = []int64{2, 9}
+	peer.voice.listeningTo = 7
 	hub.mu.Lock()
 	hub.clients[1] = []*Client{peer}
 	hub.mu.Unlock()
@@ -255,6 +256,7 @@ func TestResume_KeepsWatchingAndResendsPeers(t *testing.T) {
 	old.voice.voiceJoinToken = "tok"
 	old.voice.voiceJoinCompleted = true
 	old.voice.watching = []int64{1}
+	old.voice.listeningTo = 5
 	hub.mu.Lock()
 	hub.clients[2] = []*Client{old}
 	hub.mu.Unlock()
@@ -269,8 +271,14 @@ func TestResume_KeepsWatchingAndResendsPeers(t *testing.T) {
 	if got := old.voice.watchingCopy(); len(got) != 0 {
 		t.Errorf("old slot kept %v", got)
 	}
-	frames := watchFrames(t, newSend)
-	if len(frames) != 1 || frames[0].UserID != 1 || !reflect.DeepEqual(frames[0].UserIDs, []int64{2, 9}) {
+	if got := newC.voice.listeningCopy(); got != 5 {
+		t.Errorf("resumed slot listening = %d, want 5", got)
+	}
+	if got := old.voice.listeningCopy(); got != 0 {
+		t.Errorf("old slot kept listening %d", got)
+	}
+	frames := musicFrames(newSend)
+	if len(frames) != 1 || frames[0].UserID != 1 || !reflect.DeepEqual(frames[0].UserIDs, []int64{2, 9}) || frames[0].MusicID != 7 {
 		t.Errorf("resumed client frames = %+v", frames)
 	}
 	if f := watchFrames(t, peerSend); len(f) != 0 {
@@ -281,17 +289,17 @@ func TestResume_KeepsWatchingAndResendsPeers(t *testing.T) {
 func TestLeave_ClearsWatching(t *testing.T) {
 	var s voiceSlot
 	s.setState(5, "tok")
-	s.setWatchingIfChannel(5, []int64{2})
+	s.setWatchingIfChannel(5, []int64{2}, 0)
 	if snap := s.clearSnap(); !reflect.DeepEqual(snap.watching, []int64{2}) {
 		t.Errorf("snapshot lost the set: %v", snap.watching)
 	}
 	if got := s.watchingCopy(); len(got) != 0 {
 		t.Errorf("leave kept %v", got)
 	}
-	if s.setWatchingIfChannel(5, []int64{2}) {
+	if s.setWatchingIfChannel(5, []int64{2}, 0) {
 		t.Error("stored while not in a channel")
 	}
-	if s.setWatchingIfChannel(0, []int64{2}) {
+	if s.setWatchingIfChannel(0, []int64{2}, 0) {
 		t.Error("stored for channel 0")
 	}
 }
@@ -299,23 +307,23 @@ func TestLeave_ClearsWatching(t *testing.T) {
 func TestSetState_ClearsWatching(t *testing.T) {
 	var s voiceSlot
 	s.setState(5, "tok")
-	s.setWatchingIfChannel(5, []int64{2})
+	s.setWatchingIfChannel(5, []int64{2}, 0)
 	s.setState(5, "tok2")
 	if got := s.watchingCopy(); len(got) != 0 {
 		t.Errorf("new join instance kept %v", got)
 	}
 }
 
-func TestWatchingIfChannel_OnlyForCurrentChannel(t *testing.T) {
+func TestWatchStateIfChannel_OnlyForCurrentChannel(t *testing.T) {
 	var s voiceSlot
 	s.setState(7, "tok")
-	if !s.setWatchingIfChannel(7, []int64{3}) {
+	if !s.setWatchingIfChannel(7, []int64{3}, 0) {
 		t.Fatal("store refused for the current channel")
 	}
-	if got := s.watchingIfChannel(7); !reflect.DeepEqual(got, []int64{3}) {
-		t.Fatalf("watchingIfChannel(7) = %v, want [3]", got)
+	if got, _ := s.watchStateIfChannel(7); !reflect.DeepEqual(got, []int64{3}) {
+		t.Fatalf("watchStateIfChannel(7) = %v, want [3]", got)
 	}
-	if got := s.watchingIfChannel(8); got != nil {
-		t.Fatalf("watchingIfChannel(8) = %v, want nil", got)
+	if got, music := s.watchStateIfChannel(8); got != nil || music != 0 {
+		t.Fatalf("watchStateIfChannel(8) = %v, %d, want nil, 0", got, music)
 	}
 }

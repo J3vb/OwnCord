@@ -24,7 +24,7 @@ import { NativeVideoRenderer } from "./videoRenderer";
 
 /** How often a remote participant whose frames stopped decrypting
  *  is re-reported — the web E2EE worker's cadence, so the shared streak grace
- *  in `lib/voice/roomEventHandlers.ts` applies to the native path
+ *  in `features/voice/roomEventHandlers.ts` applies to the native path
  *  unchanged. Unlike the web worker's, these reports are not rate-limited, so
  *  the native room recovers after the short quiet gap (`isNativeRoom`). */
 const DECRYPT_REPORT_MS = 1000;

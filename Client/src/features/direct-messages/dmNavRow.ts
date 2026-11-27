@@ -5,7 +5,7 @@
  */
 import { appendChildren, createElement, setText } from "@lib/dom";
 import { createIcon, type IconName } from "@lib/icons";
-import { formatBadgeCount } from "@lib/text/formatting";
+import { formatBadgeCount } from "../messaging/formatting";
 import { trackCurrentView } from "../navigation/contentView";
 import type { ContentViewId, CountSource } from "../navigation/destinations";
 
@@ -18,18 +18,20 @@ export interface DmNavRowOptions {
   /** A live count for the badge; the row's accessible name then carries it. */
   readonly count?: CountSource;
   readonly countLabel?: (count: number) => string;
+  /** The element to draw. A tree row takes a `div`, since a button cannot be a treeitem. */
+  readonly tag?: "button" | "div";
 }
 
 /** Build one row; every subscription it makes goes on `unsubs`. */
-export function createDmNavRow(
-  opts: DmNavRowOptions,
-  unsubs: Array<() => void>,
-): HTMLButtonElement {
-  const row = createElement("button", {
-    type: "button",
-    class: "dm-nav-row",
-    "data-testid": opts.testId,
-  });
+export function createDmNavRow(opts: DmNavRowOptions, unsubs: Array<() => void>): HTMLElement {
+  const row =
+    opts.tag === "div"
+      ? createElement("div", { class: "dm-nav-row", "data-testid": opts.testId })
+      : createElement("button", {
+          type: "button",
+          class: "dm-nav-row",
+          "data-testid": opts.testId,
+        });
   const icon = createIcon(opts.icon, 20);
   icon.classList.add("dm-nav-row-icon");
   const label = createElement("span", { class: "dm-nav-row-label" }, opts.label);

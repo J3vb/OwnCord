@@ -5,16 +5,20 @@ import "@styles/base.css";
 import "@styles/login.css";
 import "@styles/app.css";
 import "@styles/theme-neon-glow.css";
+import "@styles/theme-gunmetal.css";
 
 import { installGlobalErrorHandlers } from "@lib/text/safeRender";
 import { createApiClient } from "@lib/api";
 import { installGlobalGuards } from "./app/globalGuards";
 
-import { deactivatePendingMessages } from "@lib/pendingMessages";
+import { deactivatePendingMessages } from "./features/messaging/pendingMessages";
+import { hasInstallEvidence } from "@lib/prefs/installEvidence";
+import { settleStartupLayout } from "@lib/prefs/newInstallDefaults";
 import { settleNotificationLevelDefault } from "@lib/prefs/notificationLevel";
 import { createWsClient } from "@lib/ws";
-import { markActiveChannelReadOnUnload } from "@lib/readState";
+import { markActiveChannelReadOnUnload } from "./stores/readState";
 import { registerSessionReset } from "@lib/net/sessionRegistry";
+import { registerVoiceSessionLoader } from "@lib/voice/voiceSessionLoader";
 import { authStore, clearAuth } from "@stores/auth.store";
 import { setTransientError } from "@stores/ui.store";
 import { voiceStore } from "@stores/voice.store";
@@ -30,9 +34,11 @@ import { configureServerHealth } from "./app/serverHealth";
 import { configureRouter, activePageId, navigate, renderActive, rerunHealth } from "./app/router";
 import { afterCoreSteps, beforeRenderSteps, runStartupSteps } from "./app/startup";
 
-// First, while storage still holds only what earlier sessions wrote: that is
-// how an install from before the notification level is told from a new one.
-settleNotificationLevelDefault();
+// First, before anything writes storage: what earlier sessions left tells an install
+// that ran before from a new one. Read once, so the defaults this load writes do not count.
+const installEvidence = hasInstallEvidence();
+settleStartupLayout(installEvidence);
+settleNotificationLevelDefault(installEvidence);
 
 // Gate the log level before anything logs: debug entries are serialized and
 // persisted to disk, so in production the level must filter real work, not
@@ -43,8 +49,8 @@ applyStoredLogLevel(import.meta.env.DEV ? "debug" : "info");
 const log = createLogger("main");
 
 installGlobalGuards();
-
-// Install global error handlers first
+// Logout and push-to-talk reach the (lazy) voice session facade through this.
+registerVoiceSessionLoader(() => import("./features/voice/livekitSession"));
 installGlobalErrorHandlers();
 
 // Start log persistence immediately after: an early startup failure (a missing
@@ -86,9 +92,11 @@ const ws = createWsClient();
 // Diagnostics back the lazily loaded Settings > Diagnostics & logs panel, so their engine and
 // text stay out of the startup chunk. The import resolves long before
 // the panel can be opened, and the panel's own module imports the same chunk.
-void import("@lib/net/connectionDiagnostics").then(({ configureConnectionDiagnostics }) => {
-  configureConnectionDiagnostics(api, ws);
-});
+void import("./features/connection/connectionDiagnostics").then(
+  ({ configureConnectionDiagnostics }) => {
+    configureConnectionDiagnostics(api, ws);
+  },
+);
 // App-lifetime hook: main.ts runs once per window. The other per-server resets
 // register themselves from their own modules.
 void registerSessionReset(
@@ -111,9 +119,7 @@ const profileManager = createProfileManager(createTauriBackend());
 configureRouter(api, ws, appEl, profileManager);
 configureSession(api, ws, appEl, activePageId, navigate);
 configureServerHealth(api);
-
 installCertPrompts(ws, activePageId, navigate, rerunHealth);
-
 installLogoutTeardown();
 
 // Send voice_leave on window close (best-effort — server readPump defer is the safety net)

@@ -178,7 +178,7 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
   }
   const videoCallBtn = createElement("button", {
     type: "button",
-    class: "call-btn",
+    class: "call-btn video-call-btn",
     title: messagingText("header.startVideoCall"),
     "aria-label": messagingText("header.startVideoCall"),
     "data-testid": "video-call-btn",
@@ -319,8 +319,16 @@ export function buildChatHeader(opts: ChatHeaderOptions): {
     });
     searchBtn.addEventListener("click", () => onFocus());
   }
-  // On a phone the panel toggles fold into one More button.
-  const overflow = createChatHeaderOverflow([profileBtn, membersBtn, pinBtn, mediaBtn]);
+  // On a phone the panel toggles, Threads and Start video call fold into one
+  // More button, so the channel name keeps the room.
+  const overflow = createChatHeaderOverflow([
+    videoCallBtn,
+    profileBtn,
+    membersBtn,
+    pinBtn,
+    threadsBtn,
+    mediaBtn,
+  ]);
   appendChildren(
     tools,
     searchField,
@@ -461,6 +469,8 @@ export function updateChatHeaderForDm(refs: ChatHeaderRefs, recipient: ChatHeade
     refs.callBtn.style.display = "";
     refs.videoCallBtn.style.display = "";
     if (refs.threadsBtn !== undefined) refs.threadsBtn.hidden = true;
+    // Channel media is a server-channel feature: a DM never inherits the last channel's button.
+    setChatHeaderMedia(refs, false);
     refs.profileBtn.style.display = recipient.isGroup === true ? "none" : "";
     refs.membersBtn.style.display = recipient.isGroup === true ? "" : "none";
   } else {

@@ -133,6 +133,30 @@ describe("background call service", () => {
       ]);
     });
 
+    it("is locked in the AFK channel and in a call joined without a mic", () => {
+      startBackgroundCall(owner.signal);
+      setCall(7, "connected");
+      for (const patch of [{ inAfkChannel: true }, { inAfkChannel: false }, { listenOnly: true }]) {
+        voiceStore.setState((s) => ({ ...s, ...patch }));
+        voiceStore.flush();
+      }
+      expect(host.update.mock.calls).toEqual([
+        NO_CALL,
+        call(false),
+        call(false, false, "locked"),
+        call(false),
+        call(false, false, "locked"),
+      ]);
+    });
+
+    it("is locked while a moderator's deafen closes the mic without a mute", () => {
+      startBackgroundCall(owner.signal);
+      setCall(7, "connected");
+      voiceStore.setState((s) => ({ ...s, localDeafened: true, localServerDeafened: true }));
+      voiceStore.flush();
+      expect(host.update.mock.calls).toEqual([NO_CALL, call(false), call(false, false, "locked")]);
+    });
+
     it("is the state a call starts in, when the member joins muted", () => {
       setMic(true);
       startBackgroundCall(owner.signal);

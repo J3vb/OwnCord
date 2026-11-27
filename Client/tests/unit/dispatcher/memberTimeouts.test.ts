@@ -5,7 +5,7 @@ import { voiceStore } from "../../../src/stores/voice.store";
 import {
   setMuted as mockSetMuted,
   setDeafened as mockSetDeafened,
-} from "@lib/voice/livekitSession";
+} from "../../../src/features/voice/livekitSession";
 import {
   useDispatcherHarness,
   setMeUser,
@@ -16,11 +16,11 @@ import {
   voiceStateEvent,
 } from "../../helpers/dispatcherHarness";
 
-vi.mock("@lib/notifications", () => dispatcherMocks.notificationsMock());
-vi.mock("@lib/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
+vi.mock("/src/features/notifications/notifications", () => dispatcherMocks.notificationsMock());
+vi.mock("../../../src/features/voice/livekitSession", () => dispatcherMocks.livekitSessionMock());
 vi.mock("../../../src/features/voice/screenShare", () => dispatcherMocks.screenShareMock());
 vi.mock("@lib/ui/toast", () => dispatcherMocks.toastMock());
-vi.mock("@lib/net/identity", () => dispatcherMocks.identityMock());
+vi.mock("../../../src/features/connection/identity", () => dispatcherMocks.identityMock());
 vi.mock("../../../src/features/connection/dispatchContext", async (importOriginal) =>
   dispatcherMocks.dispatchContextMock(await importOriginal<object>()),
 );
@@ -240,6 +240,7 @@ describe("WS Dispatcher", () => {
         localMuted: true,
         localDeafened: true,
         moderatorDeafened: true,
+        moderatorMuted: true,
         localServerMuted: true,
         localServerDeafened: true,
       });

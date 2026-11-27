@@ -15,7 +15,7 @@ import { membersStore } from "@stores/members.store";
 import { uiStore } from "@stores/ui.store";
 import { nsfwContentBlocked } from "../content-consent/nsfw";
 import { closeWhenChannelLeft, sidePanelStale } from "./sidePanelScope";
-import { resolveAuthor } from "@lib/text/formatting";
+import { resolveAuthor } from "./formatting";
 import { resolveDisplayName } from "@lib/ui/avatar";
 import { pickAvatarColor } from "../profiles/avatar";
 import { shellText } from "../../i18n/shell";

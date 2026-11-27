@@ -72,7 +72,7 @@ describe("DeleteChannelModal", () => {
   it("displays cannot be undone warning", () => {
     const { modal } = makeModal();
     const overlay = container.querySelector("[data-testid='delete-channel-modal']");
-    expect(overlay?.textContent).toContain("cannot be undone");
+    expect(overlay?.textContent).toContain("can't be undone");
     modal.destroy?.();
   });
 

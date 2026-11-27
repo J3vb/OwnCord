@@ -9,13 +9,16 @@ import { createLogger } from "@lib/logger";
 import { shellText } from "../../i18n/shell";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore } from "@stores/dm.store";
-import { setChannelWarmHandler } from "@lib/nav/channelNavigation";
+import { setChannelWarmHandler } from "../navigation/channelNavigation";
 import {
   newestSentId,
+  pageBackTo,
   recoverAfterReattach,
   recoverRefusedTail,
+  revalidateOlderRows,
   withLoadJournal,
 } from "./historyFetch";
+import { readingAnchor } from "./readingAnchor";
 import { createChannelWarmup } from "./channelWarmup";
 import {
   setMessages,
@@ -35,8 +38,6 @@ const log = createLogger("message-ctrl");
 const PAGE_SIZE = 50;
 /** The server's largest history page (maxMessageLimit). */
 const MAX_PAGE_SIZE = 100;
-/** Revisit paging bound: five pages span the 500-row per-channel window. */
-const MAX_REVISIT_PAGES = 5;
 
 // ---------------------------------------------------------------------------
 // Message Controller
@@ -64,13 +65,15 @@ function worthWarming(channelId: number): boolean {
   return dmStore.getState().channels.some((c) => c.channelId === channelId);
 }
 
+/** Install the revisit's fetched range; returns the id rows a splice kept
+ *  stay below (0 when it did not splice). */
 function installTail(
   channelId: number,
   fetched: MessageResponse[],
   hasMoreBefore: boolean,
   cached: readonly unknown[],
   head: number,
-): void {
+): number {
   // Rows the fetched range brought from above the cached window would
   // land as a prepend and rebuild the list; leave them for scrolling up.
   // A cache shorter than a default page keeps the newest default page
@@ -93,7 +96,9 @@ function installTail(
     count: messages.length,
     hasMore,
   });
-  setMessages(channelId, messages, hasMore, splice);
+  // Past the row cap a splice trims away from the row the reader is on.
+  setMessages(channelId, messages, hasMore, splice, splice ? readingAnchor(channelId) : null);
+  return splice ? (messages.at(-1)?.id ?? 0) : 0;
 }
 
 /**
@@ -164,12 +169,15 @@ export function createMessageController(opts: MessageControllerOptions): Message
       const { first, warmed } = await firstPage(channelId, limit, cached.length === 0, signal);
       if (signal.aborted) return;
       const head = cached[0]?.id ?? 0;
-      const { fetched, hasMoreBefore } = await pageBackToHead(
+      // A page that stops short of the oldest cached row leaves a gap above the
+      // cached window; when the window plus the unseen gap outruns the paging
+      // bound, the head is not reached and the rows below the range are dropped.
+      const { fetched, hasMoreBefore } = await pageBackTo(
+        api,
         channelId,
-        signal,
         first,
-        cached,
-        head,
+        cached.length > 0 ? head : 0,
+        signal,
       );
       // Re-check "loaded" after the awaits: a same-channel jump can install an
       // around-window (setAroundMessages) while this mount-time tail fetch is
@@ -177,7 +185,8 @@ export function createMessageController(opts: MessageControllerOptions): Message
       // Both landing marks the channel loaded, so a tail response that lost
       // the race is discarded instead of clobbering the jump's window.
       if (!signal.aborted && !isChannelLoaded(channelId)) {
-        installTail(channelId, fetched, hasMoreBefore, cached, head);
+        const keptBelow = installTail(channelId, fetched, hasMoreBefore, cached, head);
+        void revalidateOlderRows(api, channelId, keptBelow, signal);
         // A live message refused while the window was detached is in neither
         // the page nor the list: fetch what follows the newest row.
         recoverAfterReattach(api, channelId, wasDetached, signal, () =>
@@ -196,48 +205,6 @@ export function createMessageController(opts: MessageControllerOptions): Message
       // landed means this fetch lost the race and is discarded silently.
       if (!signal.aborted && !isChannelLoaded(channelId)) reportLoadFailure(channelId, err);
     }
-  }
-
-  /**
-   * A page that stops short of the oldest cached row leaves a gap above the
-   * cached window; page backwards until the fetched range reaches the head
-   * (or the history runs out). Five 100-row pages span the 500-row window:
-   * when the cached window plus the unseen gap exceeds them the head is not
-   * reached, so the rows below the fetched range are dropped instead.
-   */
-  async function pageBackToHead(
-    channelId: number,
-    signal: AbortSignal,
-    first: { readonly messages: readonly MessageResponse[]; readonly has_more: boolean },
-    cached: readonly unknown[],
-    head: number,
-  ): Promise<{ fetched: MessageResponse[]; hasMoreBefore: boolean }> {
-    const fetched: MessageResponse[] = [...first.messages];
-    let oldest = fetched[fetched.length - 1]?.id ?? 0;
-    let hasMoreBefore = first.has_more;
-    for (
-      let pages = 1;
-      cached.length > 0 &&
-      !signal.aborted &&
-      oldest > head &&
-      hasMoreBefore &&
-      pages < MAX_REVISIT_PAGES;
-      pages++
-    ) {
-      // oxlint-disable-next-line no-await-in-loop -- sequential paging: each page is fetched before the one below it
-      const older = await api
-        .getMessages(channelId, { before: oldest, limit: MAX_PAGE_SIZE }, signal)
-        .catch(() => null);
-      if (!older) {
-        hasMoreBefore = true;
-        break;
-      }
-      if (older.messages.length === 0) break;
-      fetched.push(...older.messages);
-      oldest = older.messages[older.messages.length - 1]!.id;
-      hasMoreBefore = older.has_more;
-    }
-    return { fetched, hasMoreBefore };
   }
 
   function reportLoadFailure(channelId: number, err: unknown): void {

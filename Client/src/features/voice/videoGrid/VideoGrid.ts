@@ -6,7 +6,7 @@
 import { createElement } from "@lib/dom";
 import { Disposable } from "@lib/disposable";
 import { onPhoneLayoutChange } from "@lib/ui/bottomSheet";
-import { USER_LOCAL_MUTE_CHANGED } from "@lib/constants";
+import { USER_LOCAL_MUTE_CHANGED, USER_VOLUME_CHANGED } from "@lib/constants";
 import { syncVideoSurface } from "@lib/voice/videoSurface";
 import type { MountableComponent } from "@lib/text/safeRender";
 import type { StreamInfo } from "./streamInfo";
@@ -19,6 +19,7 @@ import { createGridLayout } from "./gridLayout";
 import { createGridCallBar } from "./gridCallBar";
 import { createGridWatch } from "./gridWatch";
 import { createGridStreams } from "./gridStreams";
+import { createGridMusic } from "./gridMusicTile";
 import { createGridTileSize } from "./gridTileSize";
 import { createGridStats } from "./gridStats";
 
@@ -115,6 +116,23 @@ export interface GridPerson {
   readonly marksOwnState?: true;
 }
 
+/** A remote member sharing music, drawn as a card with Listen to music (or,
+ *  while you listen to them, the volume and Stop listening). The host owns
+ *  the state and the actions; the grid only draws. */
+export interface GridMusic {
+  readonly userId: number;
+  readonly name: string;
+  readonly listening: boolean;
+  /** The other members listening to them, by name; you are added after them
+   *  while `listening`. */
+  readonly listeners: readonly string[];
+  /** Their Music volume, 0 to 100, read when the slider is drawn or the level changes. */
+  readonly volume: () => number;
+  readonly onListen: () => void;
+  readonly onStop: () => void;
+  readonly onVolume: (percent: number) => void;
+}
+
 export interface CallState {
   readonly muted: boolean;
   readonly deafened: boolean;
@@ -136,6 +154,9 @@ export interface CallState {
   /** A phone call holds the call (the Android app): the mic control is inert
    *  and the bar says the call is paused. */
   readonly phoneHold?: boolean;
+  /** In the AFK channel, which is listen-only: the mic control reads muted
+   *  and is inert. */
+  readonly afkLocked?: boolean;
 }
 
 export interface VideoGridComponent extends MountableComponent {
@@ -164,6 +185,9 @@ export interface VideoGridComponent extends MountableComponent {
   /** The people to draw as avatar tiles, after the streams. A person's tile
    *  steps aside while their camera tile is up. Not counted by hasStreams. */
   setPeople(people: readonly GridPerson[]): void;
+  /** The remote members sharing music, each a card beside the tiles. Not
+   *  counted by hasStreams. */
+  setMusic(music: readonly GridMusic[]): void;
   /** Ring the camera and avatar tiles of the users speaking now. */
   setSpeaking(userIds: ReadonlySet<number>): void;
   /** Mute/deafen state by userId, shown as a badge on the camera and avatar
@@ -204,7 +228,10 @@ export function createVideoGrid(): VideoGridComponent {
     pinned: new Set(),
     people: [],
     personCells: new Map<number, HTMLDivElement>(),
+    music: [],
+    musicCells: new Map<number, HTMLDivElement>(),
     resizeObserver: null,
+    pixelRatioWatch: null,
     resizeRafId: 0,
     rafWindow: window,
     callbacks: {},
@@ -250,6 +277,7 @@ export function createVideoGrid(): VideoGridComponent {
     createGridWatch(st, api),
     createGridTileSize(st, api),
     createGridStreams(st, api),
+    createGridMusic(st, api),
   );
 
   function setPeople(next: readonly GridPerson[]): void {
@@ -297,6 +325,13 @@ export function createVideoGrid(): VideoGridComponent {
     window.addEventListener(USER_LOCAL_MUTE_CHANGED, api.onUserLocalMute, {
       signal: st.gridListeners.signal,
     });
+    // A level set from another surface (the voice roster's menu) too.
+    window.addEventListener(USER_VOLUME_CHANGED, api.onUserLocalMute, {
+      signal: st.gridListeners.signal,
+    });
+    window.addEventListener(USER_VOLUME_CHANGED, api.onMusicVolume, {
+      signal: st.gridListeners.signal,
+    });
 
     // Observe container size changes to recalculate tile layout, and the
     // remote tiles' sizes (0 once the grid is closed) for their video views.
@@ -325,10 +360,7 @@ export function createVideoGrid(): VideoGridComponent {
     if (st.viewResizeTimer !== null) clearTimeout(st.viewResizeTimer);
     st.viewResizeTimer = null;
 
-    if (st.resizeObserver !== null) {
-      st.resizeObserver.disconnect();
-      st.resizeObserver = null;
-    }
+    api.unobserveGrid();
 
     for (const [tileId, entry] of st.cells) {
       // An ended tile still holds its stream's watch for a re-share.
@@ -351,6 +383,7 @@ export function createVideoGrid(): VideoGridComponent {
     st.focusedTileId = null;
     st.people = [];
     st.personCells.clear();
+    api.resetMusic();
     st.callView = false;
     st.viewBar = null;
     st.viewBtn = null;
@@ -374,6 +407,7 @@ export function createVideoGrid(): VideoGridComponent {
     setFocusedTile: api.setFocusedTile,
     getFocusedTileId: api.getFocusedTileIdFn,
     setPeople,
+    setMusic: api.setMusic,
     setSpeaking,
     setUserAudioState,
     setStreamViewers,

@@ -1094,6 +1094,8 @@ export function buildTauriMockScript(opts: {
         // Close to tray / Start minimized (WP 2B-3): the host's defaults.
         if (cmd === "get_window_prefs") return { minimizeToTray: true, startMinimized: false };
         if (cmd === "set_window_pref" || cmd === "show_next_launch") return null;
+        // A fresh start, not an app restart: no start-up link was copied.
+        if (cmd === "restart_startup_link") return null;
         // Graphics card for video: no cards, so the row stays hidden.
         if (cmd === "get_gpu_adapters")
           return { cards: [], saved: "auto", active: null, notFound: false, resetAfterCrash: false };
@@ -1561,18 +1563,84 @@ export async function waitForWsReady(page: Page): Promise<void> {
   });
 }
 
+/** Whether the page runs Command Deck, read from the running document. */
+export function isDeckLayout(page: Page): Promise<boolean> {
+  return page.evaluate(() => document.documentElement.classList.contains("layout-deck"));
+}
+
 /**
- * Open Home (the DM list) from the server rail. At desktop width DMs live
- * behind the rail's Home button, not in the channel sidebar.
+ * Reach the DM list. Classic: the server rail's Home button, because at desktop
+ * width DMs live behind it. Command Deck: the Direct folder is part of the
+ * channel tree, so there is nothing to click; the folder header is the signal.
  */
 export async function openHome(page: Page): Promise<void> {
+  if (await isDeckLayout(page)) {
+    await expect(page.locator(".server-tree-direct-head")).toBeVisible({ timeout: 5_000 });
+    return;
+  }
   await page.getByTestId("server-rail-home").click();
   await expect(page.locator(".dm-sidebar-header")).toBeVisible({ timeout: 5_000 });
 }
 
-/** The DM rows of the Home list. */
+/**
+ * The DM rows: Classic's Home list rows, or Command Deck's Direct folder rows.
+ * The `layout-deck` class on <html> picks the branch each time the locator
+ * resolves, so Classic's hidden embedded DM rows never match.
+ */
 export function dmRows(page: Page) {
-  return page.locator(".dm-conversation-list .dm-item");
+  return page.locator(
+    "html:not(.layout-deck) .dm-conversation-list .dm-item, html.layout-deck [data-testid=dm-entry]",
+  );
+}
+
+/**
+ * Open the People view. Classic: Home shows it. Command Deck: the Direct
+ * folder's People entry.
+ */
+export async function openPeople(page: Page): Promise<void> {
+  await openHome(page);
+  if (await isDeckLayout(page)) await page.getByTestId("dm-people-entry").click();
+}
+
+/**
+ * Leave DM mode or the People view. Classic: the back header. Command Deck: the
+ * tree stays on screen, so a click on a channel ends DM mode.
+ */
+export async function leaveDmMode(page: Page): Promise<void> {
+  if (await isDeckLayout(page)) {
+    await page
+      .locator(".channel-item:not([data-testid=dm-entry])")
+      .filter({ visible: true })
+      .first()
+      .click();
+  } else {
+    await page.getByTestId("dm-back-header").click();
+  }
+}
+
+/** The DM row of one conversation, in whichever layout runs. */
+export function dmRow(page: Page, channelId: number | string) {
+  return dmRows(page).and(page.locator(`[data-channel-id='${channelId}']`));
+}
+
+/** The way into the DM list is on screen: Classic's Home button or Deck's Direct folder. */
+export async function expectDirectReachable(page: Page): Promise<void> {
+  const entry = (await isDeckLayout(page))
+    ? page.locator(".server-tree-direct-head")
+    : page.getByTestId("server-rail-home");
+  await expect(entry).toBeVisible({ timeout: 5_000 });
+}
+
+/**
+ * DM mode is showing: Classic swaps the sidebar for the DM list under a back
+ * header; Command Deck keeps the channel tree, with the Direct folder's
+ * Message requests entry in it.
+ */
+export async function expectDmMode(page: Page): Promise<void> {
+  const marker = (await isDeckLayout(page))
+    ? page.getByTestId("dm-requests-entry")
+    : page.getByTestId("dm-back-header");
+  await expect(marker).toBeVisible();
 }
 
 /** Open the nth DM through Home, the way a desktop user reaches it. */

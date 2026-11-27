@@ -43,6 +43,7 @@ const MOVED_NOT_MUTATED = [
   "src/features/channels/sidebar/threadMenu.ts",
   "src/features/channels/sidebar/volumeMenu.ts",
   "src/features/channels/sidebarInputs.ts",
+  "src/features/channels/voiceChannelClick.ts",
   "src/features/channels/voiceModOptions.ts",
   "src/features/channels/voiceSidebarRows.ts",
   "src/features/connection/CertMismatchModal.ts",
@@ -73,12 +74,14 @@ const MOVED_NOT_MUTATED = [
   "src/features/direct-messages/dm-call/dmCallVerify.ts",
   "src/features/direct-messages/dmAvatars.ts",
   "src/features/direct-messages/dmContextMenu.ts",
+  "src/features/direct-messages/dmEntries.ts",
   "src/features/direct-messages/dmConversation.ts",
   "src/features/direct-messages/dmRow.ts",
   "src/features/direct-messages/outgoingCallFeedback.ts",
   "src/features/direct-messages/MemberPickerModal.ts",
   "src/features/direct-messages/SidebarDmHelpers.ts",
   "src/features/direct-messages/SidebarDmSection.ts",
+  "src/features/direct-messages/sidebarDmRow.ts",
   "src/features/direct-messages/memberPickerScreen.ts",
   "src/features/direct-messages/sidebarDmPhoneHead.ts",
   "src/features/direct-messages/sidebarDms.ts",
@@ -245,12 +248,16 @@ const MOVED_NOT_MUTATED = [
   "src/features/profiles/userProfilePopup.ts",
   "src/features/profiles/userProfileRoles.ts",
   "src/features/profiles/userProfileTypes.ts",
+  "src/features/server-header/serverHeader.ts",
   "src/features/server-rail/ServerBanner.ts",
   "src/features/server-rail/ServerRail.ts",
   "src/features/server-rail/serverRailMenus.ts",
   "src/features/server-rail/serverRailParts.ts",
   "src/features/server-rail/ServerRailJoinModal.ts",
   "src/features/server-rail/mountServerRail.ts",
+  "src/features/server-rail/railController.ts",
+  "src/features/server-rail/railDrag.ts",
+  "src/features/server-rail/switcherOptions.ts",
   "src/features/settings/AboutTab.ts",
   "src/features/settings/AccessibilityTab.ts",
   "src/features/settings/AccountBanner.ts",
@@ -358,6 +365,7 @@ const config = {
     "src/stores/**/*.ts",
     "src/features/**/*.ts",
     "src/features/members/memberRow.view.ts",
+    "src/app/dispatcher.ts", // the WS event door, mutated since it lived in lib/
     "!src/lib/types.ts",
     "!src/lib/wire*.ts", // split out of types.ts, excluded with it
     "!src/lib/net/wireShapes.ts", // generated data, no logic to mutate
@@ -384,8 +392,9 @@ const config = {
   },
   concurrency: 4,
   timeoutMS: 30000,
-  // A big shard's perTest-coverage first pass takes longer than Stryker's 5-minute default.
-  dryRunTimeoutMinutes: 20,
+  // The perTest-coverage first pass runs the whole suite: ~8 minutes on an
+  // average runner, close to 20 on a slow one.
+  dryRunTimeoutMinutes: 30,
   tempDirName: ".stryker-tmp",
 };
 

@@ -10,7 +10,10 @@ import { testPrefs } from "../helpers/notificationsMocks";
 import { makePayload, seedGeneralChannel } from "../helpers/notificationsHarness";
 
 import { markdownToPlainText } from "../../src/lib/text/markdown";
-import { notifyIncomingMessage, resetNotificationCoalescing } from "../../src/lib/notifications";
+import {
+  notifyIncomingMessage,
+  resetNotificationCoalescing,
+} from "../../src/features/notifications/notifications";
 import { dmStore } from "../../src/stores/dm.store";
 import { signInAs } from "../helpers/storeSeeds";
 import type { ChatMessagePayload } from "../../src/lib/types";
@@ -18,7 +21,7 @@ import type { ChatMessagePayload } from "../../src/lib/types";
 vi.mock("../../src/lib/prefs/preferences", (importOriginal) =>
   mocks.prefsPreferencesMock(importOriginal),
 );
-vi.mock("../../src/lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@tauri-apps/plugin-notification", () => mocks.pluginNotificationMock());
 
 // The native path shows a message notification through the host's

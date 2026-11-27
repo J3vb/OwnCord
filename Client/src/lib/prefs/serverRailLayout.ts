@@ -46,7 +46,7 @@ export const FOLDER_COLORS: readonly string[] = [
 ];
 const DEFAULT_COLOR: string = FOLDER_COLORS[0] ?? "#5865f2";
 
-type FolderItem = Extract<RailItem, { kind: "folder" }>;
+export type FolderItem = Extract<RailItem, { kind: "folder" }>;
 
 function isFolder(item: RailItem): item is FolderItem {
   return item.kind === "folder";
@@ -113,6 +113,22 @@ export function reconcile(layout: RailLayout, profileHosts: readonly string[]): 
     if (take(host)) out.push({ kind: "server", host });
   }
   return out;
+}
+
+/**
+ * The hosts a layout action keeps: the saved servers once they are known
+ * (`saved` is null before), else every host the layout names; plus the current
+ * host when it is not empty. An empty host is never added: the stored layout
+ * would fail to load with it.
+ */
+export function actionHosts(
+  layout: RailLayout,
+  saved: readonly string[] | null,
+  currentHost: string,
+): string[] {
+  const hosts = new Set(saved ?? layoutHosts(layout));
+  if (currentHost !== "") hosts.add(currentHost);
+  return [...hosts];
 }
 
 // ---------------------------------------------------------------------------

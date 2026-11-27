@@ -1388,6 +1388,37 @@ describe("KeybindsTab rebindable rows (3E-3c-3)", () => {
       expect(pttButton(el).textContent).toBe("Not set");
     });
 
+    it("a Keybinds row started during the polling capture drops its late result", async () => {
+      const { el } = mount();
+      const finish = holdCapture();
+      pttButton(el).click();
+      expect(pttButton(el).textContent).toBe("Press a supported key...");
+      byId(el, "keybind-toggleScreenshare").click();
+      expect(pttButton(el).textContent).toBe("Not set");
+      press("KeyY", { key: "y", ctrlKey: true, shiftKey: true });
+      finish(0x11); // Ctrl, seen by the native poll
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(mockUpdatePttKey).not.toHaveBeenCalled();
+      expect(pttButton(el).textContent).toBe("Not set");
+      expect(byId(el, "keybind-toggleScreenshare-alert").textContent).toBe("");
+      expect(byId(el, "keybind-toggleScreenshare").textContent).toBe("Ctrl + Shift + Y");
+    });
+
+    it("the polling capture ends a Keybinds row capture started before it", async () => {
+      const { el } = mount();
+      const before = byId(el, "keybind-toggleCamera").textContent;
+      byId(el, "keybind-toggleCamera").click();
+      const finish = holdCapture();
+      pttButton(el).click();
+      press("F8", { key: "F8" });
+      expect(byId(el, "keybind-toggleCamera").textContent).toBe(before);
+      expect(stored()).toEqual({});
+      finish(0x77); // F8
+      await vi.waitFor(() => expect(mockUpdatePttKey).toHaveBeenCalledWith(0x77));
+      expect(pttButton(el).textContent).toBe("F8");
+    });
+
     it("an in-app rebind onto the push-to-talk key is refused", () => {
       localStorage.setItem("owncord:settings:pttVk", "117"); // F6
       const { el } = mount();

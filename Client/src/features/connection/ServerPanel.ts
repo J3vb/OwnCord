@@ -5,7 +5,7 @@ import { Disposable } from "@lib/disposable";
 import { createElement, setText, appendChildren, clearChildren } from "@lib/dom";
 import { createIcon } from "@lib/icons";
 import type { Compatibility, HealthStatus, ServerProfile } from "@lib/presence/profiles";
-import { loadCredential } from "@lib/net/credentials";
+import { loadCredential } from "./credentials";
 import { createLogger } from "@lib/logger";
 import { connectText } from "../../i18n/connect";
 import {
@@ -288,7 +288,7 @@ export function createServerPanel(
         const deleteBtn = createElement("button", {
           class: "srv-btn danger",
           type: "button",
-          "aria-label": connectText("servers.delete"),
+          "aria-label": connectText("servers.remove"),
         });
         deleteBtn.textContent = "";
         deleteBtn.appendChild(createIcon("x", 14));

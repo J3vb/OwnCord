@@ -10,6 +10,7 @@ import { syncVideoSurface } from "@lib/voice/videoSurface";
 import { bindVideoZoom } from "@lib/ui/zoomPan";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { voiceText } from "../../../i18n/voice";
+import { isAndroidApp } from "@lib/hostOs";
 import type { ShareSenderSample } from "../shareSenderStats";
 import {
   STATS_POLL_MS,
@@ -131,22 +132,31 @@ export function createGridTileBuild(st: GridState, api: GridApi, menus: GridMenu
     return chip;
   }
 
-  function buildTileNav(userId: number): { nav: HTMLElement; back: HTMLElement } {
+  function buildTileNav(
+    userId: number,
+    config: TileConfig | undefined,
+  ): { nav: HTMLElement; back: HTMLElement } {
     const nav = createElement("div", { class: "video-tile-nav" });
     const back = tileButton(voiceText("tile.backToGrid"), "layout-grid", "grid", () =>
       api.setFocusedTile(null),
     );
     back.hidden = true;
+    nav.appendChild(back);
     // Pop out: the stream in a window of its own (togglePopout), and the
-    // same control brings it back.
-    const pip = tileButton(voiceText("tile.popOut"), "picture-in-picture-2", "pip", () =>
-      api.togglePopout(userId),
-    );
-    pip.setAttribute("aria-pressed", "false");
+    // same control brings it back. The Android app has one window, and your
+    // own screen share shows its cover, not the picture.
+    const ownShare = config?.isSelf === true && config.isScreenshare;
+    if (!isAndroidApp() && !ownShare) {
+      const pip = tileButton(voiceText("tile.popOut"), "picture-in-picture-2", "pip", () =>
+        api.togglePopout(userId),
+      );
+      pip.setAttribute("aria-pressed", "false");
+      nav.appendChild(pip);
+    }
     const fullscreen = tileButton(voiceText("tile.fullscreen"), "maximize", "fullscreen", () =>
       api.toggleFullscreen(userId),
     );
-    appendChildren(nav, back, pip, fullscreen);
+    nav.appendChild(fullscreen);
     return { nav, back };
   }
 
@@ -202,6 +212,7 @@ export function createGridTileBuild(st: GridState, api: GridApi, menus: GridMenu
   ): void {
     const volume = buildVolumeControls(config);
     entry.applyVolume = volume.apply;
+    entry.rewireVolume = volume.rewire;
     entry.volumeOverlay = volume.overlay;
     entry.el.appendChild(volume.overlay);
     nav.insertBefore(
@@ -260,7 +271,7 @@ export function createGridTileBuild(st: GridState, api: GridApi, menus: GridMenu
     if (config !== undefined && !config.isSelf && config.isScreenshare) {
       label.appendChild(buildStatsChip(userId));
     }
-    const { nav, back } = buildTileNav(userId);
+    const { nav, back } = buildTileNav(userId, config);
 
     appendChildren(cell, video, select, label, nav, api.buildTileArrange(userId));
     syncVideoSurface(video);

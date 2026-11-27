@@ -47,7 +47,12 @@ jobs:
           persist-credentials: false
 
       - name: Print checked-out revision
-        run: git rev-parse HEAD
+        env:
+          EVENT: ${{ github.event_name }}
+          WORKFLOW_SHA: ${{ github.workflow_sha }}
+        run: |
+          git rev-parse HEAD
+          echo "Scanned \`$(git rev-parse HEAD)\` with the workflow file from \`$WORKFLOW_SHA\` ($EVENT)." >> "$GITHUB_STEP_SUMMARY"
 
       - name: Install osv-scanner
         env:

@@ -27,8 +27,10 @@ import { listeningDetailsText } from "../../i18n/listeningDetails";
 import { settingsText } from "../../i18n/settings";
 import { voiceText } from "../../i18n/voice";
 import { whatsNewText } from "../../i18n/whatsNew";
-import { isAndroidApp, isLinuxDesktop, isWindowsDesktop } from "../voice/native/platform";
+import { isAndroidApp, isLinuxDesktop, isWindowsDesktop } from "@lib/hostOs";
+import { desktop } from "../../platform/desktop";
 import { platformText } from "./helpers";
+import { layoutSearchEntries, layoutSearchKey } from "./screenLayoutRow";
 
 const s = settingsText;
 const a = accountText;
@@ -96,19 +98,20 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     s("appearance.theme.dark"),
     s("appearance.theme.neon-glow"),
     s("appearance.theme.midnight"),
+    s("appearance.theme.gunmetal"),
     s("appearance.theme.light"),
     platformText(s("appearance.theme.system"), s("appearance.theme.system.android")),
     s("appearance.accentColor"),
     s("appearance.section.textSize"),
     s("appearance.section.layout"),
     s("appearance.fontSize"),
-    ...desktopOnly(s("appearance.zoom")),
+    ...(desktop.window.available ? desktopOnly(s("appearance.zoom")) : []),
     s("appearance.compactMode"),
     s("appearance.timeFormat"),
     s("appearance.timeFormat.desc"),
     s("appearance.dateFormat"),
     s("appearance.dateFormat.desc"),
-    ...desktopOnly(s("appearance.memberLayout"), s("appearance.memberLayout.desc")),
+    ...layoutSearchEntries(),
     s("appearance.accentNote"),
     s("appearance.customThemes"),
     platformText(s("appearance.customThemes.desc"), s("appearance.customThemes.desc.android")),
@@ -224,7 +227,9 @@ export const SETTINGS_SEARCH_INDEX: Readonly<Record<SearchableTab, () => readonl
     platformText(s("notifications.desktop.desc"), s("notifications.desktop.desc.android")),
     s("notifications.permission.label"),
     ...androidOnly(s("notifications.push.label")),
-    ...desktopOnly(s("notifications.flash.label"), s("notifications.flash.desc")),
+    ...(desktop.notifier.canFlash
+      ? desktopOnly(s("notifications.flash.label"), s("notifications.flash.desc"))
+      : []),
     s("notifications.suppress.label"),
     s("notifications.suppress.desc"),
     ...desktopOnly(s("notifications.unreadBadge.label"), s("notifications.unreadBadge.desc")),
@@ -379,7 +384,7 @@ export function normalizeQuery(raw: string): string {
 const searchTextCache = new Map<string, string>();
 
 function indexedText(tab: SearchableTab): string {
-  const key = `${tab}:${isAndroidApp() ? "android" : "desktop"}`;
+  const key = `${tab}:${isAndroidApp() ? "android" : "desktop"}:${layoutSearchKey()}`;
   let text = searchTextCache.get(key);
   if (text === undefined) {
     text = SETTINGS_SEARCH_INDEX[tab]().join("\n").toLowerCase();

@@ -6,7 +6,7 @@
 // mismatch. The session, key-holder role and peer set stay owned by E2EEManager
 // and its other modules; this module reaches them only through E2EEHost.
 import { exportPublicKey, importPublicKey, wrapRoomKey } from "../../lib/net/e2eeCrypto";
-import { storeIdentityPin } from "../../lib/net/identity";
+import { storeIdentityPin } from "../connection/identity";
 import { authStore } from "../../stores/auth.store";
 import { clearPeerVerification } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";

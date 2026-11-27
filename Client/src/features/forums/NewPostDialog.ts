@@ -21,14 +21,14 @@ import { createIcon } from "@lib/icons";
 import { createModal } from "@lib/ui/modalFactory";
 import { errorText, type ApiClient } from "@lib/api";
 import { createLogger } from "@lib/logger";
-import { newClientMessageId, pendingMessageRetryFloor } from "@lib/pendingMessages";
+import { newClientMessageId, pendingMessageRetryFloor } from "../messaging/pendingMessages";
 import type { WsClient } from "@lib/ws";
 import type { ThreadInfo } from "@lib/types";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/ui/toast";
-import { claimForwardRequest, releaseForwardRequest } from "../messaging/forwardRequests";
+import { claimRequest, releaseRequest } from "@lib/net/requestClaims";
 import { forumsText } from "../../i18n/forums";
 import { POST_TITLE_MAX, cleanPostTitle } from "./forumModel";
 import { buildTagSection, fieldGroup } from "./postTagPicker";
@@ -369,7 +369,7 @@ export function openNewPostDialog(options: NewPostDialogOptions): void {
   function settle(): void {
     stopWaiting?.();
     stopWaiting = null;
-    if (requestId !== null) releaseForwardRequest(requestId);
+    if (requestId !== null) releaseRequest(requestId);
     requestId = null;
     submit.disabled = false;
     setText(submit, forumsText("dialog.submit"));
@@ -481,7 +481,7 @@ export function openNewPostDialog(options: NewPostDialogOptions): void {
         payload: { ...body, client_message_id: attempt.clientMessageId },
       });
       requestId = id;
-      claimForwardRequest(id);
+      claimRequest(id);
       submit.disabled = true;
       setText(submit, forumsText("dialog.sending"));
       waitForAck(id);
@@ -490,7 +490,7 @@ export function openNewPostDialog(options: NewPostDialogOptions): void {
   );
   owner.addCleanup(() => {
     stopWaiting?.();
-    if (requestId !== null) releaseForwardRequest(requestId);
+    if (requestId !== null) releaseRequest(requestId);
   });
 
   titleInput.focus();

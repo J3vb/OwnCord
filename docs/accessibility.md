@@ -31,9 +31,10 @@ Open **Settings** (Ctrl+,) and pick a tab.
 - **Font size** from 12 to 20 px.
 - **Zoom level** from 50 % to 200 %. Ctrl and `+`, `-` or `0` zoom in, out
   and back to 100 % from anywhere in the app.
-- **Theme**: dark, midnight, light, neon glow, or **Match my computer** to
+- **Theme**: dark, midnight, gunmetal, light, neon glow, or **Match my computer** to
   follow your system's light or dark setting. Each choice is a tile with a
-  small preview of the theme; arrow keys move between them.
+  small preview of the theme; arrow keys move between them. A new install starts on the Gunmetal theme, except in the Android app.
+- **Screen layout**: Command Deck or Classic. On desktop, in the browser and on phones. Applies the next time OwnCord starts or reloads; Restart now applies it at once.
 - **Compact mode** fits more messages on screen.
 - **Time format**: 12-hour or 24-hour clocks. Until you pick one, the clock and the date order follow the device language.
 

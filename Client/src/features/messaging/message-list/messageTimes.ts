@@ -1,7 +1,7 @@
 /**
  * Message time labels: the header time and the full-date tooltip.
  */
-import { formatClockTime, formatMessageTimestamp, parseTimestamp } from "@lib/text/formatting";
+import { formatClockTime, formatMessageTimestamp, parseTimestamp } from "../formatting";
 import { formatFullDateTime } from "@lib/text/discordTimestamp";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 

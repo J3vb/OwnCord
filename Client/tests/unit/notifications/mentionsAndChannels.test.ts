@@ -5,7 +5,7 @@ import {
   notifyIncomingMessage,
   notifyMention,
   openMessageTarget,
-} from "../../../src/lib/notifications";
+} from "../../../src/features/notifications/notifications";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { setBlockedByMe } from "../../../src/stores/blocks.store";
 import type { ChannelActivityEntry } from "../../../src/lib/types";
@@ -28,7 +28,7 @@ import {
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
   mocks.prefsPreferencesMock(importOriginal),
 );
-vi.mock("../../../src/lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@tauri-apps/plugin-notification", () => mocks.pluginNotificationMock());
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());

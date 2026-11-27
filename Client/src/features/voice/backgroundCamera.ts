@@ -32,7 +32,7 @@ export function startBackgroundCamera(signal: AbortSignal): void {
       return;
     }
     paused = { channelId: state.currentChannelId, joinedAt: state.joinedAt };
-    const { disableCamera } = await import("../../lib/voice/livekitSession");
+    const { disableCamera } = await import("./livekitSession");
     await disableCamera();
   };
 
@@ -50,7 +50,7 @@ export function startBackgroundCamera(signal: AbortSignal): void {
     ) {
       return;
     }
-    const { enableCamera } = await import("../../lib/voice/livekitSession");
+    const { enableCamera } = await import("./livekitSession");
     await enableCamera();
   };
 

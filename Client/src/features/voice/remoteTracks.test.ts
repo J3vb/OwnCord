@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from "vitest";
+import { describe, it, expect, vi, afterEach } from "vitest";
 import { Encryption_Type, VideoQuality, type Room } from "livekit-client";
 
 vi.mock("./screenShare", () => ({
@@ -7,7 +7,7 @@ vi.mock("./screenShare", () => ({
 }));
 
 import { getLocalCameraStream, getLocalScreenshareStream } from "./screenShare";
-import { RemoteTracks } from "./remoteTracks";
+import { RemoteTracks, LISTEN_GRACE_MS } from "./remoteTracks";
 
 function roomWith(identity: string, source: string, track: unknown): Room {
   return {
@@ -489,5 +489,252 @@ describe("RemoteTracks.removeUnpublishedTiles", () => {
     tracks.removeUnpublishedTiles();
 
     expect(removed).not.toHaveBeenCalled();
+  });
+});
+
+/** A room whose users each publish a music track, with a setSubscribed spy. */
+function roomWithMusic(ids: number[]) {
+  const spies = new Map(ids.map((id) => [id, vi.fn()]));
+  const participants = new Map(
+    ids.map((id) => {
+      const pub = {
+        source: "screen_share_audio",
+        trackName: "music",
+        setSubscribed: spies.get(id)!,
+      };
+      return [
+        `user-${String(id)}`,
+        { identity: `user-${String(id)}`, trackPublications: new Map([["m", pub]]) },
+      ];
+    }),
+  );
+  const room = { state: "connected", remoteParticipants: participants } as unknown as Room;
+  return { room, participants, sub: (id: number) => spies.get(id)! };
+}
+
+describe("RemoteTracks listen (opt-in music)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("subscribes the listened-to sharer's music and reports it", () => {
+    const { room, sub } = roomWithMusic([7]);
+    const tracks = new RemoteTracks(() => room);
+    const onChange = vi.fn();
+    tracks.onListeningChange = onChange;
+
+    tracks.listen(7);
+
+    expect(sub(7)).toHaveBeenLastCalledWith(true);
+    expect(tracks.isListening(7)).toBe(true);
+    expect(onChange).toHaveBeenCalledWith(7);
+  });
+
+  it("listens to one sharer at a time: switching unsubscribes the old one first", () => {
+    const { room, sub } = roomWithMusic([7, 8]);
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+
+    tracks.listen(8);
+
+    expect(sub(7)).toHaveBeenLastCalledWith(false);
+    expect(sub(8)).toHaveBeenLastCalledWith(true);
+    expect(tracks.isListening(7)).toBe(false);
+    expect(tracks.isListening(8)).toBe(true);
+  });
+
+  it("stops listening on null, once, and reports it", () => {
+    const { room, sub } = roomWithMusic([7]);
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+    const onChange = vi.fn();
+    tracks.onListeningChange = onChange;
+
+    tracks.listen(null);
+    tracks.listen(null);
+
+    expect(sub(7)).toHaveBeenLastCalledWith(false);
+    expect(onChange).toHaveBeenCalledTimes(1);
+    expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it("keeps the choice for a sharer whose music is not published yet", () => {
+    const tracks = new RemoteTracks(() => null);
+    tracks.listen(7);
+    expect(tracks.isListening(7)).toBe(true);
+  });
+
+  it("does not subscribe music published without encryption", () => {
+    const { room, participants, sub } = roomWithMusic([7]);
+    const pub = participants.get("user-7")!.trackPublications.get("m") as unknown as {
+      trackInfo: unknown;
+    };
+    pub.trackInfo = { encryption: Encryption_Type.NONE };
+    const tracks = new RemoteTracks(() => room);
+    const onChange = vi.fn();
+    tracks.onListeningChange = onChange;
+    tracks.listen(7);
+    expect(sub(7)).not.toHaveBeenCalledWith(true);
+    expect(tracks.isListening(7)).toBe(false);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("keeps listening when the music is unpublished and published again (their reconnect)", () => {
+    vi.useFakeTimers();
+    const { room, participants } = roomWithMusic([7]);
+    const tracks = new RemoteTracks(() => room);
+    const onChange = vi.fn();
+    tracks.listen(7);
+    tracks.onListeningChange = onChange;
+    const stored = participants.get("user-7")!.trackPublications;
+    const pub = stored.get("m")!;
+    stored.delete("m");
+
+    tracks.musicEnded(7);
+    vi.advanceTimersByTime(LISTEN_GRACE_MS / 2);
+    stored.set("m", pub);
+    vi.advanceTimersByTime(LISTEN_GRACE_MS);
+
+    expect(tracks.isListening(7)).toBe(true);
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it("forgets the listen when the music stays gone past the grace", () => {
+    vi.useFakeTimers();
+    const { room, participants } = roomWithMusic([7]);
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+    const onChange = vi.fn();
+    tracks.onListeningChange = onChange;
+    participants.get("user-7")!.trackPublications.clear();
+
+    tracks.musicEnded(7);
+    vi.advanceTimersByTime(LISTEN_GRACE_MS + 1);
+
+    expect(tracks.isListening(7)).toBe(false);
+    expect(onChange).toHaveBeenCalledWith(null);
+  });
+
+  it("keeps listening across your own reconnect that outlasts the grace, and picks the music up in the new room", () => {
+    vi.useFakeTimers();
+    const first = roomWithMusic([7]);
+    let room: Room | null = first.room;
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+    // The full restart unpublishes the music and leaves no room for a while.
+    room = null;
+    tracks.musicEnded(7);
+    vi.advanceTimersByTime(LISTEN_GRACE_MS * 3);
+    expect(tracks.isListening(7)).toBe(true);
+
+    const next = roomWithMusic([7]);
+    room = next.room;
+    tracks.reviewListening();
+    vi.advanceTimersByTime(LISTEN_GRACE_MS * 3);
+
+    // Still listening, so the new room's handleTrackPublished subscribes it.
+    expect(tracks.isListening(7)).toBe(true);
+    expect(next.sub(7)).not.toHaveBeenCalledWith(false);
+  });
+
+  it("drops a listen when a join goes to another channel, and keeps it for the same one", () => {
+    const { room } = roomWithMusic([7]);
+    let channel: number | null = 10;
+    const tracks = new RemoteTracks(() => room);
+    tracks.currentChannel = () => channel;
+    tracks.listen(7);
+    // A rejoin through idle: the session has no channel while it reconnects.
+    channel = null;
+    tracks.keepListenFor(10);
+    expect(tracks.isListening(7)).toBe(true);
+    tracks.keepListenFor(20);
+    expect(tracks.isListening(7)).toBe(false);
+  });
+
+  it("forgets a listen whose music comes back without encryption", () => {
+    vi.useFakeTimers();
+    const { room, participants } = roomWithMusic([7]);
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+    const pub = [...participants.get("user-7")!.trackPublications.values()][0]!;
+    Object.assign(pub, { trackInfo: { encryption: 0 } });
+    tracks.reviewListening();
+    vi.advanceTimersByTime(LISTEN_GRACE_MS + 1);
+    expect(tracks.isListening(7)).toBe(false);
+  });
+
+  it("forgets a pending listen once a live room still lacks the music for the grace", () => {
+    vi.useFakeTimers();
+    let room: Room | null = null;
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+    tracks.musicEnded(7);
+    vi.advanceTimersByTime(LISTEN_GRACE_MS * 2);
+    room = roomWithMusic([]).room;
+
+    tracks.reviewListening();
+    vi.advanceTimersByTime(LISTEN_GRACE_MS + 1);
+
+    expect(tracks.isListening(7)).toBe(false);
+  });
+
+  it("does not restart or cancel anything when told to listen to the same sharer again", () => {
+    const { room, sub } = roomWithMusic([7]);
+    const tracks = new RemoteTracks(() => room);
+    const onChange = vi.fn();
+    tracks.listen(7);
+    tracks.onListeningChange = onChange;
+    sub(7).mockClear();
+
+    tracks.listen(7);
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(sub(7)).not.toHaveBeenCalled();
+  });
+
+  it("ignores another sharer's music ending", () => {
+    vi.useFakeTimers();
+    const { room, participants } = roomWithMusic([7, 8]);
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+    participants.get("user-8")!.trackPublications.clear();
+
+    tracks.musicEnded(8);
+    vi.advanceTimersByTime(LISTEN_GRACE_MS + 1);
+
+    expect(tracks.isListening(7)).toBe(true);
+  });
+
+  it("keeps the listen across a room swap that still has the music, and forgets it when it does not", () => {
+    vi.useFakeTimers();
+    const first = roomWithMusic([7]);
+    let room: Room = first.room;
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+
+    room = roomWithMusic([7]).room;
+    tracks.reviewListening();
+    vi.advanceTimersByTime(LISTEN_GRACE_MS + 1);
+    expect(tracks.isListening(7)).toBe(true);
+
+    room = roomWithMusic([]).room;
+    tracks.reviewListening();
+    vi.advanceTimersByTime(LISTEN_GRACE_MS + 1);
+    expect(tracks.isListening(7)).toBe(false);
+  });
+
+  it("forgets the listen on leave, and a pending grace does nothing after", () => {
+    vi.useFakeTimers();
+    const { room, participants } = roomWithMusic([7]);
+    const tracks = new RemoteTracks(() => room);
+    tracks.listen(7);
+    participants.get("user-7")!.trackPublications.clear();
+    tracks.musicEnded(7);
+    const onChange = vi.fn();
+    tracks.onListeningChange = onChange;
+
+    tracks.clearWatched();
+    vi.advanceTimersByTime(LISTEN_GRACE_MS + 1);
+
+    expect(tracks.isListening(7)).toBe(false);
+    expect(onChange).toHaveBeenCalledTimes(1);
   });
 });

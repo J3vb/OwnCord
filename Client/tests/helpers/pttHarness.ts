@@ -18,13 +18,18 @@ export const pttState = {
   localMuted: false,
   localDeafened: false,
   pttGated: false,
+  /** A release's close the store records only once its delay has run. */
+  closePending: false,
   pollingLive: false,
 };
 
 /** livekitSession.setPttGated: closes/opens the mic processor's gate and writes
  *  the store's pttGated (the real session does both; the mock mirrors the store
- *  write so later reads of pttGated see it). */
-export const mockSetPttGated = vi.fn((gated: boolean) => {
+ *  write so later reads of pttGated see it). A release also carries its delay,
+ *  which the real session hands to the mic processor's own clock; the real
+ *  store records that close only once the delay has run (`closePending` until
+ *  then), which a test sets by hand. */
+export const mockSetPttGated = vi.fn((gated: boolean, _releaseDelayMs?: number) => {
   pttState.pttGated = gated;
 });
 export const mockSetMuted = vi.fn();
@@ -61,6 +66,7 @@ export function voiceStoreMock() {
     },
     setPttPollingLive: (live: boolean) => mockSetPttPollingLive(live),
     isPttPollingLive: () => pttState.pollingLive,
+    isPttClosePending: () => pttState.closePending,
   };
 }
 
@@ -68,7 +74,7 @@ export function voiceStoreMock() {
  *  never touched (PTT no longer uses mute). */
 export function livekitSessionMock() {
   return withOverrides({
-    setPttGated: (gated: boolean) => mockSetPttGated(gated),
+    setPttGated: (...args: [gated: boolean, releaseDelayMs?: number]) => mockSetPttGated(...args),
     setMuted: (muted: boolean) => mockSetMuted(muted),
   });
 }
@@ -80,6 +86,7 @@ export function resetAll(): void {
   pttState.localMuted = false;
   pttState.localDeafened = false;
   pttState.pttGated = false;
+  pttState.closePending = false;
   pttState.pollingLive = false;
   mockSetPttGated.mockReset();
   mockSetPttGated.mockImplementation((gated: boolean) => {

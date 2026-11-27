@@ -124,19 +124,32 @@ fn is_simulcasted(info: &proto::TrackInfo) -> bool {
     info.simulcast || info.layers.len() > 1 || info.codecs.iter().any(|c| c.layers.len() > 1)
 }
 
+// OWNCORD-PATCH (signal input): the sid and kind of a track entry, or why the
+// entry is unusable (a sid without the track prefix, or a type the SDK does not
+// implement). Callers skip such an entry instead of unwrapping it.
+pub(crate) fn checked_track_ids(info: &proto::TrackInfo) -> Result<(TrackSid, TrackKind), String> {
+    let kind = TrackKind::try_from(info.r#type())
+        .map_err(|reason| format!("track {:?} has an unsupported type: {}", info.sid, reason))?;
+    let sid = TrackSid::try_from(info.sid.clone())
+        .map_err(|sid| format!("track entry with invalid sid: {:?}", sid))?;
+    Ok((sid, kind))
+}
+
+// OWNCORD-PATCH (signal input): fails on an unusable entry instead of unwrapping.
 pub(super) fn new_inner(
     info: proto::TrackInfo,
     track: Option<Track>,
-) -> Arc<TrackPublicationInner> {
+) -> Result<Arc<TrackPublicationInner>, String> {
+    let (sid, kind) = checked_track_ids(&info)?;
     let info = PublicationInfo {
         track,
         simulcasted: is_simulcasted(&info),
         proto_info: info.clone(),
         source: info.source().into(),
-        kind: info.r#type().try_into().unwrap(),
+        kind,
         encryption_type: info.encryption().into(),
         name: info.clone().name,
-        sid: info.sid.clone().try_into().unwrap(),
+        sid,
         dimension: TrackDimension(info.width, info.height),
         mime_type: info.mime_type.clone(),
         muted: info.muted,
@@ -152,7 +165,7 @@ pub(super) fn new_inner(
             .collect(),
     };
 
-    Arc::new(TrackPublicationInner { info: RwLock::new(info), events: Default::default() })
+    Ok(Arc::new(TrackPublicationInner { info: RwLock::new(info), events: Default::default() }))
 }
 
 pub(super) fn update_info(
@@ -160,13 +173,21 @@ pub(super) fn update_info(
     _publication: &TrackPublication,
     new_info: proto::TrackInfo,
 ) {
+    // OWNCORD-PATCH (signal input): an unusable update is skipped.
+    let (sid, kind) = match checked_track_ids(&new_info) {
+        Ok(ids) => ids,
+        Err(reason) => {
+            log::warn!("ignoring publication update: {}", reason);
+            return;
+        }
+    };
     let mut info = inner.info.write();
-    info.kind = TrackKind::try_from(new_info.r#type()).unwrap();
+    info.kind = kind;
     info.source = TrackSource::from(new_info.source());
     info.encryption_type = new_info.encryption().into();
     info.proto_info = new_info.clone();
     info.name = new_info.name.clone();
-    info.sid = new_info.sid.clone().try_into().unwrap();
+    info.sid = sid;
     info.dimension = TrackDimension(new_info.width, new_info.height);
     info.mime_type = new_info.mime_type.clone();
     info.simulcasted = is_simulcasted(&new_info);
@@ -213,5 +234,45 @@ pub(super) fn set_track(
                 }
             }
         });
+    }
+}
+
+// OWNCORD-PATCH (signal input)
+#[cfg(test)]
+mod signal_input_tests {
+    use super::*;
+
+    fn track_entry(sid: &str, kind: proto::TrackType) -> proto::TrackInfo {
+        proto::TrackInfo { sid: sid.to_string(), r#type: kind as i32, ..Default::default() }
+    }
+
+    #[test]
+    fn a_track_entry_needs_a_track_sid_and_a_supported_type() {
+        let (sid, kind) = checked_track_ids(&track_entry("TR_ok", proto::TrackType::Video))
+            .expect("usable entry");
+        assert_eq!(sid.as_str(), "TR_ok");
+        assert_eq!(kind, TrackKind::Video);
+
+        assert!(checked_track_ids(&track_entry("PA_not_a_track", proto::TrackType::Audio)).is_err());
+        assert!(checked_track_ids(&track_entry("", proto::TrackType::Audio)).is_err());
+        assert!(checked_track_ids(&track_entry("TR_data", proto::TrackType::Data)).is_err());
+    }
+
+    #[test]
+    fn an_unusable_entry_builds_no_publication() {
+        let bad_sid = track_entry("bad", proto::TrackType::Audio);
+        assert!(RemoteTrackPublication::new(bad_sid, None, true).is_err());
+        let data = track_entry("TR_data", proto::TrackType::Data);
+        assert!(RemoteTrackPublication::new(data, None, true).is_err());
+    }
+
+    #[test]
+    fn an_unusable_update_leaves_the_publication_as_it_was() {
+        let entry = track_entry("TR_a", proto::TrackType::Audio);
+        let publication = RemoteTrackPublication::new(entry, None, true).expect("usable entry");
+        publication.update_info(track_entry("bad", proto::TrackType::Video));
+        publication.update_info(track_entry("TR_a", proto::TrackType::Data));
+        assert_eq!(publication.sid().as_str(), "TR_a");
+        assert_eq!(publication.kind(), TrackKind::Audio);
     }
 }

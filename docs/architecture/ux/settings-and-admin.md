@@ -179,7 +179,7 @@ audit/settings/permissions/setup calls in `api.ts`). The one bridge the client
 does have is a deep-link: `lib/adminPanel.ts` opens
 `https://{host}/admin#{section}` in the OS browser (wired from
 the Audit Log button handler in `createSidebarArea()`, `pages/main-page/SidebarArea.ts`, gated by
-`lib/permissions.ts::canViewAuditLog`).
+`stores/permissions.ts::canViewAuditLog`).
 
 > **Decision point.** If the target is for admins to manage the server from the
 > desktop app (audit log, settings, plugins) rather than the web panel, that is a
@@ -191,11 +191,15 @@ the Audit Log button handler in `createSidebarArea()`, `pages/main-page/SidebarA
 
 ## 4. Appearance & theming
 
-Themes are CSS custom properties (`styles/tokens.css`), 4 built-ins
-(`dark | neon-glow | midnight | light`) plus custom overrides. **Target:** theme
+Themes are CSS custom properties (`styles/tokens.css`), 5 built-ins
+(`dark | neon-glow | midnight | gunmetal | light`) plus custom overrides. **Target:** theme
 changes apply **live** — `ui.setTheme` + the `owncord:pref-change` event re-skin
 open views without reload. Appearance is editable pre-login (on the connect page)
 so the app respects the user's theme before they authenticate.
+
+**Screen layout.** Settings > Appearance offers Command Deck and Classic everywhere, phones included. A change applies the next time OwnCord starts or reloads; Restart now applies it at once (in a call it asks first). Clear all cache & restart keeps the screen layout, the record that the one-time move to Command Deck is settled, and the folded Buddies groups; it drops a move notice not yet seen.
+
+**New installs and the move to Command Deck.** A new install starts in Command Deck and on the Gunmetal theme. A new Android app install starts in Command Deck and keeps the theme it had before. The decision is made once, at the first launch, from whether storage holds anything an earlier launch wrote (`hasInstallEvidence()` in `main.ts`, read before any startup write). Right after it, `settleDeckSwitch()` (`lib/prefs/deckSwitch.ts`) moves an install that ran before and is on Classic (its own pick, or pinned there when Command Deck first shipped, the Android app included) to Command Deck, once: it stores `"deck"`, sets `deckSwitchNotice` so the main page shows a one-time notice with the way back (`features/layout-notice/`, after What's new when that shows), and sets the `deckSwitchDone` marker on every install, so someone who goes back to Classic is never moved again. A stored Classic with no install evidence stays (the test harness seeds it that way). Themes of earlier installs are never changed. Storage that cannot be written moves no one and shows no notice.
 
 **Custom themes** (Appearance > Custom themes, `features/custom-themes/`): a saved
 list of the user's own CSS, per device (`owncord:theme:custom:list` and

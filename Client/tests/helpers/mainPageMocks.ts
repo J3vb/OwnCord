@@ -235,6 +235,10 @@ export function pageSidebarAreaMock() {
         syncMemberSection,
         renameGroup: mockRenameGroup,
         openCall: vi.fn(),
+        frameSlots: {
+          userBar: document.createElement("div"),
+          voiceWidget: document.createElement("div"),
+        },
       };
     },
   };

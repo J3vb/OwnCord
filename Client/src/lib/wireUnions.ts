@@ -97,6 +97,7 @@ import type {
   UserUpdatePayload,
   VoiceE2EEAnnouncePayload,
   VoiceE2EEOfferPayload,
+  VoiceSpeakingPayload,
   VoiceWatchingPayload,
 } from "./wireVoiceDm";
 
@@ -145,6 +146,7 @@ export type ServerMessage =
   | (WsEnvelope<VoiceE2EEAnnouncePayload> & { readonly type: "voice_e2ee_announce" })
   | (WsEnvelope<VoiceE2EEOfferPayload> & { readonly type: "voice_e2ee_offer" })
   | (WsEnvelope<VoiceWatchingPayload> & { readonly type: "voice_watching" })
+  | (WsEnvelope<VoiceSpeakingPayload> & { readonly type: "voice_speaking" })
   | (WsEnvelope<MemberJoinPayload> & { readonly type: "member_join" })
   | (WsEnvelope<MemberUpdatePayload> & { readonly type: "member_update" })
   | (WsEnvelope<MemberUpdateBatchPayload> & { readonly type: "member_update_batch" })
@@ -228,6 +230,9 @@ export type ClientMessage =
   | (WsEnvelope<{ target_user_id: number; encrypted_key: string; iv: string }> & {
       readonly type: "voice_e2ee_offer";
     })
-  | (WsEnvelope<{ user_ids: readonly number[] }> & { readonly type: "voice_watch" })
+  | (WsEnvelope<{ user_ids: readonly number[]; music_id?: number }> & {
+      readonly type: "voice_watch";
+    })
+  | (WsEnvelope<{ speaking: boolean | null }> & { readonly type: "voice_speak" })
   | (WsEnvelope<CallSignalRequestPayload> & { readonly type: "call_ring" })
   | (WsEnvelope<CallSignalRequestPayload> & { readonly type: "call_decline" });

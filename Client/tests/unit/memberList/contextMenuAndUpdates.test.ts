@@ -210,7 +210,7 @@ describe("MemberList full context menu (3C-3)", () => {
       const mention = menu!.querySelector<HTMLElement>('[data-testid="member-menu-mention"]')!;
       expect(mention.getAttribute("aria-disabled")).toBeNull();
       mention.click();
-      expect(insertMention).toHaveBeenCalledWith("Dave");
+      expect(insertMention).toHaveBeenCalledWith("Dave", 4);
       expect(document.body.querySelector(".context-menu")).toBeNull();
     } finally {
       release();

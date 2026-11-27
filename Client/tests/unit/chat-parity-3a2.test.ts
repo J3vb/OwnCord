@@ -6,7 +6,7 @@
 import { describe, it, expect, beforeAll, beforeEach, vi, type Mock } from "vitest";
 import * as voiceSession from "../helpers/voiceSessionMock";
 
-vi.mock("@lib/voice/livekitSession", () => voiceSession.defaults());
+vi.mock("../../src/features/voice/livekitSession", () => voiceSession.defaults());
 
 import {
   filterChannelSuggestions,
@@ -172,6 +172,15 @@ describe("composer: #channel autocomplete", () => {
     type("hi :joy:");
     press("Enter");
     expect(onSend).toHaveBeenCalledWith("hi 😂", null, [], [], false);
+  });
+
+  it("counts typed shortcodes as the emoji they will be sent as", () => {
+    // About 5000 typed characters, 1700 once sent: under the limit, no counter.
+    type(":joy: ".repeat(844));
+    const counter = document.querySelector<HTMLElement>("[data-testid=char-counter]")!;
+    expect(counter.hidden).toBe(true);
+    press("Enter");
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 });
 

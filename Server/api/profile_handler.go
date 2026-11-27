@@ -139,6 +139,59 @@ func MountProfileRoutes(r chi.Router, svc *service.Services, store FileStore, li
 	})
 }
 
+// sanitizeTextField is service.SanitizeText plus a trim for one request field. Text the sanitizer refuses is
+// answered 400 here, naming the field, and ok is false.
+func sanitizeTextField(w http.ResponseWriter, raw, field string) (string, bool) {
+	clean, err := service.SanitizeText(raw)
+	if err != nil {
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, field+" has too many layers of markup or entities")
+		return "", false
+	}
+	return strings.TrimSpace(clean), true
+}
+
+// parseProfileAvatar bounds, sanitizes and validates a present avatar field in place. Use service.SanitizeText:
+// bare bluemonday escaping would rewrite "&" in a URL to "&amp;" and persist it broken. On failure it writes
+// the response and returns false.
+func parseProfileAvatar(w http.ResponseWriter, r *http.Request, req *updateProfileRequest, selfHosts []string) bool {
+	if len(*req.Avatar) > maxAvatarURLLen*4 {
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "avatar URL is too long")
+		return false
+	}
+	trimmed, ok := sanitizeTextField(w, *req.Avatar, "avatar")
+	if !ok {
+		return false
+	}
+	if err := validateAvatarURL(trimmed, selfHosts, r.Host); err != nil {
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
+		return false
+	}
+	req.Avatar = &trimmed
+	return true
+}
+
+// parseProfileDisplayName bounds, sanitizes and validates a present display_name in place. display_name is
+// rendered wherever a username is, so it gets the same scrutiny. Sanitize BEFORE validateDisplayName:
+// validating the raw JSON let an entity-encoded control or bidi character ("&#x202e;") pass as ASCII and
+// become real later in UserService's cleanText. On failure it writes the response and returns false.
+func parseProfileDisplayName(w http.ResponseWriter, req *updateProfileRequest) bool {
+	if len(*req.DisplayName) > service.MaxDisplayNameLen*4 {
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "display_name is too long")
+		return false
+	}
+	cleaned, ok := sanitizeTextField(w, *req.DisplayName, "display_name")
+	if !ok {
+		return false
+	}
+	trimmed := auth.CollapseSpaces(cleaned)
+	if err := validateDisplayName(trimmed); err != nil {
+		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
+		return false
+	}
+	req.DisplayName = &trimmed
+	return true
+}
+
 // parseUpdateProfileRequest decodes the PATCH body and applies bound, sanitize, then validate to every
 // field, in the order the register path uses. On failure it writes the response and returns ok=false.
 func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts []string, currentUsername string) (updateProfileRequest, bool) {
@@ -147,8 +200,8 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 		return req, false
 	}
 
-	// Bound the raw field before the fixpoint sanitizer, which is quadratic in input length; *4 still admits
-	// any legitimate 32-rune UTF-8 username.
+	// Bound the raw field before the fixpoint sanitizer, whose passes cost time in proportion to their
+	// input; *4 still admits any legitimate 32-rune UTF-8 username.
 	if len(req.Username) > maxLoginUsernameLen*4 {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is too long")
 		return req, false
@@ -157,7 +210,11 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	// Use service.SanitizeText, not a bare bluemonday call: its output is HTML-escaped, so an apostrophe
 	// would persist as &#39; and login (which never re-escapes) would no longer match. Register canonicalizes
 	// the same way.
-	req.Username = strings.TrimSpace(service.SanitizeText(req.Username))
+	username, ok := sanitizeTextField(w, req.Username, "username")
+	if !ok {
+		return req, false
+	}
+	req.Username = username
 	if req.Username == "" {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "username is required")
 		return req, false
@@ -167,42 +224,22 @@ func parseUpdateProfileRequest(w http.ResponseWriter, r *http.Request, selfHosts
 	validateName := auth.ValidateNewUsername
 	if req.Username == currentUsername {
 		validateName = auth.ValidateUsername
+	} else if p, _ := principal(r); p.Session == nil {
+		// The sign-in name is a credential, so changing it needs a login session like the password does;
+		// an API token may still edit the rest of the profile while resending the current name.
+		writeLoginSessionRequired(w)
+		return req, false
 	}
 	if err := validateName(req.Username); err != nil {
 		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
 		return req, false
 	}
 
-	if req.Avatar != nil && len(*req.Avatar) > maxAvatarURLLen*4 {
-		writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "avatar URL is too long")
+	if req.Avatar != nil && !parseProfileAvatar(w, r, &req, selfHosts) {
 		return req, false
 	}
-
-	// Use service.SanitizeText: bare bluemonday escaping would rewrite "&" in a URL to "&amp;" and persist it
-	// broken.
-	if req.Avatar != nil {
-		trimmed := strings.TrimSpace(service.SanitizeText(*req.Avatar))
-		if err := validateAvatarURL(trimmed, selfHosts, r.Host); err != nil {
-			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
-			return req, false
-		}
-		req.Avatar = &trimmed
-	}
-
-	// display_name is rendered wherever a username is, so it gets the same scrutiny. Sanitize BEFORE
-	// validateDisplayName: validating the raw JSON let an entity-encoded control or bidi character
-	// ("&#x202e;") pass as ASCII and become real later in UserService's cleanText.
-	if req.DisplayName != nil {
-		if len(*req.DisplayName) > service.MaxDisplayNameLen*4 {
-			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, "display_name is too long")
-			return req, false
-		}
-		trimmed := auth.CollapseSpaces(strings.TrimSpace(service.SanitizeText(*req.DisplayName)))
-		if err := validateDisplayName(trimmed); err != nil {
-			writeErr(w, http.StatusBadRequest, httperr.CodeInvalidInput, err.Error())
-			return req, false
-		}
-		req.DisplayName = &trimmed
+	if req.DisplayName != nil && !parseProfileDisplayName(w, &req) {
+		return req, false
 	}
 
 	// Bound the raw colour first; the longest valid value is 7 bytes and the service validates the rest.

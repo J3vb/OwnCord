@@ -2,7 +2,7 @@
 
 import type { ApiClient } from "@lib/api";
 import { ApiClientError, errorText } from "@lib/api";
-import { canManageInvites } from "@lib/permissions";
+import { canManageInvites } from "@stores/permissions";
 import { createLogger } from "@lib/logger";
 import { createLazyScreen } from "@lib/ui/lazyScreen";
 import { createAsyncOverlayController } from "@lib/ui/asyncOverlay";

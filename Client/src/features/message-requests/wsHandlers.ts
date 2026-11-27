@@ -1,4 +1,4 @@
-// Message Requests WebSocket handlers — lib/dispatcher.ts keeps the
+// Message Requests WebSocket handlers — app/dispatcher.ts keeps the
 // socket subscriptions and calls these plain functions.
 import type { DispatchApi, Payload, WsRoute } from "../connection/dispatchContext";
 import { mapRequest } from "./api";

@@ -29,7 +29,8 @@ the owner on 2026-09-23:
    measured but not qualified.
 4. The Q8 fallback target is the theme's tested `--accent-text`/`--focus-ring`
    token. Since Q13 it is `#2fd0ff` on neon-glow, `#a3aaf8` on dark and
-   midnight, and on light `#4150c4` as text and `#4752c4` as the focus ring.
+   midnight, `#ff7a45` (text and focus ring) on gunmetal, and on light
+   `#4150c4` as text and `#4752c4` as the focus ring.
    The default fill accents (`#00c8ff`, `#5865f2`, light's `#4f5bd5`) are
    below Q1 as text on at least one of their surfaces.
 
@@ -55,28 +56,62 @@ button on close, and exposes `aria-expanded`. Above 800px nothing changes.
 `Client/tests/e2e/responsive-nav.spec.ts` pins the keyboard and pointer
 paths at the 640×400 zoom viewport.
 
+Swipes. On a phone the drawer opens with a swipe right on the chat and the
+member list with a swipe left, and each closes when swiped back. Both follow
+the finger while the swipe lasts (`Client/src/lib/ui/panelDrag.ts`) and, on
+release, open (or close) past the larger of 60 px and 40 % of the panel's
+width, or on a flick (at least 30 px, at 0.4 px/ms or faster over the last
+100 ms); otherwise they snap back. A swipe that is interrupted (a second
+finger, the app going to the background, the window leaving the phone layout,
+or a Back while the finger is down) leaves the panel as it was, and that Back
+then does what it does with no drag. A panel is dragged only where its button
+would open it: the member list not in a direct message, in a content view or
+when it sits on the left. With Reduce motion on nothing follows the finger,
+and a swipe of 60 px opens or closes the panel on release. A drag changes
+none of the drawer's `aria-expanded`, focus or Escape behaviour above until
+it opens or closes the panel; every swipe also has a button.
+
+Call controls on a phone. On Command Deck on a phone, in a call, Mute, Leave
+and hold-to-talk are only in the bottom bar while the voice widget is up: the
+call bar, the call view and the DM call panel hide their copies only then
+(`display: none`, so a screen reader meets one of each), so a widget that fails
+to load leaves them in place. The voice widget does not scroll on a phone, so its call row,
+with Leave and "Unsecured", is always drawn; its panels scroll on their own.
+Signal and noise suppression are 44 px. While the message box has focus on a
+phone, the status bar's contents hide out of a call and keep its bottom inset;
+in a call the status bar stays, and the call bar and the tall widget panels
+hide. On Android, Back closes the keyboard but keeps focus in the box, so the
+bar comes back only after a tap outside it.
+
+Command Deck runs on phones too, in phone browsers and in the Android app. A
+new install starts on Command Deck, and an install that ran Classic before
+moves to it once (settings-and-admin.md, "New installs and the move to
+Command Deck").
+
 ## Colour tokens
 
 `Client/src/styles/tokens.css` holds the dark defaults, which midnight shares
 where its `THEMES` entry does not override them, and light's accent fills
-(`body.theme-light`). `theme-neon-glow.css` and the midnight and light entries
-in `lib/prefs/themes.ts` `THEMES` override them.
+(`body.theme-light`). `theme-neon-glow.css`, `theme-gunmetal.css` (the Ember
+orange accent block) and the midnight, gunmetal and light entries in
+`lib/prefs/themes.ts` `THEMES` override them.
 `app/accessibility.css` holds High Contrast. A "surface" is any of
 `--bg-primary`, `--bg-secondary`, `--bg-tertiary` and `--bg-input`. The values
 are the owner's Q13 direction A, Refined Neon.
 
-| Token                                                                     | Use                                                    | Qualified                                                  |
-| ------------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------- |
-| `--text-normal`, `--text-muted`, `--header-primary`, `--header-secondary` | body text, secondary text, headings                    | ≥ 4.5:1 on every surface, every theme, High Contrast       |
-| `--text-link`                                                             | links                                                  | same                                                       |
-| `--text-positive`, `--text-warning`, `--text-danger`                      | success, warning and error **text**                    | same                                                       |
-| `--accent-text`                                                           | the accent used as text (selected item, active option) | same, including every preset accent                        |
-| `--focus-ring`                                                            | every focus indicator                                  | ≥ 3:1 on every surface                                     |
-| `--on-accent`                                                             | text or icons on an accent fill                        | ≥ 4.5:1 on `--accent`, `--accent-hover`, `--accent-active` |
-| `--danger-fill`, `--danger-fill-hover`                                    | destructive button fills (white text)                  | ≥ 4.5:1 with white                                         |
-| `--border-control`                                                        | the 1px edge of an input or other control              | ≥ 3:1 on `--bg-primary` and `--bg-secondary` (1.4.11)      |
-| `--on-fill`, `--on-warning`                                               | text on a theme-independent fill or media scrim        | white on `--danger-fill`; `--on-warning` on `--yellow`     |
-| `--text-faint`, `--text-micro`                                            | incidental text only: decoration, separators, disabled | **not qualified**                                          |
+| Token                                                                     | Use                                                    | Qualified                                                              |
+| ------------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------- |
+| `--text-normal`, `--text-muted`, `--header-primary`, `--header-secondary` | body text, secondary text, headings                    | ≥ 4.5:1 on every surface, every theme, High Contrast                   |
+| `--text-link`                                                             | links                                                  | same                                                                   |
+| `--text-positive`, `--text-warning`, `--text-danger`                      | success, warning and error **text**                    | same                                                                   |
+| `--accent-text`                                                           | the accent used as text (selected item, active option) | same, including every preset accent                                    |
+| `--focus-ring`                                                            | every focus indicator                                  | ≥ 3:1 on every surface                                                 |
+| `--on-accent`                                                             | text or icons on an accent fill                        | ≥ 4.5:1 on `--accent`, `--accent-hover`, `--accent-active`             |
+| `--danger-fill`, `--danger-fill-hover`                                    | destructive button fills (white text)                  | ≥ 4.5:1 with white                                                     |
+| `--border`                                                                | decorative separators and panel frames                 | **not qualified**; never a control's edge (that is `--border-control`) |
+| `--border-control`                                                        | the 1px edge of an input or other control              | ≥ 3:1 on `--bg-primary` and `--bg-secondary` (1.4.11)                  |
+| `--on-fill`, `--on-warning`                                               | text on a theme-independent fill or media scrim        | white on `--danger-fill`; `--on-warning` on `--yellow`                 |
+| `--text-faint`, `--text-micro`                                            | incidental text only: decoration, separators, disabled | **not qualified**                                                      |
 
 Rules:
 
@@ -100,6 +135,8 @@ Rules:
   scale. Kept literals are deliberate: true-black video letterbox, each theme
   tile's own preview colours, and px glyph sizes in fixed boxes (avatar
   initials, icon buttons, emoji).
+  Under Command Deck only: `--deck-radius` (3 px) and `--deck-gap` (6 px),
+  outside the radius and spacing scales.
 - Do not use `--text-faint` or `--text-micro` for text a user needs to read.
   Their ~78 existing uses predate B9-2, and the feature polish milestones
   (B9-21..B9-24) review them. Qualifying these tokens at 4.5:1 would make
@@ -165,13 +202,23 @@ beside it) everywhere else. The `@font-face` is in `base.css`; font-src is
 
 ## Keyboard
 
-| Control                                       | Keys                                                                                                                                                                                                                                                         |
-| --------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Every action                                  | reachable with Tab/Shift+Tab; activates with Enter (and Space for buttons); nothing is hover-only                                                                                                                                                            |
-| Dialog                                        | Tab cycles inside; Escape closes and restores focus                                                                                                                                                                                                          |
-| Switch (`createToggle`)                       | Enter or Space toggles; `label` is required and becomes the accessible name                                                                                                                                                                                  |
-| Radio group, grid of options, navigation list | `setRovingTabindex` + `enableRovingNavigation` (`lib/ui/a11y.ts`): one Tab stop, arrows/Home/End move, Enter/Space choose; a stacked list passes `"vertical"` for ArrowUp/Down; a grid of rows passes `"grid"` (Up/Down step a row within the cell's parent) |
-| Combobox over a listbox                       | as the quick switcher: `aria-controls`, `aria-activedescendant`                                                                                                                                                                                              |
+| Control                                                  | Keys                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| -------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Every action                                             | reachable with Tab/Shift+Tab; activates with Enter (and Space for buttons); nothing is hover-only                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Dialog                                                   | Tab cycles inside; Escape closes and restores focus                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| Switch (`createToggle`)                                  | Enter or Space toggles; `label` is required and becomes the accessible name                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  |
+| Radio group, grid of options, navigation list            | `setRovingTabindex` + `enableRovingNavigation` (`lib/ui/a11y.ts`): one Tab stop, arrows/Home/End move, Enter/Space choose; a stacked list passes `"vertical"` for ArrowUp/Down; a grid of rows passes `"grid"` (Up/Down step a row within the cell's parent)                                                                                                                                                                                                                                                                                                                 |
+| Combobox over a listbox                                  | as the quick switcher: `aria-controls`, `aria-activedescendant`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| Tree (Command Deck's channel list, `lib/ui/treeKeys.ts`) | one Tab stop; Up/Down step the items in order; Right opens a closed header, else enters the first child; Left closes an open header, else goes to the parent; Home/End; Enter or Space activates (a header folds); a typed character jumps to the next name that starts with it; Alt, Ctrl and Meta are left to the app. Every row is a `treeitem` and `aria-level`, `aria-setsize` and `aria-posinset` are stamped from DOM order. The category "+" and the Listen pill leave the Tab order: the category menu's Create channel and the voice user menu's Listen reach them |
+
+Command Deck's Buddies group headers are focusable buttons (`role="button"`,
+`aria-expanded`) that fold or open their group with a click, Enter or Space;
+the folded set is kept on the device. Arrows, Home and End skip them and walk
+the member rows only; pressed on a header they are not handled, so the browser
+scrolls the list, as for any focused element that is not a row. During a
+search the headers are plain text, and every group shows its matches. They
+carry no `aria-controls`, because their rows are list siblings, not a
+container. The Deck tree differs: there a category folds with Right and Left.
 
 ## Announcements
 
@@ -217,6 +264,68 @@ From `Client/tests/e2e/support/accessibility.ts`:
 | `textContrast(locator, pseudo?)`  | text (or `::placeholder`) against its composited background                                                       |
 | `tokenContrasts(page, pairs)`     | token pairs as the page resolves them                                                                             |
 | `mountSharedControls(page)`       | the shared-controls fixture, including its pending, error and success states                                      |
+
+A feature works in both layouts: Classic and Command Deck, checked in the e2e
+`screen-layout` spec, in the feature's own spec under Deck, or by the Deck job
+(`playwright.config.deck.ts`).
+
+The server header is one such feature. Classic draws the icon, the server-name
+button (the server menu's anchor), the online count and the invite, Audit Log
+and Moderation buttons. Command Deck draws a second layout from the same module
+(`features/server-header/serverHeader.ts`): a strip labelled "Server tree" with
+the server menu (≡), invite, Audit Log and Moderation buttons, over the tree's
+root row (status dot, server name, online count). The menu button is shown to
+everyone; the other three keep their permission rules and test ids. The root
+row's rules live in `styles/app/server-tree.css`, whose colours are held to the
+tree policy in `tests/unit/deck/server-tree-css.test.ts`; `deck.css` stays last.
+
+The Direct button is another. Classic counts unread DMs and waiting message
+requests on the server rail's Home button; Command Deck shows the same count on
+an envelope button at the right end of its top bar
+(`features/direct-messages/directButton.ts`, `data-testid="deck-direct"`),
+hidden at zero. A click moves focus to the Direct folder's header in the tree,
+opening the sidebar drawer first at 800px and below. Its rules live in
+`styles/app/server-tabs.css`, held to its own colour policy in
+`tests/unit/deck/server-tabs-css.test.ts`.
+
+The room Info block is Command Deck only. While you are in a server voice room
+(not a DM call), the member column shows it after the Buddies scroller
+(`features/deck/roomInfoPanel.ts`, `data-testid="room-info"`): a header with the
+room name and a status light, then Users, Audio, Security, Quality and Streams.
+It is built and torn down with the column's panel, so it hides whenever the
+column does, and the column also hides it while the call view is up, even when
+the toggle opens the column there. At 600 px tall or less it shrinks to its
+header and one summary line ("4/8 · Secured · 18 ms"). It is read-only: nothing
+in it takes focus and it has no live region. Its rules live in
+`styles/app/room-info.css`, held to its own colour policy in
+`tests/unit/deck/room-info-css.test.ts`.
+
+Under Command Deck the member toggle sits at the end of the top bar's
+connection cell, after the connection state. At 900 px wide or more, in a
+connected call while the chat connection is up and the server tabs are not
+folded, the ping sits before the connection state
+(`features/deck/deckPing.ts`). At 1200 px or less the column folds into an
+overlay under the chat header, 280 px wide. It works as Classic's overlay with
+two exceptions: from 900 to 1200 px it has no shadow, and at 600 px or less it
+stays 280 px wide instead of taking the full width. On a phone it is the Buddies
+drawer: it runs from just below the top bar to the status bar, so in a call
+Mute and Leave stay reachable, and it is `min(320px, 88vw)` wide, with no dim
+backdrop. The Buddies button opens it with focus on the Buddies heading
+(`tabindex="-1"`), not the member search, so the keyboard stays closed; a
+swipe opens it without moving focus. One Back closes it, and a buddy menu open
+over it closes with it. The tree drawer's rows and its strip buttons are at
+least 44 px on a phone, and foldable Buddies group headers are 44 px tall.
+
+The server switcher is a third. Classic draws the server rail; Command Deck draws
+a row of server tabs under the top bar's first row, folded into a Servers button
+at most 640 px wide or 499 px tall, and on a phone. The button's accessible name
+is "Servers, {name}" with the current server's name. On a phone it shows that
+name, every top-bar control is 44 px, and a tap opens the server list as a
+bottom sheet (`features/server-rail/serverSheet.ts`) in place of the menu; the
+sheet replaces Switch server in your row. A browser has no tabs, so on a phone
+it shows the name as plain text and keeps Sign out. Both are drawn from one
+controller (`features/server-rail/railController.ts`), share the saved order and
+folders, and run the same cases in `tests/unit/serverRail/railContract.test.ts`.
 
 `Client/tests/e2e/accessibility-primitives.spec.ts` shows each one in use, including
 the negative controls that prove each check fails when its behaviour is

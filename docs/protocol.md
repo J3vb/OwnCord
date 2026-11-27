@@ -580,7 +580,7 @@ Sent once after `auth_ok` (fresh connection or replay fallback).
 
 ### Payload Fields
 
-**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "id_mentions": true, "game_activity": true, "link_previews": true, "listening_activity": true, "thread_follows": true, "voice_messages": true, "channel_media": true }`. `channel_media` (WP 8.17) means the server answers `GET /api/v1/channels/{id}/media` and `GET /api/v1/channels/{id}/media/months` (see `docs/api.md`); a client that does not see it shows no media gallery. `voice_messages` (WP 8.9) means `POST /api/v1/uploads` accepts the `voice_duration_ms` and `voice_waveform` query parameters and an attachment of a voice message carries `duration_ms` and `waveform` (see `docs/api.md`, File Upload and Serving); a client that does not see it offers no voice message recorder. `link_previews` means the server builds link cards: it sends `link_previews` on history messages and `message_link_previews` frames (see below). It is `false` while `link_previews.enabled` is off or the unfurl workers are not running, and a client that does not see it keeps fetching previews itself. `listening_activity` (WP 8.10a) means the server understands `listening_update`, carries a member's song as `listening` on `presence` and `presence_batch` and as `ready.listening`, and has member activity switched on right now; it follows the same admin switch as `game_activity` and is `false` while it is off. A client that does not see it sends no `listening_update` and shows no song. `game_activity` means the server understands `activity_update`, carries a member's game as `activity` on `presence` and `presence_batch` and as `ready.activities`, and has game activity switched on right now (WP 8.3e-2: an admin can turn it off, and the flag is then `false`, like `threads` tracking whether threads are available); a client that does not see it sends no `activity_update` and shows no game. The runtime switch is [`game_activity_policy`](#game_activity_policy-server---client-broadcast). `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `id_mentions` means the server resolves `<@id>` (a user by id) and `<@&id>` (a role by id) tokens in message content (see `chat_send`): the client then sends a mention the user picked from the @ list as its token, and offers roles in that list; a client that does not see it sends a picked mention as the plain `@name` text and offers no roles. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
+**capabilities:** `{ "message_deduplication": true, "message_retry_window_seconds": 86400, "message_retry_floor_ms": 0, "read_pointer": true, "user_notes": true, "profile_banners": true, "dm_privacy": true, "polls": true, "threads": true, "multi_role": true, "manage_nicknames": true, "id_mentions": true, "game_activity": true, "link_previews": true, "listening_activity": true, "thread_follows": true, "voice_messages": true, "voice_speaking": true, "channel_media": true }`. `voice_speaking` means the server understands `voice_speak` and relays it as `voice_speaking` (see below); a client that does not see it sends no `voice_speak`, and every speaking ring follows the media server's speaker detection. `channel_media` (WP 8.17) means the server answers `GET /api/v1/channels/{id}/media` and `GET /api/v1/channels/{id}/media/months` (see `docs/api.md`); a client that does not see it shows no media gallery. `voice_messages` (WP 8.9) means `POST /api/v1/uploads` accepts the `voice_duration_ms` and `voice_waveform` query parameters and an attachment of a voice message carries `duration_ms` and `waveform` (see `docs/api.md`, File Upload and Serving); a client that does not see it offers no voice message recorder. `link_previews` means the server builds link cards: it sends `link_previews` on history messages and `message_link_previews` frames (see below). It is `false` while `link_previews.enabled` is off or the unfurl workers are not running, and a client that does not see it keeps fetching previews itself. `listening_activity` (WP 8.10a) means the server understands `listening_update`, carries a member's song as `listening` on `presence` and `presence_batch` and as `ready.listening`, and has member activity switched on right now; it follows the same admin switch as `game_activity` and is `false` while it is off. A client that does not see it sends no `listening_update` and shows no song. `game_activity` means the server understands `activity_update`, carries a member's game as `activity` on `presence` and `presence_batch` and as `ready.activities`, and has game activity switched on right now (WP 8.3e-2: an admin can turn it off, and the flag is then `false`, like `threads` tracking whether threads are available); a client that does not see it sends no `activity_update` and shows no game. The runtime switch is [`game_activity_policy`](#game_activity_policy-server---client-broadcast). `multi_role` means a member can hold several roles: `role_ids` rides `members[]`, `auth_ok.user`, `member_join.user` and `member_update`, `roles[]` carry `hoist` and `mentionable`, and `PUT` / `DELETE {base}/{id}/roles/{roleId}` add and remove one role (see `docs/api.md`, Member actions). A client that does not see it treats `role` as the only role. `manage_nicknames` means the server accepts `PUT /api/v1/moderation/users/{id}/nickname` (body `{ "display_name": string | null }`, `null` or `""` clears) from a member holding `MANAGE_NICKNAMES` who outranks the target, and answers with the usual `user_update` frame to every client; a client that does not see it offers no Change Nickname action, even if the member holds the bit. `id_mentions` means the server resolves `<@id>` (a user by id) and `<@&id>` (a role by id) tokens in message content (see `chat_send`): the client then sends a mention the user picked from the @ list as its token, and offers roles in that list; a client that does not see it sends a picked mention as the plain `@name` text and offers no roles. `polls` means the server understands `poll_create`, `poll_vote` and `poll_end` and sends `poll_update`; a client that does not see it hides the Poll button. `threads` means the server supports the thread frames and `GET /api/v1/channels/{id}/threads` (see Threads); a client that does not see it shows no thread controls. `ready` never lists thread rows in `channels`. `thread_follows` means the server understands `thread_follow`, sends `thread_follow_update` and lists the viewer's followed threads in `ready.threads`; a client that does not see it shows no Follow control and no followed threads. It is only ever `true` together with `threads`. `dm_privacy` means the server stores the two direct message privacy settings (`GET` and `PUT /api/v1/users/me/privacy`, body `{ "allow_member_dms": bool, "message_requests": bool }`, both required); a client that does not see it shows no privacy controls. The server applies them to direct messages (see `dm_request`). `profile_banners` means the server supports profile banners (`POST` and `DELETE /api/v1/users/me/banner`, `banner_color` on `PATCH /api/v1/users/me`); a client that does not see it shows no banner controls. `user_notes` means the server stores private profile notes (`GET` and `PUT /api/v1/users/me/notes/{userId}`); a client that does not see it keeps notes in local storage. `read_pointer` means the server supports `channel_focus.read`, `mark_read.message_id`, `mark_unread` and the `read_state` frame (see Channel Focus and Read State). A client that does not see it keeps marking on focus and does not offer Mark Unread.
 These fields advertise retry-safe `chat_send` support. Older servers omit them;
 clients must not infer support from the protocol epoch or silently retry a
 durable pending message against a server that no longer advertises support.
@@ -2229,7 +2229,7 @@ A forum post's `ThreadInfo` also carries `post`: `{ "tag_ids": [3, 7], "first_me
 }
 ```
 
-`name` is 1 to 100 runes after sanitising. `auto_archive_minutes` is one of 60, 1440, 4320 or 10080; omitted or 0 means 1440. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the parent, which must be a text channel. The starter must be a live user message in that channel that has no thread. A message has at most one thread, and that makes the create idempotent without a request key: a retry by the thread's owner (a lost `thread_create_ok`) is answered with the same `thread_create_ok`, before the rate gate and without announcing anything. Rate limited to 5 per 10 minutes per user (`RATE_LIMITED`).
+`name` is 1 to 100 runes after sanitising, single-line visible text as for a display name (no control, invisible or direction-changing characters, runs of spaces collapsed). `auto_archive_minutes` is one of 60, 1440, 4320 or 10080; omitted or 0 means 1440. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the parent, which must be a text channel. The starter must be a live user message in that channel that has no thread. A message has at most one thread, and that makes the create idempotent without a request key: a retry by the thread's owner (a lost `thread_create_ok`) is answered with the same `thread_create_ok`, before the rate gate and without announcing anything. Rate limited to 5 per 10 minutes per user (`RATE_LIMITED`).
 
 Errors: `THREAD_EXISTS` (the message already has a thread that the caller did not make; the error payload carries `thread_id`, so the loser of a race learns the winner), `NOT_FOUND`, `FORBIDDEN`, `BAD_REQUEST`, `RATE_LIMITED`.
 
@@ -2299,7 +2299,7 @@ A forum holds no messages. A post is a thread whose parent is the forum, with no
 }
 ```
 
-`channel_id` is the forum. `name` is the title, 1 to 100 runes after sanitising. `content` and `attachments` follow the `chat_send` rules and the opening message needs one of them. `tag_ids` holds at most 5 distinct tags of the forum, and at least one when the forum has `require_tag`. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the forum (and `ATTACH_FILES` with attachments), is subject to the forum's slow mode, and shares the `thread_create` budget (5 per 10 minutes, `RATE_LIMITED`). The post's `auto_archive_minutes` is the forum's default. The post and its opening message commit in one transaction.
+`channel_id` is the forum. `name` is the title, 1 to 100 runes after sanitising, under the `thread_create` name rule. `content` and `attachments` follow the `chat_send` rules and the opening message needs one of them. `tag_ids` holds at most 5 distinct tags of the forum, and at least one when the forum has `require_tag`. The caller needs `READ_MESSAGES` and `SEND_MESSAGES` in the forum (and `ATTACH_FILES` with attachments), is subject to the forum's slow mode, and shares the `thread_create` budget (5 per 10 minutes, `RATE_LIMITED`). The post's `auto_archive_minutes` is the forum's default. The post and its opening message commit in one transaction.
 
 The request is idempotent on `client_message_id`, as `chat_send` is: a retry of a post that committed is answered with the same `forum_post_create_ok` and `deduplicated: true`, before the `thread_create` budget is spent and even if the post has since been archived. A retry of a post that has since been deleted answers `ALREADY_DELETED`; a retry whose payload differs from the original answers `CONFLICT`. A retry from a caller who can no longer see the forum is acknowledged without the `thread` field. A malformed request (title, tag shape) is refused before it costs a token.
 
@@ -3493,21 +3493,26 @@ verifies the signature itself.
 ### voice_watch (Client -> Server)
 
 The whole set of users whose **screen share** this participant watches now
-(cameras are not counted). It is idempotent, so a lost or reordered frame
+(cameras are not counted), and optionally the one sharer whose **music** it
+listens to (`music_id`). It is idempotent, so a lost or reordered frame
 heals on the next send; clients re-send after a join and after a resume. An
-empty list is valid and means "watching nothing".
+empty list is valid and means "watching nothing". `music_id` is a single
+integer because a listener hears one music share at a time; `0` or an absent
+field means "listening to nobody", so an older client that never sends it
+reads as none.
 
 ```json
-{ "type": "voice_watch", "payload": { "user_ids": [2, 5] } }
+{ "type": "voice_watch", "payload": { "user_ids": [2, 5], "music_id": 7 } }
 ```
 
 The sender must be in a voice channel (otherwise `VOICE_ERROR`). More than 16
 ids answers `BAD_PAYLOAD`. The server drops ids that are not positive and the
 sender's own id, removes duplicates and sorts ascending; it does not check
-that the ids are in the channel or sharing (clients filter on display).
+that the ids are in the channel or sharing (clients filter on display). A
+`music_id` that is not positive, or is the sender's own id, is stored as `0`.
 Rate limited at 10 per 5 seconds per user (`RATE_LIMITED`). The set lives in
 memory on the member's voice slot, survives a resume, and is cleared on leave
-and on a new join.
+and on a new join, together with the `music_id`.
 
 ### voice_watching (Server -> Client, broadcast to voice channel)
 
@@ -3515,12 +3520,60 @@ Relayed to the other members of the same voice channel only (never the
 sender, nobody outside the channel) when a member's set is stored. It is an
 unsequenced pub/sub frame like `voice_e2ee_announce`: no `seq`, never
 replayed. The server therefore re-sends it on join and on resume, one frame
-per other member whose set is non-empty. There is no frame on leave; peers
-drop that user's entry on `voice_leave`. `user_ids` is always an array.
+per other member whose set is non-empty or who listens to someone's music.
+There is no frame on leave; peers drop that user's entry on `voice_leave`.
+`user_ids` is always an array. `music_id` is the sharer whose music `user_id`
+listens to; it is omitted when nobody is (so a frame is unchanged for a member
+who listens to no one); a member who only listens, with an empty
+`user_ids`, still gets a frame. An older server ignores `music_id` on
+`voice_watch` and never sends it, so listener names need a server with this
+field.
 
 ```json
-{ "type": "voice_watching", "payload": { "user_id": 1, "user_ids": [2, 5] } }
+{
+  "type": "voice_watching",
+  "payload": { "user_id": 1, "user_ids": [2, 5], "music_id": 7 }
+}
 ```
+
+### voice_speak (Client -> Server)
+
+What this participant's own speaking ring shows, as its input gate decides it.
+`speaking` is `true` (lit), `false` (dark) or `null` ("no verdict of my own":
+the gate stopped deciding, so listeners go back to the media server's speaker
+detection for this member). A missing `speaking` reads as `null`.
+
+```json
+{ "type": "voice_speak", "payload": { "speaking": true } }
+```
+
+A client sends it only to a server that advertises the `voice_speaking`
+capability: on every change of its ring, and again once a second while the
+ring is lit. It never repeats `false`, and a call that has heard nothing yet
+is told only once the ring lights. The server stores nothing and never
+answers: a frame from a member who is in no voice channel, and one over the
+rate limit of 40 per 5 seconds per user, is dropped without an error (like
+`typing_start`). A `speaking` that is neither a boolean nor `null` answers
+`BAD_REQUEST`.
+
+### voice_speaking (Server -> Client, broadcast to voice channel)
+
+Relayed to the other members of the sender's voice channel only (never the
+sender, nobody outside the channel). It is an unsequenced pub/sub frame like
+`voice_watching`: no `seq`, never replayed, and nothing is re-sent on join or
+resume, because the sender repeats a lit ring every second. `user_id` is the
+sender, stamped by the server.
+
+```json
+{ "type": "voice_speaking", "payload": { "user_id": 1, "speaking": true } }
+```
+
+A receiving client shows that member's ring from the report instead of the
+media server's speaker detection, for 3 seconds after the last frame; after
+that, or on `null`, it follows the detection again. It ignores a frame for a
+member who is not in its media room, never lights a member whose microphone
+is muted, and drops what a member reported when that member leaves, mutes or
+rejoins.
 
 ### voice_e2ee_offer (Client -> Server)
 
@@ -4025,7 +4078,13 @@ The full list is `error_codes.ws` of `protocol/schema.json`, generated into the
 | `REQUEST_TIMEOUT`          | A command's database work ran past the per-frame deadline and was not applied; the `error` carries the command's `id` (see Command deadlines). Unlike `SERVER_BUSY` it does not end the connection                                            |
 | `ANOTHER_DEVICE_ACTIVE`    | No longer sent; kept for clients that still talk to an older server, which refused a wake reconnect while a different session held the connection                                                                                             |
 
-After 10 consecutive invalid JSON messages, the connection is forcibly closed.
+Each account has an inbound budget of 600 frames per 5 seconds, shared by all
+of its connections and spent before a frame is decoded. A frame over it is
+answered `RATE_LIMITED` and not processed. A frame that is not valid JSON, or
+is over the budget, counts as a strike; a frame that parses into a known
+command clears the count. After 10 consecutive strikes the connection is
+closed. An unknown `type` or a payload that does not parse is answered with its
+error and is no strike.
 
 A command's `channel_id`, `message_id`, `thread_id`, `user_id` and
 `to_channel_id` must be positive integers. A missing, fractional, zero or
@@ -4169,6 +4228,7 @@ tables below add per-type behavioral notes.
 | `voice_e2ee_announce` | 5/sec                                                       | ECDH pubkey announce                                            |
 | `voice_e2ee_offer`    | 64/sec outer, 5/sec per target                              | Wrapped room key to target (budgeted per key rotation)          |
 | `voice_watch`         | 10/5sec                                                     | Must be in voice; screen shares watched, max 16 ids             |
+| `voice_speak`         | 40/5sec (silently dropped)                                  | Own speaking ring; dropped outside a voice channel              |
 | `call_ring`           | 1/3sec                                                      | DM participants only; fans out as `call_incoming`               |
 | `call_decline`        | 1/3sec                                                      | DM participants only; fans out as `call_declined`               |
 | `chat_command`        | 5/sec                                                       | Plugin slash command; max 64 args; broadcast gated by `CanPost` |
@@ -4231,6 +4291,7 @@ tables below add per-type behavioral notes.
 | `voice_e2ee_announce`   | No       | Voice channel (excl. sender)                                                                           |
 | `voice_e2ee_offer`      | No       | Direct to target participant                                                                           |
 | `voice_watching`        | No       | Voice channel (excl. sender)                                                                           |
+| `voice_speaking`        | No       | Voice channel (excl. sender)                                                                           |
 | `server_restart`        | Yes      | All clients                                                                                            |
 | `mod_queue`             | No       | Connected `MODERATE_MEMBERS`/`ADMINISTRATOR` holders only                                              |
 | `mod_action`            | No       | Direct to the live target only                                                                         |

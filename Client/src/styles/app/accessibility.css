@@ -33,6 +33,10 @@
   --accent-text: #2fd0ff !important;
   --focus-ring: #2fd0ff !important;
 }
+.high-contrast body.theme-gunmetal {
+  --accent-text: #ff7a45 !important;
+  --focus-ring: #ff7a45 !important;
+}
 /* Light surfaces need dark text: the white above would be invisible. */
 .high-contrast body.theme-light {
   --text-normal: #000000 !important;

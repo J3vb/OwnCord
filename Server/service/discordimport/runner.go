@@ -233,13 +233,17 @@ func readHeader(ctx context.Context, ex Export) (Header, error) {
 }
 
 // cleanText sanitizes like any other free text, trims it and cuts it to max runes; an empty result becomes
-// fallback.
+// fallback, as does text the sanitizer refuses.
 func cleanText(s string, maxRunes int, fallback string) string {
 	// Cut the raw bytes first, as service.SanitizeImportedContent does, so sanitizing stays bounded.
 	if len(s) > maxRunes*4 {
 		s = strings.ToValidUTF8(s[:maxRunes*4], "")
 	}
-	s = strings.TrimSpace(service.SanitizeText(s))
+	clean, err := service.SanitizeText(s)
+	if err != nil {
+		return fallback
+	}
+	s = strings.TrimSpace(clean)
 	if r := []rune(s); len(r) > maxRunes {
 		s = strings.TrimSpace(string(r[:maxRunes]))
 	}

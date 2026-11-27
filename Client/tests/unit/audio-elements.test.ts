@@ -42,7 +42,7 @@ vi.mock("@stores/voice.store", () => ({
   },
 }));
 
-vi.mock("@lib/voice/livekitSession", () =>
+vi.mock("../../src/features/voice/livekitSession", () =>
   voiceSession.withOverrides({
     parseUserId: (identity: string) => {
       const match = identity.match(/^user-(\d+)$/);
@@ -52,7 +52,7 @@ vi.mock("@lib/voice/livekitSession", () =>
   }),
 );
 
-import { AudioElements, setAudioVolumeHost } from "../../src/lib/voice/audioElements";
+import { AudioElements, setAudioVolumeHost } from "../../src/features/voice/audioElements";
 
 function createMockTrack(kind: string, sid: string | undefined) {
   const audioEl = document.createElement("audio");
@@ -1394,6 +1394,16 @@ describe("AudioElements", () => {
       elements.setUserLocalMute(7, true);
       window.removeEventListener("owncord:user-local-mute-changed", onChange);
       expect(seen).toEqual([{ userId: 7 }]);
+    });
+
+    it("announces every level change, not only those to or from 0", () => {
+      const seen: unknown[] = [];
+      const onChange = (e: Event): void => void seen.push((e as CustomEvent).detail);
+      window.addEventListener("owncord:user-volume-changed", onChange);
+      elements.setUserVolume(7, 40);
+      elements.setUserVolume(7, 120);
+      window.removeEventListener("owncord:user-volume-changed", onChange);
+      expect(seen).toEqual([{ userId: 7 }, { userId: 7 }]);
     });
 
     it("scopes the Mute pref to the current host", () => {

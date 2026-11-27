@@ -1,46 +1,30 @@
 /** Loading the server rail into the page on demand. */
 
-import type { ServerRailOptions } from "./ServerRail";
+import { createElement } from "@lib/dom";
 import { createLogger } from "@lib/logger";
-import { addServer, loadSavedServers, switchToServer } from "./switchServer";
-import { pendingRequestCount } from "../message-requests/store";
-import { confirmAndJoinInvite, currentServerName, parseInviteInput } from "./joinInvite";
+import { runningScreenLayout } from "@lib/prefs/screenLayout";
+import { switcherOptions, type ServerSwitcherDeps } from "./switcherOptions";
 
 const log = createLogger("main-page");
 
-export interface ServerRailMount {
-  readonly host: string;
-  readonly slot: HTMLElement;
-  readonly isTornDown: () => boolean;
-  readonly onOpenDm: NonNullable<ServerRailOptions["onOpenDm"]>;
-  readonly onShowServer: () => void;
-  /** Called with the rail's teardown once it is mounted. */
-  readonly own: (destroy: () => void) => void;
-}
-
-/** The rail's code loads on demand, keeping it out of the eager MainPage chunk. */
-export function mountServerRail(opts: ServerRailMount): void {
-  const { host, slot } = opts;
+/**
+ * Classic's rail: appends its slot to `app`, marks `app` and loads the rail on
+ * demand. The slot holds the rail's width while the rail's code loads, keeping
+ * it out of the eager MainPage chunk. Command Deck draws its server tabs
+ * instead, so there it returns null and leaves `app` as it is.
+ */
+export function mountServerRail(app: HTMLElement, deps: ServerSwitcherDeps): HTMLDivElement | null {
+  if (runningScreenLayout() === "deck") return null;
+  const slot = createElement("div", { class: "server-rail-slot" });
+  app.classList.add("has-server-rail");
+  app.appendChild(slot);
   void import("./ServerRail")
     .then(({ createServerRail }) => {
-      if (opts.isTornDown()) return;
-      const rail = createServerRail({
-        currentHost: host,
-        loadServers: loadSavedServers,
-        switchServer: switchToServer,
-        addServer,
-        onOpenDm: opts.onOpenDm,
-        onShowServer: opts.onShowServer,
-        pendingRequests: pendingRequestCount,
-        joinInvite: (text) => {
-          const invite = parseInviteInput(text);
-          if (invite === null) return false;
-          confirmAndJoinInvite(invite, currentServerName(host));
-          return true;
-        },
-      });
+      if (deps.isTornDown()) return;
+      const rail = createServerRail(switcherOptions(deps));
       rail.mount(slot);
-      opts.own(() => rail.destroy?.());
+      deps.own(() => rail.destroy?.());
     })
     .catch((err: unknown) => log.warn("Server rail failed to load", err));
+  return slot;
 }

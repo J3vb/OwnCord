@@ -57,7 +57,8 @@ func MountDMRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaste
 		r.Post("/group", handleCreateGroupDM(svc, broadcaster, limiter))
 		r.With(compressJSON).Get("/", handleListDMs(svc))
 		r.Patch("/{channelId}", handleRenameGroupDM(svc, broadcaster, limiter))
-		r.Delete("/{channelId}", handleCloseDM(svc, broadcaster))
+		r.With(perUserActionLimit(limiter, "dm_close", "too many DMs closed, please slow down")).
+			Delete("/{channelId}", handleCloseDM(svc, broadcaster))
 		r.Post("/{channelId}/members", handleAddGroupMembers(svc, broadcaster, limiter))
 		r.Delete("/{channelId}/members/{userId}", handleRemoveGroupMember(svc, broadcaster, limiter))
 		r.Put("/{channelId}/owner", handleTransferGroupOwner(svc, broadcaster, limiter))
@@ -71,8 +72,10 @@ func MountDMRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaste
 	r.Route("/api/v1/blocks", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
 		r.Get("/", handleListBlocks(svc))
-		r.Put("/{userId}", handleBlockUser(svc, broadcaster))
-		r.Delete("/{userId}", handleUnblockUser(svc))
+		// Block and unblock share one budget, so toggling cannot double it.
+		blockLimit := perUserActionLimit(limiter, "block", "too many block changes, please slow down")
+		r.With(blockLimit).Put("/{userId}", handleBlockUser(svc, broadcaster))
+		r.With(blockLimit).Delete("/{userId}", handleUnblockUser(svc))
 	})
 }
 
@@ -286,16 +289,8 @@ func handleCreateGroupDM(svc *service.Services, broadcaster DMBroadcaster, limit
 // handleRenameGroupDM sets or clears a group DM's name (any member); an unchanged name sends nothing.
 func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		user, ok := requireUser(w, r)
+		userID, channelID, ok := groupMutationRequest(w, r, limiter)
 		if !ok {
-			return
-		}
-
-		channelID, ok := parseIDParam(w, r, "channelId")
-		if !ok {
-			return
-		}
-		if !allowGroupMutation(w, limiter, user.ID) {
 			return
 		}
 
@@ -304,7 +299,7 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster, limit
 			return
 		}
 
-		result, err := svc.DMs.RenameGroupDM(r.Context(), user.ID, channelID, req.Name)
+		result, err := svc.DMs.RenameGroupDM(r.Context(), userID, channelID, req.Name)
 		if err != nil {
 			writeServiceError(r.Context(), w, err)
 			return
@@ -316,7 +311,7 @@ func handleRenameGroupDM(svc *service.Services, broadcaster DMBroadcaster, limit
 			fanOutGroupChange(r.Context(), svc, broadcaster, channelID, result.Audience, result.Rows)
 		}
 
-		writeGroupSummary(w, r, svc, user.ID, channelID)
+		writeGroupSummary(w, r, svc, userID, channelID)
 	}
 }
 

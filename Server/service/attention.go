@@ -22,12 +22,6 @@ const (
 	AttentionStatusCritical = "critical"
 )
 
-// AttentionBackupJob is the maintenance step whose runs decide whether a server with no
-// backup is waiting for its first run (unknown) or failing (warning).
-const AttentionBackupJob = "Backups"
-
-const attentionBackupSignal = "backup"
-
 // AttentionInterval is how often Run samples the sources.
 const AttentionInterval = time.Minute
 
@@ -91,6 +85,9 @@ type AttentionSources struct {
 	DispatchAlive  func() bool
 	BackupSchedule func(context.Context) (string, error)
 	LastBackup     func() (time.Time, error)
+	// BackupArchive and BackupDisk feed the backup coverage and disk hints; nil leaves them out.
+	BackupArchive func(context.Context) (BackupArchiveReading, error)
+	BackupDisk    func(context.Context) (BackupDiskReading, error)
 	// VoiceHealth gets the sample context so an external LiveKit is probed with a bounded
 	// timeout. Nil reports unknown, never healthy.
 	VoiceHealth func(context.Context) VoiceHealth
@@ -305,6 +302,8 @@ type attentionReadings struct {
 	scheduleErr   error
 	lastBackup    time.Time
 	lastBackupErr error
+	archive       *BackupArchiveReading
+	backupDisk    *BackupDiskReading
 	voice         *VoiceHealth
 	certMode      string
 	cert          auth.ServedCert
@@ -399,6 +398,7 @@ func (s *AttentionService) evaluate(r attentionReadings, now time.Time) {
 		dead:   !r.dispatchAlive,
 	})
 	s.evalBackup(r, now)
+	s.evalBackupPolicy(r, now)
 	s.evalVoice(r, now)
 	s.evalCertificate(r, now)
 	s.evalPeople(r, now)

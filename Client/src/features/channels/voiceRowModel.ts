@@ -18,14 +18,17 @@ import type { PeerVerification, VoiceState, VoiceUser } from "../../stores/voice
 import type { SafetyState } from "../safety/store";
 import { resolveDisplayName } from "../../lib/ui/avatar";
 import { shellText } from "../../i18n/shell";
-import { formatUntil, safetyText } from "../../i18n/safety";
+import { safetyText } from "../../i18n/safety";
+import { formatUntil } from "../safety/timeText";
+import { rowActivity } from "../members/listeningLine";
 import { ownIdentityTitle, verifyPresentation } from "../voice/peerVerification";
+import type { VoiceChannelChromeModel } from "./voiceRow.view";
 import type {
+  VoiceActivityModel,
   VoiceAudioModel,
-  VoiceChannelChromeModel,
   VoiceUserRowModel,
   VoiceVerifyModel,
-} from "./voiceRow.view";
+} from "./voiceUserRow.view";
 
 /** Everything the voice rows draw from, as one snapshot of several stores. */
 export interface VoiceRowInputs {
@@ -44,6 +47,8 @@ export interface VoiceRowInputs {
   readonly movable: readonly number[];
   /** Members sharing music (you included), or absent when none does. */
   readonly musicSharers?: ReadonlySet<number>;
+  /** The sharer whose music you listen to, or absent when none. */
+  readonly listeningTo?: number;
   /** A fresh token per local-mute event: `localSilenced` answers differ after it. */
   readonly localMute: object;
 }
@@ -58,6 +63,8 @@ export interface VoiceUserContext {
   readonly musicMuted?: (userId: number) => boolean;
   /** The page wired voice moderation (drag to move needs it). */
   readonly moderation: boolean;
+  /** Tree mode: read by the draw calls, never by the model. Optional so a context built without it compiles. */
+  readonly tree?: boolean;
 }
 
 /** The participants of one channel in the snapshot, in the store's order. */
@@ -95,6 +102,26 @@ function verifyModel(v: PeerVerification | undefined): VoiceVerifyModel | null {
   return { cls: v.status, icon, color, title };
 }
 
+/** The Listen pill of a remote sharer in the channel you are in: absent for
+ *  yourself, for a member who does not share, and for any other channel. */
+function listenModel(
+  userId: number,
+  channelId: number,
+  self: boolean,
+  inputs: VoiceRowInputs,
+): { readonly listen: "off" | "on" } | Record<string, never> {
+  if (self || inputs.currentChannelId !== channelId) return {};
+  if (inputs.musicSharers?.has(userId) !== true) return {};
+  return { listen: inputs.listeningTo === userId ? "on" : "off" };
+}
+
+/** A tree row's second line, from the member's game or song; null for none. */
+function activityModel(member: Member | undefined): VoiceActivityModel | null {
+  if (member === undefined) return null;
+  const shown = rowActivity(member.activity, member.listening);
+  return shown === null ? null : { text: shown.text, icon: shown.icon };
+}
+
 /** One participant row's model, from the snapshot. */
 export function voiceUserModel(
   user: VoiceUser,
@@ -119,6 +146,7 @@ export function voiceUserModel(
     live: user.screenshare,
     music: inputs.musicSharers?.has(user.userId) === true,
     musicMuted: !self && ctx.musicMuted?.(user.userId) === true,
+    ...listenModel(user.userId, channelId, self, inputs),
     audio: audioModel(user),
     localMuted: !self && ctx.localSilenced(user.userId),
     ownFingerprintTitle: self
@@ -131,6 +159,8 @@ export function voiceUserModel(
       inputs.connectionStatus === "connected" &&
       inputs.movable.includes(channelId),
     self,
+    // Only a tree draws the second line; Classic's model stays as it was.
+    ...(ctx.tree === true ? { activity: activityModel(member) } : {}),
   };
 }
 
@@ -138,6 +168,7 @@ export function voiceUserModel(
 export function voiceChannelChrome(
   channel: Channel,
   inputs: VoiceRowInputs,
+  tree = false,
 ): VoiceChannelChromeModel {
   const joined = inputs.currentChannelId === channel.id;
   // A timeout refuses a join (TIMED_OUT) but never a leave.
@@ -173,5 +204,9 @@ export function voiceChannelChrome(
           }
         : null,
     mentionCount: channel.mentionCount,
+    // Only a tree shows LIVE on the channel row (the per-person badge is hidden there).
+    ...(tree && channelVoiceUsers(inputs, channel.id).some((u) => u.screenshare)
+      ? { live: true }
+      : {}),
   };
 }

@@ -5,7 +5,7 @@
 import { setText } from "@lib/dom";
 import { wrapWithMarker } from "../markdownMarkers";
 import { MAX_MESSAGE_LEN } from "../messageLimits";
-import { applyPickedMentions } from "@lib/text/pickedMentions";
+import { composeOutgoing } from "./outgoingText";
 import { idMentionsEnabled, voiceMessagesEnabled } from "@lib/net/serverCapabilities";
 import { composerButtonShown } from "../composerButtons";
 import { composerPlaceholder } from "../composerPlaceholder";
@@ -107,10 +107,12 @@ export function createInputComposer(st: InputState, api: InputApi) {
    *  autoResize(), so the counter and the draft hook are driven from there. */
   function updateCounter(): void {
     if (st.charCounter === null || st.textarea === null) return;
-    const sent = applyPickedMentions(
-      st.textarea.value.trim(),
+    const outgoing = composeOutgoing(
+      st.textarea.value,
       idMentionsEnabled() ? st.pickedMentions : [],
     );
+    // A bare /me or /spoiler sends nothing; the counter shows what is typed.
+    const sent = "empty" in outgoing ? st.textarea.value.trim() : outgoing.content;
     const left = MAX_MESSAGE_LEN - [...sent].length;
     const show = left <= COUNTER_FROM_REMAINING;
     st.charCounter.hidden = !show;

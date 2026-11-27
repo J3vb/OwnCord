@@ -96,6 +96,7 @@ async function badge(count: number): Promise<void> {
 export const notifier: Notifier = {
   // `Notification.permission` is the browser's own record of the user's choice.
   readsOsPermission: true,
+  canFlash: false,
   async permissionGranted(): Promise<boolean> {
     return api().permission === "granted";
   },

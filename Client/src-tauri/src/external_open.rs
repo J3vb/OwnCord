@@ -16,7 +16,8 @@
 #[cfg(desktop)]
 use std::path::Path;
 
-/// URL schemes `open_external_url` accepts: the plugin's `opener:default` scope.
+/// URL schemes `open_external_url` accepts: the opener plugin's default scope.
+/// The page has no opener grant of its own; this command is its only way.
 const ALLOWED_SCHEMES: [&str; 4] = ["http", "https", "mailto", "tel"];
 
 /// Check `url` is one the renderer may open and return its normalised text.
@@ -90,7 +91,8 @@ pub(crate) fn open_path(path: &Path) -> Result<(), String> {
 pub(crate) fn host_command(program: &str) -> std::process::Command {
     let mut command = std::process::Command::new(program);
     if let Some(appdir) = appimage::appimage_dir() {
-        for edit in appimage::host_env(std::env::vars_os(), &appdir) {
+        let own = crate::launch_env::own_gstreamer_registry();
+        for edit in appimage::host_env(std::env::vars_os(), &appdir, own) {
             match edit {
                 appimage::EnvEdit::Set(name, value) => command.env(name, value),
                 appimage::EnvEdit::Remove(name) => command.env_remove(name),
@@ -119,6 +121,11 @@ mod appimage {
         "GTK_THEME",
         "GST_REGISTRY_REUSE_PLUGIN_SCANNER",
     ];
+
+    /// Set to the bundled GStreamer's own registry at launch
+    /// (`launch_env.rs`); removed only when it still is that file, so a
+    /// registry the user chose reaches the programs we start.
+    const GST_REGISTRY: &str = "GST_REGISTRY_1_0";
 
     /// One change to a child's environment.
     #[derive(Debug, PartialEq, Eq)]
@@ -163,14 +170,21 @@ mod appimage {
 
     /// The environment edits that give a program we launch the host's
     /// environment instead of the AppImage's. Pure: `vars` is the environment
-    /// to clean.
+    /// to clean, `own_registry` the GStreamer registry set at launch.
     pub(super) fn host_env(
         vars: impl IntoIterator<Item = (OsString, OsString)>,
         appdir: &Path,
+        own_registry: Option<&Path>,
     ) -> Vec<EnvEdit> {
         let appdir = normalise(appdir.as_os_str().as_bytes());
         let mut edits = Vec::new();
         for (name, value) in vars {
+            if name == GST_REGISTRY {
+                if own_registry.is_some_and(|own| own.as_os_str() == value) {
+                    edits.push(EnvEdit::Remove(name));
+                }
+                continue;
+            }
             if LAUNCHER_ONLY.iter().any(|n| OsStr::new(n) == name) {
                 edits.push(EnvEdit::Remove(name));
                 continue;
@@ -226,7 +240,11 @@ mod appimage {
 
     /// `xdg-open target`, or `gio open target` when xdg-open is not installed.
     pub(super) fn spawn_opener(target: &str, appdir: &Path) -> Result<(), String> {
-        let edits = host_env(std::env::vars_os(), appdir);
+        let edits = host_env(
+            std::env::vars_os(),
+            appdir,
+            crate::launch_env::own_gstreamer_registry(),
+        );
         match spawn("xdg-open", &[target], &edits) {
             Ok(()) => Ok(()),
             Err(e) if e.kind() == ErrorKind::NotFound => spawn("gio", &["open", target], &edits)
@@ -270,6 +288,7 @@ mod appimage {
                     ),
                 ]),
                 Path::new(APPDIR),
+                None,
             );
             assert_eq!(
                 edits,
@@ -295,6 +314,7 @@ mod appimage {
                     ("GTK_EXE_PREFIX", "/tmp/.mount_OwnCorabc123/usr"),
                 ]),
                 Path::new(APPDIR),
+                None,
             );
             assert_eq!(
                 edits,
@@ -314,6 +334,7 @@ mod appimage {
                     ("LD_LIBRARY_PATH", "/tmp/.mount_OwnCorabc1234/lib"),
                 ]),
                 Path::new(APPDIR),
+                None,
             );
             assert_eq!(edits, []);
         }
@@ -327,6 +348,7 @@ mod appimage {
                     ("EMPTY", ""),
                 ]),
                 Path::new(APPDIR),
+                None,
             );
             assert_eq!(edits, []);
         }
@@ -344,6 +366,7 @@ mod appimage {
                     ("LANG", "C.UTF-8"),
                 ]),
                 Path::new(APPDIR),
+                None,
             );
             assert_eq!(
                 edits,
@@ -359,10 +382,24 @@ mod appimage {
         }
 
         #[test]
+        fn only_the_registry_set_at_launch_is_removed() {
+            let own = Path::new("/home/me/.cache/com.owncord.client/gstreamer-1.0/registry.bin");
+            let ours = vars(&[("GST_REGISTRY_1_0", own.to_str().unwrap())]);
+            assert_eq!(
+                host_env(ours, Path::new(APPDIR), Some(own)),
+                [remove("GST_REGISTRY_1_0")]
+            );
+            let users = vars(&[("GST_REGISTRY_1_0", "/home/me/my-registry.bin")]);
+            assert_eq!(host_env(users.clone(), Path::new(APPDIR), Some(own)), []);
+            assert_eq!(host_env(users, Path::new(APPDIR), None), []);
+        }
+
+        #[test]
         fn a_trailing_slash_on_appdir_still_matches() {
             let edits = host_env(
                 vars(&[("PYTHONPATH", "/tmp/.mount_OwnCorabc123/usr/lib/python3")]),
                 Path::new("/tmp/.mount_OwnCorabc123/"),
+                None,
             );
             assert_eq!(edits, [remove("PYTHONPATH")]);
         }

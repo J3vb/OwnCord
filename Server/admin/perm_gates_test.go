@@ -331,8 +331,8 @@ func TestBackupPolicySettings_NonOwnerForbidden(t *testing.T) {
 	_, adminToken := createRoleUser(t, database, 21, "Administrator", permissions.Administrator, 90, "administratoruser")
 	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "backuppolicyowner")
 
-	validValue := map[string]string{"backup_schedule": "daily", "backup_retention": "30"}
-	for _, key := range []string{"backup_schedule", "backup_retention"} {
+	validValue := map[string]string{"backup_schedule": "daily", "backup_retention": "30", "backup_scope": "everything", "backup_disk_ack": "/mnt/backups"}
+	for _, key := range []string{"backup_schedule", "backup_retention", "backup_scope", "backup_disk_ack"} {
 		for _, tc := range []struct {
 			name  string
 			token string
@@ -376,6 +376,32 @@ func TestBackupPolicySettings_BoundedRetention(t *testing.T) {
 		w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"backup_retention": value})
 		if w.Code != http.StatusOK {
 			t.Errorf("PATCH backup_retention=%q = %d, want 200; body: %s", value, w.Code, w.Body.String())
+		}
+	}
+}
+
+// TestBackupPolicySettings_ScopeValues: backup_scope takes only the two real choices over the API, and
+// backup_disk_ack takes a plain folder path.
+func TestBackupPolicySettings_ScopeValues(t *testing.T) {
+	database := openAdminTestDB(t)
+	handler := admin.NewAdminAPI(database, "1.0.0", &mockHub{}, nil, nil, nil, nil, newTestServices(database))
+	_, ownerToken := createRoleUser(t, database, permissions.OwnerRoleID, "Owner", permissions.Administrator, 100, "scopeowner")
+
+	for key, bad := range map[string][]string{
+		"backup_scope":    {"unset", "", "all", "db"},
+		"backup_disk_ack": {"/mnt/a\x00b", strings.Repeat("a", 5000)},
+	} {
+		for _, value := range bad {
+			if w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{key: value}); w.Code != http.StatusBadRequest {
+				t.Errorf("PATCH %s=%.20q = %d, want 400; body: %s", key, value, w.Code, w.Body.String())
+			}
+		}
+	}
+	for _, value := range []string{"database", "everything"} {
+		w := doRequest(t, handler, http.MethodPatch, "/settings", ownerToken, map[string]string{"backup_scope": value})
+		requireStatus(t, w, http.StatusOK)
+		if got := decodeBody[map[string]string](t, w)["backup_scope"]; got != value {
+			t.Errorf("backup_scope after PATCH %s = %q", value, got)
 		}
 	}
 }

@@ -19,7 +19,7 @@
 import { supportsH265, supportsVP9 } from "livekit-client";
 import { loadPref } from "../../lib/prefs/preferences";
 import { pickCommonCodec, type PeerDecodeLists } from "./decodeCaps";
-import { isLinuxDesktop, isWindowsDesktop } from "./native/platform";
+import { isLinuxDesktop, isWindowsDesktop } from "@lib/hostOs";
 import { nativeVideoCodecs } from "./native/videoCodecs";
 
 export type VideoCodecPref = "vp8" | "h264" | "vp9" | "h265" | "auto";

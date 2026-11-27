@@ -232,11 +232,19 @@ pub(super) fn set_muted(inner: &Arc<TrackInner>, track: &Track, muted: bool) {
 }
 
 pub(super) fn update_info(inner: &Arc<TrackInner>, _track: &Track, new_info: proto::TrackInfo) {
+    // OWNCORD-PATCH (signal input): an unusable update is skipped.
+    let (sid, kind) = match crate::room::publication::checked_track_ids(&new_info) {
+        Ok(ids) => ids,
+        Err(reason) => {
+            log::warn!("ignoring track update: {}", reason);
+            return;
+        }
+    };
     let mut info = inner.info.write();
-    info.kind = TrackKind::try_from(new_info.r#type()).unwrap();
+    info.kind = kind;
     info.source = TrackSource::from(new_info.source());
     info.name = new_info.name.clone();
-    info.sid = new_info.sid.clone().try_into().unwrap();
+    info.sid = sid;
     info.audio_features =
         new_info.audio_features().into_iter().map(|item| item.try_into().unwrap()).collect();
 }

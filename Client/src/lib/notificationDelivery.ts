@@ -11,11 +11,16 @@ import { isAndroidHost } from "./hostPlatform";
 
 const log = createLogger("notifications");
 
-/** Strip control characters from user-provided text and cap its length. */
+/**
+ * Strip control characters from user-provided text and cap it at `maxLen`
+ * characters. The cut counts whole characters, so it never splits an emoji:
+ * half of one is not valid text, and the native popup refuses it.
+ */
 export function sanitizeNotif(s: string, maxLen: number): string {
   // eslint-disable-next-line no-control-regex -- intentional: strip control chars from user-provided strings
   const cleaned = s.replace(/[\x00-\x1F\x7F]/g, "");
-  return cleaned.length > maxLen ? cleaned.slice(0, maxLen) + "..." : cleaned;
+  const chars = Array.from(cleaned);
+  return chars.length > maxLen ? chars.slice(0, maxLen).join("") + "..." : cleaned;
 }
 
 /**

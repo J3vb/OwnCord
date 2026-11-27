@@ -74,7 +74,8 @@
               "thread_follows": true,
               "threads": true,
               "user_notes": true,
-              "voice_messages": true
+              "voice_messages": true,
+              "voice_speaking": true
             },
             "channels": [
               {
@@ -391,7 +392,8 @@
               "thread_follows": true,
               "threads": true,
               "user_notes": true,
-              "voice_messages": true
+              "voice_messages": true,
+              "voice_speaking": true
             },
             "channels": [
               {

@@ -27,6 +27,8 @@ const BUS_NAME: &str = "org.freedesktop.Notifications";
 const OBJECT_PATH: &str = "/org/freedesktop/Notifications";
 const INTERFACE: &str = BUS_NAME;
 const CALL_TIMEOUT: Duration = Duration::from_secs(5);
+/// The longest wait for the server's capabilities before the first popup.
+const CAPABILITIES_TIMEOUT: Duration = Duration::from_secs(1);
 /// How long the thread blocks on commands before reading signals again.
 const POLL: Duration = Duration::from_millis(100);
 /// Popups whose click is still remembered. Past this the oldest is forgotten;
@@ -159,6 +161,9 @@ fn serve(
     let popups: Arc<Mutex<Popups<MessageTarget>>> =
         Arc::new(Mutex::new(Popups::new(MAX_REMEMBERED)));
     watch_signals(conn, &popups, on_click);
+    // Whether this server reads the body as markup, asked once per bus
+    // connection; unknown until a GetCapabilities call answers.
+    let mut escape_body: Option<bool> = None;
 
     let mut next = Some(first);
     loop {
@@ -185,7 +190,11 @@ fn serve(
                 // appear after the caller has given up and shown its own.
                 let left = deadline.saturating_duration_since(Instant::now());
                 if !left.is_zero() {
-                    let _ = reply.send(send_popup(conn, &popups, popup, left));
+                    let escape = body_escape(conn, &mut escape_body, left);
+                    let left = deadline.saturating_duration_since(Instant::now());
+                    if !left.is_zero() {
+                        let _ = reply.send(send_popup(conn, &popups, popup, left, escape));
+                    }
                 }
             }
             Some(Command::Close { tag }) => {
@@ -281,16 +290,46 @@ fn watch_signals(
     }
 }
 
+/// Whether popup bodies must be escaped for this server. The answer of the
+/// first GetCapabilities call that succeeds is kept in `known`; while none has,
+/// the body is escaped (`owncord_parse::notify::body_needs_escape`).
+fn body_escape(conn: &Connection, known: &mut Option<bool>, left: Duration) -> bool {
+    if let Some(escape) = *known {
+        return escape;
+    }
+    let answer: Result<(Vec<String>,), dbus::Error> = conn
+        .with_proxy(BUS_NAME, OBJECT_PATH, left.min(CAPABILITIES_TIMEOUT))
+        .method_call(INTERFACE, "GetCapabilities", ());
+    let capabilities = match answer {
+        Ok((capabilities,)) => Some(capabilities),
+        Err(e) => {
+            log::debug!("[notify] no capabilities from the notification server: {e}");
+            None
+        }
+    };
+    let escape = owncord_parse::notify::body_needs_escape(capabilities.as_deref());
+    if capabilities.is_some() {
+        *known = Some(escape);
+    }
+    escape
+}
+
 fn send_popup(
     conn: &Connection,
     popups: &Mutex<Popups<MessageTarget>>,
     popup: Popup,
     timeout: Duration,
+    escape_body: bool,
 ) -> Result<(), String> {
     let replaces = popup
         .tag
         .as_deref()
         .map_or(0, |tag| lock(popups).replaces(tag));
+    let body = if escape_body {
+        owncord_parse::notify::escape_body_markup(&popup.body)
+    } else {
+        popup.body.clone()
+    };
     let (id,): (u32,) = conn
         .with_proxy(BUS_NAME, OBJECT_PATH, timeout)
         .method_call(
@@ -301,7 +340,7 @@ fn send_popup(
                 replaces,
                 notification_icon(),
                 popup.title.as_str(),
-                popup.body.as_str(),
+                body.as_str(),
                 vec!["default", text::NOTIFICATION_OPEN],
                 popup_hints(&popup.app_name),
                 -1i32,
@@ -577,12 +616,21 @@ mod tests {
         let client = Arc::new(Mutex::new(None::<String>));
         let notifier = Arc::clone(&client);
         let activated = AtomicBool::new(false);
+        let capability_calls = Arc::new(AtomicU32::new(0));
+        let asked = Arc::clone(&capability_calls);
+        let bodies = Arc::new(Mutex::new(Vec::<String>::new()));
+        let shown_bodies = Arc::clone(&bodies);
         server.start_receive(
             MatchRule::new_method_call(),
             Box::new(move |msg: Message, conn: &Connection| {
                 match msg.member().as_deref() {
+                    Some("GetCapabilities") => {
+                        asked.fetch_add(1, Ordering::SeqCst);
+                        let caps = vec!["actions", "body", "body-markup"];
+                        let _ = conn.send(msg.method_return().append1(caps));
+                    }
                     Some("Notify") => {
-                        let (_, replaces, _, _, _, actions, hints, _): (
+                        let (_, replaces, _, _, body, actions, hints, _): (
                             String,
                             u32,
                             String,
@@ -593,6 +641,7 @@ mod tests {
                             i32,
                         ) = msg.read_all().expect("Notify arguments");
                         assert_eq!(actions, ["default", text::NOTIFICATION_OPEN]);
+                        lock(&shown_bodies).push(body);
                         *lock(&notifier) = msg.sender().map(|s| s.to_string());
                         if prop_cast::<bool>(&hints, "suppress-sound") == Some(&true) {
                             served.store(true, Ordering::SeqCst);
@@ -650,7 +699,7 @@ mod tests {
             tx.send(Command::Show {
                 popup: Popup {
                     title: "t".into(),
-                    body: "b".into(),
+                    body: "<a href=\"https://x.example.com\">b</a> & c".into(),
                     target: MessageTarget {
                         host: "h".into(),
                         channel_id,
@@ -670,6 +719,12 @@ mod tests {
             show(channel_id, None).expect("popup shown");
         }
         assert!(suppressed.load(Ordering::SeqCst));
+        // The server reads markup: every body arrives escaped, and its
+        // capabilities were asked once for all twenty popups.
+        assert_eq!(capability_calls.load(Ordering::SeqCst), 1);
+        assert!(lock(&bodies)
+            .iter()
+            .all(|b| b == "&lt;a href=\"https://x.example.com\"&gt;b&lt;/a&gt; &amp; c"));
         let showed_by = lock(&client).clone().expect("Notify came from the client");
         // The first popup (id 41) survives the server's start announcement,
         // and the 20th (id 60) still opens its target on click.

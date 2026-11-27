@@ -3,13 +3,13 @@ import { defineCatalog } from "./format";
 /**
  * The startup-safe slice of the messaging journey: the message date
  * stamps, the attachment download labels and the who-reacted tooltip.
- * `lib/text/formatting.ts` is statically reachable from the entry through its many
+ * `features/messaging/formatting.ts` is statically reachable from the entry through its many
  * callers, so its copy lives here rather than in the main-page catalog
  * `messaging.ts`, the same way `mediaControls.ts` is split from `content.ts`.
  *
  * `features/messaging/content/attachments.ts` and `message-list/reactionTooltip.ts` are no
  * longer in the entry's static closure. Attachments used to be pulled in
- * through `lib/notifications.ts` → `lib/ui/avatar.ts`, which no longer imports it;
+ * through `features/notifications/notifications.ts` → `lib/ui/avatar.ts`, which no longer imports it;
  * it is now reached only from components and pages. The tooltip used to be
  * pulled in through the dispatcher's `reaction_update` handler, which now
  * imports `features/messaging/reactionUsers.ts` instead; it is reached only

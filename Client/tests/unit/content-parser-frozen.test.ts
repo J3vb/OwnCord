@@ -21,7 +21,11 @@ import {
 import { setRoles } from "../../src/stores/channels.store";
 import { seedMembersAndChannels } from "../helpers/contentRenderHarness";
 import { createElement, setText } from "@lib/dom";
-import { navigateToChannel, findChannelByName, findChannelById } from "@lib/nav/channelNavigation";
+import {
+  navigateToChannel,
+  findChannelByName,
+  findChannelById,
+} from "../../src/features/navigation/channelNavigation";
 import { parseInviteLink, parseMessageLink } from "@lib/nav/deepLink";
 import { getChannelMutesHost } from "@lib/prefs/channelMutes";
 import { normalizeHostForCertCompare } from "@lib/net/hostNormalize";
@@ -40,7 +44,7 @@ import {
   isEveryoneToken,
   resolveMentionUserId,
   type MentionInfo,
-} from "@lib/text/mentions";
+} from "../../src/features/messaging/mentions";
 import { isSafeUrl } from "../../src/features/messaging/content/attachments";
 import {
   EMOJI_TOKEN_REGEX,
@@ -142,9 +146,16 @@ function buildSpoiler(
     // spoiler must not open on the same click that uncovers it.
     e.preventDefault();
     e.stopPropagation();
+    const hadFocus = document.activeElement === span;
     span.classList.add("revealed");
-    span.setAttribute("aria-pressed", "true");
-    span.setAttribute("aria-label", messagingText("spoiler.revealed"));
+    // A revealed spoiler is plain text again, keeping a keyboard reader's
+    // place (changed deliberately: it no longer reads as a pressed button).
+    for (const attr of ["role", "aria-pressed", "aria-label", "tabindex"])
+      span.removeAttribute(attr);
+    if (hadFocus) {
+      span.tabIndex = -1;
+      span.focus();
+    }
   };
   span.addEventListener("click", reveal);
   span.addEventListener("keydown", (e: KeyboardEvent) => {

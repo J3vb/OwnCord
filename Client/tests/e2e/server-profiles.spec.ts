@@ -176,7 +176,14 @@ test.describe("Server profiles — quick-switch add", () => {
   // 800px or less (a desktop window at 200 % zoom), from the sidebar drawer.
   test.use({ viewport: { width: 640, height: 400 }, deviceScaleFactor: 1 });
 
-  test("the quick-switch Add new server row returns to the connect page", async ({ page }) => {
+  test("the quick-switch Add new server row returns to the connect page", async ({
+    page,
+    screenLayout,
+  }) => {
+    test.skip(
+      screenLayout === "deck",
+      "Classic's drawer Switch server button; Deck's server tabs add entry is covered by deck-tabs",
+    );
     await page.addInitScript(
       buildTauriMockScript({
         httpRoutes: [...BASE_SESSION_ROUTES],

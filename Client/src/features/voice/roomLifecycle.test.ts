@@ -35,8 +35,8 @@ vi.mock("../../lib/prefs/preferences", () => ({
 vi.mock("../../lib/logger", () => ({
   createLogger: () => ({ debug: vi.fn(), info: vi.fn(), warn: vi.fn(), error: vi.fn() }),
 }));
-vi.mock("../../lib/voice/deviceManager", () => ({ isMicPolicyGated: () => false }));
-vi.mock("../../lib/voice/livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
+vi.mock("../../features/voice/deviceManager", () => ({ isMicPolicyGated: () => false }));
+vi.mock("./livekitDiagnostics", () => ({ attachDiagnosticListeners: vi.fn() }));
 vi.mock("./videoCapFollow", () => ({
   VideoCapFollower: vi.fn(function () {
     return { kick: vi.fn(), stop: vi.fn() };
@@ -301,7 +301,7 @@ describe("leaveVoice", () => {
 describe("RoomLifecycle on the Linux native backend", () => {
   it("builds a NativeRoom with the same event wiring and no E2EE web worker", async () => {
     vi.resetModules();
-    vi.doMock("./native/platform", () => ({ isLinuxDesktop: () => true }));
+    vi.doMock("../../lib/hostOs", () => ({ isLinuxDesktop: () => true }));
     const nativeRoom = {
       on: vi.fn(),
       disconnect: vi.fn(async () => {}),
@@ -317,8 +317,7 @@ describe("RoomLifecycle on the Linux native backend", () => {
     );
     vi.doMock("./native/nativeRoom", () => ({ createNativeRoom }));
     const { RoomLifecycle: LinuxLifecycle } = await import("./roomLifecycle");
-    const { attachDiagnosticListeners: attach } =
-      await import("../../lib/voice/livekitDiagnostics");
+    const { attachDiagnosticListeners: attach } = await import("./livekitDiagnostics");
     const { Room: WebRoom } = await import("livekit-client");
     const webRoomsBefore = vi.mocked(WebRoom).mock.calls.length;
     const ctx = setup();
@@ -351,7 +350,7 @@ describe("RoomLifecycle on the Linux native backend", () => {
     // here, so count the registrations rather than name them).
     expect(nativeRoom.on).toHaveBeenCalledTimes(15);
     expect(attach).toHaveBeenCalledWith(nativeRoom);
-    vi.doUnmock("./native/platform");
+    vi.doUnmock("../../lib/hostOs");
     vi.doUnmock("./native/nativeRoom");
   });
 });

@@ -35,6 +35,7 @@ function memo(): GridSyncMemo {
     prevSpeaking: "",
     prevAudioState: "",
     prevViewers: "",
+    prevMusic: "",
     prevCallState: "",
     prevTileLabels: new Map(),
     gridLoadChannel: null,
@@ -48,6 +49,7 @@ function setup() {
     setStreamViewers: vi.fn(),
     setLabel: vi.fn(),
     setCallState: vi.fn(),
+    setMusic: vi.fn(),
   };
   const deps: GridSyncDeps = {
     grid: () => grid as unknown as ReturnType<GridSyncDeps["grid"]>,
@@ -56,6 +58,8 @@ function setup() {
     tileLabel: (id, screen) => `${screen ? "screen" : "cam"}${String(id)}`,
     personName: (id) => `p${String(id)}`,
     syncCallState: vi.fn(),
+    selfId: () => 1,
+    music: { listen: vi.fn(), volume: () => 100, setVolume: vi.fn() },
   };
   return { grid, deps, memo: memo() };
 }
@@ -140,9 +144,84 @@ describe("syncGridCallState", () => {
     expect(setCallState.mock.calls[1]![0]).not.toHaveProperty("music");
   });
 
+  it("tells the grid the AFK channel locks the mic, and only inside a call", () => {
+    const { setCallState, grid, seen } = callStateSetup();
+    syncGridCallState(voiceState(1, [], { inAfkChannel: true }), seen, grid);
+    expect(setCallState).toHaveBeenLastCalledWith(expect.objectContaining({ afkLocked: true }));
+    syncGridCallState(voiceState(null, [], { inAfkChannel: true }), seen, grid);
+    expect(setCallState.mock.calls[1]![0]).not.toHaveProperty("afkLocked");
+  });
+
   it("holds nothing where there is no call", () => {
     const { setCallState, grid, seen } = callStateSetup();
     syncGridCallState(voiceState(null, [], { phoneCallHold: true }), seen, grid);
     expect(setCallState.mock.calls[0]![0]).not.toHaveProperty("phoneHold");
+  });
+});
+
+const sharers = (...ids: number[]) => new Set(ids);
+
+describe("syncVideoGrid music tiles", () => {
+  it("gives each remote sharer a tile, never you, in user id order", () => {
+    const { grid, deps, memo: m } = setup();
+    syncVideoGrid(
+      voiceState(5, [user(1), user(3), user(2)], { musicSharers: sharers(3, 1, 2) }),
+      m,
+      deps,
+    );
+    const tiles = grid.setMusic.mock.calls[0]![0] as { userId: number; name: string }[];
+    expect(tiles.map((t) => t.userId)).toEqual([2, 3]);
+    expect(tiles[0]!.name).toBe("p2");
+  });
+
+  it("marks the one listened to and wires its actions to the session", () => {
+    const { grid, deps, memo: m } = setup();
+    syncVideoGrid(
+      voiceState(5, [user(2), user(3)], { musicSharers: sharers(2, 3), listeningTo: 3 }),
+      m,
+      deps,
+    );
+    const tiles = grid.setMusic.mock.calls[0]![0] as {
+      userId: number;
+      listening: boolean;
+      onListen(): void;
+      onStop(): void;
+      onVolume(p: number): void;
+    }[];
+    expect(tiles.map((t) => t.listening)).toEqual([false, true]);
+    tiles[0]!.onListen();
+    tiles[1]!.onStop();
+    tiles[0]!.onVolume(40);
+    expect(deps.music.listen).toHaveBeenNthCalledWith(1, 2);
+    expect(deps.music.listen).toHaveBeenNthCalledWith(2, null);
+    expect(deps.music.setVolume).toHaveBeenCalledWith(2, 40);
+  });
+
+  it("names the members listening to each sharer, and pushes again when they change", () => {
+    const { grid, deps, memo: m } = setup();
+    const state = voiceState(5, [user(2), user(3), user(4)], {
+      musicSharers: sharers(2),
+      peerListening: new Map([
+        [4, 2],
+        [3, 2],
+      ]),
+    });
+    syncVideoGrid(state, m, deps);
+    const tiles = grid.setMusic.mock.calls[0]![0] as { listeners: string[] }[];
+    expect(tiles[0]!.listeners).toEqual(["p3", "p4"]);
+    syncVideoGrid({ ...state, peerListening: new Map([[3, 2]]) }, m, deps);
+    expect(grid.setMusic).toHaveBeenCalledTimes(2);
+  });
+
+  it("pushes again only when the sharers or who is listened to change", () => {
+    const { grid, deps, memo: m } = setup();
+    const state = voiceState(5, [user(2)], { musicSharers: sharers(2) });
+    syncVideoGrid(state, m, deps);
+    syncVideoGrid(state, m, deps);
+    expect(grid.setMusic).toHaveBeenCalledTimes(1);
+    syncVideoGrid({ ...state, listeningTo: 2 }, m, deps);
+    expect(grid.setMusic).toHaveBeenCalledTimes(2);
+    syncVideoGrid({ ...state, musicSharers: sharers() }, m, deps);
+    expect(grid.setMusic).toHaveBeenLastCalledWith([]);
   });
 });

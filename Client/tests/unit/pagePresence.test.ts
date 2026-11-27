@@ -9,7 +9,7 @@ import {
   saveUserStatus,
   type StatusOrigin,
 } from "@lib/presence/userStatus";
-import { startStatusTimerWatcher } from "@lib/presence/statusTimer";
+import { startStatusTimerWatcher } from "../../src/features/presence/statusTimer";
 import { handlePresence } from "../../src/features/channels/wsHandlers";
 import { setChannelMutesHost } from "@lib/prefs/channelMutes";
 import { savePref } from "@lib/prefs/preferences";

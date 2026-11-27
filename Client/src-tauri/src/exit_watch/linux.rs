@@ -190,7 +190,7 @@ pub(super) fn log_session() {
         })
         .map_or("unknown".to_string(), |kb| format!("{} MB", kb / 1024));
     log::info!(
-        "[startup] session: type={}, desktop={}, WAYLAND_DISPLAY {}, DISPLAY {}, GDK_BACKEND={}, AppImage={}, kernel={kernel}, RAM={ram}, WEBKIT_DISABLE_DMABUF_RENDERER={}, WEBKIT_DISABLE_COMPOSITING_MODE={}",
+        "[startup] session: type={}, desktop={}, WAYLAND_DISPLAY {}, DISPLAY {}, GDK_BACKEND={}, AppImage={}, kernel={kernel}, RAM={ram}, WEBKIT_DISABLE_DMABUF_RENDERER={}, WEBKIT_DISABLE_COMPOSITING_MODE={}, {}",
         var("XDG_SESSION_TYPE").unwrap_or_else(|| "unknown".into()),
         var("XDG_CURRENT_DESKTOP").unwrap_or_else(|| "unknown".into()),
         set("WAYLAND_DISPLAY"),
@@ -199,6 +199,7 @@ pub(super) fn log_session() {
         if var("APPIMAGE").is_some() { "yes" } else { "no" },
         var("WEBKIT_DISABLE_DMABUF_RENDERER").unwrap_or_else(|| "unset".into()),
         var("WEBKIT_DISABLE_COMPOSITING_MODE").unwrap_or_else(|| "unset".into()),
+        crate::realtime_limits::summary(),
     );
 }
 

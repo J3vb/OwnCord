@@ -18,7 +18,7 @@ import {
 import { clearHost, hostAndroidApp, hostDesktopApp } from "../../helpers/androidHost";
 import { routeButtonMock, routeButtonsMade } from "../../helpers/routeButtonStub";
 
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("../../../src/features/voice/routeButton", () => routeButtonMock());
 vi.mock("../../../src/features/voice/peerVerification", (importOriginal) =>
   mocks.voicePeerVerificationMock(importOriginal),

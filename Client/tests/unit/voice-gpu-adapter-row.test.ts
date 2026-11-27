@@ -54,7 +54,7 @@ describe("graphics card row", () => {
   afterEach(() => ctl.abort());
 
   it("lists Auto and every card, with the saved one selected", async () => {
-    await mount({ ...base, saved: cards[1]!.id });
+    await mount({ ...base, saved: cards[1]!.id, active: cards[1]!.id });
     expect([...select().options].map((o) => o.textContent)).toEqual([
       "Auto (recommended)",
       "NVIDIA RTX",
@@ -80,6 +80,23 @@ describe("graphics card row", () => {
     expect(host.set).toHaveBeenCalledWith(cards[0]!.id);
     restart().click();
     expect(host.relaunch).toHaveBeenCalled();
+  });
+
+  it("keeps offering the restart on reopen while the saved card is not the one running", async () => {
+    await mount({ ...base, saved: cards[1]!.id, active: null });
+    expect(select().value).toBe(cards[1]!.id);
+    expect(restart().hidden).toBe(false);
+  });
+
+  it("drops the restart when the running card is picked back", async () => {
+    await mount({ ...base, saved: cards[0]!.id, active: cards[0]!.id });
+    select().value = cards[1]!.id;
+    select().dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(restart().hidden).toBe(false));
+    select().value = cards[0]!.id;
+    select().dispatchEvent(new Event("change"));
+    await vi.waitFor(() => expect(restart().hidden).toBe(true));
+    expect(host.set).toHaveBeenLastCalledWith(cards[0]!.id);
   });
 
   it("puts the old choice back when the save fails", async () => {

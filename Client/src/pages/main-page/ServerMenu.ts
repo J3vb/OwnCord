@@ -16,10 +16,10 @@ import {
   type ContextMenuSeparator,
 } from "@lib/ui/contextMenu";
 import { createLogger } from "@lib/logger";
-import { canManageChannels, canManageInvites, canViewAuditLog } from "@lib/permissions";
+import { canManageChannels, canManageInvites, canViewAuditLog } from "@stores/permissions";
 import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { isHideMutedChannels, setHideMutedChannels } from "@lib/prefs/hideMutedChannels";
-import { unreadChannelIds } from "@lib/readState";
+import { unreadChannelIds } from "@stores/readState";
 import { shellText } from "../../i18n/shell";
 
 const log = createLogger("server-menu");

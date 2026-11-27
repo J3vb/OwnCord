@@ -12,8 +12,9 @@ import {
   noteWatchingResync,
   clearPeerWatching,
 } from "../../stores/voice.store";
-import { ensureIdentityKeyPublished } from "../../lib/net/identity";
-import { moderatorAudioPlan } from "./moderatorAudioPlan";
+import { ensureIdentityKeyPublished } from "../connection/identity";
+import { moderatorAudioPlan, prevModeratorFlags } from "./moderatorAudioPlan";
+import type { PrevModeratorFlags } from "./moderatorAudioPlan";
 import { clearAfkMove } from "./moveHint";
 import { livekitSession } from "../connection/dispatchContext";
 import type { DispatchApi, DispatchWs, Payload } from "../connection/dispatchContext";
@@ -47,7 +48,9 @@ import type { DispatchApi, DispatchWs, Payload } from "../connection/dispatchCon
  * touched by moderation, always kept in sync with the user's own toggle via
  * voice_mute/voice_deafen) — requiring them to also be false before
  * releasing means a genuine self-mute that happens to coincide with the
- * moderator's release is never clobbered.
+ * moderator's release is never clobbered. The lift releases only a mute the
+ * moderator laid over an open mic (`prev.moderatorMuted`): a mute the member
+ * set before the moderator's stays, whatever the lifting frame's own row says.
  *
  * Lifting a moderator deafen also clears the row's own deafen (the server
  * cannot tell whose it was), so a member who had deafened themselves before
@@ -62,8 +65,7 @@ export function enforceModeratorAudioState(
   ws: DispatchWs,
   serverMuted: boolean,
   serverDeafened: boolean,
-  prevServerMuted: boolean,
-  prevServerDeafened: boolean,
+  prev: PrevModeratorFlags,
   selfMuted: boolean,
   selfDeafened: boolean,
 ): void {
@@ -72,8 +74,7 @@ export function enforceModeratorAudioState(
     voice,
     serverMuted,
     serverDeafened,
-    prevServerMuted,
-    prevServerDeafened,
+    prev,
     selfMuted,
     selfDeafened,
   );
@@ -111,8 +112,9 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
   // pre-resync moderator flags before setVoiceStates() overwrites them,
   // so a moderator restriction lifted while we were disconnected (and
   // still applied locally from before the drop) is released here too.
-  const prevSelfServerMuted = voiceStore.getState().localServerMuted ?? false;
-  const prevSelfServerDeafened = voiceStore.getState().localServerDeafened ?? false;
+  const prevSelf = prevModeratorFlags(voiceStore.getState());
+  const prevSelfServerMuted = prevSelf.serverMuted;
+  const prevSelfServerDeafened = prevSelf.serverDeafened;
   return (ws, payload) => {
     setVoiceStates(payload.voice_states);
     // A reconnect supersedes any AFK move still awaiting its join
@@ -147,8 +149,7 @@ export function snapshotReadyVoice(): (ws: DispatchWs, payload: Payload<"ready">
         ws,
         selfVoiceState.server_muted === true,
         selfVoiceState.server_deafened === true,
-        prevSelfServerMuted,
-        prevSelfServerDeafened,
+        prevSelf,
         selfVoiceState.muted,
         selfVoiceState.deafened,
       );

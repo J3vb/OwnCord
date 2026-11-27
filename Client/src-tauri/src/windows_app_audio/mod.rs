@@ -171,9 +171,54 @@ pub fn pick_target_pid(
     checked(first)
 }
 
+/// The window class of a Store (UWP) app's top-level frame. The frame is
+/// drawn by ApplicationFrameHost; the app runs in its own process, which owns
+/// a [`UWP_APP_CLASS`] window inside the frame.
+const UWP_FRAME_CLASS: &str = "ApplicationFrameWindow";
+/// The window class of a Store app's own window, inside its frame.
+const UWP_APP_CLASS: &str = "Windows.UI.Core.CoreWindow";
+
+/// The process whose sound a window owned by `pid`, of window class `class`,
+/// plays. For a Store app's frame it is the process of the app window inside
+/// it (`children`: each window inside the frame as (class, owner pid), read
+/// only for a frame); `None` when there is none, as for an app Windows
+/// suspended, so the share reports the app as not found instead of capturing
+/// the frame host's silence. Any other window plays from its owner.
+pub fn window_sound_pid(
+    class: &str,
+    pid: u32,
+    children: impl FnOnce() -> Vec<(String, u32)>,
+) -> Option<u32> {
+    if class != UWP_FRAME_CLASS {
+        return Some(pid);
+    }
+    children()
+        .into_iter()
+        .find(|(child_class, owner)| child_class == UWP_APP_CLASS && *owner != pid && *owner != 0)
+        .map(|(_, owner)| owner)
+}
+
+/// Whether `parent` really is `child`'s parent. Windows keeps a child's
+/// parent id after that parent exits and later gives the id to a new process,
+/// which was created after the child. `created` gives a process's creation
+/// time. While either time is unknown (a process that cannot be opened) the
+/// link stands as recorded: kept wrongly it only refuses a share, while
+/// dropped wrongly it could let a capture include OwnCord's own sound.
+fn parent_link_holds(child: u32, parent: u32, created: &impl Fn(u32) -> Option<u64>) -> bool {
+    match (created(child), created(parent)) {
+        (Some(child_at), Some(parent_at)) => parent_at <= child_at,
+        _ => true,
+    }
+}
+
 /// The processes `own_pid` descends from (parent, grandparent, ...), not
-/// `own_pid` itself. Hop-capped and cycle-safe like [`own_process_tree`].
-pub fn own_process_ancestors(own_pid: u32, parent_of: &HashMap<u32, u32>) -> HashSet<u32> {
+/// `own_pid` itself. Hop-capped and cycle-safe, and the climb stops at a
+/// parent id that names a newer process ([`parent_link_holds`]).
+pub fn own_process_ancestors(
+    own_pid: u32,
+    parent_of: &HashMap<u32, u32>,
+    created: impl Fn(u32) -> Option<u64>,
+) -> HashSet<u32> {
     let mut ancestors = HashSet::new();
     let mut current = own_pid;
     for _ in 0..64 {
@@ -182,6 +227,7 @@ pub fn own_process_ancestors(own_pid: u32, parent_of: &HashMap<u32, u32>) -> Has
                 if parent != 0
                     && parent != own_pid
                     && parent != current
+                    && parent_link_holds(current, parent, &created)
                     && ancestors.insert(parent) =>
             {
                 current = parent;
@@ -193,22 +239,28 @@ pub fn own_process_ancestors(own_pid: u32, parent_of: &HashMap<u32, u32>) -> Has
 }
 
 /// `own_pid` and every process descended from it, given a pid -> parent pid
-/// map (a Toolhelp snapshot on Windows). Chains are walked upward with a hop
-/// cap, so a stale parent id that closes a cycle cannot loop.
-pub fn own_process_tree(own_pid: u32, parent_of: &HashMap<u32, u32>) -> HashSet<u32> {
+/// map (a Toolhelp snapshot on Windows). The walk goes down from `own_pid`
+/// and visits each process once, so a stale parent id that closes a cycle
+/// cannot loop, and it does not follow a parent id that names a process newer
+/// than the child ([`parent_link_holds`]).
+pub fn own_process_tree(
+    own_pid: u32,
+    parent_of: &HashMap<u32, u32>,
+    created: impl Fn(u32) -> Option<u64>,
+) -> HashSet<u32> {
+    let mut children: HashMap<u32, Vec<u32>> = HashMap::new();
+    for (&child, &parent) in parent_of {
+        if child != parent {
+            children.entry(parent).or_default().push(child);
+        }
+    }
     let mut tree = HashSet::from([own_pid]);
-    for &start in parent_of.keys() {
-        let mut chain = Vec::new();
-        let mut current = start;
-        loop {
-            if tree.contains(&current) {
-                tree.extend(chain);
-                break;
-            }
-            chain.push(current);
-            match parent_of.get(&current) {
-                Some(&parent) if parent != current && chain.len() < 64 => current = parent,
-                _ => break,
+    let mut pending = vec![own_pid];
+    while let Some(parent) = pending.pop() {
+        for &child in children.get(&parent).into_iter().flatten() {
+            if !tree.contains(&child) && parent_link_holds(child, parent, &created) {
+                tree.insert(child);
+                pending.push(child);
             }
         }
     }
@@ -841,9 +893,9 @@ mod tests {
     fn never_an_ancestor_of_ours() {
         // own 7 was launched by explorer 3, itself under 1.
         let parents = HashMap::from([(7, 3), (3, 1), (1, 0), (50, 3)]);
-        let ancestors = own_process_ancestors(7, &parents);
+        let ancestors = own_process_ancestors(7, &parents, unknown);
         assert_eq!(ancestors, HashSet::from([3, 1]));
-        let own = own_process_tree(7, &parents);
+        let own = own_process_tree(7, &parents, unknown);
         let windows = [win(1, 3, "Explorer", true), win(2, 50, "Sibling", true)];
         assert_eq!(
             pick_target_pid("Explorer", none, &windows, &own, &ancestors),
@@ -860,14 +912,112 @@ mod tests {
         );
     }
 
+    /// No process's creation time can be read.
+    fn unknown(_: u32) -> Option<u64> {
+        None
+    }
+
+    /// Creation times by pid; a pid not listed cannot be opened.
+    fn born(times: &[(u32, u64)]) -> impl Fn(u32) -> Option<u64> + '_ {
+        move |pid| times.iter().find(|(p, _)| *p == pid).map(|&(_, at)| at)
+    }
+
+    #[test]
+    fn a_parent_created_after_its_child_is_a_reused_id() {
+        // OwnCord 7 (created at 10) was started by explorer 3 (at 5). 3's
+        // recorded parent 9 is long gone and its id now names a browser
+        // created at 50, which descends from 1.
+        let parents = HashMap::from([(7, 3), (3, 9), (9, 1), (1, 0)]);
+        let times = [(1, 1), (3, 5), (7, 10), (9, 50)];
+        let ancestors = own_process_ancestors(7, &parents, born(&times));
+        assert_eq!(ancestors, HashSet::from([3]));
+        let own = own_process_tree(7, &parents, born(&times));
+        let browser = [win(1, 9, "Video", true)];
+        assert_eq!(
+            pick_target_pid("window:1:0", |_| Some(9), &browser, &own, &ancestors),
+            Ok(9)
+        );
+        // A link whose times cannot both be read stays as recorded.
+        let partly = born(&[(3, 5), (7, 10)]);
+        assert_eq!(
+            own_process_ancestors(7, &parents, partly),
+            HashSet::from([3, 9, 1])
+        );
+        // A parent created in the same tick as its child is its parent.
+        assert_eq!(
+            own_process_ancestors(7, &parents, born(&[(3, 10), (7, 10)])),
+            HashSet::from([3, 9, 1])
+        );
+    }
+
+    #[test]
+    fn an_app_whose_parent_id_was_reused_by_owncord_is_not_its_child() {
+        // App 20 (created at 4) and its child 21 outlived their parent, whose
+        // id 8 now names one of OwnCord's processes (created at 12).
+        let parents = HashMap::from([(8, 7), (20, 8), (21, 20), (7, 3)]);
+        let times = [(3, 1), (7, 10), (8, 12), (20, 4), (21, 6)];
+        assert_eq!(
+            own_process_tree(7, &parents, born(&times)),
+            HashSet::from([7, 8])
+        );
+        // Without the times the links stand.
+        assert_eq!(
+            own_process_tree(7, &parents, unknown),
+            HashSet::from([7, 8, 20, 21])
+        );
+    }
+
+    #[test]
+    fn a_store_app_window_plays_from_its_app_process() {
+        let frame = "ApplicationFrameWindow";
+        let title_bar = || ("ApplicationFrameTitleBarWindow".to_string(), 100);
+        let core = |pid: u32| ("Windows.UI.Core.CoreWindow".to_string(), pid);
+        // The frame belongs to ApplicationFrameHost (100); the app (300) owns
+        // the CoreWindow inside it.
+        assert_eq!(
+            window_sound_pid(frame, 100, || vec![title_bar(), core(300)]),
+            Some(300)
+        );
+        // No CoreWindow of another process (the app is suspended or not yet
+        // drawn): nothing to capture, so the share reports it.
+        assert_eq!(
+            window_sound_pid(frame, 100, || vec![title_bar(), core(100)]),
+            None
+        );
+        assert_eq!(window_sound_pid(frame, 100, Vec::new), None);
+        assert_eq!(
+            window_sound_pid(frame, 100, || vec![("Other".to_string(), 300)]),
+            None
+        );
+        // Any other window plays from its owner; its children are not read.
+        assert_eq!(
+            window_sound_pid("Chrome_WidgetWin_1", 200, || panic!("children read")),
+            Some(200)
+        );
+        // A frame the app cannot be found in gives not_found.
+        assert_eq!(
+            pick_target_pid(
+                "window:1:0",
+                |_| window_sound_pid(frame, 100, Vec::new),
+                &[],
+                &HashSet::new(),
+                &HashSet::new()
+            ),
+            Err(ResolveError::NotFound)
+        );
+    }
+
     #[test]
     fn ancestors_survive_cycles_and_roots() {
         let cyc = HashMap::from([(7, 3), (3, 7)]);
-        assert_eq!(own_process_ancestors(7, &cyc), HashSet::from([3]));
+        assert_eq!(own_process_ancestors(7, &cyc, unknown), HashSet::from([3]));
         let cyc2 = HashMap::from([(7, 3), (3, 4), (4, 3)]);
-        assert_eq!(own_process_ancestors(7, &cyc2), HashSet::from([3, 4]));
-        assert!(own_process_ancestors(7, &HashMap::new()).is_empty());
-        assert!(own_process_ancestors(7, &HashMap::from([(7, 0)])).is_empty());
+        assert_eq!(
+            own_process_ancestors(7, &cyc2, unknown),
+            HashSet::from([3, 4])
+        );
+        assert!(own_process_ancestors(7, &HashMap::new(), unknown).is_empty());
+        assert!(own_process_ancestors(7, &HashMap::from([(7, 0)]), unknown).is_empty());
     }
 
     #[test]
@@ -915,14 +1065,17 @@ mod tests {
     fn process_tree_follows_parent_chains() {
         // 1 -> 2 -> 3 -> 4 descend from 1; 10 -> 11 and 20 do not.
         let parents = HashMap::from([(2, 1), (3, 2), (4, 3), (11, 10), (10, 0), (20, 1000)]);
-        let tree = own_process_tree(1, &parents);
+        let tree = own_process_tree(1, &parents, unknown);
         assert_eq!(tree, HashSet::from([1, 2, 3, 4]));
     }
 
     #[test]
     fn process_tree_survives_cycles_and_self_parents() {
         let parents = HashMap::from([(5, 6), (6, 5), (0, 0), (9, 9), (2, 1)]);
-        assert_eq!(own_process_tree(1, &parents), HashSet::from([1, 2]));
+        assert_eq!(
+            own_process_tree(1, &parents, unknown),
+            HashSet::from([1, 2])
+        );
     }
 
     #[test]

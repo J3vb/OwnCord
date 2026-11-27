@@ -6,7 +6,9 @@ import {
   setChatHeaderCallChat,
   setChatHeaderTopic,
   setChatHeaderLock,
+  setChatHeaderMedia,
 } from "../../src/pages/main-page/ChatHeader";
+import { closeBottomSheet } from "../../src/lib/ui/bottomSheet";
 import { useMountContainer } from "../helpers/mountContainer";
 import { cascadedDeclaration } from "../helpers/app-css";
 
@@ -239,6 +241,14 @@ describe("setChatHeaderLock", () => {
 });
 
 describe("updateChatHeaderForDm", () => {
+  it("hides the Media button a channel showed, whatever channel was viewed last", () => {
+    const { refs } = buildChatHeader({ onTogglePins: vi.fn() });
+    setChatHeaderMedia(refs, true);
+    expect(refs.mediaBtn!.hidden).toBe(false);
+    updateChatHeaderForDm(refs, { username: "alice", status: "Online" });
+    expect(refs.mediaBtn!.hidden).toBe(true);
+  });
+
   let container: HTMLDivElement;
   useMountContainer((mounted) => {
     container = mounted;
@@ -283,6 +293,39 @@ describe("updateChatHeaderForDm", () => {
     updateChatHeaderForDm(refs, null);
     expect(refs.videoCallBtn.style.display).toBe("none");
     expect(refs.avatarEl.style.display).toBe("none");
+  });
+
+  it("lists Start video call and Threads in the phone's More sheet, which starts the call", () => {
+    const onStartVideoCall = vi.fn();
+    const { element, refs } = buildChatHeader({ onTogglePins: vi.fn(), onStartVideoCall });
+    container.appendChild(element);
+    updateChatHeaderForDm(refs, { username: "Alice", status: "online" });
+    refs.threadsBtn!.hidden = false;
+
+    element.querySelector<HTMLButtonElement>('[data-testid="chat-header-more"]')!.click();
+    const sheet = document.querySelector('[data-testid="chat-header-more-sheet"]')!;
+    expect(sheet.querySelector('[data-testid="chat-header-more-threads-btn"]')).not.toBeNull();
+    sheet.querySelector<HTMLElement>('[data-testid="chat-header-more-video-call-btn"]')!.click();
+
+    expect(onStartVideoCall).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows Start video call as disabled in the More sheet while the header button is", () => {
+    const onStartVideoCall = vi.fn();
+    const { element, refs } = buildChatHeader({ onTogglePins: vi.fn(), onStartVideoCall });
+    container.appendChild(element);
+    updateChatHeaderForDm(refs, { username: "Alice", status: "online" });
+    refs.videoCallBtn.disabled = true;
+
+    element.querySelector<HTMLButtonElement>('[data-testid="chat-header-more"]')!.click();
+    const sheet = document.querySelector('[data-testid="chat-header-more-sheet"]')!;
+    const row = sheet.querySelector<HTMLElement>(
+      '[data-testid="chat-header-more-video-call-btn"]',
+    )!;
+    expect(row.getAttribute("aria-disabled")).toBe("true");
+    closeBottomSheet();
+
+    expect(onStartVideoCall).not.toHaveBeenCalled();
   });
 
   it("calls onStartVideoCall, not onStartCall, from the video button", () => {

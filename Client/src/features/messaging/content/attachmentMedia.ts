@@ -4,7 +4,6 @@
  */
 
 import { ensureHttpProxy } from "@lib/net/httpProxy";
-import { getToken } from "@stores/auth.store";
 import { desktop } from "../../../platform/desktop";
 import { log } from "./attachmentUrls";
 import { createObjectUrl, currentGeneration, revokeObjectUrl } from "./attachmentObjectUrls";
@@ -16,7 +15,14 @@ import {
   mediaInFlight,
   type FileLink,
 } from "./attachmentCacheState";
-import { fetchServerFile, isServerUrl, sanitizeContentType } from "./attachmentServerFetch";
+import {
+  fetchServerFile,
+  isCurrentServerSession,
+  sanitizeContentType,
+  serverRequestSession,
+  urlOnSessionServer,
+  type ServerRequestSession,
+} from "./attachmentServerFetch";
 
 /**
  * Fetch a video/audio attachment through the same authenticated,
@@ -82,10 +88,9 @@ const FILE_LINK_PATH = /^\/api\/v1\/files\/[^/]+$/;
 
 /** The parsed URL when a link can be minted for it: the server's own
  *  attachment path (not /thumb). */
-function mintableUrl(url: string): URL | null {
-  if (!isServerUrl(url)) return null;
-  const parsed = new URL(url);
-  return FILE_LINK_PATH.test(parsed.pathname) ? parsed : null;
+function mintableUrl(url: string, session: ServerRequestSession | null): URL | null {
+  const parsed = urlOnSessionServer(url, session);
+  return parsed !== null && FILE_LINK_PATH.test(parsed.pathname) ? parsed : null;
 }
 
 /** The link's path and expiry from the server's reply, or null when malformed. */
@@ -102,15 +107,16 @@ function parseFileLinkBody(body: unknown): { path: string; expiresAtMs: number }
 async function requestFileLink(url: string): Promise<FileLink | null> {
   const generation = currentGeneration();
   try {
-    const parsed = mintableUrl(url);
-    if (parsed === null) return null;
-    const token = getToken();
-    if (token === null) return null;
+    // Host and token come from one read of the session, before any await.
+    const session = serverRequestSession();
+    const parsed = mintableUrl(url, session);
+    if (session === null || parsed === null || session.token === null) return null;
     const origin = await ensureHttpProxy(parsed.host);
+    if (!isCurrentServerSession(session)) return null;
     const res = await desktop.http.fetch(`${origin}${parsed.pathname}/link`, {
       method: "POST",
       // i18n-exempt: HTTP wire header value, never rendered
-      headers: { Authorization: `Bearer ${token}` },
+      headers: { Authorization: `Bearer ${session.token}` },
     });
     if (res.status === 404 || res.status === 405) {
       if (generation === currentGeneration()) fileLinkRefused.add(url);

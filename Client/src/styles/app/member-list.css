@@ -374,3 +374,10 @@
     user-select: none;
   }
 }
+
+/* Phones: every member row is 44px to hit. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .member-item {
+    min-height: 44px;
+  }
+}

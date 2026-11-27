@@ -34,7 +34,7 @@ import {
 import { recoverEvictedImage, resolveServerUrl } from "../messaging/content/attachments";
 import { avatarFetchUrl, fetchAvatarObjectUrl } from "../profiles/avatarSource";
 import type { WsClient } from "@lib/ws";
-import type { PresenceSender } from "@lib/presence/presence";
+import type { PresenceSender } from "../presence/presence";
 import { shellText } from "../../i18n/shell";
 import { voiceText } from "../../i18n/voice";
 import { micControlState } from "./voiceStatusText";
@@ -305,7 +305,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
     function applyStatus(status: UserStatus, durationMs?: number): void {
       saveUserStatus(status);
       // After the save, which ends any earlier timer: this one reverts the
-      // status to Online when it runs out (lib/presence/statusTimer, started by the page).
+      // status to Online when it runs out (features/presence/statusTimer, started by the page).
       if (durationMs !== undefined && isTimedStatus(status)) {
         saveStatusTimer(status, Date.now() + durationMs);
       }
@@ -315,7 +315,7 @@ export function createUserBar(options?: UserBarOptions): MountableComponent {
         // No custom_status field: a plain status change must leave whatever
         // text the user set standing. Routed through the shared sender
         // (not ws.send directly) so a frame the presence limiter's window
-        // rejects is retried instead of lost — see @lib/presence/presence.
+        // rejects is retried instead of lost — see features/presence/presence.
         sender.send(status);
       }
     }

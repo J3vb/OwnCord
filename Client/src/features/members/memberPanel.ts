@@ -11,11 +11,11 @@ import { Disposable } from "@lib/disposable";
 import { createElement } from "@lib/dom";
 import type { createMemberList } from "./MemberList";
 import type { buildVoiceModOptions, VoiceModerationCallbacks } from "../channels/ChannelSidebar";
-import { parseTimestamp } from "@lib/text/formatting";
+import { parseTimestamp } from "../messaging/formatting";
 import { authStore } from "@stores/auth.store";
 import { channelsStore } from "@stores/channels.store";
 import { membersStore, memberDisplayName } from "@stores/members.store";
-import { currentUserRoleHasPermission, topPositionFor } from "@lib/permissions";
+import { currentUserRoleHasPermission, topPositionFor } from "@stores/permissions";
 import { Permission, type AdminUser } from "@lib/types";
 import { type ApiClient, ApiClientError, errorText } from "@lib/api";
 import type { ToastContainer, ToastType } from "@lib/ui/toastContainer";
@@ -31,6 +31,9 @@ import {
   type RoleMembershipDeps,
 } from "../moderation/roleAssignment";
 import { TIMEOUT_PRESETS } from "../moderation/timeoutPresets";
+import { runningScreenLayout } from "@lib/prefs/screenLayout";
+import { buddiesListOptions } from "./buddies/buddiesSetup";
+import { createBuddiesTitle } from "./buddies/buddiesTitle";
 
 /** The two UI-layer functions the panel needs. Injected rather than imported:
  *  `features/` is a lower layer and may not statically import `pages/`.
@@ -52,6 +55,9 @@ export interface MemberPanelOptions {
   /** Senders for the voice moderation rows (Server Mute, Deafen, Disconnect);
    *  without them the member menu offers none. */
   readonly onVoiceModerate?: VoiceModerationCallbacks;
+  /** Join a voice room, as a click on the room does. Under Command Deck the
+   *  row menu offers "Join {room}" through it; Classic does not use it. */
+  readonly onJoinVoice?: (channelId: number) => void;
 }
 
 export interface MemberPanel {
@@ -215,7 +221,10 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
     signal: owner.signal,
     fallbackFocus: () => memberList.focusMember(userId),
   });
+  // Command Deck draws the list as Buddies; Classic keeps its role groups.
+  const deck = runningScreenLayout() === "deck";
   const memberList = ui.createMemberList({
+    ...(deck ? buddiesListOptions(opts.onJoinVoice) : {}),
     currentUserRole: authStore.getState().user?.role ?? "member",
     ...(onMessageUser !== undefined ? { onMessageUser } : {}),
     ...(onCallUser !== undefined ? { onCallUser } : {}),
@@ -367,6 +376,7 @@ export function createMemberPanel(opts: MemberPanelOptions): MemberPanel {
       }
     },
   });
+  if (deck) element.appendChild(createBuddiesTitle(owner.signal));
   memberList.mount(element);
   // Appended after MemberList's own root: its re-renders replace only the
   // inside of that root, so this sibling survives every roster change.

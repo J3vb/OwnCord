@@ -15,7 +15,11 @@
  */
 
 import { motionReduced, bindAnimatedImage, type AnimationMode } from "@lib/ui/animatedStill";
-import { fetchImageAsObjectUrl, smallThumbnailUrl } from "../messaging/content/attachments";
+import {
+  attachmentCacheGeneration,
+  fetchImageAsObjectUrl,
+  smallThumbnailUrl,
+} from "../messaging/content/attachments";
 
 /** The preview sizes the server keeps: list rows, and profile surfaces. */
 export type AvatarThumbSize = 128 | 256;
@@ -33,9 +37,14 @@ export function fetchAvatarObjectUrl(
 ): Promise<string | null> {
   const first = avatarFetchUrl(resolved, size);
   if (first === resolved) return fetchImageAsObjectUrl(resolved);
-  return fetchImageAsObjectUrl(first).then((objectUrl) =>
-    objectUrl === null ? fetchImageAsObjectUrl(resolved) : objectUrl,
-  );
+  const generation = attachmentCacheGeneration();
+  return fetchImageAsObjectUrl(first).then((objectUrl) => {
+    if (objectUrl !== null) return objectUrl;
+    // The caches were cleared (sign-out, server switch) while the preview was
+    // on its way: the avatar belongs to a session that is gone.
+    if (generation !== attachmentCacheGeneration()) return null;
+    return fetchImageAsObjectUrl(resolved);
+  });
 }
 
 /**

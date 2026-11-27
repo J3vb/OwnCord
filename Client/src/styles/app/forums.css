@@ -87,7 +87,7 @@
 .forum-tag-chip.selected {
   border-color: var(--accent);
   background: var(--accent);
-  color: var(--on-fill);
+  color: var(--on-accent);
 }
 .forum-sort-btn:hover:not([aria-pressed="true"]),
 .forum-tag-chip:hover:not(.selected),

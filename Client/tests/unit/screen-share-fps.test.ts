@@ -35,6 +35,8 @@ import {
   SCREENSHARE_PUBLISH_BITRATES,
   type StreamQuality,
 } from "../../src/features/voice/screenShare";
+import { captureOptions } from "../../src/features/voice/native/screenTrack";
+import { createLocalScreenTracks } from "livekit-client";
 
 const SCREENSHARE_AUDIO_CAPTURE = {
   restrictOwnAudio: true,
@@ -195,11 +197,41 @@ describe("screen share FPS", () => {
       expect(getScreenShareCaptureOptions("medium", 30).resolution?.frameRate).toBe(30);
     });
 
-    it("returns a copy of the source preset at the default fps", () => {
-      const opts = getScreenShareCaptureOptions("source", 30);
+    // Source is the capture's own size at every frame rate: a zero size is
+    // uncapped in livekit's constraint translation, and a defined resolution
+    // stops createLocalScreenTracks injecting its 1080p30 default.
+    it.each([30, 60, 120])("gives source the zero-size sentinel at %i fps", (fps) => {
+      const opts = getScreenShareCaptureOptions("source", fps);
       expect(opts).not.toBe(SCREENSHARE_PRESETS.source);
-      expect(opts.resolution).toBeUndefined();
+      expect(opts.resolution).toEqual({ width: 0, height: 0, frameRate: fps });
+      expect(opts.video).toEqual({ frameRate: fps });
       expect(opts.audio).toEqual(SCREENSHARE_AUDIO_CAPTURE);
+    });
+
+    it("sends source at the default frame rate to getDisplayMedia with no size cap", async () => {
+      const getDisplayMedia = vi.fn((_constraints: DisplayMediaStreamOptions) =>
+        Promise.reject(new Error("picker closed")),
+      );
+      Object.defineProperty(navigator, "mediaDevices", {
+        value: { getDisplayMedia },
+        configurable: true,
+      });
+      try {
+        await expect(
+          createLocalScreenTracks(getScreenShareCaptureOptions("source", 30)),
+        ).rejects.toThrow("picker closed");
+      } finally {
+        delete (navigator as { mediaDevices?: unknown }).mediaDevices;
+      }
+      expect(getDisplayMedia.mock.calls[0]?.[0].video).toEqual({ frameRate: 30 });
+    });
+
+    it.each([
+      ["source", 30, { fps: 30, maxWidth: 0, maxHeight: 0 }],
+      ["source", 60, { fps: 60, maxWidth: 0, maxHeight: 0 }],
+      ["high", 30, { fps: 30, maxWidth: 1920, maxHeight: 1080 }],
+    ] as const)("maps %s at %i fps to the Linux host's capture as %o", (quality, fps, want) => {
+      expect(captureOptions(getScreenShareCaptureOptions(quality, fps))).toEqual(want);
     });
 
     it("captures screen audio unprocessed and stereo, excluding the call itself", () => {
@@ -207,15 +239,6 @@ describe("screen share FPS", () => {
         expect(getScreenShareCaptureOptions(quality, 30).audio).toEqual(SCREENSHARE_AUDIO_CAPTURE);
         expect(SCREENSHARE_PRESETS[quality].audio).toEqual(SCREENSHARE_AUDIO_CAPTURE);
       }
-    });
-
-    it("uses a zero-size resolution sentinel for source with explicit fps", () => {
-      const opts = getScreenShareCaptureOptions("source", 120);
-      expect(opts).not.toBe(SCREENSHARE_PRESETS.source);
-      // Zero width/height = uncapped in livekit's constraint translation, and
-      // a defined resolution stops the library injecting its 1080p30 default.
-      expect(opts.resolution).toEqual({ width: 0, height: 0, frameRate: 120 });
-      expect(opts.video).toEqual({ frameRate: 120 });
     });
 
     it("does not mutate the shared presets", () => {

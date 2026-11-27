@@ -5,10 +5,10 @@
  */
 
 import { createElement, setText, appendChildren } from "@lib/dom";
-import { formatBadgeCount, formatDmRowTime } from "@lib/text/formatting";
+import { formatBadgeCount, formatDmRowTime } from "../messaging/formatting";
 import { createIcon } from "@lib/icons";
 import { openMenuOnKeyboard } from "@lib/ui/contextMenu";
-import { attachPressWarm } from "@lib/nav/pressWarm";
+import { attachPressWarm } from "../navigation/pressWarm";
 import { getChannelMute } from "@lib/prefs/channelMutes";
 import { requestsText } from "../../i18n/requests";
 import { voiceText } from "../../i18n/voice";
@@ -65,7 +65,7 @@ function buildBody(convo: DmConversation): HTMLDivElement {
 
 /** Participant count, groups only: the label may be a name that says nothing
  *  about size, and "who else is in here" is the first thing you want to know. */
-function buildMemberCount(convo: DmConversation): HTMLElement {
+export function buildMemberCount(convo: DmConversation): HTMLElement {
   const count = (convo.participants ?? []).length + 1;
   const countEl = createElement(
     "span",

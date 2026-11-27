@@ -131,6 +131,7 @@ describe("browser notifier", () => {
   it("observes the browser's permission, which is the page's own state", async () => {
     const notifier = await load();
     expect(notifier.readsOsPermission).toBe(true);
+    expect(notifier.canFlash).toBe(false);
   });
 
   it("shows nothing without permission, and asks for none on its own", async () => {

@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"net/http"
 
+	"github.com/J3vb/OwnCord/Server/auth"
 	"github.com/J3vb/OwnCord/Server/db"
 	"github.com/J3vb/OwnCord/Server/httperr"
 	"github.com/J3vb/OwnCord/Server/service"
@@ -18,9 +19,11 @@ import (
 // under /api/v1/channels/{id}/nsfw-acknowledgement. broadcaster sends the
 // caller's OTHER live sockets an nsfw_ack frame so a second device converges
 // without a reconnect — the same DMBroadcaster seam MountDMRoutes uses.
-func MountNSFWRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaster) {
+func MountNSFWRoutes(r chi.Router, svc *service.Services, broadcaster DMBroadcaster, limiter *auth.RateLimiter) {
 	r.Route("/api/v1/channels/{id}/nsfw-acknowledgement", func(r chi.Router) {
 		r.Use(AuthMiddleware(svc.Sessions))
+		// Acknowledge and revoke share one per-account budget; a nil limiter allows.
+		r.Use(perUserActionLimit(limiter, "nsfw_ack", "too many content setting changes, please slow down"))
 		r.Put("/", handleNSFWAcknowledge(svc, broadcaster))
 		r.Delete("/", handleNSFWRevoke(svc, broadcaster))
 	})

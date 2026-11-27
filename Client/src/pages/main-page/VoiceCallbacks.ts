@@ -14,7 +14,7 @@ import {
 } from "@stores/voice.store";
 import { uiStore } from "@stores/ui.store";
 import { showToast } from "@lib/ui/toast";
-import { noteJoinFailed } from "../../features/voice/joinBackoff";
+import { noteJoinFailed } from "@lib/voice/joinBackoff";
 import { sendUserJoin, switchWaiting } from "../../features/voice/joinClick";
 import { noteVoiceLeave } from "../../features/voice/leaveOwed";
 import { joinBackoffText } from "../../features/voice/joinBackoffText";
@@ -27,7 +27,7 @@ import {
   disableCamera,
   enableScreenshare,
   disableScreenshare,
-} from "@lib/voice/livekitSession";
+} from "../../features/voice/livekitSession";
 
 const log = createLogger("voice-callbacks");
 
@@ -91,6 +91,9 @@ export function createVoiceWidgetCallbacks(
       // unmute, so don't spend the round-trip (keybinds reach here too, not
       // just the disabled button).
       if (state.localServerMuted === true) return;
+      // The AFK channel's mic is locked muted: a toggle there would only flip
+      // a mute nothing shows, and save it for the next channel.
+      if (state.inAfkChannel === true && state.currentChannelId !== null) return;
       // Mute and deafen apply locally whatever the chat socket is doing, in a
       // call or not; the frame goes out only in a call on a live socket, and
       // the reconnect or the next join restates it.
@@ -132,7 +135,8 @@ export function createVoiceWidgetCallbacks(
         }
         setMutedBeforeDeafen(false);
       } else {
-        setMutedBeforeDeafen(state.localMuted);
+        // A moderator's mute is not one the member had before deafening.
+        setMutedBeforeDeafen(state.localMuted && state.moderatorMuted !== true);
         voiceSessionSetDeafened(true);
         if (live) ws.send({ type: "voice_deafen", payload: { deafened: true } });
         if (!state.localMuted) {

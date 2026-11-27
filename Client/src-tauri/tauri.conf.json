@@ -1,6 +1,6 @@
 {
   "productName": "OwnCord",
-  "version": "2.10.0",
+  "version": "2.11.0",
   "identifier": "com.owncord.client",
   "build": {
     "frontendDist": "../dist",
@@ -27,7 +27,7 @@
     ],
     "withGlobalTauri": false,
     "security": {
-      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' blob: data:; media-src 'self' blob: http://127.0.0.1:*; font-src 'self'; object-src 'none'; base-uri 'self'; frame-src https://www.youtube.com https://youtube.com; worker-src 'self' blob:"
+      "csp": "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; connect-src 'self' ipc: http://ipc.localhost http://localhost:* ws://localhost:* http://127.0.0.1:* ws://127.0.0.1:*; img-src 'self' blob: data:; media-src 'self' blob: http://127.0.0.1:*; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'none'; frame-src https://www.youtube.com https://youtube.com; worker-src 'self' blob:"
     }
   },
   "bundle": {
@@ -38,7 +38,7 @@
     "linux": {
       "deb": {
         "depends": [
-          "libwebkit2gtk-4.1-0",
+          "libwebkit2gtk-4.1-0 (>= 2.44)",
           "libgtk-3-0",
           "libayatana-appindicator3-1",
           "libsecret-1-0",

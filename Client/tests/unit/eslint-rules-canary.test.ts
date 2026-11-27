@@ -55,7 +55,7 @@ interface Canary {
 const CANARIES: readonly Canary[] = [
   {
     rule: "local/no-leave-voice-when-superseded",
-    filePath: "src/lib/voice/livekitReconnect.ts",
+    filePath: "src/features/voice/livekitReconnect.ts",
     code: `async function attemptAutoReconnect(deps, signal, channelId, owner) {
       const superseded = () => reconnectSuperseded(signal, channelId, owner, deps.getState());
       if (superseded()) {
@@ -132,7 +132,7 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/no-store-write-in-ws-on",
     shape: "getState() mutator",
-    filePath: "src/lib/presence/presence.ts",
+    filePath: "src/features/presence/presence.ts",
     code: `import { messagesStore } from "@stores/messages.store";
     ws.on("x", (p) => { messagesStore.getState().addMessage(p); });`,
     messageId: "storeWriteOutsideDispatcher",
@@ -184,13 +184,13 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/subscription-result-kept",
     shape: "ws.on",
-    filePath: "src/lib/dispatcher.ts",
+    filePath: "src/app/dispatcher.ts",
     code: `this.ws.on("x", () => {});`,
     messageId: "discarded",
   },
   {
     rule: "local/layer-direction",
-    filePath: "src/lib/presence/presence.ts",
+    filePath: "src/features/presence/presence.ts",
     code: `import { MainPage } from "@pages/MainPage";`,
     messageId: "upwardImport",
     hasOptions: true,
@@ -206,7 +206,7 @@ const CANARIES: readonly Canary[] = [
   {
     rule: "local/layer-direction",
     shape: "dynamic import",
-    filePath: "src/lib/voice/livekitSession.ts",
+    filePath: "src/features/voice/livekitSession.ts",
     code: `async function f() { return import("@pages/MainPage"); }`,
     messageId: "upwardImport",
     hasOptions: true,
@@ -301,9 +301,9 @@ describe("view-file store ban", () => {
     expect(await restricted(`import { x } from "../../stores/ui.store";`, VIEW)).toContain(
       "no-restricted-imports",
     );
-    expect(await restricted(`import { x } from "@lib/voice/livekitSession";`, VIEW)).toContain(
-      "no-restricted-imports",
-    );
+    expect(
+      await restricted(`import { x } from "../../src/features/voice/livekitSession";`, VIEW),
+    ).toContain("no-restricted-imports");
     expect(await restricted(`import { x } from "../safety/store";`, VIEW)).toContain(
       "no-restricted-imports",
     );
@@ -317,7 +317,10 @@ describe("view-file store ban", () => {
       await restricted(`export const f = () => import("../moderation/store");`, VIEW),
     ).toContain("no-restricted-syntax");
     expect(
-      await restricted(`export const f = () => import("@lib/voice/livekitSession");`, VIEW),
+      await restricted(
+        `export const f = () => import("../../src/features/voice/livekitSession");`,
+        VIEW,
+      ),
     ).toContain("no-restricted-syntax");
   }, 60_000);
 

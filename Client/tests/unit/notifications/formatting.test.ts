@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import * as mocks from "../../helpers/notificationsMocks";
-import { notifyIncomingMessage } from "../../../src/lib/notifications";
+import { notifyIncomingMessage } from "../../../src/features/notifications/notifications";
 import { channelsStore } from "../../../src/stores/channels.store";
 import { messagesStore } from "../../../src/stores/messages.store";
 import { setLogLevel } from "../../../src/lib/logger";
@@ -20,7 +20,7 @@ import { resetAuthState } from "../../helpers/storeSeeds";
 vi.mock("../../../src/lib/prefs/preferences", (importOriginal) =>
   mocks.prefsPreferencesMock(importOriginal),
 );
-vi.mock("../../../src/lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@tauri-apps/plugin-notification", () => mocks.pluginNotificationMock());
 vi.mock("@tauri-apps/api/core", () => mocks.apiCoreMock());
 vi.mock("@tauri-apps/api/event", () => mocks.apiEventMock());
@@ -81,7 +81,7 @@ describe("notifyIncomingMessage", () => {
 
     // OC-0233: the popup that tells you who wrote to you has to name them the
     // same way the message row you click through to does. resolveAuthor
-    // (lib/text/formatting.ts) prefers the live membersStore copy of the
+    // (features/messaging/formatting.ts) prefers the live membersStore copy of the
     // author's nickname over whatever was frozen into the payload.
     it("titles the notification with the member store's nickname, not the raw username", async () => {
       const sendNotification = await freshSendNotification();
@@ -214,6 +214,41 @@ describe("notifyIncomingMessage", () => {
         expect(call.body).toBe("HelloWorld!");
       });
     });
+
+    // The native popup's command refuses half an emoji, so a cut that lands
+    // inside one keeps it whole: the text before "..." is the limit in
+    // characters, and no lone surrogate is left.
+    it.each([
+      {
+        part: "title" as const,
+        username: `${"U".repeat(79)}\u{1F600}`,
+        content: "x",
+        kept: `${"U".repeat(79)}\u{1F600}`,
+        limit: 80,
+      },
+      {
+        part: "body" as const,
+        username: "X",
+        content: `${"B".repeat(99)}\u{1F600}x`,
+        kept: `${"B".repeat(99)}\u{1F600}`,
+        limit: 100,
+      },
+    ])(
+      "a $part cut that lands inside an emoji keeps it whole",
+      async ({ part, username, content, kept, limit }) => {
+        const sendNotification = await armDesktopNotifications();
+
+        notifyAs(username, 1, content);
+
+        await vi.waitFor(() => {
+          const call = sendNotification.mock.calls[0]![0];
+          const text: string = call[part];
+          expect(/\p{Cs}/u.test(text)).toBe(false);
+          expect(text).toBe(`${kept}...`);
+          expect(Array.from(kept)).toHaveLength(limit);
+        });
+      },
+    );
 
     it("control chars are removed before length check (not counted)", async () => {
       const sendNotification = await armDesktopNotifications();

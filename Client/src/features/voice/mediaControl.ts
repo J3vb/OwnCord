@@ -14,8 +14,8 @@ import {
 } from "../../stores/voice.store";
 import { createLogger } from "../../lib/logger";
 import type { AudioPipeline } from "../../lib/voice/audioPipeline";
-import type { AudioElements } from "../../lib/voice/audioElements";
-import { type DeviceManager, isMicPolicyGated } from "../../lib/voice/deviceManager";
+import type { AudioElements } from "../../features/voice/audioElements";
+import { type DeviceManager, isMicPolicyGated } from "../../features/voice/deviceManager";
 import { publishAllowed, announceFallbackMute } from "./publishGrant";
 import { voiceText } from "../../i18n/voice";
 import { CodecSwitchController } from "./codecSwitch";
@@ -484,8 +484,8 @@ export class MediaControl {
   }
 
   /** Close or open the push-to-talk gate (AudioPipeline.setPttGated). */
-  setPttGated(gated: boolean): void {
-    this._audioPipeline.setPttGated(gated);
+  setPttGated(gated: boolean, releaseDelayMs = 0): void {
+    this._audioPipeline.setPttGated(gated, releaseDelayMs);
   }
 
   async reapplyAudioProcessing(): Promise<void> {

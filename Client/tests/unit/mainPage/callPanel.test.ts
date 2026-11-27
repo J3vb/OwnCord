@@ -21,11 +21,11 @@ vi.mock("../../../src/features/content-consent/external", (importOriginal) =>
   mocks.consentExternalMock(importOriginal),
 );
 vi.mock("@lib/logger", () => mocks.loggerMock());
-vi.mock("@lib/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
+vi.mock("../../../src/features/voice/livekitSession", () => mocks.voiceLivekitSessionMock());
 vi.mock("@lib/media/notificationSound", () => mocks.mediaNotificationSoundMock());
 vi.mock("../../../src/features/direct-messages/callAlerts", () => mocks.messagesCallAlertsMock());
 vi.mock("../../../src/features/updates/UpdateNotifier", () => mocks.updateNotifierMock());
-vi.mock("@lib/voice/audioElements", () => mocks.voiceAudioElementsMock());
+vi.mock("../../../src/features/voice/audioElements", () => mocks.voiceAudioElementsMock());
 vi.mock("@lib/presence/autoIdle", () => mocks.presenceAutoIdleMock());
 vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) =>
   mocks.listAttachmentsMock(importOriginal),
@@ -179,7 +179,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   });
 
   it("wires full screen, the full-screen call controls, stream stats and video views into the video grid", async () => {
-    const lk = await import("@lib/voice/livekitSession");
+    const lk = await import("../../../src/features/voice/livekitSession");
     const setFullscreen = vi.spyOn(desktop.window, "setFullscreen").mockResolvedValue(undefined);
     const ws = fakeWs();
     uiStore.setState((prev) => ({ ...prev, connectionStatus: "connected" }));
@@ -581,7 +581,7 @@ describe("MainPage — video grid, DM profile panel, calls, settings", () => {
   // WP 1D-1: outside a call the shortcut toggles the local, saved state and
   // sends nothing; the next join restates it to the server.
   it("toggles mute and deafen from a global shortcut outside a voice channel, sending nothing (U6)", async () => {
-    const lk = await import("@lib/voice/livekitSession");
+    const lk = await import("../../../src/features/voice/livekitSession");
     const shortcutHandlers = new Set<(action: "mute" | "deafen") => void>();
     const onShortcut = vi
       .spyOn(desktop.globalShortcuts, "onShortcut")

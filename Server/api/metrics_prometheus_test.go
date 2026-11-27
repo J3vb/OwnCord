@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -276,6 +277,11 @@ func fullPromSources() api.MetricsSources {
 	}
 	src.Windows = promWindowFixture
 	src.LatencyCounts = fullLatencyCounts
+	src.MemStats = func(m *runtime.MemStats) {
+		m.HeapAlloc = 48 << 20
+		m.HeapSys = 96 << 20
+		m.NumGC = 7
+	}
 	return src
 }
 
@@ -419,12 +425,10 @@ func TestPrometheusMetrics_WindowNotReadyIsAbsent(t *testing.T) {
 // promVolatile are the runtime figures that move between the two reads (one
 // for the JSON, one for the scrape), so they are compared within a tolerance
 // instead of exactly. The tolerance is still far tighter than a unit mix-up.
+// The memory figures are pinned by fullPromSources, so they compare exactly.
 var promVolatile = map[string]struct{ rel, abs float64 }{
 	"uptime_seconds": {0, 5},
 	"goroutines":     {1, 50},
-	"heap_alloc_mb":  {0.5, 0},
-	"heap_sys_mb":    {0.5, 0},
-	"num_gc":         {0, 5},
 }
 
 // jsonValue resolves a promFieldMap path in the decoded JSON, with win standing

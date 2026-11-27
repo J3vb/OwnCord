@@ -451,4 +451,17 @@ describe("createPromptModal", () => {
 
     expect(onClose).toHaveBeenCalledTimes(1);
   });
+  it("fallbackFocus takes focus when the opener is gone at close", () => {
+    const opener = document.createElement("button");
+    const fallback = document.createElement("button");
+    container.append(opener, fallback);
+    opener.focus();
+    createPromptModal({ title: "t", onSubmit: vi.fn(), fallbackFocus: () => fallback }, container);
+    expect(document.activeElement).toBe(getInput());
+
+    opener.remove();
+    clickCancel();
+
+    expect(document.activeElement).toBe(fallback);
+  });
 });

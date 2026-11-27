@@ -82,12 +82,21 @@ export function sidebarRoot(from: HTMLElement): ParentNode {
   return from.closest(".channel-list") ?? document;
 }
 
+/** The box whose midpoint splits "before" from "after". A voice channel's
+ *  wrapper holds its people, so in the server tree (where they are two lines
+ *  tall) only the channel's own row counts as the top half; Classic keeps the
+ *  wrapper's. */
+function midpointBox(item: HTMLElement): HTMLElement {
+  if (item.closest(".server-tree") === null) return item;
+  return item.querySelector<HTMLElement>(":scope > .channel-item") ?? item;
+}
+
 /** What the pointer is over: a row of the drag's own container first (the
  *  within-category drop), then a row of any other category, then a category
  *  header, whose drop appends to its category. */
 export function findDropTarget(drag: ChannelDrag, e: MouseEvent): DropTarget | null {
   const rowAt = (item: HTMLElement, container: HTMLElement): DropTarget | null => {
-    const rect = item.getBoundingClientRect();
+    const rect = midpointBox(item).getBoundingClientRect();
     return pointerOver(item, e)
       ? {
           kind: "row",

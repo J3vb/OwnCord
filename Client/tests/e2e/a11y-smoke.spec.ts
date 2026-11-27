@@ -77,7 +77,7 @@ test.describe("A11y smoke — dialogs, focus, live regions", () => {
   test("a factory modal (member picker) traps Tab inside the dialog", async ({ page }) => {
     // Open the DM member picker via the "+" in the Home DM list.
     await openHome(page);
-    const newDmBtn = page.locator(".dm-section-label .dm-add");
+    const newDmBtn = page.locator(".dm-section-label .dm-add, [data-testid=dm-folder-new]");
     await expect(newDmBtn).toBeVisible({ timeout: 5_000 });
     await newDmBtn.click();
 

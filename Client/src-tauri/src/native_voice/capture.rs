@@ -13,8 +13,9 @@
 //! input-sensitivity gate (`VoiceGate`) and push-to-talk's gate decide
 //! whether the frame goes out or silence does.
 use std::collections::VecDeque;
-use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::{Duration, Instant};
 
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{FromSample, Sample, SizedSample};
@@ -33,6 +34,49 @@ use super::stream_format::{pick_config, typed};
 use crate::sync::lock;
 
 pub const SAMPLE_RATE: u32 = 48_000;
+
+/// How long opening a capture stream may take in all: building it, then its
+/// first sound. cpal's PulseAudio start waits for that sound with no limit, so
+/// a source that takes the stream and never sends anything (a Bluetooth
+/// headset whose call profile failed to start) would otherwise hold the
+/// device's lock for good, and every later mute, switch and leave with it.
+pub(super) const OPEN_TIMEOUT: Duration = Duration::from_secs(5);
+
+/// The error of an open that ran out of [`OPEN_TIMEOUT`]. Not retried on
+/// another device: the default is often the same source, and would wait as
+/// long again.
+pub(super) const TIMED_OUT: &str = "the capture device did not respond in time";
+
+/// Per capture device, the starts still waiting for a first sound after their
+/// caller gave up, each a thread holding an open stream. Past [`MAX_STUCK`] on
+/// one device a start on it fails at once rather than leave one more behind on
+/// every retry; other devices still open.
+static STUCK: std::sync::LazyLock<Mutex<std::collections::HashMap<String, Arc<AtomicUsize>>>> =
+    std::sync::LazyLock::new(Mutex::default);
+const MAX_STUCK: usize = 2;
+
+fn stuck_on(device: &cpal::Device) -> Arc<AtomicUsize> {
+    let key = device.id().map(|id| id.to_string()).unwrap_or_default();
+    lock(&STUCK).entry(key).or_default().clone()
+}
+
+const WAITING: u8 = 0;
+const STARTED: u8 = 1;
+const ABANDONED: u8 = 2;
+
+/// One stream start, shared by the stream's callbacks and the thread that
+/// starts it.
+#[derive(Default)]
+pub(super) struct Attempt(AtomicU8);
+
+impl Attempt {
+    /// The caller gave up on this start: its sound and errors are ignored, so
+    /// a late first sound feeds nothing and a late error does not mark the
+    /// live stream dead.
+    fn abandoned(&self) -> bool {
+        self.0.load(Ordering::Acquire) == ABANDONED
+    }
+}
 /// One 10 ms frame: the APM's unit and RNNoise's (`nnnoiseless::FRAME_SIZE`).
 pub const FRAME: usize = SAMPLE_RATE as usize / 100;
 
@@ -905,7 +949,7 @@ impl Capture {
 
     /// Start capturing into `sink` (the first unmute publishes a track's
     /// source). A cached device that no longer opens (unplugged) is resolved
-    /// again once.
+    /// again once; one that opened but did not respond in time is not.
     pub fn start(&mut self, sink: Sink) -> Result<(), String> {
         *lock(&self.feed.sink) = Some(sink);
         if self.stream().is_some() {
@@ -913,10 +957,14 @@ impl Capture {
         }
         let cached = lock(&self.resolved).as_ref().map(|(_, d)| d.clone());
         if let Some(device) = cached {
-            if let Ok(stream) = self.open(&device) {
-                lock(&self.stream).set(stream);
-                self.ensure_watcher();
-                return Ok(());
+            match self.open(&device) {
+                Ok(stream) => {
+                    lock(&self.stream).set(stream);
+                    self.ensure_watcher();
+                    return Ok(());
+                }
+                Err(e) if e == TIMED_OUT => return Err(e),
+                Err(_) => {}
             }
         }
         let selected = lock(&self.selected).clone();
@@ -1098,23 +1146,95 @@ fn open_input(
     let channels = device.default_input_config().ok().map(|c| c.channels());
     let (config, format) = pick_config(supported, SAMPLE_RATE, channels)
         .ok_or("the capture device offers no 48 kHz format")?;
+    let stuck = stuck_on(device);
+    if stuck.load(Ordering::Acquire) >= MAX_STUCK {
+        return Err(TIMED_OUT.to_string());
+    }
     // Shared by the two build attempts; only the one that succeeds runs.
     let state = Arc::new(Mutex::new((processor, sink)));
+    let attempt = Arc::new(Attempt::default());
+    let deadline = Instant::now() + OPEN_TIMEOUT;
+    let left = || deadline.saturating_duration_since(Instant::now());
     let build = |buffer_size| {
         let config = cpal::StreamConfig {
             buffer_size,
             ..config
         };
-        let (state, dead) = (state.clone(), dead.clone());
-        typed!(format, build_input(device, config, state, dead))
+        let (state, dead, attempt) = (state.clone(), dead.clone(), attempt.clone());
+        typed!(
+            format,
+            build_input(device, config, state, dead, attempt, left())
+        )
     };
-    let stream = build(cpal::BufferSize::Fixed(FRAME as u32))
+    let stream = match build(cpal::BufferSize::Fixed(FRAME as u32))
         .or_else(|_| build(cpal::BufferSize::Default))
-        .map_err(|e| format!("opening the capture stream: {e}"))?;
-    stream
-        .play()
+    {
+        Ok(stream) => stream,
+        Err(_) if left().is_zero() => return Err(TIMED_OUT.to_string()),
+        Err(e) => return Err(format!("opening the capture stream: {e}")),
+    };
+    start_within(stream, left(), &attempt, stuck, |s| {
+        s.play().map_err(|e| e.to_string())
+    })
+}
+
+/// Run `play` on a thread of its own and give up after `limit`. A thread left
+/// waiting is counted in `stuck` and drops the stream when the first sound
+/// does come. A stream the sound server kills keeps it waiting (the
+/// PulseAudio client ignores the kill) until that connection ends, which for
+/// the shared connection is the app's end; hence [`MAX_STUCK`], past which a
+/// start fails at once.
+pub(super) fn start_within<S: Send + 'static>(
+    stream: S,
+    limit: Duration,
+    attempt: &Arc<Attempt>,
+    stuck: Arc<AtomicUsize>,
+    play: impl FnOnce(&S) -> Result<(), String> + Send + 'static,
+) -> Result<S, String> {
+    if stuck.load(Ordering::Acquire) >= MAX_STUCK {
+        return Err(TIMED_OUT.to_string());
+    }
+    let (tx, rx) = std::sync::mpsc::channel();
+    let (waiting, left_waiting) = (attempt.clone(), stuck.clone());
+    std::thread::Builder::new()
+        .name("capture-start".into())
+        .spawn(move || {
+            let started = play(&stream).map(|()| stream);
+            let claimed =
+                waiting
+                    .0
+                    .compare_exchange(WAITING, STARTED, Ordering::AcqRel, Ordering::Acquire);
+            if claimed.is_ok() {
+                let _ = tx.send(started);
+            } else {
+                drop(started);
+                left_waiting.fetch_sub(1, Ordering::AcqRel);
+            }
+        })
         .map_err(|e| format!("starting the capture stream: {e}"))?;
-    Ok(stream)
+    let started = match rx.recv_timeout(limit) {
+        Ok(started) => started,
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+            return Err("the capture start thread ended".to_string());
+        }
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {
+            // Counted before the thread can see it abandoned, so its
+            // decrement always follows this.
+            stuck.fetch_add(1, Ordering::AcqRel);
+            let gave_up =
+                attempt
+                    .0
+                    .compare_exchange(WAITING, ABANDONED, Ordering::AcqRel, Ordering::Acquire);
+            if gave_up.is_ok() {
+                return Err(TIMED_OUT.to_string());
+            }
+            // It finished as the limit ran out: its result is on the way.
+            stuck.fetch_sub(1, Ordering::AcqRel);
+            rx.recv()
+                .map_err(|_| "the capture start thread ended".to_string())?
+        }
+    };
+    started.map_err(|e| format!("starting the capture stream: {e}"))
 }
 
 /// Interleaved device samples (`width` channels) as mono f32 (-1 to 1).
@@ -1132,15 +1252,21 @@ fn build_input<T>(
     config: cpal::StreamConfig,
     state: Arc<Mutex<(Processor, Sink)>>,
     dead: Arc<AtomicBool>,
+    attempt: Arc<Attempt>,
+    timeout: Duration,
 ) -> Result<cpal::Stream, cpal::Error>
 where
     T: SizedSample,
     f32: FromSample<T>,
 {
     let width = usize::from(config.channels.max(1));
+    let gave_up = attempt.clone();
     device.build_input_stream::<T, _, _>(
         config,
         move |data, _| {
+            if attempt.abandoned() {
+                return;
+            }
             let mut guard = lock(&state);
             let (processor, sink) = &mut *guard;
             processor.push(to_mono(data, width), |frame| sink.deliver(frame));
@@ -1150,10 +1276,14 @@ where
         // watcher reopens it, or the user goes silent to peers with no
         // signal (voice #3).
         move |e| {
+            if gave_up.abandoned() {
+                log::debug!("[native_voice] abandoned capture stream: {e}");
+                return;
+            }
             log::warn!("[native_voice] capture stream: {e}");
             dead.store(true, Ordering::Relaxed);
         },
-        None,
+        Some(timeout),
     )
 }
 

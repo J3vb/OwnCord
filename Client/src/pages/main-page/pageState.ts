@@ -3,11 +3,12 @@ import type { MountableComponent } from "@lib/text/safeRender";
 import type { UserStatus } from "@lib/types";
 import type { VideoGridComponent } from "../../features/voice/videoGrid/VideoGrid";
 import type { ServerBannerControl } from "../../features/server-rail/ServerBanner";
+import type { ServerSwitcherDeps } from "../../features/server-rail/switcherOptions";
 import type { ToastContainer } from "@lib/ui/toastContainer";
 import type { AutoIdleController } from "@lib/presence/autoIdle";
 import type { GameActivityLoop } from "@lib/presence/gameActivity";
 import type { MusicActivityLoop } from "@lib/presence/musicActivity";
-import type { StatusTimerWatcher } from "@lib/presence/statusTimer";
+import type { StatusTimerWatcher } from "../../features/presence/statusTimer";
 import type { CallChat } from "../../features/voice/callChat";
 import type { MessageController } from "../../features/messaging/MessageController";
 import type { ReactionController } from "../../features/messaging/ReactionController";
@@ -19,7 +20,7 @@ import type { IncomingCallBannerComponent } from "../../features/direct-messages
 import type { RingController, OutgoingCall } from "@lib/voice/callRing";
 import type { DmCallPanelComponent } from "../../features/direct-messages/DmCallPanel";
 import type { SidebarDrawer } from "./SidebarDrawer";
-import type { MemberColumn } from "./MemberColumn";
+import type { MemberColumn } from "../../features/members/memberColumn";
 import type { ContentNavigator } from "../../features/navigation/contentView";
 import type { MainPageOptions } from "../MainPage";
 
@@ -39,7 +40,7 @@ export interface PageState {
   readonly cacheScope: string | null;
   readonly unsubCacheScope: () => void;
   readonly limiters: import("@lib/net/rateLimiter").RateLimiterSet;
-  readonly presenceSender: import("@lib/presence/presence").PresenceSender;
+  readonly presenceSender: import("../../features/presence/presence").PresenceSender;
   container: Element | null;
   root: HTMLDivElement | null;
   /** Set by destroy(), so a lazily-loaded controller that resolves after the
@@ -150,32 +151,6 @@ export interface PageApi {
 /** The values main page's mount() builds, shared by its mount steps. */
 export interface MountScope {
   target: Element;
-  // "Use here" takes the connection back: this device connects again and
-  // the server displaces the other one (last connect wins). It serves both
-  // a displaced socket (SESSION_REPLACED) and a wake reconnect the server
-  // refused because another device held the session (ANOTHER_DEVICE_ACTIVE,
-  // U4) — the two are the same user choice, so they share one prompt.
-  useHere: () => void;
-  // Retry is safe on a plain disconnect: connect() re-dials and the native
-  // proxy re-validates the certificate, so a TOFU mismatch re-latches rather
-  // than being bypassed. It also cancels any pending backoff attempt, so it
-  // cannot race the reconnect loop.
-  retryConnection: () => void;
-  // Signed-in-elsewhere outranks the connection status it leaves behind
-  // ("disconnected"), so every banner refresh goes through here. The device's
-  // own network fact stays apart from the server's reachability: a LAN server
-  // with no internet still answers onLine, and `undefined` (host without the
-  // API) never claims the internet is required.
-  syncBanner: () => void;
-  // Losing or regaining the device's network only re-renders, so the banner
-  // says the true thing immediately; the reconnect loop and Retry own
-  // recovery. Only re-render while the socket is actually down — a network
-  // flap during a live connection (a VPN toggle, a Wi-Fi flap) must not
-  // route to `applyConnectionStatus("connected")` and clear an announced
-  // server-restart countdown. Owned by a Disposable so the lifecycle guard
-  // sees both listeners torn down with the page.
-  networkOwner: Disposable;
-  syncBannerIfNotConnected: () => void;
   // A sign-in not yet reviewed: listed on connect and on window focus.
   sessionNotice: Disposable;
   pollSessions: () => void;
@@ -197,9 +172,8 @@ export interface MountScope {
   // The member column: always present, hidden until MemberColumn shows it.
   memberColumnEl: HTMLElement;
   memberColumnBody: HTMLDivElement;
-  // The server rail sits left of the sidebar. The web portal serves exactly
-  // one server, so it has none there. The slot holds the rail's width while
-  // the rail loads on demand, keeping it out of the eager MainPage chunk.
+  // The server switcher's inputs (null in the web portal) and Classic's rail slot.
+  switcher: ServerSwitcherDeps | null;
   railSlot: HTMLDivElement | null;
   layoutOwner: Disposable;
   // --- Moderation notices: persistent, above the app row ---
@@ -236,6 +210,7 @@ export interface MountScope {
   prevSpeaking: string;
   prevAudioState: string;
   prevViewers: string;
+  prevMusic: string;
   prevCallState: string;
   /** Your call state for the grid's call controls, from the voice store and
    *  the chat socket (camera and share freeze while it is down). */

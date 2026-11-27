@@ -55,7 +55,14 @@ export interface UiState {
  *  tab with its profile editor open and the display name focused; "Devices"
  *  the Account tab with its signed-in devices shown. */
 export type SettingsTabRequest =
-  "Account" | "Profile" | "Devices" | "Safety" | "My uploads" | "About" | "Notifications";
+  | "Account"
+  | "Profile"
+  | "Devices"
+  | "Safety"
+  | "My uploads"
+  | "Appearance"
+  | "About"
+  | "Notifications";
 
 /**
  * The one `ui.store` fact a protocol-epoch refusal leaves behind:
@@ -218,6 +225,9 @@ export function migrateCollapsedCategoryNames(keysByName: ReadonlyMap<string, st
   saveCollapsedCategories(next);
   uiStore.setState((prev) => ({ ...prev, collapsedCategories: next }));
 }
+
+/** The Direct Messages section's key in the collapsed set (no category id looks like it). */
+export const DM_SECTION_COLLAPSED_KEY = "section:dms";
 
 /** Selector: check if a category is collapsed. */
 export function isCategoryCollapsed(category: string): boolean {

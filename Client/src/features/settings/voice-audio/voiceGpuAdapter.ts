@@ -1,6 +1,7 @@
 /**
  * The "Graphics card for video" row (Windows). The host applies the choice at
- * its next start, so a change shows a restart button. The row stays out of
+ * its next start, so a restart button shows while the choice differs from the
+ * card this launch runs on. The row stays out of
  * the page when the host cannot list cards or the PC has none.
  */
 import { createElement } from "@lib/dom";
@@ -35,7 +36,11 @@ function build(state: GpuAdapterState, signal: AbortSignal): HTMLElement[] {
     { class: "ac-btn", type: "button", "data-testid": "gpu-adapter-restart" },
     t("voiceAudio.gpuAdapterRestart"),
   );
-  restart.hidden = true;
+  const running = state.active ?? AUTO;
+  const showRestart = (): void => {
+    restart.hidden = select.value === running;
+  };
+  showRestart();
 
   let saved = select.value;
   const save = (choice: string): void => {
@@ -49,7 +54,7 @@ function build(state: GpuAdapterState, signal: AbortSignal): HTMLElement[] {
       }
       saved = choice;
       status.textContent = "";
-      restart.hidden = false;
+      showRestart();
     })();
   };
   select.addEventListener("change", () => save(select.value), { signal });

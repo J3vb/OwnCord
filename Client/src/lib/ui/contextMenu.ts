@@ -85,6 +85,9 @@ export interface ContextMenuOptions {
   readonly className?: string;
   /** The document to open in (a pop-out window's); the app's by default. */
   readonly doc?: Document;
+  /** `flip` (default): anchor by the bottom edge when it does not fit below.
+   *  `scroll`: cap the height and scroll instead. */
+  readonly fit?: "flip" | "scroll";
 }
 
 /** Tears down the one open menu, whatever kind it is. Opening any menu runs it
@@ -279,9 +282,9 @@ export function openMenuShell(opts: MenuShellOptions): OpenMenu {
  * Show a context menu of plain rows at the given coordinates. Closes any other
  * open menu, and closes on a click outside or when `signal` is aborted.
  */
-export function showContextMenu(opts: ContextMenuOptions): void {
+export function showContextMenu(opts: ContextMenuOptions): OpenMenu {
   const { x, y, items, signal, className, group } = opts;
-  openMenuShell({
+  return openMenuShell({
     x,
     y,
     ...(className !== undefined ? { className } : {}),
@@ -290,6 +293,7 @@ export function showContextMenu(opts: ContextMenuOptions): void {
     ...(opts.restoreFocusTo !== undefined ? { restoreFocusTo: opts.restoreFocusTo } : {}),
     ...(opts.onClosed !== undefined ? { onClosed: opts.onClosed } : {}),
     ...(opts.doc !== undefined ? { doc: opts.doc } : {}),
+    ...(opts.fit !== undefined ? { fit: opts.fit } : {}),
     build: (menu, closeMenu, menuSignal) => {
       /** One plain row: a focusable button that closes the menu, then acts. */
       const buildRow = (item: ContextMenuItem): HTMLElement => {

@@ -2,13 +2,13 @@
 
 Condensed from the sources listed at the end, at commit `ac6ffc4e` (2026-10-13). On conflict, the source documents win.
 
-The visual rules for the desktop client: themes and tokens, typography, spacing, components, states, layout and accessibility. The binding contract is [docs/architecture/ui-contract.md](../architecture/ui-contract.md); token values live in `Client/src/styles/tokens.css`, `Client/src/styles/theme-neon-glow.css` and the `THEMES` map in `Client/src/lib/prefs/themes.ts`.
+The visual rules for the desktop client: themes and tokens, typography, spacing, components, states, layout and accessibility. The binding contract is [docs/architecture/ui-contract.md](../architecture/ui-contract.md); token values live in `Client/src/styles/tokens.css`, `Client/src/styles/theme-neon-glow.css`, `Client/src/styles/theme-gunmetal.css` and the `THEMES` map in `Client/src/lib/prefs/themes.ts`.
 
 ## Brand direction
 
-The visual direction is **Refined Neon** (owner decision Q13), applied across four themes: `neon-glow` (the default on a fresh install, and the OwnCord brand identity), `dark` (whose values are `tokens.css`'s `:root` defaults), `midnight`, and `light`.
+The visual direction is **Refined Neon** (owner decision Q13), applied across five themes: `neon-glow` (the OwnCord brand identity, and the theme of an install from before Gunmetal became the default that never picked one), `dark` (whose values are `tokens.css`'s `:root` defaults), `midnight`, `gunmetal` (the theme a new install starts on, except in the Android app: blue-grey surfaces with an Ember orange `#ff7a45` accent), and `light`.
 
-`applyTheme()` (`lib/prefs/themes.ts`) switches themes. It writes the theme's `THEMES` entry as inline custom properties on `<html>`, over `tokens.css`'s `:root` dark defaults, then `applyThemeByName()` (`lib/prefs/themes.ts`) sets `theme-<name>` on `<body>`. Only `body.theme-neon-glow` and `body.theme-light` (accent fills only) have CSS rules, so midnight is entirely its `THEMES` entry and most of light's palette is too: a new midnight or light value goes in `THEMES`. A user's custom accent (`applyAccent()`, inline on `<body>`) overrides the accent-derived tokens on top of whichever theme is active. High Contrast is a separate toggle layered over any theme.
+`applyTheme()` (`lib/prefs/themes.ts`) switches themes. It writes the theme's `THEMES` entry as inline custom properties on `<html>`, over `tokens.css`'s `:root` dark defaults, then `applyThemeByName()` (`lib/prefs/themes.ts`) sets `theme-<name>` on `<body>`. Only `body.theme-neon-glow`, `body.theme-gunmetal` (accent block only) and `body.theme-light` (accent fills only) have CSS rules, so midnight is entirely its `THEMES` entry and most of light's palette is too: a new midnight or light value goes in `THEMES`. A user's custom accent (`applyAccent()`, inline on `<body>`) overrides the accent-derived tokens on top of whichever theme is active. High Contrast is a separate toggle layered over any theme.
 
 Accessibility is load-bearing, not decorative: the app targets a WCAG 2.2 AA-oriented bar (owner decision Q1), checked automatically on every UI PR. It is not a certification claim.
 
@@ -58,6 +58,8 @@ Dark and midnight's fill `#5865f2` (2.47–3.72:1) and light's `#4f5bd5` (4.39:1
 
 `--text-faint` and `--text-micro` are for incidental text only (decoration, separators, disabled) and are **not contrast-qualified**. Every other text token above is ≥4.5:1 on each of the four surfaces (`--bg-primary`, `--bg-secondary`, `--bg-tertiary`, `--bg-input`) in every theme, with and without High Contrast.
 
+Gunmetal sets its own blue-grey values for the tokens other dark themes leave at the `:root` greys: `--text-faint` `#7d8898` (4.72:1 on `--bg-primary`, 5.06:1 on `--bg-secondary`, because it heads categories, roles and settings sections there), `--text-micro` `#6f7a8a` (3.89:1 / 4.17:1, above neon-glow's 3.55:1 / 3.74:1), `--interactive-normal`/`-hover`/`-active`/`-muted` `#b4bec9`/`#dbe1e8`/`#ffffff`/`#3e4a58`, `--bg-modifier-hover`/`-active`/`-selected` `rgba(76,89,107,0.16/0.24/0.32)`, both scrollbar thumbs `#626e7e` (≥3:1 on `--bg-primary`/`--bg-secondary`) and `--role-member` `#9aa5b3`. `tests/unit/color-contrast.test.ts` pins these ratios.
+
 ### Borders, status fills, and other tokens
 
 | Token                                                           | Value                                                                                                                 | Note                                                                                                                                                          |
@@ -76,12 +78,12 @@ Dark and midnight's fill `#5865f2` (2.47–3.72:1) and light's `#4f5bd5` (4.39:1
 
 ### High Contrast overrides (`app/accessibility.css`)
 
-| Token                            | dark/neon-glow/midnight          | light                 |
-| -------------------------------- | -------------------------------- | --------------------- |
-| `--text-normal`                  | `#ffffff`                        | `#000000`             |
-| `--text-muted`                   | `#cccccc`                        | `#2e3035`             |
-| `--bg-active`                    | `rgba(255,255,255,0.15)`         | `rgba(0,0,0,0.15)`    |
-| `--accent-text` / `--focus-ring` | `#a3aaf8` (neon-glow: `#2fd0ff`) | `#4150c4` / `#4752c4` |
+| Token                            | dark/neon-glow/midnight/gunmetal                      | light                 |
+| -------------------------------- | ----------------------------------------------------- | --------------------- |
+| `--text-normal`                  | `#ffffff`                                             | `#000000`             |
+| `--text-muted`                   | `#cccccc`                                             | `#2e3035`             |
+| `--bg-active`                    | `rgba(255,255,255,0.15)`                              | `rgba(0,0,0,0.15)`    |
+| `--accent-text` / `--focus-ring` | `#a3aaf8` (neon-glow: `#2fd0ff`, gunmetal: `#ff7a45`) | `#4150c4` / `#4752c4` |
 
 ### Rules
 
@@ -156,7 +158,7 @@ Transition timing tokens: `--transition-fast: 100ms ease`, `--transition-normal:
 
 - Shared UI components live under `Client/src/features/` (e.g. `settings/SettingsOverlay.ts`, `channels/CreateChannelModal.ts`).
 - Shared helpers live in `Client/src/lib/`: `modalFactory.ts`, `a11y.ts`, `dom.ts`, `icons.ts` (`createIcon`, the one icon source: Lucide inline SVG with a `currentColor` stroke), `context-menu.ts` (`showContextMenu`; `enableMenuKeyboard`, `createMenuItem` and `openMenuOnKeyboard` give a hand-built menu the same keyboard model), `avatar.ts` (only the pure name helpers `resolveDisplayName`, `avatarInitial` and the `AvatarSubject` type) and `toast.ts` (`showToast`). The avatar DOM builder, `createAvatarElement`, and `isRenderableAvatar` live in `features/profiles/avatar.ts`. Settings UI adds `features/settings/helpers.ts`: `createToggle`, `appendToggleRows`, and `outcomeEl`/`showOutcome` for `.form-error`/`.form-status`/`.form-warning` with their live roles.
-- Style rules live in `Client/src/styles/`, which `main.ts` imports as `tokens.css`, `base.css`, `login.css`, `app.css`, `theme-neon-glow.css`, in that order. The shared modal, button, form, checkbox and spinner classes are in `login.css` (its "MODALS (shared)" and form sections), not `app/`. `app.css` is an `@import` manifest over `app/*.css` whose order is the cascade: add rules to the owning fragment, and never reorder imports or move rules between fragments in a visual PR.
+- Style rules live in `Client/src/styles/`, which `main.ts` imports as `tokens.css`, `base.css`, `login.css`, `app.css`, `theme-neon-glow.css`, `theme-gunmetal.css`, in that order. The shared modal, button, form, checkbox and spinner classes are in `login.css` (its "MODALS (shared)" and form sections), not `app/`. `app.css` is an `@import` manifest over `app/*.css` whose order is the cascade: add rules to the owning fragment, and never reorder imports or move rules between fragments in a visual PR.
 - All UI text, including `aria-label`s and toast copy, comes from an English catalog under `Client/src/i18n/`. `tests/unit/ui-strings.test.ts` fails on new literal UI text unless it is marked `// i18n-exempt: <reason>`.
 
 | Pattern                                | Classes / factory                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                            |
@@ -255,7 +257,7 @@ Every UI PR runs these against its own journey:
 ## Sources
 
 - [docs/architecture/ui-contract.md](../architecture/ui-contract.md), [docs/architecture/ux/README.md](../architecture/ux/README.md)
-- [Client/src/styles/tokens.css](../../Client/src/styles/tokens.css), [Client/src/styles/theme-neon-glow.css](../../Client/src/styles/theme-neon-glow.css), [Client/src/styles/base.css](../../Client/src/styles/base.css), [Client/src/styles/login.css](../../Client/src/styles/login.css)
+- [Client/src/styles/tokens.css](../../Client/src/styles/tokens.css), [Client/src/styles/theme-neon-glow.css](../../Client/src/styles/theme-neon-glow.css), [Client/src/styles/theme-gunmetal.css](../../Client/src/styles/theme-gunmetal.css), [Client/src/styles/base.css](../../Client/src/styles/base.css), [Client/src/styles/login.css](../../Client/src/styles/login.css)
 - [Client/src/styles/app/accessibility.css](../../Client/src/styles/app/accessibility.css), [Client/src/styles/app/settings.css](../../Client/src/styles/app/settings.css), [Client/src/styles/app/responsive.css](../../Client/src/styles/app/responsive.css), [Client/src/styles/app/overlays.css](../../Client/src/styles/app/overlays.css), [Client/src/styles/app/composer.css](../../Client/src/styles/app/composer.css)
 - [Client/src/features/settings/helpers.ts](../../Client/src/features/settings/helpers.ts), [Client/src/lib/prefs/themes.ts](../../Client/src/lib/prefs/themes.ts), [Client/src/lib/prefs/appearance.ts](../../Client/src/lib/prefs/appearance.ts), [Client/src/lib/ui/osMotion.ts](../../Client/src/lib/ui/osMotion.ts), [Client/src/lib/text/colorContrast.ts](../../Client/src/lib/text/colorContrast.ts)
 - [Client/src/lib/ui/modalFactory.ts](../../Client/src/lib/ui/modalFactory.ts), [Client/src/lib/ui/toast.ts](../../Client/src/lib/ui/toast.ts), [Client/src/lib/icons.ts](../../Client/src/lib/icons.ts), [Client/src/main.ts](../../Client/src/main.ts)

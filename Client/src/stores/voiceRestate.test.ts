@@ -3,10 +3,16 @@ import {
   voiceStore,
   resetVoiceStore,
   joinVoiceChannel,
+  leaveVoiceChannel,
   restateSelfVoiceState,
+  setLocalDeafened,
+  setLocalMuted,
+  setModeratorDeafened,
+  updateVoiceState,
 } from "./voice.store";
 import { authStore } from "./auth.store";
 import type { VoiceUser } from "./voice.store";
+import { isVoiceDeafened } from "@lib/voice/voiceDeafened";
 
 const ME = 9;
 const CHANNEL = 4;
@@ -218,5 +224,118 @@ describe("restateSelfVoiceState", () => {
     restateSelfVoiceState(socket);
 
     expect(socket.send).not.toHaveBeenCalled();
+  });
+});
+
+/** The member's own row as the server sends it, moderator flags included. */
+function ownRow(flags: { server_muted?: boolean; server_deafened?: boolean }): void {
+  updateVoiceState({
+    channel_id: CHANNEL,
+    user_id: ME,
+    username: "me",
+    muted: flags.server_muted === true,
+    deafened: flags.server_deafened === true,
+    speaking: false,
+    camera: false,
+    screenshare: false,
+    ...flags,
+  });
+}
+
+/** What enforcing the moderator's mute does to the store. */
+function moderatorMutes(): void {
+  ownRow({ server_muted: true });
+  setLocalMuted(true);
+}
+
+describe("a moderator's mute or deafen at the end of a call", () => {
+  it("drops a moderator's mute with the leave, so the next call starts open and restates nothing", () => {
+    moderatorMutes();
+    expect(voiceStore.getState().moderatorMuted).toBe(true);
+
+    leaveVoiceChannel();
+
+    expect(voiceStore.getState()).toMatchObject({ localMuted: false, moderatorMuted: false });
+    joinVoiceChannel(CHANNEL);
+    const socket = socketStub();
+    restateSelfVoiceState(socket);
+    expect(socket.send).not.toHaveBeenCalled();
+  });
+
+  it("keeps a mute the member had before the moderator's, and restates it on the next join", () => {
+    setLocalMuted(true);
+    ownRow({ server_muted: true });
+    expect(voiceStore.getState().moderatorMuted).toBe(false);
+
+    leaveVoiceChannel();
+
+    expect(voiceStore.getState().localMuted).toBe(true);
+    joinVoiceChannel(CHANNEL);
+    const socket = socketStub();
+    restateSelfVoiceState(socket);
+    expect(socket.send).toHaveBeenCalledWith({ type: "voice_mute", payload: { muted: true } });
+  });
+
+  it("drops a moderator's mute laid over the member's own deafen, once they undeafen and leave", () => {
+    setLocalDeafened(true);
+    setLocalMuted(true);
+    ownRow({ server_muted: true });
+    expect(voiceStore.getState().moderatorMuted).toBe(true);
+    // Undeafening under the moderator's mute keeps the mic muted.
+    setLocalDeafened(false);
+
+    leaveVoiceChannel();
+
+    expect(voiceStore.getState()).toMatchObject({ localMuted: false, localDeafened: false });
+  });
+
+  it("keeps a mute the member had before deafening when a moderator mutes them too", () => {
+    voiceStore.setState((prev) => ({ ...prev, mutedBeforeDeafen: true }));
+    setLocalMuted(true);
+    setLocalDeafened(true);
+    ownRow({ server_muted: true });
+
+    expect(voiceStore.getState().moderatorMuted).toBe(false);
+  });
+
+  it("keeps a deafen the member chose during the moderator's mute, and the mute that comes with it", () => {
+    moderatorMutes();
+    setLocalDeafened(true);
+
+    leaveVoiceChannel();
+
+    expect(voiceStore.getState()).toMatchObject({
+      localMuted: true,
+      localDeafened: true,
+      moderatorMuted: false,
+    });
+  });
+
+  it("drops a moderator's deafen with the leave, and the sound mirror with it", () => {
+    ownRow({ server_deafened: true });
+    setModeratorDeafened(true);
+    setLocalDeafened(true);
+
+    leaveVoiceChannel();
+
+    expect(voiceStore.getState()).toMatchObject({
+      localDeafened: false,
+      moderatorDeafened: false,
+      localMuted: false,
+    });
+    joinVoiceChannel(CHANNEL);
+    expect(isVoiceDeafened()).toBe(false);
+  });
+
+  it("marks the mute again when the server re-sends it on the next join", () => {
+    moderatorMutes();
+    leaveVoiceChannel();
+    joinVoiceChannel(CHANNEL);
+
+    ownRow({ server_muted: true });
+
+    expect(voiceStore.getState()).toMatchObject({ localServerMuted: true, moderatorMuted: true });
+    ownRow({});
+    expect(voiceStore.getState().moderatorMuted).toBe(false);
   });
 });

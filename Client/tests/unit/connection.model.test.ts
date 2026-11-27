@@ -10,7 +10,7 @@
  *
  * System under test — the REAL modules, wired together the way main.ts wires
  * them: `createWsClient()` (src/lib/ws.ts) driving `wireDispatcher()`
- * (src/lib/dispatcher.ts) into the real stores. Only the boundaries are
+ * (src/app/dispatcher.ts) into the real stores. Only the boundaries are
  * mocked:
  *   - the Tauri IPC surface (`invoke`/`listen`), via the shared ws-mocks
  *     helper the ws-*.test.ts files already use — this is the wire, and
@@ -39,7 +39,7 @@ vi.mock("@tauri-apps/api/event", async () => ({
   listen: (await import("./helpers/ws-mocks")).mockListen,
 }));
 
-vi.mock("@lib/notifications", () => ({
+vi.mock("../../src/features/notifications/notifications", () => ({
   notifyIncomingMessage: vi.fn(),
   cleanupNotificationAudio: vi.fn(),
 }));
@@ -49,14 +49,14 @@ vi.mock("../../src/features/voice/screenShare", () => ({
 vi.mock("@lib/ui/toast", () => ({
   showToast: vi.fn(),
 }));
-vi.mock("@lib/net/identity", () => ({
+vi.mock("../../src/features/connection/identity", () => ({
   ensureIdentityKeyPublished: vi.fn(async () => true),
 }));
 // The media layer is out of scope for a connection model (it needs a real
 // LiveKit room and WebCrypto), but handleParticipantLeft's store-visible
 // effect is not: livekitE2EE.ts drops a departed peer's verification, and the
 // verification invariant below has to be able to observe that happening.
-vi.mock("@lib/voice/livekitSession", async () => {
+vi.mock("../../src/features/voice/livekitSession", async () => {
   const { clearPeerVerification, clearPeerVerifications } = await import("@stores/voice.store");
   return {
     ...(await import("../helpers/dispatcherMocks")).livekitSessionMock(),
@@ -72,7 +72,7 @@ vi.mock("@lib/voice/livekitSession", async () => {
 
 import { mockInvoke, mockListen, eventHandlers, emitTauriEvent } from "./helpers/ws-mocks";
 import { createWsClient, type WsClient } from "../../src/lib/ws";
-import { wireDispatcher, type DispatcherCleanup } from "../../src/lib/dispatcher";
+import { wireDispatcher, type DispatcherCleanup } from "../../src/app/dispatcher";
 import { clearAuth } from "../../src/stores/auth.store";
 import { getChannelMessages } from "../../src/stores/messages.store";
 import { voiceStore, setPeerVerification, joinVoiceChannel } from "../../src/stores/voice.store";

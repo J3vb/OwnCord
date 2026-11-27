@@ -1,6 +1,6 @@
 // Behaviour suite for the `PendingMessageStore` contract
 // (`src/platform/contracts/pendingMessages.ts`). Run now against the legacy
-// binding (`pendingMessages.legacy.test.ts`, today's `lib/pendingMessages.ts`
+// binding (`pendingMessages.legacy.test.ts`, today's `features/messaging/pendingMessages.ts`
 // exports) and again in B7-4 against `platform/desktop` — a green run before
 // and after that move is the evidence the move changed nothing.
 //

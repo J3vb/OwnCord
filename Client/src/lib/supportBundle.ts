@@ -161,6 +161,7 @@ const SETTINGS_ALLOWLIST = [
   "autoGainControl",
   "enhancedNoiseSuppression",
   "softSpeech",
+  "sileroBufferMs",
   "inputVolume",
   "outputVolume",
   "voiceSensitivity",
@@ -175,6 +176,8 @@ const SETTINGS_ALLOWLIST = [
   "shareDiagnosticsV2",
   "shareMotionPolicy",
   "developerMode",
+  "screenLayout",
+  "buddiesCollapsed",
   "logs_min_level",
 ] as const;
 

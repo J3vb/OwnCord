@@ -541,3 +541,19 @@
     display: none;
   }
 }
+/* A phone's composer gives the text the room the side gutters took: the
+   placeholder "Message #channel" reads at 320px beside four 44px buttons. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .message-input-wrap {
+    padding-right: 6px;
+    padding-left: 6px;
+  }
+  .message-input-box {
+    padding: 2px;
+  }
+  /* The buttons on either side centre their icons in 44px, which is gap enough. */
+  .msg-textarea {
+    padding-right: 0;
+    padding-left: 0;
+  }
+}

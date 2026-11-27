@@ -37,11 +37,25 @@ const updater = process.platform === "win32" ? ".nsis.zip" : ".AppImage.tar.gz";
 // error". Only the baseline's launch and first interaction retry on that.
 const BASELINE_SESSION_LOST = /WebDriver [\s\S]*"error":"(invalid session id|unknown error)"/;
 
+interface StoredAppearance {
+  layout: string | null;
+  theme: string | null;
+  deck: boolean;
+}
+
+const storedAppearance = (app: ArtifactDriver) =>
+  app.evaluate<StoredAppearance>(`() => ({
+    layout: localStorage.getItem("owncord:settings:screenLayout"),
+    theme: localStorage.getItem("owncord:theme:active"),
+    deck: document.documentElement.classList.contains("layout-deck"),
+  })`);
+
 const digest = async (file: string) =>
   createHash("sha256")
     .update(await readFile(file))
     .digest("hex");
 
+// eslint-disable-next-line no-empty-pattern -- Playwright requires the destructuring form
 test("the previous release updates to this one, then rolls back", async ({}, info) => {
   test.setTimeout(480_000);
   if (!CURRENT || !PREVIOUS)
@@ -103,7 +117,10 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
     await baseline("launch", async () => {
       await app?.close().catch(() => {});
       await killInstalled(binary);
-      app = await launchArtifact(binary, { pins: { [host]: await serverPin(server.directory) } });
+      app = await launchArtifact(binary, {
+        pins: { [host]: await serverPin(server.directory) },
+        screenLayout: "fresh",
+      });
       await waitFor(app, "#host", "", 60_000);
       previous = await appVersion(app);
       expect(previous).not.toBe(version);
@@ -122,6 +139,10 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
     await app.press("Enter");
     await waitFor(app, ".msg-text", text);
 
+    // What the previous release stored, before the update decides anything:
+    // a release from before the new-install defaults stores no layout.
+    const before = await storedAppearance(app);
+
     // Update: the binary asks for its own target and gets this release.
     const original = await digest(binary);
     await app.click(".update-banner-install", "Update Now");
@@ -137,6 +158,12 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
     await waitFor(app!, "[data-testid='app-layout']", "", 60_000);
     expect(await appVersion(app!)).toBe(version);
     await waitFor(app!, ".msg-text", text);
+    // The update moves an install on Classic (or with no layout stored) to
+    // Command Deck once, keeps one already there, and changes no theme.
+    const after = await storedAppearance(app!);
+    expect(after.layout).toBe(JSON.stringify("deck"));
+    expect(after.deck).toBe(true);
+    expect(after.theme).toBe(before.theme);
 
     // Roll back: reinstall the previous release over the updated one.
     await app!.close().catch(() => {});

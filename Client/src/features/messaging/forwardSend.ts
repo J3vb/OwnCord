@@ -14,10 +14,10 @@
  */
 
 import { setOwnedTimeout } from "../../lib/dom";
-import { newClientMessageId, pendingMessageSessionFloor } from "../../lib/pendingMessages";
+import { newClientMessageId, pendingMessageSessionFloor } from "./pendingMessages";
 import type { ClientMessage, ServerMessage } from "../../lib/types";
 import type { ConnectionState, WsListener } from "../../lib/ws";
-import { claimForwardRequest, releaseForwardRequest } from "./forwardRequests";
+import { claimRequest, releaseRequest } from "@lib/net/requestClaims";
 
 /** The slice of the WS client the sender uses; the real client and the test mock both fit. */
 export interface ForwardWs {
@@ -109,7 +109,7 @@ export function createForwardSession(opts: ForwardSessionOptions): ForwardSessio
     if (waiter === undefined) return;
     waiting.delete(id);
     if (!outcome.ok && outcome.code === "UNCONFIRMED") abandoned.push(id);
-    else releaseForwardRequest(id);
+    else releaseRequest(id);
     waiter.settle(outcome);
   }
 
@@ -143,7 +143,7 @@ export function createForwardSession(opts: ForwardSessionOptions): ForwardSessio
     () => {
       for (const unsub of unsubs) unsub();
       failAll("CANCELLED");
-      for (const id of abandoned.splice(0)) releaseForwardRequest(id);
+      for (const id of abandoned.splice(0)) releaseRequest(id);
     },
     { once: true },
   );
@@ -154,7 +154,7 @@ export function createForwardSession(opts: ForwardSessionOptions): ForwardSessio
     if (ws.getState() !== "connected") return Promise.resolve({ ok: false, code: "OFFLINE" });
     return new Promise<Outcome>((resolve) => {
       const id = ws.send(msg);
-      claimForwardRequest(id);
+      claimRequest(id);
       const stopTimer = setOwnedTimeout(
         signal,
         () => settleWaiter(id, { ok: false, code: "UNCONFIRMED" }),

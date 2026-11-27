@@ -1,6 +1,6 @@
 /**
- * What a voice channel row and its participant rows draw, from plain-data
- * models and nothing else.
+ * What a voice channel row draws, from plain-data models and nothing else
+ * (its participant rows are `voiceUserRow.view.ts`, re-exported here).
  *
  * A model is the drawn values after formatting: the resolved name, each
  * tooltip with its fingerprint or safety number already in it, the capacity
@@ -15,70 +15,25 @@
  */
 
 import { createElement, appendChildren, setText } from "../../lib/dom";
-import { createIcon, type IconName } from "../../lib/icons";
+import { createIcon } from "../../lib/icons";
 import { shellText } from "../../i18n/shell";
-import type { createAvatarElement } from "../profiles/avatar";
 import {
   mentionBadge,
   nsfwIndicator,
   passwordIndicator,
   privateIndicator,
+  treeItemAttrs,
 } from "./channelRow.view";
 
-/** The avatar drawer, injected: a feature reaches the UI layer only lazily. */
-export type CreateAvatar = typeof createAvatarElement;
-
-/** The one mute or deafen icon a participant shows: deafen wins over mute. */
-export type VoiceAudioModel = {
-  readonly icon: "mic-off" | "headphones-off";
-  /** A moderator imposed it: drawn with `vu-server-muted`. */
-  readonly server: boolean;
-  /** The tooltip; null draws no title (an ordinary self-mute). */
-  readonly title: string | null;
-};
-
-/** A peer's E2EE identity badge exactly as drawn. `cls` is the verification
- *  status and is the badge's class, so a stale or wrong status cannot hide
- *  behind an equal icon. */
-export type VoiceVerifyModel = {
-  readonly cls: "verified" | "changed" | "unverified" | "mismatch" | "unknown";
-  readonly icon: IconName;
-  readonly color: string;
-  readonly title: string;
-};
-
-export type VoiceUserRowModel = {
-  /** Row key; drawn as `data-voice-uid`. */
-  readonly userId: number;
-  /** The name shown: display name, else username, else "Unknown". */
-  readonly name: string;
-  /** The name the avatar shows: its initial and the picture's alt text. */
-  readonly avatarName: string;
-  /** The letter avatar's background, from the username. */
-  readonly avatarColor: string;
-  readonly avatarUrl: string | null;
-  /** Patch field: the speaking ring toggles in place. */
-  readonly speaking: boolean;
-  readonly camera: boolean;
-  /** Screen share: the monitor icon and the LIVE badge. */
-  readonly live: boolean;
-  /** Shares music: a music note beside the name. Absent reads as false. */
-  readonly music?: boolean;
-  /** Mute music is on for a member who shares: the note is dimmed. */
-  readonly musicMuted?: boolean;
-  readonly audio: VoiceAudioModel | null;
-  /** Muted for this client only. */
-  readonly localMuted: boolean;
-  /** The local user's own session fingerprint badge title; null for others. */
-  readonly ownFingerprintTitle: string | null;
-  /** Never a patch field and never defaulted: null when the snapshot holds no
-   *  verification for this user, so an unverified peer never draws verified. */
-  readonly verify: VoiceVerifyModel | null;
-  /** Drawn as `voice-user-draggable`: the row can be dragged to move them. */
-  readonly draggable: boolean;
-  /** Not drawn: decides which handlers the sidebar binds to the row. */
-  readonly self: boolean;
-};
+// The participant row moved to its own module; importers of this one keep working.
+export {
+  VOICE_USER_PATCH_FIELDS,
+  drawVoiceUserRow,
+  patchVoiceUserRow,
+  type VoiceAudioModel,
+  type VoiceUserRowModel,
+  type VoiceVerifyModel,
+} from "./voiceUserRow.view";
 
 /** A voice channel's own row (the wrapper's `.channel-item` and the timeout
  *  notice), without its participant list. */
@@ -101,126 +56,22 @@ export type VoiceChannelChromeModel = {
   readonly capacity: { readonly label: string; readonly title: string } | null;
   /** The mention badge's count; 0 draws none. Unread is never drawn here. */
   readonly mentionCount: number;
+  /** Someone in the channel shares a screen: a LIVE tag on the row. Only a tree
+   *  sets it, and an absent field reads as false. */
+  readonly live?: boolean;
 };
-
-/** The fields `patchVoiceUserRow` changes in place. */
-export const VOICE_USER_PATCH_FIELDS = ["speaking"] as const;
 
 /** The fields `patchVoiceChannelChrome` changes in place. */
 export const VOICE_CHROME_PATCH_FIELDS = [
   "passwordProtected",
   "afk",
   "joined",
+  "live",
   "frozenReason",
   "timeoutReason",
   "capacity",
   "mentionCount",
 ] as const;
-
-function iconSpan(cls: string, icon: IconName): HTMLSpanElement {
-  const span = createElement("span", { class: cls });
-  span.appendChild(createIcon(icon, 14));
-  return span;
-}
-
-/**
- * Draw one participant row, without handlers. `speaking` is the last class so
- * the patch's toggle lands where a fresh draw puts it, and a patch keeps any
- * class another module set on the live row (dragMove's `dragging`).
- */
-/** The note beside a member who shares music, dimmed while you muted it. */
-function musicNote(muted: boolean): HTMLElement {
-  const note = iconSpan("vu-status vu-music", "music");
-  note.title = shellText(muted ? "channel.sharingMusicMuted" : "channel.sharingMusic");
-  note.classList.toggle("vu-music--muted", muted);
-  return note;
-}
-
-export function drawVoiceUserRow(
-  model: VoiceUserRowModel,
-  createAvatar: CreateAvatar,
-): HTMLDivElement {
-  const classes = ["voice-user-item"];
-  if (model.draggable) classes.push("voice-user-draggable");
-  if (model.speaking) classes.push("speaking");
-  const row = createElement("div", {
-    class: classes.join(" "),
-    "data-voice-uid": String(model.userId),
-  });
-  // Every row is focusable (A11Y-01): Enter/Space does what a click does.
-  row.tabIndex = 0;
-  row.setAttribute("role", "button");
-
-  const avatar = createAvatar(
-    { username: model.avatarName, avatar: model.avatarUrl },
-    { className: "vu-avatar", background: model.avatarColor },
-  );
-  // The name follows, so the avatar's initial would only repeat it.
-  avatar.setAttribute("aria-hidden", "true");
-  row.appendChild(avatar);
-  row.appendChild(createElement("span", { class: "vu-name" }, model.name));
-
-  if (model.music === true) row.appendChild(musicNote(model.musicMuted === true));
-  if (model.camera) row.appendChild(iconSpan("vu-status", "camera"));
-  if (model.live) {
-    row.appendChild(iconSpan("vu-status", "monitor"));
-    row.appendChild(createElement("span", { class: "vu-live-badge" }, shellText("channel.live")));
-  }
-
-  // A moderator-imposed mute/deafen gets its own class and tooltip: the same
-  // glyph would otherwise read as an ordinary self-mute.
-  if (model.audio !== null) {
-    const audio = iconSpan(
-      model.audio.server ? "vu-muted vu-server-muted" : "vu-muted",
-      model.audio.icon,
-    );
-    if (model.audio.title !== null) audio.title = model.audio.title;
-    row.appendChild(audio);
-  }
-
-  if (model.localMuted) {
-    const local = iconSpan("vu-muted vu-local-muted", "volume-x");
-    local.title = shellText("channel.locallyMuted");
-    row.appendChild(local);
-  }
-
-  // The local user's own session fingerprint: what a peer who sees
-  // us as unverified compares against.
-  if (model.ownFingerprintTitle !== null) {
-    const own = createElement("span", { class: "vu-verify vu-session-fp" });
-    own.style.color = "var(--text-muted, #949ba4)";
-    own.title = model.ownFingerprintTitle;
-    own.appendChild(createIcon("shield", 14));
-    row.appendChild(own);
-  }
-
-  // E2EE identity verification badge (F3 TOFU). Absent until the peer's
-  // announce resolves.
-  if (model.verify !== null) {
-    const badge = createElement("span", { class: `vu-verify ${model.verify.cls}` });
-    badge.style.color = model.verify.color;
-    badge.title = model.verify.title;
-    badge.appendChild(createIcon(model.verify.icon, 14));
-    // A blocked peer's shield opens the re-trust prompt, any other with an
-    // identity key their trusted keys (both bound by the sidebar).
-    if (
-      model.verify.cls === "mismatch" ||
-      model.verify.cls === "verified" ||
-      model.verify.cls === "changed"
-    ) {
-      badge.style.cursor = "pointer";
-    }
-    row.appendChild(badge);
-  }
-
-  row.style.cursor = "pointer";
-  return row;
-}
-
-/** Bring a drawn participant row to `next`; only `VOICE_USER_PATCH_FIELDS` differ. */
-export function patchVoiceUserRow(el: Element, next: VoiceUserRowModel): void {
-  el.classList.toggle("speaking", next.speaking);
-}
 
 function drawCapacity(
   channelId: number,
@@ -249,6 +100,15 @@ function drawAfk(channelId: number): HTMLSpanElement {
   return badge;
 }
 
+/** LIVE on the row of a channel where someone shares a screen (a tree hides the per-person tag). */
+function drawLive(channelId: number): HTMLSpanElement {
+  return createElement(
+    "span",
+    { class: "ch-live", "data-testid": `channel-live-${channelId}` },
+    shellText("channel.live"),
+  );
+}
+
 function drawRestriction(channelId: number, reason: string): HTMLDivElement {
   return createElement(
     "div",
@@ -270,14 +130,16 @@ function chromeClasses(model: VoiceChannelChromeModel): string[] {
  * the `.ch-restriction` notice. No handlers and no participant list; the
  * sidebar appends `.voice-users-list` after them.
  */
-export function drawVoiceChannelChrome(model: VoiceChannelChromeModel): HTMLDivElement {
+export function drawVoiceChannelChrome(
+  model: VoiceChannelChromeModel,
+  tree = false,
+): HTMLDivElement {
   const wrapper = createElement("div", {});
   const item = createElement("div", {
     class: chromeClasses(model).join(" "),
     "data-testid": `channel-${model.channelId}`,
     // Roving list item: reachable by Tab once, then arrow-stepped.
-    role: "button",
-    tabindex: "-1",
+    ...(tree ? treeItemAttrs("row") : { role: "button", tabindex: "-1" }),
   });
   item.dataset.channelId = String(model.channelId);
   if (model.frozenReason !== null) {
@@ -292,6 +154,7 @@ export function drawVoiceChannelChrome(model: VoiceChannelChromeModel): HTMLDivE
   if (model.private) item.appendChild(privateIndicator(model.channelId));
   if (model.passwordProtected) item.appendChild(passwordIndicator(model.channelId));
   if (model.afk) item.appendChild(drawAfk(model.channelId));
+  if (model.live === true) item.appendChild(drawLive(model.channelId));
   if (model.capacity !== null) item.appendChild(drawCapacity(model.channelId, model.capacity));
   if (model.mentionCount > 0) item.appendChild(mentionBadge(model.channelId, model.mentionCount));
 
@@ -332,7 +195,9 @@ function patchPasswordBadge(item: HTMLElement, next: VoiceChannelChromeModel): v
     insertBefore(
       item,
       passwordIndicator(next.channelId),
-      item.querySelector(":scope > .ch-afk, :scope > .ch-capacity, :scope > .mention-badge"),
+      item.querySelector(
+        ":scope > .ch-afk, :scope > .ch-live, :scope > .ch-capacity, :scope > .mention-badge",
+      ),
     );
   }
 }
@@ -346,6 +211,20 @@ function patchAfkBadge(item: HTMLElement, next: VoiceChannelChromeModel): void {
     insertBefore(
       item,
       drawAfk(next.channelId),
+      item.querySelector(":scope > .ch-live, :scope > .ch-capacity, :scope > .mention-badge"),
+    );
+  }
+}
+
+function patchLiveBadge(item: HTMLElement, next: VoiceChannelChromeModel): void {
+  const badge = item.querySelector(":scope > .ch-live");
+  if (next.live !== true) {
+    badge?.remove();
+  } else if (badge === null) {
+    // Before the capacity and mention badges, as a fresh draw orders them.
+    insertBefore(
+      item,
+      drawLive(next.channelId),
       item.querySelector(":scope > .ch-capacity, :scope > .mention-badge"),
     );
   }
@@ -406,6 +285,7 @@ export function patchVoiceChannelChrome(wrapper: Element, next: VoiceChannelChro
   patchChromeRow(item, next);
   patchPasswordBadge(item, next);
   patchAfkBadge(item, next);
+  patchLiveBadge(item, next);
   patchCapacityBadge(item, next);
   patchMentionBadge(item, next);
   patchTimeoutNotice(wrapper, item, next);

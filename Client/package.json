@@ -1,7 +1,7 @@
 {
   "name": "owncord-client",
   "private": true,
-  "version": "2.10.0",
+  "version": "2.11.0",
   "type": "module",
   "engines": {
     "node": "^26",
@@ -25,6 +25,7 @@
     "test:contract": "vitest run tests/contract",
     "test:e2e": "playwright test",
     "test:e2e:prod": "npm run build && playwright test --config tests/e2e/config/playwright.config.prod.ts",
+    "test:e2e:deck": "npm run build && playwright test --config tests/e2e/config/playwright.config.deck.ts",
     "test:e2e:smoke": "playwright test --config tests/e2e/config/playwright.config.smoke.ts",
     "test:e2e:native": "playwright test --config tests/e2e/config/playwright.config.native.ts",
     "test:e2e:native-voice": "playwright test --config tests/e2e/config/playwright.config.native-voice.ts",
@@ -56,6 +57,7 @@
     "perf:analyze": "node scripts/analyze-perf.mjs"
   },
   "devDependencies": {
+    "@axe-core/playwright": "4.14.0",
     "@discordapp/twemoji": "17.0.3",
     "@eslint/js": "^10.0.1",
     "@jitsi/rnnoise-wasm": "^0.2.1",
@@ -66,22 +68,22 @@
     "@stryker-mutator/vitest-runner": "^10.1.1",
     "@tauri-apps/cli": "^2",
     "@types/node": "^26.6.6",
-    "@vitest/browser-playwright": "^5.1.0",
+    "@vitest/browser-playwright": "^5.1.1",
     "@vitest/coverage-v8": "^5.0.5",
     "eslint": "^10.15.0",
-    "fast-check": "^4.10.2",
+    "fast-check": "^4.10.3",
     "jsdom": "^30.1.3",
-    "knip": "^6.45.1",
+    "knip": "^6.47.0",
     "lightningcss": "^1.33.0",
-    "oxlint": "^1.93.0",
+    "oxlint": "^1.94.0",
     "patch-package": "8.0.1",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.2",
+    "typescript-eslint": "^8.73.0",
     "vite": "^8.3.8",
     "vitest": "^5.0.5"
   },
   "dependencies": {
-    "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/api": "^2.12.5",
     "@tauri-apps/plugin-autostart": "^2.7.0",
     "@tauri-apps/plugin-deep-link": "^2.6.3",
     "@tauri-apps/plugin-dialog": "^2.8.4",

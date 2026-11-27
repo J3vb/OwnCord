@@ -20,12 +20,13 @@ import {
   type ConnectionStatsPoller,
 } from "@lib/voice/connectionStats";
 import { enhancedNoiseSuppressionEnabled } from "@lib/voice/audioPipeline";
-import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "@lib/voice/livekitSession";
+import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "./livekitSession";
+import { writeLiveStats } from "@lib/voice/liveStats";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../../i18n/voice";
 import { callStatusText, isConnecting, isPhoneCallHold } from "./voiceStatusText";
 import { shareBlockReason } from "./shareGate";
-import { canPublishScreen } from "./native/platform";
+import { canPublishScreen } from "@lib/hostOs";
 import { createMusicButton, syncMusicButton, watchMusicSupport } from "./musicControl";
 import { createSecuredBadge, type SecuredBadge } from "./securedBadge";
 import type { StreamCard } from "./voiceWidget/streamCard";
@@ -38,7 +39,10 @@ import {
 import { subscribeVoiceWidget } from "./widget/subscriptions";
 import { isShareLive } from "./widget/liveShare";
 import { createListenOnlyUi, type ListenOnlyUi } from "./widget/listenOnly";
+import { createListeningBar, type ListeningBar } from "./widget/listeningBar";
 import { formatDuration } from "@lib/text/duration";
+import { setCallRow } from "./callRowMark";
+import { moderationText } from "./widget/moderationText";
 
 export interface VoiceWidgetOptions {
   onDisconnect(): void;
@@ -47,14 +51,6 @@ export interface VoiceWidgetOptions {
   /** Open the call's channel: the DM for a DM call, the call view for a guild
    *  voice channel. Without it the call name is plain text. */
   onOpenCall?(channelId: number): void;
-}
-
-/** The moderator-imposed state as a sentence, or "" when there is none. */
-function moderationText(serverMuted: boolean, serverDeafened: boolean): string {
-  if (serverMuted && serverDeafened) return t("widget.moderatedMutedDeafened");
-  if (serverMuted) return t("widget.mutedByModerator");
-  if (serverDeafened) return t("widget.deafenedByModerator");
-  return "";
 }
 
 export function createVoiceWidget(options: VoiceWidgetOptions): MountableComponent {
@@ -86,6 +82,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
   // Listen-only mode: "Grant Microphone" button + its persistent explanation.
   let listenOnly: ListenOnlyUi | null = null;
+  /** "Listening to {name}" with Stop, above the call block while you listen. */
+  let listeningBar: ListeningBar | null = null;
 
   // Connection stats
   let signalBtn: SignalButton | null = null;
@@ -100,6 +98,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   const unsubs: Array<() => void> = [];
 
   function updateSignalIcon(stats: ConnectionStats): void {
+    writeLiveStats(stats, voiceStore.getState().voiceStatus === "connected");
     if (signalBtn === null || statsPane === null) return;
     signalBtn.draw(stats);
     statsPane.update(stats);
@@ -161,6 +160,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       statusLabel.classList.toggle("vw-securing", status === "securing");
       statusLabel.classList.toggle("vw-reconnecting", status === "reconnecting");
       statusLabel.classList.toggle("vw-paused", isPhoneCallHold(voice));
+      statusLabel.classList.toggle("vw-steady", status === "connected" && !isPhoneCallHold(voice));
     }
     securedBadge?.sync(status === "connected", voice.encryptionDegraded === true);
   }
@@ -269,13 +269,16 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     if (channelId === null) {
       root.classList.remove("visible");
+      setCallRow(false);
       stopStatsPoller();
       stopElapsedTimer();
       statsPane?.el.classList.remove("visible");
+      signalBtn?.el.setAttribute("aria-expanded", "false");
       return;
     }
 
     root.classList.add("visible");
+    setCallRow(true);
     startStatsPoller();
     startElapsedTimer();
     updateStatus(voice);
@@ -285,6 +288,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     renderMediaButtons(voice.localCamera, voice.localScreenshare);
     if (musicBtn !== null) syncMusicButton(musicBtn, voice);
     listenOnly?.sync(voice.listenOnly);
+    listeningBar?.sync(voice);
   }
 
   function syncStreamCard(sharing: boolean): void {
@@ -428,6 +432,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     statsPane = createStatsPane();
     const controls = buildControls();
     listenOnly = createListenOnlyUi(disposable.signal, render);
+    listeningBar = createListeningBar(disposable.signal, render);
 
     // A live region present from mount (screen readers skip one inserted
     // already filled) that only fills when a moderator-imposed state lands.
@@ -440,6 +445,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     appendChildren(
       root,
+      listeningBar.el,
       header,
       statsPane.el,
       modStatusEl,
@@ -455,6 +461,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   }
 
   function destroy(): void {
+    setCallRow(false);
     stopStatsPoller();
     stopElapsedTimer();
     disposable.destroy();
@@ -480,6 +487,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     modStatusEl = null;
     listenOnly?.dispose();
     listenOnly = null;
+    listeningBar = null;
     signalBtn = null;
     timerEl = null;
     statsPane = null;

@@ -5,6 +5,7 @@
  */
 
 import { loadPref } from "../../lib/prefs/preferences";
+import { runningScreenLayout } from "../../lib/prefs/screenLayout";
 
 /** Where the member list sits: beside the chat or under the channels. */
 export type MemberLayout = "right" | "left";
@@ -18,8 +19,11 @@ export const MEMBER_WIDTH_MAX = 360;
 export const MEMBER_WIDTH_DEFAULT = 240;
 
 /** The stored layout. Only a stored `"left"` reads as left; a missing or
- *  invalid value reads as `"right"` (the default since 3C-6c). */
+ *  invalid value reads as `"right"` (the default since 3C-6c). While Command
+ *  Deck runs it is always `"right"`; the stored value is kept and applies
+ *  again once Classic runs. */
 export function loadMemberLayout(): MemberLayout {
+  if (runningScreenLayout() === "deck") return "right";
   return loadPref<string>(MEMBER_LAYOUT_PREF, "right") === "left" ? "left" : "right";
 }
 

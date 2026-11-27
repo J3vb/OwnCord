@@ -324,6 +324,18 @@ describe("renderGenericLinkPreview", () => {
     expect(card.querySelector(".msg-embed-host")?.textContent).toBe("untitled.example.com");
   });
 
+  it("shows the link's own host, not the site name the page gives", async () => {
+    previewMock.mockResolvedValue({
+      ok: true,
+      value: { title: "Sign in", description: null, siteName: "bank.example", image: null },
+    });
+
+    const card = mountCard("https://other.example.net/login");
+
+    await embedStateIs(card, "loaded");
+    expect(card.querySelector(".msg-embed-host")?.textContent).toBe("other.example.net");
+  });
+
   it("keeps a pending card's link out of the tab order until it has content", async () => {
     const settle = deferredPreview();
 
@@ -650,14 +662,14 @@ describe("applyOgMeta", () => {
     expect(titleEl.textContent).toBe("example.com");
   });
 
-  it("sets siteName when present", () => {
+  it("keeps the host line on displayHost when a siteName is present", () => {
     const { hostEl } = apply({
       title: "Title",
       description: null,
       image: null,
       siteName: "My Site",
     });
-    expect(hostEl.textContent).toBe("My Site");
+    expect(hostEl.textContent).toBe("example.com");
   });
 
   it("truncates long descriptions to 200 chars", () => {

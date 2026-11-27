@@ -112,3 +112,13 @@
     display: none;
   }
 }
+
+/* Phones: a person's Message button is 44px to hit. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  .people-msg {
+    align-items: center;
+    justify-content: center;
+    min-width: 44px;
+    min-height: 44px;
+  }
+}

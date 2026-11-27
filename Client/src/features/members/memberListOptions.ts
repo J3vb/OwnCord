@@ -4,6 +4,8 @@
 
 import type { VoiceUser } from "@stores/voice.store";
 import type { VoiceModMenuOptions } from "../channels/sidebar/volumeMenu";
+import type { ListItem, MemberModel } from "./memberModel";
+import type { MemberRowRenderer, MemberRows } from "./memberRowRenderer";
 
 /** Options for configuring admin action callbacks on the member list. */
 export interface MemberListOptions {
@@ -46,4 +48,31 @@ export interface MemberListOptions {
     channelId: number,
     user: VoiceUser,
   ) => VoiceModMenuOptions | string | undefined;
+  /** How a row is drawn, for a renderer that needs no row context: the
+   *  no-context form of `view`. Absent: the Classic rows. */
+  readonly rows?: MemberRowRenderer;
+  /** How a row is drawn, with the row context it reads. Wins over `rows`. */
+  readonly view?: MemberRows;
+  /** The role model and the search text as list items; `collapsed` holds the
+   *  keys of the groups shown folded. Absent: Classic's role groups. */
+  readonly flatten?: (
+    model: MemberModel,
+    query: string,
+    collapsed: ReadonlySet<string>,
+  ) => ListItem[];
+  /** The voice room a Join on member `userId` would enter now, or null. The
+   *  row menu calls it when it opens and again on the click. Absent: no Join. */
+  readonly joinRoomFor?: (
+    userId: number,
+  ) => { readonly label: string; readonly join: () => void } | null;
+  /** Which group headers are collapsed, and how to toggle one. Absent: no
+   *  header folds. */
+  readonly collapse?: {
+    /** Returns a new Set object only when the set changes. */
+    read(): ReadonlySet<string>;
+    toggle(key: string): void;
+    subscribe(signal: AbortSignal, onChange: () => void): void;
+    /** The header key of the group member `id` belongs in now, or null. */
+    groupOf(id: number): string | null;
+  };
 }

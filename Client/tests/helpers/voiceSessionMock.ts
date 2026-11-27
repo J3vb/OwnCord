@@ -1,7 +1,7 @@
 import { vi } from "vitest";
 
 /**
- * Module factory bodies for `vi.mock("@lib/voice/livekitSession", ...)`.
+ * Module factory bodies for `vi.mock("../../src/features/voice/livekitSession", ...)`.
  *
  * `defaults()` covers every export the suites mock, each as a spy with the
  * behaviour most suites want. `withOverrides(partial)` changes single members
@@ -9,7 +9,7 @@ import { vi } from "vitest";
  * namespace import placed before the module under test:
  *
  *   import * as voiceSession from "../helpers/voiceSessionMock";
- *   vi.mock("@lib/voice/livekitSession", () => voiceSession.withOverrides({ ... }));
+ *   vi.mock("../../src/features/voice/livekitSession", () => voiceSession.withOverrides({ ... }));
  */
 
 export function defaults() {
@@ -28,6 +28,8 @@ export function defaults() {
     getLocalMicSettings: () => null,
     getLocalScreenshareStats: vi.fn().mockResolvedValue(null),
     getLocalScreenshareStream: vi.fn(() => null),
+    getMusicMuted: vi.fn(() => false),
+    getMusicVolume: vi.fn(() => 100),
     getRemoteVideoStats: vi.fn().mockResolvedValue(null),
     getRoomForStats: vi.fn().mockReturnValue(null),
     getScreenshareAudioMuted: vi.fn(() => false),
@@ -46,6 +48,7 @@ export function defaults() {
     isVoiceSessionActive: vi.fn(() => false),
     joinVoice: vi.fn(),
     leaveVoice: vi.fn(),
+    listenToMusic: vi.fn(),
     muteScreenshareAudio: vi.fn(),
     onNativeInputLevel: () => () => {},
     parseUserId: vi.fn(),
@@ -63,6 +66,8 @@ export function defaults() {
     setOnError: vi.fn(),
     setOnRemoteVideo: vi.fn(),
     setOnRemoteVideoRemoved: vi.fn(),
+    setMusicMuted: vi.fn(),
+    setMusicVolume: vi.fn(),
     setOutputVolume: vi.fn(),
     setPttGated: vi.fn(),
     setRemoteVideoView: vi.fn(),

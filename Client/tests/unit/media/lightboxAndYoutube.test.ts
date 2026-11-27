@@ -31,6 +31,17 @@ vi.mock("../../../src/features/messaging/content/attachments", (importOriginal) 
   mocks.listAttachmentsMock(importOriginal),
 );
 vi.mock("../../../src/features/messaging/content/embeds", () => mocks.listEmbedsMock());
+const { webOriginMock, openUrlMock } = vi.hoisted(() => ({
+  webOriginMock: vi.fn(() => true),
+  openUrlMock: vi.fn(() => Promise.resolve()),
+}));
+vi.mock("@lib/hostPlatform", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../../../src/lib/hostPlatform")>()),
+  pageIsWebOrigin: webOriginMock,
+}));
+vi.mock("../../../src/platform/desktop/urlOpener", () => ({
+  urlOpener: { open: openUrlMock },
+}));
 
 const { previewMock, imageMock } = mocks;
 
@@ -73,6 +84,25 @@ describe("media.ts", () => {
       for (const feature of ["camera", "microphone", "display-capture"]) {
         expect(allowed).not.toContain(feature);
       }
+    });
+
+    it("on a page outside http(s), Play opens the video in the browser, not a frame", () => {
+      // A tauri: page sends no Referer, and YouTube's player refuses a frame
+      // without one.
+      webOriginMock.mockReturnValue(false);
+      previewMock.mockResolvedValue(oembedResponse("Test Video"));
+      const url = "https://www.youtube.com/watch?v=noref1";
+      const embed = renderYouTubeEmbed("noref1", url);
+      document.body.appendChild(embed);
+      const thumbWrap = embed.querySelector<HTMLElement>(".msg-embed-thumb")!.parentElement!;
+
+      thumbWrap.click();
+      thumbWrap.click();
+
+      expect(embed.querySelector("iframe")).toBeNull();
+      expect(openUrlMock).toHaveBeenCalledTimes(2);
+      expect(openUrlMock).toHaveBeenCalledWith(url);
+      webOriginMock.mockReturnValue(true);
     });
 
     it("shows 'Loading...' while fetching the title", () => {

@@ -5,6 +5,7 @@ import type { ChannelType } from "@lib/types";
 import type { MountableComponent } from "@lib/text/safeRender";
 import { errorText } from "@lib/api";
 import { createChannelSidebar } from "../../../features/channels/ChannelSidebar";
+import { createDmFolder } from "../../../features/direct-messages/dmFolder";
 import { openEditChannelModal } from "../../../features/channels/editChannelModal";
 import { rollBackRejectedReorders } from "../../../features/channels/channelReorderRollback";
 import { withThreadsStore } from "@stores/threadsLoader";
@@ -14,10 +15,11 @@ import {
 } from "../../../features/threads/threadNavigation";
 import { createDeleteChannelModal } from "../../../features/channels/DeleteChannelModal";
 import { createSidebarVoiceCallbacks, createVoiceModerationCallbacks } from "../VoiceCallbacks";
-import { markChannelRead } from "@lib/readState";
+import { markChannelRead } from "@stores/readState";
 import { uiStore } from "@stores/ui.store";
 import { type CategoryRef } from "@stores/channels.store";
 import { shellText } from "../../../i18n/shell";
+import { runningScreenLayout } from "@lib/prefs/screenLayout";
 import { createChannelModalScreen } from "./sidebarShared";
 import type { SidebarScope } from "./sidebarScope";
 
@@ -73,7 +75,10 @@ export function mountChannelSidebar(sc: SidebarScope): void {
 
   sc.buildChannelSidebar = function buildChannelSidebar(): MountableComponent {
     const sidebarVoice = createSidebarVoiceCallbacks(sc.ws);
+    const tree = runningScreenLayout() === "deck";
     return createChannelSidebar({
+      tree,
+      ...(tree && { direct: () => createDmFolder(sc.dmFolderOptions()) }),
       onVoiceJoin: sidebarVoice.onVoiceJoin,
       onOpenCall: () => sc.opts.onOpenCall?.(),
       onVoiceModerate: createVoiceModerationCallbacks(sc.ws),

@@ -3,6 +3,8 @@ mod active_session;
 mod android_notifications;
 #[cfg(target_os = "android")]
 mod android_secrets;
+#[cfg(desktop)]
+mod autostart_entry;
 #[cfg(target_os = "android")]
 mod call_service;
 mod commands;
@@ -52,6 +54,8 @@ mod idle_android;
 mod idle_wayland;
 mod json_store;
 #[cfg(target_os = "linux")]
+mod launch_env;
+#[cfg(target_os = "linux")]
 mod linux_media;
 #[cfg(target_os = "linux")]
 mod linux_spellcheck;
@@ -77,6 +81,8 @@ mod portal_shortcuts;
 pub mod native_voice;
 mod proxy_common;
 mod ptt;
+#[cfg(target_os = "linux")]
+mod realtime_limits;
 mod region;
 mod secret_store;
 #[cfg(any(target_os = "android", test))]
@@ -169,13 +175,29 @@ fn app_sounds_state() -> NoAppSounds {
 
 /// Whether a forwarded single-instance launch should restore the main window.
 ///
-/// Once an installer is launching the old process must not take handoffs: the
-/// plugin has already hidden the window and is blocked in `ShellExecuteW`, so
-/// re-showing it puts the old version on screen for the whole install gap
-/// (the reported "old version stays up for ~90 s" symptom).
+/// Once an installer is launching the old process must not take handoffs. The
+/// app's pre-exit step (`update_commands/handoff.rs`) has hidden the window and
+/// the tray icon but kept the single-instance lock, so a launch in the gap
+/// lands here instead of starting a second copy, while the plugin is blocked
+/// in `ShellExecuteW`. Re-showing the window would put the old version on
+/// screen for the whole install gap (the reported "old version stays up for
+/// ~90 s" symptom), so the window stays hidden; a link the launch carries
+/// still reaches the hidden webview. If the installer does not start, the
+/// update's error path brings the window and tray back.
 #[cfg(desktop)]
 fn should_restore_on_second_launch(installer_launching: bool) -> bool {
     !installer_launching
+}
+
+/// Process setup that must come before GTK, GLib or GStreamer start, so
+/// `main` calls it first, with one thread: stderr goes to its file for the
+/// next start's report, an AppImage's GStreamer gets its own registry, and
+/// the process's threads stay off realtime scheduling.
+#[cfg(target_os = "linux")]
+pub fn prepare_linux_launch() {
+    stderr_capture::start_at_launch();
+    realtime_limits::drop_realtime_priority();
+    launch_env::use_private_gstreamer_registry();
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -294,11 +316,15 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             diagnostics::frontend_ready,
             #[cfg(desktop)]
+            autostart_entry::autostart_fix_entry,
+            #[cfg(desktop)]
             window_prefs::get_window_prefs,
             #[cfg(desktop)]
             window_prefs::set_window_pref,
             #[cfg(desktop)]
             window_prefs::show_next_launch,
+            #[cfg(desktop)]
+            window_prefs::restart_startup_link,
             #[cfg(desktop)]
             gpu_adapter::get_gpu_adapters,
             #[cfg(desktop)]
@@ -586,6 +612,9 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         // by the next start; freezes and memory are logged as they happen.
         exit_watch::start(app.handle(), &dir, &app.package_info().version.to_string());
     }
+    // Launch on login: an existing entry follows this app's current path.
+    #[cfg(target_os = "linux")]
+    autostart_entry::repair(app.handle());
     // How earlier runs ended, from Android, into the same native log.
     #[cfg(target_os = "android")]
     if let Ok(dir) = tauri::Manager::path(app).app_log_dir() {
@@ -604,9 +633,10 @@ fn setup_app(app: &mut tauri::App) -> Result<(), Box<dyn std::error::Error>> {
         app.manage(window_prefs::WindowPrefs::load(app.handle()));
         let prefs = app.state::<window_prefs::WindowPrefs>();
         // Always consumed, so the marker never outlives one launch.
-        let show_next = window_prefs::take_show_next_launch(app.handle());
+        let next = window_prefs::take_show_next_launch(app.handle());
+        app.manage(window_prefs::LaunchOrigin::new(next.restart_link));
         let hidden = window_prefs::should_start_hidden(
-            show_next,
+            next.show,
             window_prefs::launched_minimized(),
             prefs.start_minimized(),
             window_prefs::tray_available,

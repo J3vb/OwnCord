@@ -262,12 +262,77 @@ describe("fitGpuH264Share", () => {
     });
   });
 
-  it("leaves a capture that already fits alone", async () => {
-    const { share, applyConstraints } = capture({ width: 3840, height: 2160 }, { frameRate: 30 });
+  it.each([
+    ["uncapped (Source)", undefined],
+    ["opened with livekit's zero-size Source sentinel", { width: 0, height: 0 }],
+  ])(
+    "caps a share %s that fits now, so a later larger window stays within the encoder",
+    async (_, held) => {
+      const { share, applyConstraints } = capture({ width: 1920, height: 1080 }, { frameRate: 60 });
 
-    await fitGpuH264Share(share);
+      await fitGpuH264Share(share, held);
+
+      expect(applyConstraints).toHaveBeenCalledExactlyOnceWith({
+        width: { max: 3840 },
+        height: { max: 2160 },
+        frameRate: 60,
+      });
+    },
+  );
+
+  it.each([
+    ["the capture reports none", {}],
+    ["the capture reports another", { frameRate: 30 }],
+  ])("keeps the rate a 60 fps Source share was opened with when %s", async (_, settings) => {
+    const { share, applyConstraints } = capture({ width: 1920, height: 1080 }, settings);
+
+    await fitGpuH264Share(share, { width: 0, height: 0, frameRate: 60 });
+
+    expect(applyConstraints).toHaveBeenCalledExactlyOnceWith({
+      width: { max: 3840 },
+      height: { max: 2160 },
+      frameRate: 60,
+    });
+  });
+
+  it("leaves a share held to a quality's size alone: that box already fits", async () => {
+    const { share, applyConstraints } = capture({ width: 1920, height: 1080 }, { frameRate: 30 });
+
+    await fitGpuH264Share(share, { width: 1920, height: 1080 });
 
     expect(applyConstraints).not.toHaveBeenCalled();
+  });
+
+  it("keeps a window share that starts small and grows past 3840 px inside the encoder", async () => {
+    // A window capture follows the window; max-only constraints shrink a frame
+    // that outgrows them (aspect ratio kept) and leave a smaller one as it is.
+    let windowSize = { width: 1600, height: 900 };
+    let max: { width: number; height: number } | null = null;
+    const frame = () => {
+      if (max === null) return windowSize;
+      const scale = Math.min(1, max.width / windowSize.width, max.height / windowSize.height);
+      return {
+        width: Math.round(windowSize.width * scale),
+        height: Math.round(windowSize.height * scale),
+      };
+    };
+    const applyConstraints = vi.fn((c: MediaTrackConstraints) => {
+      const w = c.width as ConstrainULongRange;
+      const h = c.height as ConstrainULongRange;
+      max = { width: w.max!, height: h.max! };
+      return Promise.resolve();
+    });
+    const mediaStreamTrack = {
+      getSettings: () => ({ ...frame(), frameRate: 60 }),
+      applyConstraints,
+    } as unknown as MediaStreamTrack;
+
+    await fitGpuH264Share({ mediaStreamTrack, waitForDimensions: () => Promise.resolve(frame()) });
+    expect(mediaStreamTrack.getSettings()).toMatchObject({ width: 1600, height: 900 });
+
+    // The game goes borderless full screen on a 5120x1440 monitor.
+    windowSize = { width: 5120, height: 1440 };
+    expect(mediaStreamTrack.getSettings()).toMatchObject({ width: 3840, height: 1080 });
   });
 
   it("logs a capture whose size never arrives and leaves it alone", async () => {

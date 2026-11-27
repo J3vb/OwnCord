@@ -6,6 +6,8 @@ import { closeSettings, setActiveView, uiStore } from "@stores/ui.store";
 import { claimBack } from "@lib/ui/backHistory";
 import { closeBottomSheet, openBottomSheet } from "@lib/ui/bottomSheet";
 import { guarded, pressBack, settle } from "../helpers/backNav";
+import { panelSwipe } from "@lib/ui/panelDrag";
+import { setRunningScreenLayout } from "@lib/prefs/screenLayout";
 
 const ANDROID_UA = "Mozilla/5.0 (Linux; Android 14; Pixel 7) AppleWebKit/537.36 Chrome/140.0";
 
@@ -71,10 +73,29 @@ function stubPhoneViewport(): void {
   );
 }
 
+/** Command Deck running, as on phone Deck; undo with `leavePhoneDeck`. */
+function enterPhoneDeck(): void {
+  document.documentElement.classList.add("layout-deck");
+  setRunningScreenLayout("deck");
+}
+
+function leavePhoneDeck(): void {
+  document.documentElement.classList.remove("layout-deck");
+  setRunningScreenLayout("classic");
+}
+
 function openOneButtonSheet() {
   const content = document.createElement("div");
   content.innerHTML = "<button>One</button>";
   return openBottomSheet({ label: "Sheet", content });
+}
+
+/** Opens the drawer with its button, puts a sheet over it, and presses Back once. */
+async function backOverDrawerSheet(s: Setup): Promise<boolean> {
+  s.toggle.click();
+  const sheet = openOneButtonSheet();
+  await pressBack();
+  return sheet.signal.aborted;
 }
 
 describe("the drawer on a phone", () => {
@@ -225,6 +246,67 @@ describe("the drawer on a phone", () => {
       expect(guarded()).toBe(false);
     });
 
+    it("on phone Deck, a row sheet over the drawer closes first, then the drawer", async () => {
+      enterPhoneDeck();
+      try {
+        const s = setup();
+        drawer = s.drawer;
+        expect([await backOverDrawerSheet(s), s.drawer.isOpen()]).toEqual([true, true]);
+        await pressBack();
+        expect([s.drawer.isOpen(), guarded()]).toEqual([false, false]);
+      } finally {
+        leavePhoneDeck();
+      }
+    });
+
+    it("a peek draws the drawer open with no Back claim, no aria-expanded change and no focus move", () => {
+      const s = setup();
+      drawer = s.drawer;
+      const before = document.activeElement;
+      s.drawer.peekTarget()!.setPeek(true);
+      expect(s.sidebar.classList.contains("drawer-open")).toBe(true);
+      expect(s.rail.classList.contains("drawer-open")).toBe(true);
+      expect(document.querySelector(".sidebar-drawer-backdrop")!.classList.contains("open")).toBe(
+        true,
+      );
+      expect(s.drawer.isOpen()).toBe(false);
+      expect(s.toggle.getAttribute("aria-expanded")).toBe("false");
+      expect(guarded()).toBe(false);
+      expect(document.activeElement).toBe(before);
+      s.drawer.peekTarget()!.setPeek(false);
+      expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
+    });
+
+    it("a Back while the open drawer is dragged shut cancels the drag and closes the drawer", async () => {
+      const s = setup();
+      drawer = s.drawer;
+      s.toggle.click();
+      const shut = panelSwipe(
+        () => s.drawer.peekTarget(),
+        "left",
+        () => false,
+      );
+      shut.start(-12);
+      shut.move(-40);
+      expect(s.sidebar.style.transform).not.toBe("");
+      await pressBack();
+      expect(s.drawer.isOpen()).toBe(false);
+      expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
+      expect(s.sidebar.style.transform).toBe("");
+      // The lift after a cancel opens nothing.
+      expect(shut.end(-40, true)).toBe(true);
+      expect(s.drawer.isOpen()).toBe(false);
+      expect(guarded()).toBe(false);
+    });
+
+    it("has no peek target where the sidebar is not a drawer", () => {
+      narrow.matches = false;
+      phone.matches = false;
+      const s = setup();
+      drawer = s.drawer;
+      expect(s.drawer.peekTarget()).toBeNull();
+    });
+
     it("does not pop twice when the drawer closes another way", async () => {
       const s = setup();
       drawer = s.drawer;
@@ -347,6 +429,52 @@ describe("the drawer in the Android app", () => {
     expect(s.sidebar.classList.contains("drawer-open")).toBe(true);
   });
 
+  it("on phone Deck, Back closes a row sheet, then the drawer, then the guard opens it with focus inside", async () => {
+    enterPhoneDeck();
+    try {
+      const s = setup();
+      drawer = s.drawer;
+      expect(await backOverDrawerSheet(s)).toBe(true);
+      expect(s.drawer.isOpen()).toBe(true);
+      await pressBack();
+      expect([s.drawer.isOpen(), guarded()]).toEqual([false, true]);
+      await pressBack();
+      expect(s.drawer.isOpen()).toBe(true);
+      expect(s.sidebar.contains(document.activeElement)).toBe(true);
+      // A drawer the guard opened holds no entry: the next Back leaves the app.
+      expect(guarded()).toBe(false);
+    } finally {
+      leavePhoneDeck();
+    }
+  });
+
+  it("an opening peek keeps the guard's entry: the guard follows open, not what is drawn", async () => {
+    const s = setup();
+    drawer = s.drawer;
+    s.drawer.peekTarget()!.setPeek(true);
+    await settle();
+    expect(guarded()).toBe(true);
+    s.drawer.peekTarget()!.setPeek(false);
+  });
+
+  it("a Back during an opening drag cancels it, and the guard opens the drawer as today", async () => {
+    const s = setup();
+    drawer = s.drawer;
+    const drag = panelSwipe(
+      () => s.drawer.peekTarget(),
+      "left",
+      () => true,
+    );
+    drag.start(12);
+    drag.move(40);
+    await pressBack();
+    expect(s.drawer.isOpen()).toBe(true);
+    expect(s.sidebar.classList.contains("drawer-open")).toBe(true);
+    expect(s.sidebar.style.transform).toBe("");
+    expect(drag.end(40, true)).toBe(true);
+    expect(s.drawer.isOpen()).toBe(true);
+  });
+
   it("puts the guard back after a channel is reached from the drawer", async () => {
     const s = setup();
     drawer = s.drawer;
@@ -401,6 +529,21 @@ describe("the drawer in the Android app", () => {
     expect(sheet.signal.aborted).toBe(true);
     expect(s.sidebar.classList.contains("drawer-open")).toBe(false);
     expect(guarded()).toBe(true);
+  });
+
+  it("on phone Deck, a sheet over the chat closes on Back and the next Back opens the drawer", async () => {
+    enterPhoneDeck();
+    try {
+      const s = setup();
+      drawer = s.drawer;
+      const sheet = openOneButtonSheet();
+      await pressBack();
+      expect([sheet.signal.aborted, s.drawer.isOpen(), guarded()]).toEqual([true, false, true]);
+      await pressBack();
+      expect(s.drawer.isOpen()).toBe(true);
+    } finally {
+      leavePhoneDeck();
+    }
   });
 
   it("has no guard in a wide window", async () => {

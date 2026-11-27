@@ -264,6 +264,9 @@ func dropSafetyCopy(safety string) {
 
 // checkRestoreSource refuses a source unsafe to copy over dbPath, before the --force gate.
 func checkRestoreSource(source, dbPath string) error {
+	if strings.EqualFold(filepath.Ext(source), ".zip") {
+		return fmt.Errorf("%s: %s", source, admin.ArchiveRestoreHelp)
+	}
 	// SQLite verifies with the -wal applied but only the main file is copied, so a source with
 	// committed WAL frames would be checked as one database and restored as another.
 	if walInfo, err := os.Stat(source + "-wal"); err == nil && walInfo.Size() > 0 {

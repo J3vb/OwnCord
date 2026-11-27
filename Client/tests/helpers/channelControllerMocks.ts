@@ -278,6 +278,7 @@ export function messagesStoreMock() {
   return {
     messagesStore: {
       getState: () => ({ messagePinRevision: mockPinRevisions }),
+      subscribeSelector: () => () => {},
     },
     getChannelMessages: mockGetChannelMessages,
     setMessagePinned: mockSetMessagePinned,

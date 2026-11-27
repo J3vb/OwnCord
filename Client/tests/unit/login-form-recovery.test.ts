@@ -11,7 +11,7 @@ import {
   testProfiles as profiles,
 } from "../helpers/connectPageHarness";
 
-vi.mock("../../src/lib/net/credentials", () => mocks.netCredentialsMock());
+vi.mock("../../src/features/connection/credentials", () => mocks.netCredentialsMock());
 vi.mock("../../src/features/settings/SettingsOverlay", () => mocks.settingsOverlayMock());
 
 const makeCallbacks = (overrides: Partial<ConnectPageCallbacks> = {}): ConnectPageCallbacks =>

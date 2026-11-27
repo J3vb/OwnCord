@@ -130,7 +130,7 @@ export interface InputApi {
   syncEmojiPopup(): void;
   syncMentionPopup(): void;
   syncAutocomplete(): void;
-  insertMentionAtCaret(username: string): boolean;
+  insertMentionAtCaret(username: string, userId?: number): boolean;
   applyFormatting(marker: string): void;
   showReplyBar(): void;
   replyPing(): boolean;

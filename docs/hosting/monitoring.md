@@ -67,7 +67,9 @@ LiveKit, add `prometheus: port: 6789` to `livekit.yaml` so it can read them.
 `/api/v1/metrics` gives numbers about the running server, as JSON.
 `/api/v1/metrics/prometheus` gives the same for Prometheus. Both answer only
 the addresses in `server.metrics_allowed_cidrs` (or the admin list when that
-is empty).
+is empty), with no sign-in. Behind a reverse proxy, set
+`server.trusted_proxies`, or every visitor has the proxy's address and passes
+that list ([TLS and reverse proxies](tls-and-proxy.md)).
 
 The few worth an alert:
 

@@ -1,10 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import {
-  loadLastChannel,
-  rememberLastChannel,
-  setLastChannelHost,
-  viewChannel,
-} from "@lib/prefs/lastChannel";
+import { loadLastChannel, rememberLastChannel, setLastChannelHost } from "@lib/prefs/lastChannel";
+import { viewChannel } from "../../src/features/channels/viewChannel";
 import type { WsClient } from "@lib/ws";
 import { focusPayload } from "@lib/prefs/lastChannel";
 import { applyReadyCapabilities, resetServerCapabilities } from "@lib/net/serverCapabilities";

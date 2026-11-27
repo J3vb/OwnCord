@@ -4,7 +4,7 @@ vi.mock("@lib/ui/toast", () => ({ showToast: vi.fn() }));
 
 import { showToast } from "@lib/ui/toast";
 import { exportPublicKey, generateIdentityKeyPair } from "@lib/net/e2eeCrypto";
-import type { ForgetIdentityPinResult } from "@lib/net/identity";
+import type { ForgetIdentityPinResult } from "../connection/identity";
 import { createTrustedKeysPanel, type TrustedKeysPanelOptions } from "./trustedKeysPanel";
 
 let oldKey = "";
