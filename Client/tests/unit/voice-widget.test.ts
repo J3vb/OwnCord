@@ -38,7 +38,8 @@ vi.mock("../../src/features/voice/livekitSession", () =>
 
 vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true));
 
-import { CALL_ROW_CLASS, createVoiceWidget } from "../../src/features/voice/VoiceWidget";
+import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
+import { CALL_ROW_CLASS } from "../../src/features/voice/callRowMark";
 import { createConnectionStatsPoller } from "@lib/voice/connectionStats";
 import { voiceStore, type VoiceStatus } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
