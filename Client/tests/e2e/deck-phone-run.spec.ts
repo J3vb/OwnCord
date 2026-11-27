@@ -373,6 +373,20 @@ test.describe("phone Command Deck at 360 x 640", () => {
     await expectNoPageScroll(page);
   });
 
+  test("if the voice widget never loads, the call bar keeps Mute and Leave", async ({ page }) => {
+    await page.route(/\/VoiceWidget[^/]*\.(ts|js)(\?|$)/, (route) => route.abort());
+    await startPhoneDeck(page, { voice: true });
+    await openTree(page);
+    await page.locator(".channel-item.voice", { hasText: "Voice Chat" }).tap();
+    await page.getByTestId("join-sheet-join").tap();
+    await expect(page.locator("html")).not.toHaveClass(/voice-widget-up/);
+    await expect.poll(() => reachableCount(page, LEAVE), "Leave without the widget").toBe(1);
+    await expect
+      .poll(() => reachableCount(page, MUTE), "Mute without the widget")
+      .toBeGreaterThan(0);
+    await expect(statusBar(page).locator(".voice-widget")).toHaveCount(0);
+  });
+
   test("a degraded call shows Unsecured in the status bar", async ({ page }) => {
     await startPhoneDeck(page, { voice: true });
     await enterCall(page);

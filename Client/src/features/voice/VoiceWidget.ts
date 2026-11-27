@@ -59,6 +59,16 @@ function moderationText(serverMuted: boolean, serverDeafened: boolean): string {
   return "";
 }
 
+/**
+ * On `<html>` while the widget shows a call. Phone Command Deck hides the other
+ * Mute and Leave buttons only then, so a widget that never loads leaves them up.
+ */
+export const CALL_ROW_CLASS = "voice-widget-up";
+
+function setCallRow(up: boolean): void {
+  document.documentElement.classList.toggle(CALL_ROW_CLASS, up);
+}
+
 export function createVoiceWidget(options: VoiceWidgetOptions): MountableComponent {
   const disposable = new Disposable();
   let root: HTMLDivElement | null = null;
@@ -275,6 +285,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     if (channelId === null) {
       root.classList.remove("visible");
+      setCallRow(false);
       stopStatsPoller();
       stopElapsedTimer();
       statsPane?.el.classList.remove("visible");
@@ -283,6 +294,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     }
 
     root.classList.add("visible");
+    setCallRow(true);
     startStatsPoller();
     startElapsedTimer();
     updateStatus(voice);
@@ -465,6 +477,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   }
 
   function destroy(): void {
+    setCallRow(false);
     stopStatsPoller();
     stopElapsedTimer();
     disposable.destroy();

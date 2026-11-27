@@ -72,9 +72,10 @@ none of the drawer's `aria-expanded`, focus or Escape behaviour above until
 it opens or closes the panel; every swipe also has a button.
 
 Call controls on a phone. On Command Deck on a phone, in a call, Mute, Leave
-and hold-to-talk are only in the bottom bar: the call bar, the call view and
-the DM call panel hide their copies (`display: none`, so a screen reader meets
-one of each). The voice widget does not scroll on a phone, so its call row,
+and hold-to-talk are only in the bottom bar while the voice widget is up: the
+call bar, the call view and the DM call panel hide their copies only then
+(`display: none`, so a screen reader meets one of each), so a widget that fails
+to load leaves them in place. The voice widget does not scroll on a phone, so its call row,
 with Leave and "Unsecured", is always drawn; its panels scroll on their own.
 Signal and noise suppression are 44 px. While the message box has focus on a
 phone, the status bar's contents hide out of a call and keep its bottom inset;

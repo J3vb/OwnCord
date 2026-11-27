@@ -305,20 +305,21 @@ html.layout-deck
 
 /* On a phone in a call, Mute, hold-to-talk and Leave live only in the status
    bar: the call bar, the call view's bar and the DM call panel hide their
-   copies. The voice widget takes its own row above yours and never clips, so
+   copies, but only once the voice widget shows the call (voice-widget-up on
+   <html>), so a widget that fails to load leaves them in place. The voice widget takes its own row above yours and never clips, so
    the call row (Leave, and "Unsecured" in its header) is always drawn; each
    panel above it scrolls inside its own cap. */
 @media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
-  html.layout-deck [data-testid="pcb-mute"],
-  html.layout-deck [data-testid="pcb-leave"],
-  html.layout-deck .phone-call-bar .talk-btn--bar,
-  html.layout-deck .video-grid__controls [data-call-control="mute"],
-  html.layout-deck .video-grid__controls [data-call-control="leave"],
-  html.layout-deck .video-grid__controls .talk-btn--call,
-  html.layout-deck [data-testid="dcp-mute"],
-  html.layout-deck [data-testid="dcp-leave"],
-  html.layout-deck [data-testid="dcp-leave-call"],
-  html.layout-deck [data-testid="dm-call-panel"] .talk-btn--bar {
+  html.layout-deck.voice-widget-up [data-testid="pcb-mute"],
+  html.layout-deck.voice-widget-up [data-testid="pcb-leave"],
+  html.layout-deck.voice-widget-up .phone-call-bar .talk-btn--bar,
+  html.layout-deck.voice-widget-up .video-grid__controls [data-call-control="mute"],
+  html.layout-deck.voice-widget-up .video-grid__controls [data-call-control="leave"],
+  html.layout-deck.voice-widget-up .video-grid__controls .talk-btn--call,
+  html.layout-deck.voice-widget-up [data-testid="dcp-mute"],
+  html.layout-deck.voice-widget-up [data-testid="dcp-leave"],
+  html.layout-deck.voice-widget-up [data-testid="dcp-leave-call"],
+  html.layout-deck.voice-widget-up [data-testid="dm-call-panel"] .talk-btn--bar {
     display: none;
   }
   html.layout-deck .deck-status-bar {
