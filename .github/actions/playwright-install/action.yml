@@ -22,13 +22,15 @@ runs:
         path: ~/.cache/ms-playwright
         key: ${{ runner.os }}-playwright-${{ hashFiles('Client/package-lock.json') }}
 
+    # Bump the v<N> in both keys when a saved set no longer installs on the
+    # image (the archive moved a package the set pins an old version of).
     - name: Restore Playwright apt packages
       id: apt-cache
       uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/owncord-playwright-apt
-        key: playwright-apt-${{ steps.image.outputs.id }}-${{ hashFiles('Client/package-lock.json') }}
-        restore-keys: playwright-apt-${{ steps.image.outputs.id }}-
+        key: playwright-apt-v2-${{ steps.image.outputs.id }}-${{ hashFiles('Client/package-lock.json') }}
+        restore-keys: playwright-apt-v2-${{ steps.image.outputs.id }}-
 
     - name: Install browser and system dependencies
       shell: bash
@@ -44,4 +46,4 @@ runs:
       uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
       with:
         path: ~/.cache/owncord-playwright-apt
-        key: playwright-apt-${{ steps.image.outputs.id }}-${{ hashFiles('Client/package-lock.json') }}
+        key: playwright-apt-v2-${{ steps.image.outputs.id }}-${{ hashFiles('Client/package-lock.json') }}
