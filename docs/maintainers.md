@@ -6,12 +6,12 @@ For the people who cut releases. Everyone else wants
 The Linux checks every release must pass are in the
 [Linux release checklist](linux-release-checklist.md).
 
-## Maintenance mode (2.10.x)
+## Maintenance mode (2.11.x)
 
-2.10.0 is the current release and 2.10.x is the maintained line. The project is
+2.11.0 is the current release and 2.11.x is the maintained line. The project is
 in maintenance: reported bugs and security issues get fixed, and there is no
 planned feature work. `main` takes **only fixes**, shipped as patch releases cut
-from `main` (2.10.1, 2.10.2 and so on). Work already on `dev` reaches `main` in a
+from `main` (2.11.1, 2.11.2 and so on). Work already on `dev` reaches `main` in a
 feature release only when the owner says so.
 
 What counts as a fix:
@@ -35,7 +35,7 @@ the `main` copy is a cherry-pick of the `dev` commit, not a new version of it.
 ## Release procedure
 
 This is the end-to-end procedure for cutting a feature release from `dev`.
-In [maintenance mode](#maintenance-mode-210x), a fix ships with
+In [maintenance mode](#maintenance-mode-211x), a fix ships with
 [Patch release from `main`](#patch-release-from-main) instead. Every step runs on
 `main` or against it. The order matters, because the release workflow
 (`release.yml`) stops on any missing input. In the examples below,

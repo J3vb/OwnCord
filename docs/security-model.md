@@ -482,7 +482,9 @@ disagreement is a bug in this page.
   - Any other read error stops the server from starting. Replacing the key
     would orphan every stored secret.
   - The key is written atomically.
-  - Back it up next to the database. A backup does not contain it.
+  - Back it up next to the database. A database backup does not contain it;
+    a full archive (automatic backups set to Everything, or Download full
+    archive) does, so keep archives as private as the key itself.
 - **Erasure marker key** (`data/erasure.key`, or `OWNCORD_ERASURE_KEY`)
   follows the same rules: generated only when confirmed absent, any other read
   error stops the start-up, atomic write.
