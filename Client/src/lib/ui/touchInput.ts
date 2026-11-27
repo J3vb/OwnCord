@@ -1,6 +1,7 @@
 // Touch input for phones and touchscreens. Loaded lazily by
 // app/globalGuards.ts, only when a coarse pointer exists. Everything is
-// closure state, so nothing is module-level and nothing needs a session reset.
+// closure state, so nothing is module-level; the one session reset clears the
+// typing class, which a sign-out could otherwise leave on `body`.
 //
 // - Long-press (500 ms) sends the existing `contextmenu` event at the finger,
 //   so every menu handler opens without new wiring. iOS fires no native one.
@@ -16,10 +17,14 @@
 // - A tap on a message does nothing: like Discord, the hold is the only way
 //   to a message's actions on a touch screen.
 // - visualViewport drives --app-height so the keyboard does not hide the composer.
+// - On a phone, `body.composer-typing` is set while the message box has focus;
+//   `deck.css` reads it.
 
 import { Disposable } from "../disposable";
 import { setOwnedTimeout, wantsNativeMenu } from "../dom";
-import { watchNextBottomSheet } from "./bottomSheet";
+import { registerSessionReset } from "../net/sessionRegistry";
+import { onPhoneLayoutChange, watchNextBottomSheet } from "./bottomSheet";
+import { isPhoneLayout } from "./phoneLayout";
 
 const LONG_PRESS_MS = 500;
 const MOVE_TOLERANCE_PX = 10;
@@ -212,6 +217,60 @@ export function installTouchInput(signal: AbortSignal, options: TouchInputOption
     () => {
       clearTimer();
       buzzWatch?.destroy();
+    },
+    { once: true },
+  );
+
+  watchTyping(signal);
+}
+
+const TYPING_CLASS = "composer-typing";
+
+/**
+ * Sets `body.composer-typing` while the chat's or the thread's message box has
+ * focus on a phone. Only that box counts: not the inline editor or any search
+ * field. The text field starts it; Send, Emoji and Attach only keep it. A first
+ * tap on Emoji would otherwise move the box under the finger (the bar above it
+ * folds away between the press and the click), and the click would miss.
+ */
+function recomputeTyping(): void {
+  const active = document.activeElement;
+  const box = active instanceof Element ? active.closest(".message-input-box") : null;
+  const field = box?.querySelector("textarea.msg-textarea") ?? null;
+  const was = document.body.classList.contains(TYPING_CLASS);
+  const typing =
+    isPhoneLayout() &&
+    box !== null &&
+    box.isConnected &&
+    field !== null &&
+    (was || active === field);
+  document.body.classList.toggle(TYPING_CLASS, typing);
+}
+
+function clearTyping(): void {
+  document.body.classList.remove(TYPING_CLASS);
+}
+
+/**
+ * Keeps the typing class in step with focus. On Android, Back closes the
+ * keyboard but leaves focus in the box, so the class stays until focus goes
+ * elsewhere. The one session reset clears it.
+ */
+function watchTyping(signal: AbortSignal): void {
+  document.addEventListener("focusin", recomputeTyping, { signal });
+  // focusout fires before focus lands on the next element.
+  document.addEventListener("focusout", () => queueMicrotask(recomputeTyping), { signal });
+  // A box removed while focused sends no focusout in WebKit (a channel change,
+  // a thread closing); the next press anywhere catches it.
+  document.addEventListener("pointerdown", recomputeTyping, { capture: true, signal });
+  onPhoneLayoutChange(recomputeTyping, signal);
+
+  const dispose = registerSessionReset("touchInput:typing", clearTyping);
+  signal.addEventListener(
+    "abort",
+    () => {
+      dispose();
+      clearTyping();
     },
     { once: true },
   );

@@ -284,7 +284,7 @@ describe("deck.css", () => {
       is(`${BAR} .user-bar`, "flex", "1 1 100%");
     });
 
-    it("caps each widget panel at 20vh and lets it scroll", () => {
+    it("caps each widget panel at 12vh and lets it scroll", () => {
       const panels = phoneRules().find((r) =>
         r.selectors.some((x) => x.includes(".vw-stats.visible")),
       );
@@ -293,7 +293,7 @@ describe("deck.css", () => {
         expect(panels!.selectors[0]).toContain(panel);
       const value = (property: string): string =>
         text(panels!.declarations.find((d) => d.property === property));
-      expect(value("max-height")).toBe(parsed("max-height", "20vh"));
+      expect(value("max-height")).toBe(parsed("max-height", "12vh"));
       expect(value("overflow-y")).toBe(parsed("overflow-y", "auto"));
     });
 
@@ -321,6 +321,139 @@ describe("deck.css", () => {
       expect(padding).toContain("safe-area-inset-left");
       expect(padding).toContain("safe-area-inset-right");
       expect(padding).toContain("safe-bottom");
+    });
+
+    describe("while typing", () => {
+      const TYPING = "body.composer-typing";
+      const OUT_OF_CALL = `html.layout-deck ${TYPING} .deck-status-bar:not(:has(.voice-widget.visible))`;
+      const CALL_BAR = `html.layout-deck ${TYPING} .phone-call-bar`;
+      const TALL = `html.layout-deck ${TYPING} .deck-status-bar :is(.vw-stats.visible, .vw-listening, .vw-mic-notice, .vw-stream-card)`;
+      const SMALL = `${BAR} :is(.vw-grant-mic, .vw-listening__stop, .vw-stream-card button)`;
+      const SHORT = "(max-height: 499px) and (orientation: landscape)";
+      const WIDGET = `${BAR} .voice-widget`;
+      const VISIBLE = `${BAR} .voice-widget.visible`;
+      const USER = `${BAR} .user-bar`;
+
+      /** Every rule that names the typing class. */
+      const typingRules = (): DeckRule[] =>
+        deckRules().filter((r) => r.selectors.some((x) => x.includes(TYPING)));
+      /** The only rule listing `selector`. */
+      const only = (selector: string): DeckRule => {
+        const found = rulesFor(selector);
+        expect(found, selector).toHaveLength(1);
+        return found[0]!;
+      };
+      const shortRules = (): DeckRule[] => deckRules().filter((r) => r.media === SHORT);
+
+      it("the typing block's rules are under exactly the phone query, after the hide rule", () => {
+        const rules = deckRules();
+        const phoneOnes = typingRules().filter((r) => r.media !== SHORT);
+        expect(phoneOnes.length).toBeGreaterThan(0);
+        for (const r of [...phoneOnes, only(SMALL)]) {
+          expect(r.media, r.selectors.join()).toBe(PHONE);
+          expect(rules.indexOf(r)).toBeGreaterThan(rules.indexOf(hideRule()));
+        }
+      });
+
+      it("out of a call, hides the bar's contents, not the bar, and drops its min-height", () => {
+        expect(keywordOf(declarationOf(`${OUT_OF_CALL} > *`, "display", PHONE))).toBe("none");
+        is(OUT_OF_CALL, "min-height", "0");
+        const onBar = deckRules().filter((r) =>
+          r.declarations.some((d) => d.property === "display" && keywordOf(d) === "none"),
+        );
+        const barItself = onBar.flatMap((r) =>
+          r.selectors.filter((x) => /\.deck-status-bar(:[^ >]+)?$/.test(x)),
+        );
+        expect(barItself).toEqual([]);
+      });
+
+      it("hides the call bar only while typing", () => {
+        const rule = only(CALL_BAR);
+        expect(rule.media).toBe(PHONE);
+        expect(keywordOf(declarationOf(CALL_BAR, "display", PHONE))).toBe("none");
+        const others = deckRules().filter(
+          (r) => r.selectors.some((x) => x.endsWith(" .phone-call-bar")) && r !== rule,
+        );
+        expect(others).toEqual([]);
+      });
+
+      it("hides exactly the tall panels while typing, and keeps Grant mic", () => {
+        const rule = only(TALL);
+        expect(rule.selectors).toEqual([TALL]);
+        expect(keywordOf(declarationOf(TALL, "display", PHONE))).toBe("none");
+        for (const panel of [
+          ".vw-stats.visible",
+          ".vw-listening",
+          ".vw-mic-notice",
+          ".vw-stream-card",
+        ])
+          expect(TALL).toContain(panel);
+        const hiders = typingRules().filter((r) =>
+          r.declarations.some((d) => d.property === "display" && keywordOf(d) === "none"),
+        );
+        expect(
+          hiders.flatMap((r) => r.selectors).filter((x) => x.includes("vw-grant-mic")),
+        ).toEqual([]);
+      });
+
+      it("makes Grant mic, the listening Stop button and the stream-card buttons 44 px tall", () => {
+        is(SMALL, "min-height", "44px");
+      });
+
+      it("the short-window block is exactly (max-height: 499px) and (orientation: landscape), after the typing block", () => {
+        const rules = deckRules();
+        const short = shortRules();
+        expect(short.length).toBeGreaterThan(0);
+        expect(preludesOf("app/deck.css")).toContain(SHORT);
+        const lastTyping = Math.max(
+          ...typingRules()
+            .filter((r) => r.media === PHONE)
+            .map((r) => rules.indexOf(r)),
+        );
+        for (const r of short) expect(rules.indexOf(r)).toBeGreaterThan(lastTyping);
+      });
+
+      it("puts your row beside the call row with the desktop values, so desktop cannot drift", () => {
+        const flexText = (selector: string, media: string | null): string =>
+          text(declarationOf(selector, "flex", media));
+        expect(flexText(VISIBLE, SHORT)).toBe(flexText(WIDGET, null));
+        expect(flexText(USER, SHORT)).toBe(flexText(USER, null));
+        expect(flexText(WIDGET, null)).not.toBe("null");
+        expect(flexText(USER, null)).not.toBe("null");
+      });
+
+      it("every other short-window rule needs the typing class", () => {
+        const rest = shortRules().flatMap((r) =>
+          r.selectors.filter((x) => x !== VISIBLE && x !== USER),
+        );
+        expect(rest.length).toBeGreaterThan(0);
+        expect(rest.filter((x) => !x.includes(TYPING))).toEqual([]);
+        // The top bar keeps only its inset, and the chat header goes.
+        expect(
+          keywordOf(
+            declarationOf(`html.layout-deck ${TYPING} .deck-top-bar > *`, "display", SHORT),
+          ),
+        ).toBe("none");
+        expect(
+          keywordOf(declarationOf(`html.layout-deck ${TYPING} .chat-header`, "display", SHORT)),
+        ).toBe("none");
+      });
+
+      it("no typing or short-window rule sets padding-bottom", () => {
+        const padders = [...typingRules(), ...shortRules(), only(SMALL)].filter((r) =>
+          r.declarations.some((d) => d.property === "padding-bottom" || d.property === "padding"),
+        );
+        expect(padders.map((r) => r.selectors)).toEqual([]);
+      });
+
+      it("no :has() in the file sits on the page or the frame root (#app)", () => {
+        const ROOTS = /(^|[\s>~+])(body|html|:root|\.app|#app)[^\s]*:has\(/;
+        const onRoot = deckRules().flatMap((r) =>
+          r.selectors.filter((x) => x.includes(":has(") && ROOTS.test(x)),
+        );
+        expect(onRoot).toEqual([]);
+        expect(deckRules().some((r) => r.selectors.some((x) => x.includes(":has(")))).toBe(true);
+      });
     });
   });
   it("the LED colours are allow-listed fills", () => {

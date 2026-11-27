@@ -54,6 +54,7 @@ export const TAB_S4: PhoneProfile = { name: "Tab S4", use: tabS4Device };
 
 const DEV_KEY = "owncord:settings:developerMode";
 const LAYOUT_KEY = "owncord:settings:screenLayout";
+const THEME_KEY = "owncord:theme:active";
 /** Marks a tab seeded once. `window.name` survives Clear all cache & restart,
  *  which clears both storages, so the seed is not written back after it. */
 const SEEDED_MARK = "owncord-phone-deck-seeded";
@@ -67,6 +68,9 @@ export interface PhoneDeckOptions {
   readonly seedOnce?: boolean;
   /** A session of the spec's own in place of the plain (or voice) one. */
   readonly mock?: Parameters<typeof buildTauriMockScript>[0];
+  /** Store this theme too ("gunmetal"); the seeded layout makes the profile an
+   *  existing install, which otherwise keeps the fallback theme. */
+  readonly theme?: string;
 }
 
 /**
@@ -76,17 +80,18 @@ export interface PhoneDeckOptions {
  * nothing is stored, so without `seedOnce` the keys are written on every load.
  */
 export async function startPhoneDeck(page: Page, options: PhoneDeckOptions = {}): Promise<void> {
-  const { voice = false, developerMode = true, seedOnce = false, mock } = options;
+  const { voice = false, developerMode = true, seedOnce = false, mock, theme } = options;
   await page.addInitScript(
-    ([dev, layout, mark, withDev, once]) => {
+    ([dev, layout, mark, withDev, once, themeKey, themeName]) => {
       if (once === true) {
         if (window.name === mark) return;
         window.name = mark;
       }
       localStorage.setItem(layout, JSON.stringify("deck"));
       if (withDev === true) localStorage.setItem(dev, JSON.stringify(true));
+      if (themeName !== "") localStorage.setItem(themeKey, themeName);
     },
-    [DEV_KEY, LAYOUT_KEY, SEEDED_MARK, developerMode, seedOnce] as const,
+    [DEV_KEY, LAYOUT_KEY, SEEDED_MARK, developerMode, seedOnce, THEME_KEY, theme ?? ""] as const,
   );
   if (mock !== undefined) await page.addInitScript(buildTauriMockScript(mock));
   else await (voice ? mockTauriFullSessionWithVoice(page) : mockTauriFullSession(page));
@@ -96,6 +101,8 @@ export async function startPhoneDeck(page: Page, options: PhoneDeckOptions = {})
   await (developerMode
     ? expect(html).toHaveClass(/layout-deck/)
     : expect(html).not.toHaveClass(/layout-deck/));
+  if (theme !== undefined)
+    await expect(page.locator("body")).toHaveClass(new RegExp(`(^|\\s)theme-${theme}(\\s|$)`));
 }
 
 /** Seeds Command Deck once: a reload must not put "deck" back. */

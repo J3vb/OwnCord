@@ -104,7 +104,7 @@ release changes the database, and anything an operator must do first.)
 
 **Appearance & layout**
 
-- A new screen layout, Command Deck: your servers in tabs across the top, your channels, voice rooms and direct messages in one list on the left, Buddies on the right grouped by what people are doing, and an Info block for the voice room you are in. Pick it in Settings > Appearance > Screen layout, on desktop and in the browser. The Android app and phone-sized screens run Classic. With Developer mode on, they can run Command Deck as a preview. Clear all cache & restart turns Developer mode off, and with it the preview; to get it back, turn Developer mode on and restart. Applies the next time OwnCord starts or reloads; Restart now applies it at once.
+- A new screen layout, Command Deck: your servers in tabs across the top, your channels, voice rooms and direct messages in one list on the left, Buddies on the right grouped by what people are doing, and an Info block for the voice room you are in. Pick it in Settings > Appearance > Screen layout, on desktop and in the browser. The Android app and phone-sized screens run Classic. With Developer mode on, they can run Command Deck as a preview. Clear all cache & restart turns Developer mode off, and with it the preview; to get it back, turn Developer mode on and restart. In the preview, the bottom bar hides while you type, except during a call. During a call, the bar above the chat hides instead. Applies the next time OwnCord starts or reloads; Restart now applies it at once.
 - The Gunmetal theme, with blue-grey surfaces and an orange accent, in both layouts.
 
 **Accounts & admin**
@@ -242,6 +242,7 @@ release changes the database, and anything an operator must do first.)
 - **Scrolling far back in a long channel while it reloads can make the list jump** to another spot. Scroll back to where you were; nothing is lost.
 - **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
 - **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
+- **On a phone in the Command Deck preview, out of a call, after you close the keyboard with Back, the bottom bar stays hidden** until you tap outside the message box.
 
 ## v2.10.0
 

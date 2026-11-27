@@ -86,6 +86,31 @@ describe("the voice widget in the status bar", () => {
     }
   });
 
+  it("a degraded call's chip matches no deck.css rule that hides it while typing", () => {
+    voiceStore.setState((prev) => ({ ...prev, encryptionDegraded: true }));
+    mount();
+    // The out-of-call rule hides any child of a bar without a visible widget.
+    expect(slot.querySelector(".voice-widget.visible")).not.toBeNull();
+    document.body.classList.add("composer-typing");
+    document.documentElement.classList.add("layout-deck");
+    try {
+      const chip = bar.querySelector<HTMLElement>("[data-testid='vw-secured']")!;
+      const chain: Element[] = [];
+      for (let el: Element | null = chip; el !== null; el = el.parentElement) chain.push(el);
+      const hiders = deckRules().filter(hides);
+      expect(hiders.some((r) => r.selectors.some((s) => s.includes("composer-typing")))).toBe(true);
+      const hit = hiders.flatMap((r) =>
+        r.selectors
+          .filter((sel) => chain.some((el) => el.matches(sel)))
+          .map((sel) => `${r.media ?? "top level"}: ${sel}`),
+      );
+      expect(hit).toEqual([]);
+    } finally {
+      document.documentElement.classList.remove("layout-deck");
+      document.body.classList.remove("composer-typing");
+    }
+  });
+
   it("a normal call's chip is the one the 800 px rule hides", () => {
     mount();
     const chip = bar.querySelector<HTMLElement>("[data-testid='vw-secured']")!;

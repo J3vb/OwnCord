@@ -76,7 +76,11 @@ and hold-to-talk are only in the bottom bar: the call bar, the call view and
 the DM call panel hide their copies (`display: none`, so a screen reader meets
 one of each). The voice widget does not scroll on a phone, so its call row,
 with Leave and "Unsecured", is always drawn; its panels scroll on their own.
-Signal and noise suppression are 44 px.
+Signal and noise suppression are 44 px. While the message box has focus on a
+phone, the status bar's contents hide out of a call and keep its bottom inset;
+in a call the status bar stays, and the call bar and the tall widget panels
+hide. On Android, Back closes the keyboard but keeps focus in the box, so the
+bar comes back only after a tap outside it.
 
 ## Colour tokens
 

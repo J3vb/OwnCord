@@ -18,6 +18,7 @@ import {
   switchSettingsTab,
 } from "./helpers";
 import { seedDeckOnce } from "./support/phone";
+import { setVoiceFlag } from "./support/phoneCall";
 
 const DEV_KEY = "owncord:settings:developerMode";
 const LAYOUT_KEY = "owncord:settings:screenLayout";
@@ -220,30 +221,6 @@ async function enterCall(page: Page, size: Size): Promise<void> {
     ).__owncord.setVoiceStatus("connected"),
   );
   await page.setViewportSize(size);
-}
-
-/** Calls one of the voice store's existing setters through the dev server's
- *  module graph, as reconnect-media-notice.spec.ts does. False when the graph
- *  is not served (the production preview), so the case skips. */
-async function setVoiceFlag(
-  page: Page,
-  setter: "setListenOnly" | "setEncryptionDegraded",
-): Promise<boolean> {
-  return page.evaluate(
-    async ([url, name]) => {
-      try {
-        const mod = (await import(/* @vite-ignore */ url!)) as Record<
-          string,
-          (value: boolean) => void
-        >;
-        mod[name!]!(true);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    ["/src/stores/voice.store.ts", setter],
-  );
 }
 
 async function boxOf(page: Page, testId: string): Promise<Box> {
