@@ -2204,6 +2204,20 @@ jobs:
           workspaces: Client/src-tauri
           key: android-aarch64
 
+      # Gradle's dependency cache and wrapper, plus the android-all jars
+      # Robolectric fetches into ~/.m2 on first use. Without them every run
+      # pulls the same files from Maven Central, which rate-limits (429).
+      - name: Gradle and Robolectric cache
+        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ~/.m2/repository/org/robolectric
+          key: android-gradle-${{ runner.os }}-${{ hashFiles('Client/src-tauri/gen/android/**/*.gradle*', 'Client/src-tauri/gen/android/**/gradle-wrapper.properties', 'Client/src-tauri/gen/android/**/robolectric.properties') }}
+          restore-keys: |
+            android-gradle-${{ runner.os }}-
+
       - name: Install npm dependencies
         run: npm ci
 
