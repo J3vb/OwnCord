@@ -482,6 +482,7 @@ export const shards = {
     "src/features/messaging/pickerImages.ts",
     "src/features/messaging/slashCommands.ts",
     "src/features/server-rail/serverTabMenus.ts",
+    "src/features/server-rail/serverSheet.ts",
     "src/lib/prefs/appearance.ts",
     "src/features/presence/presence.ts",
   ],

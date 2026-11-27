@@ -305,9 +305,14 @@ stays 280 px wide instead of taking the full width.
 
 The server switcher is a third. Classic draws the server rail; Command Deck draws
 a row of server tabs under the top bar's first row, folded into a Servers button
-at most 640 px wide or 499 px tall. Both are drawn from one controller
-(`features/server-rail/railController.ts`), share the saved order and folders,
-and run the same cases in `tests/unit/serverRail/railContract.test.ts`.
+at most 640 px wide or 499 px tall, and on a phone. The button's accessible name
+is "Servers, {name}" with the current server's name. On a phone it shows that
+name, every top-bar control is 44 px, and a tap opens the server list as a
+bottom sheet (`features/server-rail/serverSheet.ts`) in place of the menu; the
+sheet replaces Switch server in your row. A browser has no tabs, so on a phone
+it shows the name as plain text and keeps Sign out. Both are drawn from one
+controller (`features/server-rail/railController.ts`), share the saved order and
+folders, and run the same cases in `tests/unit/serverRail/railContract.test.ts`.
 
 `Client/tests/e2e/accessibility-primitives.spec.ts` shows each one in use, including
 the negative controls that prove each check fails when its behaviour is

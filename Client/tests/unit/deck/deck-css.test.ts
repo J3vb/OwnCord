@@ -521,3 +521,68 @@ describe("deck.css", () => {
     });
   });
 });
+
+describe("deck.css: the top bar on a phone", () => {
+  const PHONE_RULES = (): DeckRule[] => deckRules().filter((r) => r.media === PHONE);
+  const valueText = (d: DeckDeclaration | undefined): string => JSON.stringify(d?.value ?? null);
+  const parsedText = (property: string, value: string): string =>
+    JSON.stringify(
+      parseDeckCss(`html.layout-deck .x { ${property}: ${value}; }`)[0]!.declarations[0]!.value,
+    );
+  const SEARCH = "html.layout-deck .deck-search";
+  const CONNECTION_TEXT = "html.layout-deck .deck-connection-text";
+
+  it("--deck-top-min is 44 px only on a phone", () => {
+    const tops = deckRules()
+      .filter((r) => r.selectors.includes("html.layout-deck"))
+      .flatMap((r) =>
+        r.declarations
+          .filter((d) => d.property === "--deck-top-min")
+          .map((d) => [r.media, JSON.stringify(d.value)] as const),
+      );
+    expect(tops.filter(([, v]) => v.includes("44")).map(([m]) => m)).toEqual([PHONE]);
+    expect(tops.filter(([m]) => m === null)).toHaveLength(1);
+    expect(tops.find(([m]) => m === null)?.[1]).toContain("36");
+  });
+
+  it("search is a 44 px icon on a phone, at the end of its cell", () => {
+    expect(valueText(declarationOf(SEARCH, "width", PHONE))).toBe(parsedText("width", "44px"));
+    expect(valueText(declarationOf(SEARCH, "height", PHONE))).toBe(parsedText("height", "44px"));
+    expect(valueText(declarationOf(SEARCH, "justify-self", PHONE))).toBe(
+      parsedText("justify-self", "end"),
+    );
+    expect(keywordOf(declarationOf("html.layout-deck .deck-search-text", "display", PHONE))).toBe(
+      "none",
+    );
+    expect(
+      valueText(declarationOf("html.layout-deck .deck-top-bar", "grid-template-columns", PHONE)),
+    ).toBe(parsedText("grid-template-columns", "minmax(0, 1fr) auto auto"));
+  });
+
+  it("the connection's words stay for a screen reader: never display none", () => {
+    const hidden = deckRules().filter(
+      (r) =>
+        r.selectors.includes(CONNECTION_TEXT) &&
+        r.declarations.some((d) => d.property === "display"),
+    );
+    expect(hidden).toEqual([]);
+    expect(valueText(declarationOf(CONNECTION_TEXT, "position", PHONE))).toBe(
+      parsedText("position", "absolute"),
+    );
+    expect(declarationOf(CONNECTION_TEXT, "clip", PHONE)).toBeDefined();
+  });
+
+  it("adds no ping rule on a phone, and its block is the file's last", () => {
+    expect(PHONE_RULES().filter((r) => r.selectors.some((x) => x.includes(".deck-ping")))).toEqual(
+      [],
+    );
+    const rules = deckRules();
+    const top = rules.findIndex((r) => r.media === PHONE && r.selectors.includes(SEARCH));
+    expect(top).toBeGreaterThan(-1);
+    const lastShort = rules
+      .map((r) => r.media)
+      .lastIndexOf("(max-height: 499px) and (orientation: landscape)");
+    expect(top).toBeGreaterThan(lastShort);
+    expect(rules.at(-1)?.media).toBe(PHONE);
+  });
+});

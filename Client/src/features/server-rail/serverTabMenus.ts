@@ -5,7 +5,9 @@
  * focus; this module never imports the renderer.
  */
 import { createElement } from "@lib/dom";
-import { createIcon } from "@lib/icons";
+import { createIcon, type IconName } from "@lib/icons";
+import { createLogger } from "@lib/logger";
+import { isPhoneLayout } from "@lib/ui/phoneLayout";
 import {
   createMenuItem,
   openMenuOnKeyboard,
@@ -41,6 +43,8 @@ export interface TabMenuContext {
   }) => void;
   /** A switch from a menu row: records nothing (the slot's key stays), then `ctl.activate(host)`. */
   readonly activate: (host: string) => void;
+  /** Closes the slot's open menu; the Servers sheet calls it before it opens. */
+  readonly closeMenu?: () => void;
 }
 
 interface Opener {
@@ -53,6 +57,8 @@ interface Point {
   readonly x: number;
   readonly y: number;
 }
+
+const log = createLogger("server-rail");
 
 const MENU_CLASS = "server-tabs-menu";
 const ROW_CLASS = "context-menu-item";
@@ -355,19 +361,36 @@ export function openFolderDropdown(
   });
 }
 
+/** Add a server and Join with an invite link, in every list that offers them. */
+export const ADD_JOIN: ReadonlyArray<{
+  readonly key: "add" | "join";
+  readonly icon: IconName;
+  readonly testId: string;
+  readonly act: (ctl: RailController) => void;
+}> = [
+  { key: "add", icon: "plus", testId: "server-tabs-add-server", act: (ctl) => ctl.add() },
+  { key: "join", icon: "link", testId: "server-tabs-join", act: (ctl) => ctl.openJoin() },
+];
+
+/** Add and Join as menu items, for the "+" menu and the Servers sheet. */
+export function addJoinItems(ctl: RailController): ContextMenuItem[] {
+  return ADD_JOIN.map(({ key, icon, testId, act }) => ({
+    label: serverRailText(key),
+    icon,
+    testId,
+    onClick: () => act(ctl),
+  }));
+}
+
 /** The Servers list's last rows: Add a server and Join with an invite link. */
 function addJoinRows(close: () => void, signal: AbortSignal, ctl: RailController): HTMLElement[] {
-  const rows: Array<[string, string, () => void]> = [
-    [serverRailText("add"), "server-tabs-add-server", ctl.add],
-    [serverRailText("join"), "server-tabs-join", ctl.openJoin],
-  ];
-  return rows.map(([label, testId, act]) => {
-    const row = createMenuItem(label, ROW_CLASS, { testId });
+  return ADD_JOIN.map(({ key, testId, act }) => {
+    const row = createMenuItem(serverRailText(key), ROW_CLASS, { testId });
     row.addEventListener(
       "click",
       () => {
         close();
-        act();
+        act(ctl);
       },
       { signal },
     );
@@ -382,6 +405,14 @@ export function openItemList(
   button: HTMLElement,
   ctx: TabMenuContext,
 ): void {
+  if (kind === "servers" && isPhoneLayout()) {
+    // A phone gets the list as a bottom sheet; the module imports this one.
+    void import("./serverSheet").then(
+      ({ openServerSheet }) => openServerSheet(ctx, items, button),
+      (err: unknown) => log.warn("Servers sheet failed to load", { error: String(err) }),
+    );
+    return;
+  }
   const at = belowStart(button);
   const ariaLabel =
     kind === "more" ? serverRailText("moreTabs", { count: items.length }) : serverRailText("label");
@@ -430,20 +461,7 @@ export function openAddMenu(button: HTMLElement, ctx: TabMenuContext): void {
       showContextMenu({
         x: at.x,
         y: at.y,
-        items: [
-          {
-            label: serverRailText("add"),
-            icon: "plus",
-            testId: "server-tabs-add-server",
-            onClick: () => ctl.add(),
-          },
-          {
-            label: serverRailText("join"),
-            icon: "link",
-            testId: "server-tabs-join",
-            onClick: () => ctl.openJoin(),
-          },
-        ],
+        items: addJoinItems(ctl),
         signal: ctl.signal,
         className: MENU_CLASS,
         ariaLabel: serverRailText("addMenu"),

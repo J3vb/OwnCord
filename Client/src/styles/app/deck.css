@@ -417,3 +417,32 @@ html.layout-deck
     display: none;
   }
 }
+
+/* On a phone: a 44 px top bar, search as a 44 px icon, and the connection
+   state's words kept for a screen reader only. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck {
+    --deck-top-min: 44px;
+  }
+  html.layout-deck .deck-top-bar {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  html.layout-deck .deck-search {
+    justify-self: end;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+  html.layout-deck .deck-search-text {
+    display: none;
+  }
+  html.layout-deck .deck-connection-text {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+}

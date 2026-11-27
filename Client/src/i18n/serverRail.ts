@@ -4,6 +4,7 @@ import { defineCatalog } from "./format";
  *  copy loads with the main page chunk, not the startup closure. */
 export const serverRailText = defineCatalog("serverRail", {
   label: "Servers",
+  serversNamed: "Servers, {name}",
   home: "Home",
   homeUnread: {
     one: "Home, {count} unread direct message",

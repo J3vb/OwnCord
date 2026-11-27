@@ -266,12 +266,38 @@ describe("drawing", () => {
     expect(folderTab().classList.contains("active")).toBe(false);
   });
 
-  it("the Servers button is named Servers", async () => {
+  it("the Servers button is named Servers and the server", async () => {
     await mount();
-    expect(nameOf(tabs.servers)).toBe("Servers");
+    expect(nameOf(tabs.servers)).toBe("Servers, Hangar 9");
     expect(tabs.servers.getAttribute("aria-haspopup")).toBe("menu");
     expect(tabs.servers.getAttribute("aria-expanded")).toBe("false");
     expect(tabs.servers.dataset["testid"]).toBe("deck-servers-btn");
+    expect(tabs.servers.getAttribute("title")).toBe("Servers");
+  });
+
+  it("the Servers button's name span shows the current server and follows a rename", async () => {
+    localStorage.setItem(RAIL_LAYOUT_KEY, JSON.stringify(LAYOUT));
+    navWidth = 1000;
+    // No saved name, so the live server name is drawn.
+    ctl = createRailController({
+      currentHost: H,
+      loadServers: () => Promise.resolve([]),
+      switchServer: vi.fn(),
+      addServer: vi.fn(),
+      joinInvite: () => false,
+    });
+    tabs = createServerTabs(ctl);
+    document.body.append(tabs.servers, tabs.nav);
+    ctl.start(tabs.render, tabs.focusFallback);
+    await settle();
+    const span = tabs.servers.querySelector(".deck-servers-name");
+    expect(span?.textContent).toBe("Hangar 9");
+    expect(tabs.servers.querySelector(".deck-servers-text")?.textContent).toBe("Servers");
+    authStore.setState((s) => ({ ...s, serverName: "Hangar Ten" }));
+    authStore.flush();
+    expect(span?.textContent).toBe("Hangar Ten");
+    expect(nameOf(tabs.servers)).toBe("Servers, Hangar Ten");
+    expect(tabs.servers.getAttribute("title")).toBe("Servers");
   });
 });
 

@@ -6,6 +6,7 @@ import { describe, expect, it } from "vitest";
 import { colourPolicyBreaches, parseDeckCss, type ColourPolicy } from "../../helpers/deck-css";
 import { preludesOf, type DeckDeclaration, type DeckRule } from "../../helpers/deck-css";
 import { appCssLines, sheetRules, unscopedSelectors as stray } from "../../helpers/deckSheet";
+import { PHONE_LAYOUT_QUERY } from "../../../src/lib/ui/phoneLayout";
 
 const POLICY: ColourPolicy = {
   colourVars: new Set([
@@ -128,7 +129,8 @@ describe("the server-tabs policy", () => {
   });
 });
 
-const FOLD = "(max-width: 640px), (max-height: 499px)";
+const PHONE = PHONE_LAYOUT_QUERY;
+const FOLD = `(max-width: 640px), (max-height: 499px), ${PHONE}`;
 const NARROW = "(max-width: 640px)";
 const TABS_DIRECT = "html.layout-deck .deck-top-bar.has-server-tabs.has-deck-direct";
 
@@ -162,9 +164,9 @@ function parsedValue(property: string, value: string): string {
 const valueOf = (d: DeckDeclaration): string => JSON.stringify(d.value);
 
 describe("server-tabs.css: the tab row and the fold", () => {
-  it("uses exactly two top-level media queries, the fold then (max-width: 640px), and no nested one", () => {
-    expect(preludesOf("app/server-tabs.css")).toEqual([FOLD, NARROW]);
-    expect([...new Set(tabsRules().map((r) => r.media))]).toEqual([null, FOLD, NARROW]);
+  it("uses exactly three top-level media queries, the fold, (max-width: 640px) and the phone, and no nested one", () => {
+    expect(preludesOf("app/server-tabs.css")).toEqual([FOLD, NARROW, PHONE]);
+    expect([...new Set(tabsRules().map((r) => r.media))]).toEqual([null, FOLD, NARROW, PHONE]);
   });
 
   it("at 640px names each grid rule by its exact selector and value", () => {
@@ -428,5 +430,129 @@ describe("server-tabs.css: the end group", () => {
     expect(templates.flatMap((r) => r.selectors).filter((s) => s.includes("deck-top-end"))).toEqual(
       [],
     );
+  });
+});
+
+describe("server-tabs.css: the top bar on a phone", () => {
+  const BTN = "html.layout-deck .deck-top-bar.has-server-tabs > .deck-servers-btn";
+  const NAME = "html.layout-deck .deck-servers-name";
+  const DISCONNECT =
+    'html.layout-deck .deck-top-bar.has-server-tabs ~ .deck-status-bar .user-bar [data-testid="disconnect-btn"]';
+  /** Every selector the phone block names. */
+  const phoneSelectors = (): string[] =>
+    tabsRules()
+      .filter((r) => r.media === PHONE)
+      .flatMap((r) => r.selectors);
+
+  it("the fold's prelude ends with the phone query, and the phone block is last", () => {
+    expect(FOLD.endsWith(PHONE)).toBe(true);
+    expect(preludesOf("app/server-tabs.css").at(-1)).toBe(PHONE);
+    const rules = tabsRules();
+    const lastNarrow = rules.map((r) => r.media).lastIndexOf(NARROW);
+    for (const r of rules.filter((x) => x.media === PHONE)) {
+      expect(rules.indexOf(r)).toBeGreaterThan(lastNarrow);
+    }
+  });
+
+  it("the name span is hidden at the top level and shown, truncating, only on a phone", () => {
+    expect(valueOf(exactDeclaration(NAME, "display", null))).toBe(parsedValue("display", "none"));
+    const shown = "html.layout-deck .deck-servers-btn .deck-servers-name";
+    expect(valueOf(exactDeclaration(shown, "display", PHONE))).toBe(
+      parsedValue("display", "block"),
+    );
+    expect(valueOf(exactDeclaration(shown, "text-overflow", PHONE))).toBe(
+      parsedValue("text-overflow", "ellipsis"),
+    );
+    expect(exactRules(shown, null)).toEqual([]);
+    expect(valueOf(exactDeclaration("html.layout-deck .deck-servers-text", "display", PHONE))).toBe(
+      parsedValue("display", "none"),
+    );
+  });
+
+  it("the Servers button is at least 44 px and never 28 px wide on a phone", () => {
+    expect(valueOf(exactDeclaration(BTN, "min-width", PHONE))).toBe(
+      parsedValue("min-width", "44px"),
+    );
+    expect(valueOf(exactDeclaration(BTN, "height", PHONE))).toBe(parsedValue("height", "44px"));
+    expect(valueOf(exactDeclaration(BTN, "width", PHONE))).toBe(parsedValue("width", "auto"));
+    expect(valueOf(exactDeclaration(BTN, "grid-column", PHONE))).toBe(
+      parsedValue("grid-column", "1"),
+    );
+    const widths = tabsRules()
+      .filter((r) => r.media === PHONE)
+      .flatMap((r) => r.declarations)
+      .filter((d) => d.property === "width")
+      .map(valueOf);
+    expect(widths).not.toContain(parsedValue("width", "28px"));
+    expect(
+      valueOf(
+        exactDeclaration(
+          "html.layout-deck .deck-servers-btn .server-tab-chevron",
+          "display",
+          PHONE,
+        ),
+      ),
+    ).toBe(parsedValue("display", "inline-block"));
+  });
+
+  it("--deck-direct-size is 44 px only on a phone", () => {
+    const sizes = tabsRules()
+      .filter((r) => r.selectors.includes("html.layout-deck"))
+      .flatMap((r) =>
+        r.declarations
+          .filter((d) => d.property === "--deck-direct-size")
+          .map((d) => [r.media, JSON.stringify(d.value)] as const),
+      );
+    const big = sizes.filter(([, v]) => v.includes("44"));
+    expect(big.map(([m]) => m)).toEqual([PHONE]);
+    expect(sizes.filter(([m]) => m === null)).toHaveLength(1);
+    expect(sizes.find(([m]) => m === null)?.[1]).not.toContain("44");
+  });
+
+  it("names each phone grid rule by its exact selector and value", () => {
+    const columns: Array<[string, string]> = [
+      [DIRECT_GRID, "minmax(0, 1fr) auto auto auto"],
+      ["html.layout-deck .deck-top-bar.has-server-tabs", "minmax(0, 1fr) auto auto"],
+      [TABS_DIRECT, "minmax(0, 1fr) auto auto auto"],
+    ];
+    for (const [selector, value] of columns) {
+      expect(valueOf(exactDeclaration(selector, "grid-template-columns", PHONE)), selector).toBe(
+        parsedValue("grid-template-columns", value),
+      );
+    }
+    const cells: Array<[string, string]> = [
+      ["html.layout-deck .deck-top-bar.has-server-tabs > .deck-search", "2"],
+      [
+        "html.layout-deck .deck-top-bar.has-server-tabs > :is(.deck-connection, .deck-top-end)",
+        "3",
+      ],
+      [`${TABS_DIRECT} > .deck-direct`, "4"],
+    ];
+    for (const [selector, value] of cells) {
+      expect(valueOf(exactDeclaration(selector, "grid-column", PHONE)), selector).toBe(
+        parsedValue("grid-column", value),
+      );
+    }
+  });
+
+  it("hides the plain name only beside the Servers button, so a browser keeps it", () => {
+    const hiders = tabsRules().filter(
+      (r) =>
+        r.selectors.some((x) => x.endsWith(".deck-top-name")) &&
+        r.declarations.some((d) => d.property === "display"),
+    );
+    expect(hiders.flatMap((r) => r.selectors)).toEqual([
+      "html.layout-deck .deck-top-bar.has-server-tabs > .deck-top-name",
+    ]);
+    expect(hiders.map((r) => r.media)).toEqual([PHONE]);
+  });
+
+  it("hides Switch server on a phone only where the tabs are, so a browser keeps Sign out", () => {
+    expect(valueOf(exactDeclaration(DISCONNECT, "display", PHONE))).toBe(
+      parsedValue("display", "none"),
+    );
+    const onPhone = phoneSelectors().filter((x) => x.includes("disconnect-btn"));
+    expect(onPhone).toEqual([DISCONNECT]);
+    expect(onPhone.every((x) => x.includes(".has-server-tabs"))).toBe(true);
   });
 });

@@ -19,14 +19,16 @@ import { RAIL_LAYOUT_KEY } from "@lib/prefs/serverRailLayout";
 import type { ServerProfile } from "@lib/presence/profiles";
 import { setSidebarMode } from "@stores/ui.store";
 import { authStore } from "@stores/auth.store";
+import { closeBottomSheet } from "@lib/ui/bottomSheet";
+import { usePhone } from "../../helpers/phoneMedia";
 
 interface SwitcherDriver {
   readonly name: string;
   mount(options: RailControllerOptions): Promise<void>;
-  clickServer(host: string): void;
+  clickServer(host: string): void | Promise<void>;
   /** Opens the server's menu where it is drawn and clicks the row with this test id. */
   clickMenuItem(host: string, testId: string): void;
-  openAdd(): void;
+  openAdd(): void | Promise<void>;
   openJoin(): void;
   /** Every server name as drawn text. */
   drawnNames(): string[];
@@ -234,6 +236,39 @@ function options(over: Partial<RailControllerOptions> = {}) {
 
 const stored = (): unknown => JSON.parse(localStorage.getItem(RAIL_LAYOUT_KEY) ?? "null");
 
+/** What the two switch cases need from a driver. */
+type SwitchDriver = Pick<SwitcherDriver, "mount" | "clickServer" | "openAdd" | "destroy">;
+
+async function switchesOnce(driver: SwitchDriver): Promise<void> {
+  localStorage.setItem("owncord:settings:confirmServerSwitch", "false");
+  const { opts, switchServer, addServer } = options();
+  await driver.mount(opts);
+  await driver.clickServer("b.example");
+  await driver.clickServer("b.example");
+  expect(switchServer).toHaveBeenCalledExactlyOnceWith("b.example");
+  await driver.openAdd();
+  expect(addServer).not.toHaveBeenCalled();
+}
+
+async function asksOnce(driver: SwitchDriver): Promise<void> {
+  const { opts, switchServer } = options();
+  await driver.mount(opts);
+  await driver.clickServer("b.example");
+  await driver.clickServer("b.example");
+  expect(document.querySelectorAll('[data-testid="server-switch-dialog"]')).toHaveLength(1);
+  byTestId("server-switch-cancel")?.click();
+  expect(byTestId("server-switch-dialog")).toBeNull();
+  expect(switchServer).not.toHaveBeenCalled();
+
+  await driver.clickServer("b.example");
+  const confirm = byTestId("server-switch-confirm");
+  expect(confirm).not.toBeNull();
+  driver.destroy();
+  expect(byTestId("server-switch-dialog")).toBeNull();
+  confirm?.click();
+  expect(switchServer).not.toHaveBeenCalled();
+}
+
 describe.each(drivers.map((make) => ({ make, name: make().name })))("$name", ({ make }) => {
   let driver: SwitcherDriver;
 
@@ -251,35 +286,11 @@ describe.each(drivers.map((make) => ({ make, name: make().name })))("$name", ({ 
     authStore.flush();
   });
 
-  it("a click on another server switches once even on a double click, and Add is ignored after it", async () => {
-    localStorage.setItem("owncord:settings:confirmServerSwitch", "false");
-    const { opts, switchServer, addServer } = options();
-    await driver.mount(opts);
-    driver.clickServer("b.example");
-    driver.clickServer("b.example");
-    expect(switchServer).toHaveBeenCalledExactlyOnceWith("b.example");
-    driver.openAdd();
-    expect(addServer).not.toHaveBeenCalled();
-  });
+  it("a click on another server switches once even on a double click, and Add is ignored after it", () =>
+    switchesOnce(driver));
 
-  it("with the switch question on, a double click opens one question; Cancel keeps the session; destroy closes it without switching", async () => {
-    const { opts, switchServer } = options();
-    await driver.mount(opts);
-    driver.clickServer("b.example");
-    driver.clickServer("b.example");
-    expect(document.querySelectorAll('[data-testid="server-switch-dialog"]')).toHaveLength(1);
-    byTestId("server-switch-cancel")?.click();
-    expect(byTestId("server-switch-dialog")).toBeNull();
-    expect(switchServer).not.toHaveBeenCalled();
-
-    driver.clickServer("b.example");
-    const confirm = byTestId("server-switch-confirm");
-    expect(confirm).not.toBeNull();
-    driver.destroy();
-    expect(byTestId("server-switch-dialog")).toBeNull();
-    confirm?.click();
-    expect(switchServer).not.toHaveBeenCalled();
-  });
+  it("with the switch question on, a double click opens one question; Cancel keeps the session; destroy closes it without switching", () =>
+    asksOnce(driver));
 
   it("a click on the current server shows it", async () => {
     const { opts, switchServer, onShowServer } = options();
@@ -362,4 +373,75 @@ describe.each(drivers.map((make) => ({ make, name: make().name })))("$name", ({ 
     expect(driver.drawnNames()).toContain(name);
     expect(document.querySelector("img")).toBeNull();
   });
+});
+
+/** The Servers sheet on a phone: each tap opens the sheet from the Servers button, waits for it and taps a row. */
+function sheetDriver(): SwitchDriver {
+  let ctl: RailController | null = null;
+  let tabs: ServerTabs | null = null;
+  const openSheet = async (): Promise<HTMLElement> => {
+    tabs?.servers.click();
+    await vi.dynamicImportSettled();
+    await vi.dynamicImportSettled();
+    const sheet = byTestId("deck-servers-sheet");
+    if (sheet === null) throw new Error("the Servers sheet did not open");
+    return sheet;
+  };
+  return {
+    async mount(options) {
+      ctl = createRailController(options);
+      tabs = createServerTabs(ctl);
+      ctl.start(tabs.render, tabs.focusFallback);
+      document.body.append(tabs.servers, tabs.nav);
+      await settle();
+    },
+    async clickServer(host) {
+      const sheet = await openSheet();
+      const name = ctl?.look(host).name;
+      const row = Array.from(
+        sheet.querySelectorAll<HTMLElement>('[data-testid="deck-servers-sheet-server"]'),
+      ).find((r) => r.querySelector(".menu-sheet-label")?.textContent === name);
+      if (row === undefined) throw new Error(`no sheet row for ${host}`);
+      row.click();
+    },
+    async openAdd() {
+      const sheet = await openSheet();
+      sheet.querySelector<HTMLElement>('[data-testid="server-tabs-add-server"]')?.click();
+    },
+    destroy() {
+      tabs?.destroy();
+      ctl?.destroy();
+      tabs?.nav.remove();
+      tabs?.servers.remove();
+      tabs = null;
+      ctl = null;
+    },
+  };
+}
+
+describe("Deck tabs, the Servers sheet on a phone", () => {
+  let driver: SwitchDriver;
+
+  beforeEach(() => {
+    localStorage.clear();
+    usePhone();
+    setSidebarMode("channels");
+    authStore.setState((s) => ({ ...s, serverName: "Alpha" }));
+    authStore.flush();
+    driver = sheetDriver();
+  });
+  afterEach(() => {
+    driver.destroy();
+    closeBottomSheet();
+    document.body.innerHTML = "";
+    vi.unstubAllGlobals();
+    authStore.setState((s) => ({ ...s, serverName: null }));
+    authStore.flush();
+  });
+
+  it("a tap on another server switches once even on a double tap, and Add is ignored after it", () =>
+    switchesOnce(driver));
+
+  it("with the switch question on, a double tap opens one question; Cancel keeps the session; destroy closes it without switching", () =>
+    asksOnce(driver));
 });

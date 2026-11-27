@@ -115,9 +115,12 @@ export function createServerTabs(ctl: RailController): ServerTabs {
   let cells: Cell[] = [];
 
   const servers = menuButton("deck-servers-btn", "deck-servers-btn", serverRailText("label"));
+  // The current server's name: shown on a phone, and in the name at every size.
+  const serversName = createElement("span", { class: "deck-servers-name" });
   servers.append(
     railIcon("server"),
     createElement("span", { class: "deck-servers-text" }, serverRailText("label")),
+    serversName,
     chevron(10),
   );
   const nav = createElement("nav", {
@@ -236,7 +239,7 @@ export function createServerTabs(ctl: RailController): ServerTabs {
     setExpanded(opener, true);
   };
 
-  const ctx: TabMenuContext = { ctl, open, activate: (host) => ctl.activate(host) };
+  const ctx: TabMenuContext = { ctl, open, activate: (host) => ctl.activate(host), closeMenu };
 
   // --- Cells ----------------------------------------------------------------
 
@@ -394,6 +397,10 @@ export function createServerTabs(ctl: RailController): ServerTabs {
 
   function render(): void {
     if (destroyed) return;
+    // The button is never rebuilt, so its name is kept current even while busy.
+    const { name } = ctl.look(ctl.currentHost);
+    setText(serversName, name);
+    servers.setAttribute("aria-label", serverRailText("serversNamed", { name }));
     if (busy()) {
       pending = "render";
       return;
