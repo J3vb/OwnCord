@@ -36,7 +36,8 @@ const (
 	maxArchiveReasonLen = 300
 )
 
-// archiveDataDBEntry is the database's place in every archive; a stored archive without it is not a backup.
+// archiveDataDBEntry is the database's place in an archive when the database lives outside the data dir; one
+// inside it keeps its own name there.
 const archiveDataDBEntry = "data/chatserver.db"
 
 // scheduledArchives is the one scheduled archive job of the process. It is package state, like archiveBusy
@@ -231,9 +232,6 @@ func storeScheduledArchive(ctx context.Context, database *db.DB, opts SetupOptio
 	if err != nil {
 		return "", 0, err
 	}
-	if err := checkStoredArchive(built); err != nil {
-		return "", 0, err
-	}
 	info, err := os.Stat(built)
 	if err != nil {
 		return "", 0, fmt.Errorf("reading archive size: %w", err)
@@ -249,15 +247,15 @@ func storeScheduledArchive(ctx context.Context, database *db.DB, opts SetupOptio
 	return filepath.Base(dest), info.Size(), nil
 }
 
-// checkStoredArchive reopens the finished zip and confirms it carries the database: a cheap structure check
-// that catches a zip a full disk or a bug cut short.
-func checkStoredArchive(path string) error {
+// checkStoredArchive reopens the finished zip and confirms it carries the database under dbEntry, the name the
+// build wrote it under: a cheap structure check that catches a zip a full disk or a bug cut short.
+func checkStoredArchive(path, dbEntry string) error {
 	zr, err := zip.OpenReader(path)
 	if err != nil {
 		return fmt.Errorf("archive failed verification: %w", err)
 	}
 	defer zr.Close() //nolint:errcheck
-	if !slices.ContainsFunc(zr.File, func(f *zip.File) bool { return f.Name == archiveDataDBEntry }) {
+	if !slices.ContainsFunc(zr.File, func(f *zip.File) bool { return dbEntry != "" && f.Name == dbEntry }) {
 		return errors.New("archive failed verification: the database is missing from it")
 	}
 	return nil

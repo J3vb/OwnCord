@@ -134,7 +134,7 @@ func buildArchive(ctx context.Context, database *db.DB, opts SetupOptions, paths
 type archiveBuildOptions struct {
 	// headroomPercent is free space kept above server.min_free_disk_mb, as a percent of the build's size.
 	headroomPercent uint64
-	// durable checks the snapshot and syncs the finished zip.
+	// durable checks the snapshot, syncs the finished zip and confirms the zip carries the database.
 	durable bool
 }
 
@@ -206,6 +206,11 @@ func buildArchiveWith(ctx context.Context, database *db.DB, opts SetupOptions, p
 	}
 	if err := out.Close(); err != nil {
 		return "", fmt.Errorf("closing archive: %w", err)
+	}
+	if bo.durable {
+		if err := checkStoredArchive(outPath, t.dbEntry); err != nil {
+			return "", err
+		}
 	}
 	return outPath, nil
 }
@@ -313,6 +318,7 @@ type archiveTree struct {
 	entries       []archiveEntry
 	fileBytes     uint64 // planned file bytes, the database aside
 	snapshotAdded bool
+	dbEntry       string // the zip entry the database snapshot is written under
 }
 
 // need is roughly the disk space the build takes: every file once in the zip, the database twice (snapshot,
@@ -350,7 +356,8 @@ func (t *archiveTree) write(zw *zip.Writer) error {
 	if err != nil {
 		return err
 	}
-	return addFile(zw, "data/chatserver.db", t.snapshot, info, zip.Deflate)
+	t.dbEntry = archiveDataDBEntry
+	return addFile(zw, archiveDataDBEntry, t.snapshot, info, zip.Deflate)
 }
 
 func (t *archiveTree) walk(root, prefix string) error {
@@ -406,6 +413,7 @@ func (t *archiveTree) visit(root, prefix, path string, d os.DirEntry, walkErr er
 	if path == t.db {
 		t.entries = append(t.entries, archiveEntry{name: name, src: t.snapshot, info: info, method: zip.Deflate})
 		t.snapshotAdded = true
+		t.dbEntry = name
 		return nil
 	}
 	method := zip.Deflate
