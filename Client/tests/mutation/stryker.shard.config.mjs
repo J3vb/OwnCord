@@ -75,6 +75,7 @@ export const shards = {
     "src/lib/voice/videoPresets.ts",
   ],
   "livekit-10": [
+    "src/features/voice/callRowMark.ts",
     "src/features/voice/codecSwitch.ts",
     "src/features/voice/joinFailures.ts",
     "src/features/voice/native/nativePttGate.ts",
@@ -177,6 +178,7 @@ export const shards = {
     "src/features/voice/videoGrid/gridSizing.ts",
     "src/features/voice/videoOnScreen.ts",
     "src/features/voice/widget/liveShare.ts",
+    "src/features/voice/widget/moderationText.ts",
     "src/lib/voice/audioMusicState.ts",
   ],
   "livekit-23": [
