@@ -28,7 +28,8 @@ import prod from "./playwright.config.prod";
  *   layout and already run in the parity job.
  * - `server-rail`, `member-list`, `member-list-scale`: their parts that draw
  *   the layout are Classic-only.
- * - `mobile-layout`, `phone-panels`: phones run Classic.
+ * - `mobile-layout`, `phone-panels`: Classic phone; the phone Deck counterpart
+ *   is the `deck-phone-*` specs, run in the parity job.
  * - Specs whose subject is Classic's own chrome; the `deck-*` spec named here
  *   covers the Deck counterpart:
  *   - `main-layout` (member column and its sizing): `deck-buddies`, `deck-fold`

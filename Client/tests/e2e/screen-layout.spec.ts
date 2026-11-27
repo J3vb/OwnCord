@@ -425,48 +425,61 @@ test.describe("New-install defaults", () => {
     });
   });
 
-  test("a store from an older release keeps Classic and its theme, across a reload", async ({
+  test("a store from an older release on Classic moves to Command Deck once, keeps its theme, and shows the notice once", async ({
     page,
   }) => {
     // Seeded once: a reload must find what the first load left, so a theme
     // the app lost is not written back by the seed.
     await page.addInitScript(
-      ([level, theme]) => {
+      ([level, theme, layout]) => {
         if (sessionStorage.getItem("old-release-seeded") !== null) return;
         sessionStorage.setItem("old-release-seeded", "1");
         localStorage.setItem(level, JSON.stringify("all"));
         localStorage.setItem(theme, "light");
+        localStorage.setItem(layout, JSON.stringify("classic"));
       },
-      [LEVEL_KEY, THEME_KEY] as const,
+      [LEVEL_KEY, THEME_KEY, LAYOUT_KEY] as const,
     );
     await startFullSession(page);
     await expect(page.locator("body")).toHaveClass(/theme-light/);
-    expect(await hasDeckClass(page)).toBe(false);
-    const upgraded = {
-      [LAYOUT_KEY]: JSON.stringify("classic"),
+    expect(await hasDeckClass(page)).toBe(true);
+    const moved = {
+      [LAYOUT_KEY]: JSON.stringify("deck"),
       [THEME_KEY]: "light",
       [LEVEL_KEY]: JSON.stringify("all"),
     };
-    expect(await storedDefaults(page)).toEqual(upgraded);
+    expect(await storedDefaults(page)).toEqual(moved);
+    const notice = page.getByTestId("layout-notice-dialog");
+    await expect(notice).toBeVisible();
+    await expect(notice.getByRole("heading")).toHaveText("OwnCord now uses Command Deck");
+    await notice.getByRole("button", { name: "Got it" }).click();
+    await expect(notice).toHaveCount(0);
+    const pending = () =>
+      page.evaluate(() => localStorage.getItem("owncord:settings:deckSwitchNotice"));
+    expect(await pending()).toBeNull();
 
     await page.reload();
+    await navigateToMainPage(page);
     await expect(page.locator("body")).toHaveClass(/theme-light/);
-    expect(await hasDeckClass(page)).toBe(false);
-    expect(await storedDefaults(page)).toEqual(upgraded);
+    expect(await hasDeckClass(page)).toBe(true);
+    expect(await storedDefaults(page)).toEqual(moved);
+    // Nothing is left to ask for the notice, so none can show.
+    expect(await pending()).toBeNull();
+    await expect(notice).toHaveCount(0);
   });
 
   test.describe("on a phone-sized browser", () => {
     // The iPhone profile is a phone browser; an Android user agent with the
-    // Tauri mock would be the Android app, which stores no layout.
+    // Tauri mock would be the Android app, which keeps its theme.
     const { defaultBrowserType: _iphoneBrowser, ...iphone14 } = devices["iPhone 14"];
     test.use(iphone14);
 
-    test("runs Classic on Gunmetal and stores Classic", async ({ page }) => {
+    test("runs Deck on Gunmetal and stores Deck", async ({ page }) => {
       await startFullSession(page);
       await expect(page.locator("body")).toHaveClass(/theme-gunmetal/);
-      expect(await hasDeckClass(page)).toBe(false);
+      expect(await hasDeckClass(page)).toBe(true);
       expect(await storedDefaults(page)).toEqual({
-        [LAYOUT_KEY]: JSON.stringify("classic"),
+        [LAYOUT_KEY]: JSON.stringify("deck"),
         [THEME_KEY]: "gunmetal",
         [LEVEL_KEY]: JSON.stringify("mentions"),
       });

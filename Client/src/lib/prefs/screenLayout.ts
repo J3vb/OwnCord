@@ -5,43 +5,23 @@
  * the Appearance row shows. The RUNNING value is what `applyStoredAppearance()`
  * computed at load and what the rest of the app obeys until the next reload,
  * so a pick never changes the layout under a live session.
- *
- * On a phone host (the Android app, or a phone-sized touch screen) Command
- * Deck is a preview behind Developer mode until it ships there. Developer mode
- * is read as a plain preference: `lib/` cannot import `features/`.
- *
- * `lib/` cannot import `features/voice/native`, so Android is detected through
- * `hostPlatform`.
  */
 
-import { isAndroidHost } from "../hostPlatform";
-import { isPhoneLayout } from "../ui/phoneLayout";
 import { loadPref, savePref } from "./preferences";
 
 export type ScreenLayout = "classic" | "deck";
 
 export const SCREEN_LAYOUT_PREF = "screenLayout";
 
-/** The Android app at any size, or a phone-sized touch screen. */
-export function isPhoneHost(): boolean {
-  return isAndroidHost() || isPhoneLayout();
-}
-
-/** Whether Command Deck can run here: anywhere but a phone host, and on a
- *  phone host only as a preview with Developer mode on, until it ships there. */
-export function screenLayoutAvailable(): boolean {
-  return !isPhoneHost() || loadPref<boolean>("developerMode", false);
-}
-
-/** The stored choice, as the row shows it: `"deck"` only when stored as such,
- *  whatever the platform says. Never rewrites the stored value. */
+/** The stored choice, as the row shows it: `"deck"` only when stored as such.
+ *  Never rewrites the stored value. */
 export function loadStoredScreenLayout(): ScreenLayout {
   return loadPref<string>(SCREEN_LAYOUT_PREF, "classic") === "deck" ? "deck" : "classic";
 }
 
-/** The layout a load should run: the stored choice, gated on `screenLayoutAvailable()`. */
+/** The layout a load should run: the stored choice, on every platform. */
 export function loadScreenLayout(): ScreenLayout {
-  return loadStoredScreenLayout() === "deck" && screenLayoutAvailable() ? "deck" : "classic";
+  return loadStoredScreenLayout();
 }
 
 export function saveScreenLayout(value: ScreenLayout): void {

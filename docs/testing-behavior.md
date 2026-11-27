@@ -45,7 +45,7 @@ The interactive native Playwright projects still run on Windows only.
 | Rust parser properties           | `cargo test -p owncord-parse` in `Client/src-tauri`                                                                                                        | proptest properties of the client's pure parsers: proxy request heads, tunnel token, pin keys, the trust decision, store files. CI runs it in the Rust Unit Tests job |
 | Rust parser fuzzing              | `cargo +nightly fuzz run <target>` in `Client/src-tauri/crates/owncord-parse/fuzz`                                                                         | Nightly: every cargo-fuzz target gets 60 s of generated inputs (pinned nightly toolchain and cargo-fuzz version)                                                      |
 
-Every harness seeds the Classic layout on a fresh profile, so an empty profile does not count as a new install. A test sets `screenLayout: "deck"` or `"fresh"` to change that. A spec that clears storage must seed again. A native relaunch that keeps its profile is not seeded.
+Every harness seeds the Classic layout on a fresh profile, with the marker that the one-time move to Command Deck is settled (so a seeded Classic stays Classic), so an empty profile does not count as a new install. A test sets `screenLayout: "deck"` or `"fresh"` to change that. A spec that clears storage must seed again. A native relaunch that keeps its profile is not seeded.
 
 Notes on some lanes:
 

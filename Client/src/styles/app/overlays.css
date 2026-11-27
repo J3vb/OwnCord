@@ -793,6 +793,10 @@ body .toast-container.toast-container--under-dialog {
   display: flex;
   gap: var(--space-2);
 }
+/* The one-time Command Deck notice, in the same look: two short paragraphs. */
+.layout-notice-body p + p {
+  margin-top: var(--space-3);
+}
 
 /* Masked-link warning: the real address, wrapped so a long one stays in the box. */
 .masked-link-url {

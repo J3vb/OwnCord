@@ -55,7 +55,14 @@ export interface UiState {
  *  tab with its profile editor open and the display name focused; "Devices"
  *  the Account tab with its signed-in devices shown. */
 export type SettingsTabRequest =
-  "Account" | "Profile" | "Devices" | "Safety" | "My uploads" | "About" | "Notifications";
+  | "Account"
+  | "Profile"
+  | "Devices"
+  | "Safety"
+  | "My uploads"
+  | "Appearance"
+  | "About"
+  | "Notifications";
 
 /**
  * The one `ui.store` fact a protocol-epoch refusal leaves behind:

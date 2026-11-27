@@ -83,6 +83,11 @@ in a call the status bar stays, and the call bar and the tall widget panels
 hide. On Android, Back closes the keyboard but keeps focus in the box, so the
 bar comes back only after a tap outside it.
 
+Command Deck runs on phones too, in phone browsers and in the Android app. A
+new install starts on Command Deck, and an install that ran Classic before
+moves to it once (settings-and-admin.md, "New installs and the move to
+Command Deck").
+
 ## Colour tokens
 
 `Client/src/styles/tokens.css` holds the dark defaults, which midnight shares

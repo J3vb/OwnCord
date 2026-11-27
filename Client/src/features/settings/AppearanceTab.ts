@@ -280,8 +280,7 @@ export function buildAppearanceTab(
   if (!isAndroidApp() && runningScreenLayout() !== "deck") {
     layoutGroup.card.appendChild(memberLayoutRow);
   }
-  const screenLayoutRow = buildScreenLayoutRow(signal);
-  if (screenLayoutRow !== null) layoutGroup.card.appendChild(screenLayoutRow);
+  layoutGroup.card.appendChild(buildScreenLayoutRow(signal));
 
   // Accent color picker
   const ACCENT_PRESETS: readonly string[] = [

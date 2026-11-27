@@ -6,11 +6,9 @@ import { createElement, setOwnedTimeout, setText } from "@lib/dom";
 import { isAndroidApp, isLinuxDesktop, isWindowsDesktop } from "@lib/hostOs";
 import { createLogger } from "@lib/logger";
 import {
-  isPhoneHost,
   loadStoredScreenLayout,
   runningScreenLayout,
   saveScreenLayout,
-  screenLayoutAvailable,
   type ScreenLayout,
 } from "@lib/prefs/screenLayout";
 import { isInVoiceSession } from "@lib/voice/voiceDeafened";
@@ -105,9 +103,8 @@ function createRestartControl(
   return { paint: (pending) => (pending ? add() : remove()) };
 }
 
-/** The row, or null when it does not show (a phone host without Developer mode). */
-export function buildScreenLayoutRow(signal: AbortSignal): HTMLDivElement | null {
-  if (!screenLayoutAvailable()) return null;
+/** The row, shown on every platform. */
+export function buildScreenLayoutRow(signal: AbortSignal): HTMLDivElement {
   // Always present so a screen reader announces the text when it is set.
   const note = createElement("div", { class: "setting-note", role: "status" });
   let restart: { paint: (pending: boolean) => void } | null = null;
@@ -123,12 +120,7 @@ export function buildScreenLayoutRow(signal: AbortSignal): HTMLDivElement | null
     testId: "screen-layout",
     options: [
       ["classic", t("appearance.screenLayout.classic")],
-      [
-        "deck",
-        isPhoneHost()
-          ? t("appearance.screenLayout.deckPreview")
-          : t("appearance.screenLayout.deck"),
-      ],
+      ["deck", t("appearance.screenLayout.deck")],
     ],
     current: loadStoredScreenLayout,
     save: (value) => {
@@ -144,18 +136,16 @@ export function buildScreenLayoutRow(signal: AbortSignal): HTMLDivElement | null
 }
 
 /**
- * Search text for the layout rows: Screen layout when offered, then Member
- * list position on a desktop running Classic (Deck pins the list right).
+ * Search text for the layout rows: Screen layout, then Member list position
+ * on a desktop running Classic (Deck pins the list right).
  */
 export function layoutSearchEntries(): string[] {
-  const screen = screenLayoutAvailable()
-    ? [t("appearance.screenLayout"), t("appearance.screenLayout.desc")]
-    : [];
+  const screen = [t("appearance.screenLayout"), t("appearance.screenLayout.desc")];
   if (isAndroidApp() || runningScreenLayout() === "deck") return screen;
   return [...screen, t("appearance.memberLayout"), t("appearance.memberLayout.desc")];
 }
 
-/** Part of the search cache key: whether the row is offered and the running layout change what Appearance shows. */
+/** Part of the search cache key: the running layout changes what Appearance shows. */
 export function layoutSearchKey(): string {
-  return `${screenLayoutAvailable() ? "dev" : "nodev"}:${runningScreenLayout()}`;
+  return runningScreenLayout();
 }
