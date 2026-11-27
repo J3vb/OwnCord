@@ -4269,7 +4269,7 @@ dependencies = [
 
 [[package]]
 name = "owncord-client"
-version = "2.10.0"
+version = "2.11.0"
 dependencies = [
  "apple-native-keyring-store",
  "base64 0.22.1",

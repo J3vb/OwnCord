@@ -50,6 +50,10 @@ Good to know:
 - **At most 3 archives are kept**, newest first, even when **Keep backups for**
   is `0`. Uploads can be big. The days setting also applies: older archives go,
   but the newest always stays.
+- The newest archive is never removed by the server, also after you turn
+  automatic backups off or switch to **Database only**. It still holds the
+  uploads it was made with, including those of members erased since. Delete it
+  from the list when you no longer need it.
 - If a manual **Download full archive** is running when the archive is due, the
   scheduled one waits for the next round.
 - The Dashboard warns when the archive is out of date, and says why when it

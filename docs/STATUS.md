@@ -8,11 +8,11 @@ live in the [changelog](../CHANGELOG.md) and the linked pages.
 builds (`scripts/release/verify-release-status.mjs`), so add the row in the release PR,
 together with the changelog section.
 
-_Last updated 2026-11-25._
+_Last updated 2026-11-27._
 
 ## Current release
 
-**v2.10.0**, published 2026-11-17. It is still a beta and a hobby project:
+**v2.11.0**, published 2026-11-27. It is still a beta and a hobby project:
 Windows and Linux desktop (x64 and ARM64), plus a sideloaded Android app (arm64). Update the server and the
 desktop app together. From 2.5 on, version numbers drop the `-beta.N` suffix.
 
@@ -24,6 +24,7 @@ Newest first, one line each. The full notes are the matching section of
 <!-- prettier-ignore -->
 | Version | Date | What it brought |
 | --- | --- | --- |
+| v2.11.0 | 2026-11-27 | Command Deck, OwnCord's own layout, on every device with Classic one setting away, the Gunmetal theme, automatic backups of everything (uploads, keys and settings), music you choose to listen to, a speaking ring others see as the speaker does, and the fixes of a Windows and a Linux bug hunt, a full security review and a controls review. |
 | v2.10.0 | 2026-11-17 | A new look for Settings, dialogs, menus and avatars, new app sounds with a Classic style, Android message and call notifications through UnifiedPush, music sharing in voice, link previews built by the server, theme background pictures, a server icon, emoji drawn as images, soft speech through Enhanced Noise Suppression, and search in threads and forum posts. |
 | v2.9.0 | 2026-11-12 | A faster start and smoother chat and member lists, lighter screen shares, the Silero VAD speech model for Enhanced Noise Suppression, a call layout with tile shapes, a participant strip and pinned tiles, steadier voice switching, and an admin video cap. |
 | v2.8.0 | 2026-11-04 | Share to OwnCord and notifications in the Android app, a People page with Active now, a "+" tile menu, image viewer swipes, calls that no longer freeze on a key change, an admin System health page and LiveKit card, and support bundles that remove private details. |

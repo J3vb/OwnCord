@@ -100,6 +100,31 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Known issues
+
+- **Linux: the crash with your camera on during a screen share is fixed for realtime-priority setups, but not yet confirmed on every PC that showed it.** If it still happens to you, use one at a time.
+- **Linux: this release was not checked by hand on X11, GNOME Wayland and KDE Plasma Wayland.** It works, but it is less tested than Windows.
+- **Scrolling far back in a long channel while it reloads can make the list jump** to another spot. Scroll back to where you were; nothing is lost.
+- **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
+- **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
+- **On a phone in Command Deck, out of a call, after you close the keyboard with Back, the bottom bar stays hidden** until you tap outside the message box.
+- **In the Android app with gesture navigation, a swipe that starts at the very edge of the screen goes Back.** Start the swipe a little way in.
+
+## v2.11.0
+
+**OwnCord 2.11** (the twelfth public beta) gives OwnCord its own look: **Command Deck**, a new layout built for gaming groups, now on every device, phones and the Android app included, with a new Gunmetal theme. Everyone moves over once; a short note says how to go back to Classic in Settings > Appearance > Screen layout. Automatic backups can now save everything (uploads, keys and settings, not only the database), shared music plays only for those who choose to listen, the speaking ring others see matches the speaker's own, and the release carries the fixes of a Windows and a Linux bug hunt, a full security review and a review of every settings, voice and sidebar control.
+
+It is still a **beta and a hobby project**. Update the server and the desktop app together. **This release changes the database** (change 095). The server upgrades it on first start and keeps a safety copy first; you cannot go back to 2.10 without restoring that copy. **Existing servers keep database-only automatic backups** until the owner picks a choice on Backups & restore; pick Everything. **If the server runs its own voice server on the same machine** (the default), LiveKit's port 7880 now listens on that machine only; voice is unaffected.
+
+### Highlights
+
+- **Command Deck**: servers in tabs across the top, channels, voice rooms and DMs in one list, Buddies grouped by what people are doing, and an Info block for your voice room. On every device; Classic stays one setting away.
+- **Gunmetal theme**: blue-grey surfaces with an orange accent, the default for new installs.
+- **Backups of everything**: automatic backups can keep a full archive with uploads, keys and settings, and the Dashboard warns when backups sit on the server's own disk.
+- **Listen to music by choice**: shared music stays silent until you tap Listen, and the music tile shows who is listening.
+- **A speaking ring everyone agrees on**: others see your ring exactly when your own app shows it.
+- **Many fixes**: Windows hosting and updates, Linux voice, camera and AppImage, phones, settings that show their real value, and mute and deafen buttons that follow what really happens.
+
 ### Added
 
 **Appearance & layout**
@@ -129,6 +154,7 @@ release changes the database, and anything an operator must do first.)
 
 **Accounts & admin**
 
+- Failed sign-ins from one network address keep counting toward that address's limit for the whole window, also after someone signs in correctly from it.
 - Changing your sign-in name now needs a signed-in session, like changing the password; an API token can still edit the rest of the profile.
 - The admin panel refuses an upload folder that is the data folder, the database's folder, the backup folder or a folder above them.
 - A new install creates the database, its side files and uploaded files readable by the server's user only (folders likewise); existing files keep their permissions.
@@ -238,13 +264,21 @@ release changes the database, and anything an operator must do first.)
 
 ### Known issues
 
-- **Linux: the app can crash when you turn on your camera and share your screen in the same call.** It has not been tracked down yet; use one at a time if it happens to you.
+- **Linux: the crash with your camera on during a screen share is fixed for realtime-priority setups, but not yet confirmed on every PC that showed it.** If it still happens to you, use one at a time.
 - **Linux: this release was not checked by hand on X11, GNOME Wayland and KDE Plasma Wayland.** It works, but it is less tested than Windows.
 - **Scrolling far back in a long channel while it reloads can make the list jump** to another spot. Scroll back to where you were; nothing is lost.
 - **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
 - **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
 - **On a phone in Command Deck, out of a call, after you close the keyboard with Back, the bottom bar stays hidden** until you tap outside the message box.
 - **In the Android app with gesture navigation, a swipe that starts at the very edge of the screen goes Back.** Start the swipe a little way in.
+
+### Under the hood
+
+- The pre-release security review found nothing blocking; the fixes of the full security review are in the lists above.
+- Client code moved further into feature folders (voice, notifications, members, connection diagnostics), and the admin panel scripts are typed without casts.
+- New tests: a nightly restore of a full automatic backup, a real disk-full drill in the container, Android screen-recreate tests and an accessibility scan, markdown parser edge cases, and tests for the vendored LiveKit patches.
+- The release pipeline pins the AppImage repack tools; the Android build caches its Gradle downloads.
+- Dependency updates for the Go server, the client's npm and Rust packages and the GitHub Actions; the LiveKit server SDK stays at 2.19.0.
 
 ## v2.10.0
 
