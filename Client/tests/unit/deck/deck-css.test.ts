@@ -69,7 +69,7 @@ describe("deck.css", () => {
 
   it("every selector starts with html.layout-deck", () => {
     const stray = deckRules().flatMap((r) =>
-      r.selectors.filter((s) => s !== "html.layout-deck" && !s.startsWith("html.layout-deck ")),
+      r.selectors.filter((s) => s !== "html.layout-deck" && !/^html\.layout-deck[ .]/.test(s)),
     );
     expect(stray).toEqual([]);
   });
@@ -204,16 +204,16 @@ describe("deck.css", () => {
 
   describe("the status bar on a phone", () => {
     const HIDDEN_COPIES = [
-      'html.layout-deck [data-testid="pcb-mute"]',
-      'html.layout-deck [data-testid="pcb-leave"]',
-      "html.layout-deck .phone-call-bar .talk-btn--bar",
-      'html.layout-deck .video-grid__controls [data-call-control="mute"]',
-      'html.layout-deck .video-grid__controls [data-call-control="leave"]',
-      "html.layout-deck .video-grid__controls .talk-btn--call",
-      'html.layout-deck [data-testid="dcp-mute"]',
-      'html.layout-deck [data-testid="dcp-leave"]',
-      'html.layout-deck [data-testid="dcp-leave-call"]',
-      'html.layout-deck [data-testid="dm-call-panel"] .talk-btn--bar',
+      'html.layout-deck.voice-widget-up [data-testid="pcb-mute"]',
+      'html.layout-deck.voice-widget-up [data-testid="pcb-leave"]',
+      "html.layout-deck.voice-widget-up .phone-call-bar .talk-btn--bar",
+      'html.layout-deck.voice-widget-up .video-grid__controls [data-call-control="mute"]',
+      'html.layout-deck.voice-widget-up .video-grid__controls [data-call-control="leave"]',
+      "html.layout-deck.voice-widget-up .video-grid__controls .talk-btn--call",
+      'html.layout-deck.voice-widget-up [data-testid="dcp-mute"]',
+      'html.layout-deck.voice-widget-up [data-testid="dcp-leave"]',
+      'html.layout-deck.voice-widget-up [data-testid="dcp-leave-call"]',
+      'html.layout-deck.voice-widget-up [data-testid="dm-call-panel"] .talk-btn--bar',
     ];
     const phoneRules = (): DeckRule[] => deckRules().filter((r) => r.media === PHONE);
     const phoneDecl = (selector: string, property: string): DeckDeclaration | undefined =>
@@ -233,7 +233,7 @@ describe("deck.css", () => {
     /** The rule that hides the other copies, found by its selectors (later phone blocks may add rules). */
     const hideRule = (): DeckRule => {
       const found = deckRules().filter((r) =>
-        r.selectors.includes('html.layout-deck [data-testid="pcb-mute"]'),
+        r.selectors.includes('html.layout-deck.voice-widget-up [data-testid="pcb-mute"]'),
       );
       expect(found).toHaveLength(1);
       return found[0]!;

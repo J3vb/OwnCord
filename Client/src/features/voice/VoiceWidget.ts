@@ -41,6 +41,8 @@ import { isShareLive } from "./widget/liveShare";
 import { createListenOnlyUi, type ListenOnlyUi } from "./widget/listenOnly";
 import { createListeningBar, type ListeningBar } from "./widget/listeningBar";
 import { formatDuration } from "@lib/text/duration";
+import { setCallRow } from "./callRowMark";
+import { moderationText } from "./widget/moderationText";
 
 export interface VoiceWidgetOptions {
   onDisconnect(): void;
@@ -49,14 +51,6 @@ export interface VoiceWidgetOptions {
   /** Open the call's channel: the DM for a DM call, the call view for a guild
    *  voice channel. Without it the call name is plain text. */
   onOpenCall?(channelId: number): void;
-}
-
-/** The moderator-imposed state as a sentence, or "" when there is none. */
-function moderationText(serverMuted: boolean, serverDeafened: boolean): string {
-  if (serverMuted && serverDeafened) return t("widget.moderatedMutedDeafened");
-  if (serverMuted) return t("widget.mutedByModerator");
-  if (serverDeafened) return t("widget.deafenedByModerator");
-  return "";
 }
 
 export function createVoiceWidget(options: VoiceWidgetOptions): MountableComponent {
@@ -275,6 +269,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     if (channelId === null) {
       root.classList.remove("visible");
+      setCallRow(false);
       stopStatsPoller();
       stopElapsedTimer();
       statsPane?.el.classList.remove("visible");
@@ -283,6 +278,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     }
 
     root.classList.add("visible");
+    setCallRow(true);
     startStatsPoller();
     startElapsedTimer();
     updateStatus(voice);
@@ -465,6 +461,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   }
 
   function destroy(): void {
+    setCallRow(false);
     stopStatsPoller();
     stopElapsedTimer();
     disposable.destroy();

@@ -39,6 +39,7 @@ vi.mock("../../src/features/voice/livekitSession", () =>
 vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true));
 
 import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
+import { CALL_ROW_CLASS } from "../../src/features/voice/callRowMark";
 import { createConnectionStatsPoller } from "@lib/voice/connectionStats";
 import { voiceStore, type VoiceStatus } from "../../src/stores/voice.store";
 import { channelsStore } from "../../src/stores/channels.store";
@@ -161,6 +162,24 @@ describe("VoiceWidget", () => {
     expect(root!.classList.contains("visible")).toBe(true);
 
     widget.destroy?.();
+  });
+
+  it("marks <html> while it shows a call, so phone Deck hides the other Leave buttons only then", () => {
+    const up = (): boolean => document.documentElement.classList.contains(CALL_ROW_CLASS);
+    const widget = mountVoiceWidget();
+    expect(up()).toBe(false);
+    seedVoiceLobby(1);
+    setVoiceChannel(1, []);
+    voiceStore.flush();
+    expect(up()).toBe(true);
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+    voiceStore.flush();
+    expect(up()).toBe(false);
+    setVoiceChannel(1, []);
+    voiceStore.flush();
+    expect(up()).toBe(true);
+    widget.destroy?.();
+    expect(up()).toBe(false);
   });
 
   it("displays channel name", () => {
