@@ -58,6 +58,13 @@ const SHEET = '[data-testid="deck-servers-sheet"]';
 const sheet = (): HTMLElement | null => document.querySelector<HTMLElement>(SHEET);
 const labels = (): string[] =>
   Array.from(sheet()?.querySelectorAll(".menu-sheet-label") ?? [], (el) => el.textContent ?? "");
+const OPTIONS = '[data-testid="deck-servers-options-sheet"]';
+const optionsSheet = (): HTMLElement | null => document.querySelector<HTMLElement>(OPTIONS);
+const optionIds = (): Array<string | undefined> =>
+  Array.from(
+    optionsSheet()?.querySelectorAll<HTMLElement>(".menu-sheet-row") ?? [],
+    (r) => r.dataset["testid"],
+  );
 const rowNamed = (label: string): HTMLElement => {
   const found = Array.from(sheet()?.querySelectorAll<HTMLElement>(".menu-sheet-row") ?? []).find(
     (r) => r.querySelector(".menu-sheet-label")?.textContent === label,
@@ -104,6 +111,18 @@ async function mount(): Promise<void> {
 async function tap(): Promise<void> {
   tabs.servers.click();
   await imports();
+}
+
+/** Opens the sheet, then taps `page` and the row `row` on its second page. */
+async function openOptions(page: string, row: string): Promise<void> {
+  await mount();
+  await tap();
+  rowNamed(page).click();
+  rowNamed(row).click();
+}
+
+function pickOption(testId: string): void {
+  optionsSheet()!.querySelector<HTMLElement>(`[data-testid="${testId}"]`)!.click();
 }
 
 /** A context with spies, for the cases that watch the order of calls. */
@@ -153,6 +172,7 @@ describe("the Servers sheet", () => {
       serverRailText("currentSuffix", { name: "Alpha" }),
       folder,
       "Beta",
+      serverRailText("menu"),
       serverRailText("add"),
       serverRailText("join"),
     ]);
@@ -164,24 +184,108 @@ describe("the Servers sheet", () => {
       "deck-servers-sheet-server",
       "deck-servers-sheet-folder",
       "deck-servers-sheet-server",
+      "deck-servers-sheet-server-options",
       "server-tabs-add-server",
       "server-tabs-join",
     ]);
-    // Add and Join sit in their own card, after a separation.
-    expect(sheet()!.querySelectorAll(".msg-sheet-section")).toHaveLength(2);
+    // Server options, then Add and Join, each sit in their own card.
+    expect(sheet()!.querySelectorAll(".msg-sheet-section")).toHaveLength(3);
     const current = rowNamed(serverRailText("currentSuffix", { name: "Alpha" }));
     expect(current.getAttribute("role")).toBe("radio");
     expect(current.getAttribute("aria-checked")).toBe("true");
     expect(rowNamed("Beta").getAttribute("aria-checked")).toBe("false");
   });
 
-  it("a folder opens its servers on a second page", async () => {
+  it("a folder opens its servers on a second page, then Folder options outside their group", async () => {
     await mount();
     await tap();
     rowNamed(serverRailText("folderTab", { name: "Work", count: 2 })).click();
     expect(sheet()!.querySelector('[data-testid="menu-sheet-back"]')).not.toBeNull();
-    expect(labels()).toEqual(["Gamma", "Delta"]);
-    expect(sheet()!.querySelector('[role="radiogroup"]')).not.toBeNull();
+    expect(labels()).toEqual(["Gamma", "Delta", serverRailText("folderMenu")]);
+    const group = sheet()!.querySelector('[role="radiogroup"]');
+    expect(
+      Array.from(group?.querySelectorAll(".menu-sheet-label") ?? [], (l) => l.textContent),
+    ).toEqual(["Gamma", "Delta"]);
+    const options = rowNamed(serverRailText("folderMenu"));
+    expect(options.closest('[role="radiogroup"]')).toBeNull();
+    expect(options.hasAttribute("role")).toBe(false);
+  });
+
+  it("Folder options opens the folder's menu from the Servers button, and Ungroup commits", async () => {
+    await openOptions(
+      serverRailText("folderTab", { name: "Work", count: 2 }),
+      serverRailText("folderMenu"),
+    );
+    expect(sheet()).toBeNull();
+    expect(optionsSheet()?.getAttribute("aria-label")).toBe("Work");
+    expect(tabs.servers.getAttribute("aria-expanded")).toBe("true");
+    expect(optionIds()).toEqual([
+      "rail-rename-folder",
+      "rail-folder-color",
+      undefined,
+      undefined,
+      "rail-ungroup",
+    ]);
+    pickOption("rail-ungroup");
+    expect(optionsSheet()).toBeNull();
+    expect(ctl.mutations.reconciled()).toEqual([
+      { kind: "server", host: "a.example" },
+      { kind: "server", host: "c.example" },
+      { kind: "server", host: "d.example" },
+      { kind: "server", host: "b.example" },
+    ]);
+    expect(tabs.servers.getAttribute("aria-expanded")).toBe("false");
+    expect(document.activeElement).toBe(tabs.servers);
+  });
+
+  it("Folder options' Rename commits the new name", async () => {
+    await openOptions(
+      serverRailText("folderTab", { name: "Work", count: 2 }),
+      serverRailText("folderMenu"),
+    );
+    pickOption("rail-rename-folder");
+    const input = document.querySelector<HTMLInputElement>(
+      '[data-testid="server-rail-rename-input"]',
+    );
+    expect(input?.value).toBe("Work");
+    input!.value = "Play";
+    document.querySelector<HTMLElement>('[data-testid="prompt-confirm"]')!.click();
+    const folder = ctl.mutations.reconciled().find((i) => i.kind === "folder");
+    expect(folder).toMatchObject({ id: "f1", name: "Play" });
+  });
+
+  it("Server options lists every server, outside any radio group, each opening its menu", async () => {
+    await mount();
+    await tap();
+    rowNamed(serverRailText("menu")).click();
+    expect(labels()).toEqual([
+      serverRailText("currentSuffix", { name: "Alpha" }),
+      "Gamma",
+      "Delta",
+      "Beta",
+    ]);
+    expect(sheet()!.querySelector('[role="radiogroup"], [role="radio"]')).toBeNull();
+
+    rowNamed("Beta").click();
+    expect(sheet()).toBeNull();
+    expect(optionsSheet()?.getAttribute("aria-label")).toBe("Beta");
+    expect(tabs.servers.getAttribute("aria-expanded")).toBe("true");
+    expect(optionIds()).toEqual(["rail-move-up", "rail-move-down", "rail-move-to-folder-0"]);
+    pickOption("rail-move-up");
+    expect(ctl.mutations.reconciled().map((i) => (i.kind === "server" ? i.host : i.id))).toEqual([
+      "a.example",
+      "b.example",
+      "f1",
+    ]);
+    expect(tabs.servers.getAttribute("aria-expanded")).toBe("false");
+  });
+
+  it("a folder's server in Server options gets its folder menu, and Remove from folder commits", async () => {
+    await openOptions(serverRailText("menu"), "Gamma");
+    expect(optionIds()).toEqual(["rail-move-up", "rail-move-down", "rail-remove-from-folder"]);
+    pickOption("rail-remove-from-folder");
+    const folder = ctl.mutations.reconciled().find((i) => i.kind === "folder");
+    expect(folder).toMatchObject({ hosts: ["d.example"] });
   });
 
   it("a server tap closes the sheet, then switches once", async () => {

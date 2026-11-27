@@ -300,7 +300,7 @@ describe("serverTabMenus: the Servers list on a phone, and Add and Join", () => 
     expect(plus.ids).toEqual(ADD_JOIN_IDS);
     plus.menu.destroy();
 
-    const rows = serverSheetRows(ctl.layout(), ctx);
+    const rows = serverSheetRows(ctl.layout(), { ctx, button, open: vi.fn() });
     expect(rows.slice(-2).map((r) => ("testId" in r ? r.testId : null))).toEqual(ADD_JOIN_IDS);
     expect(rows.at(-3)).toEqual({ separator: true });
   });

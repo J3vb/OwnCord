@@ -177,6 +177,39 @@ test.describe("phone Command Deck top bar, 360 x 640", () => {
     await expect(serversBtn(page)).toBeFocused();
   });
 
+  test("Server options opens a server's menu, Back closes it, and a move commits", async ({
+    page,
+  }) => {
+    const options = page.getByTestId("deck-servers-options-sheet");
+    const openOptions = async (): Promise<void> => {
+      await openSheet(page);
+      await sheet(page).getByTestId("deck-servers-sheet-server-options").tap();
+      await sheet(page)
+        .getByTestId("deck-servers-sheet-options-server")
+        .filter({ hasText: OTHER_NAME })
+        .tap();
+      await expect(sheet(page)).toBeHidden();
+      await expect(options).toBeVisible();
+      await expect(serversBtn(page)).toHaveAttribute("aria-expanded", "true");
+    };
+    await start(page);
+    await openOptions();
+    expect(await findUnnamedControls(options)).toEqual([]);
+    await page.evaluate(() => history.back());
+    await expect(options).toBeHidden();
+    await expect(serversBtn(page)).toHaveAttribute("aria-expanded", "false");
+    await expect(drawer(page)).not.toHaveClass(/drawer-open/);
+    await expect(serversBtn(page)).toBeFocused();
+
+    await openOptions();
+    await options.getByTestId("rail-move-up").tap();
+    await expect(options).toBeHidden();
+    await openSheet(page);
+    await expect(sheet(page).getByTestId("deck-servers-sheet-server").first()).toHaveText(
+      OTHER_NAME,
+    );
+  });
+
   test("opened from the focused message box, the sheet stays open as the keyboard closes", async ({
     page,
   }) => {
