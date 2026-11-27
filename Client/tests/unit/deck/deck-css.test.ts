@@ -398,7 +398,7 @@ describe("deck.css", () => {
 
       it("in a call, shrinks the bar to one row only under the phone query and the typing class", () => {
         const IN_CALL = `html.layout-deck ${TYPING} .deck-status-bar:has(.voice-widget.visible)`;
-        const HIDE = `${IN_CALL} :is(.vw-connected, .vw-ns, .vw-controls > :not(:last-child), .ub-self, [data-testid="ub-deafen"], [data-testid="ub-deafen"] ~ *)`;
+        const HIDE = `${IN_CALL} :is(.vw-connected.vw-steady, .vw-ns, .vw-controls > :not(:last-child), .ub-self, [data-testid="ub-deafen"], [data-testid="ub-deafen"] ~ *)`;
         const ROW = [
           `${IN_CALL} .user-bar`,
           `html.layout-deck ${TYPING} .deck-status-bar .voice-widget.visible`,

@@ -396,7 +396,7 @@ html.layout-deck
     body.composer-typing
     .deck-status-bar:has(.voice-widget.visible)
     :is(
-      .vw-connected,
+      .vw-connected.vw-steady,
       .vw-ns,
       .vw-controls > :not(:last-child),
       .ub-self,

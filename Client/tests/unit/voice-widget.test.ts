@@ -713,6 +713,7 @@ describe("VoiceWidget", () => {
     const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
     expect(status.textContent).toBe("Securing…");
     expect(status.classList.contains("vw-securing")).toBe(true);
+    expect(status.classList.contains("vw-steady")).toBe(false);
     expect(secured.style.display).toBe("none");
 
     widget.destroy?.();
@@ -728,6 +729,7 @@ describe("VoiceWidget", () => {
     const status = container.querySelector('[data-testid="vw-status"]');
     const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
     expect(status?.textContent).toBe("Voice Connected");
+    expect(status?.classList.contains("vw-steady")).toBe(true);
     expect(secured.style.display).toBe("inline-flex");
     expect(secured.textContent).toContain("Secured");
 
@@ -769,6 +771,7 @@ describe("VoiceWidget", () => {
     const secured = container.querySelector('[data-testid="vw-secured"]') as HTMLElement;
     expect(status.textContent).toBe("Reconnecting voice…");
     expect(status.classList.contains("vw-reconnecting")).toBe(true);
+    expect(status.classList.contains("vw-steady")).toBe(false);
     expect(secured.style.display).toBe("none");
 
     widget.destroy?.();
@@ -785,11 +788,13 @@ describe("VoiceWidget", () => {
     voiceStore.flush();
     expect(status.textContent).toBe("Call paused");
     expect(status.classList.contains("vw-paused")).toBe(true);
+    expect(status.classList.contains("vw-steady")).toBe(false);
 
     voiceStore.setState((prev) => ({ ...prev, phoneCallHold: false }));
     voiceStore.flush();
     expect(status.textContent).toBe("Voice Connected");
     expect(status.classList.contains("vw-paused")).toBe(false);
+    expect(status.classList.contains("vw-steady")).toBe(true);
 
     widget.destroy?.();
   });

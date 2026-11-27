@@ -166,6 +166,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       statusLabel.classList.toggle("vw-securing", status === "securing");
       statusLabel.classList.toggle("vw-reconnecting", status === "reconnecting");
       statusLabel.classList.toggle("vw-paused", isPhoneCallHold(voice));
+      statusLabel.classList.toggle("vw-steady", status === "connected" && !isPhoneCallHold(voice));
     }
     securedBadge?.sync(status === "connected", voice.encryptionDegraded === true);
   }
