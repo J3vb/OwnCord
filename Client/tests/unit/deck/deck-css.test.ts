@@ -230,22 +230,29 @@ describe("deck.css", () => {
       );
     };
 
-    it("is one block with the phone query, after the min-width: 801px block", () => {
-      const preludes = preludesOf("app/deck.css");
-      expect(preludes.filter((p) => p === PHONE)).toHaveLength(1);
-      expect(preludes.indexOf(PHONE)).toBeGreaterThan(preludes.indexOf("(min-width: 801px)"));
+    /** The rule that hides the other copies, found by its selectors (later phone blocks may add rules). */
+    const hideRule = (): DeckRule => {
+      const found = deckRules().filter((r) =>
+        r.selectors.includes('html.layout-deck [data-testid="pcb-mute"]'),
+      );
+      expect(found).toHaveLength(1);
+      return found[0]!;
+    };
+
+    it("the hide rule is under the phone query, after the min-width: 801px block", () => {
       const rules = deckRules();
-      const firstPhone = rules.findIndex((r) => r.media === PHONE);
+      const rule = hideRule();
+      expect(rule.media).toBe(PHONE);
       const lastWide = rules.map((r) => r.media).lastIndexOf("(min-width: 801px)");
-      expect(firstPhone).toBeGreaterThan(lastWide);
+      expect(lastWide).toBeGreaterThan(-1);
+      expect(rules.indexOf(rule)).toBeGreaterThan(lastWide);
     });
 
-    it("hides exactly the other copies of Mute, hold-to-talk and Leave", () => {
-      const hiding = phoneRules().filter(
-        (r) => keywordOf(r.declarations.find((d) => d.property === "display")) === "none",
-      );
-      expect(hiding).toHaveLength(1);
-      expect([...hiding[0]!.selectors].sort()).toEqual([...HIDDEN_COPIES].sort());
+    it("hides exactly the other copies of Mute, hold-to-talk and Leave, with display: none only", () => {
+      const rule = hideRule();
+      expect([...rule.selectors].sort()).toEqual([...HIDDEN_COPIES].sort());
+      expect(rule.declarations.map((d) => d.property)).toEqual(["display"]);
+      expect(keywordOf(rule.declarations[0])).toBe("none");
     });
 
     it("no coarse-pointer rule hides the status bar's Mute, hold-to-talk or Leave", () => {

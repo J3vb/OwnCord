@@ -16,11 +16,11 @@ import { recordNewInstallTheme } from "./themes";
  *  write. A stored value is never changed.
  *
  *  The Android app writes nothing: Command Deck runs there only as a
- *  Developer-mode preview, a layout
- *  value nobody chose must not decide it if that ever changes, and a new
- *  phone install keeps the theme it had before Gunmetal. A new phone-sized
- *  browser gets Gunmetal but stores Classic, the layout it runs, so a later
- *  release that brings Command Deck to phones does not switch it unasked. */
+ *  Developer-mode preview, a layout value nobody chose must not decide it if
+ *  that ever changes, and a new phone install keeps the theme it had before
+ *  Gunmetal. A new phone-sized browser gets Gunmetal but stores Classic, the
+ *  layout it runs, so a later release that brings Command Deck to phones does
+ *  not switch it unasked. */
 export function settleNewInstallDefaults(evidence: boolean): void {
   if (isAndroidHost()) return;
   if (readStored(STORAGE_PREFIX + SCREEN_LAYOUT_PREF) !== null) return;
