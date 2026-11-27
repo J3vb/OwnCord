@@ -5,7 +5,14 @@
  */
 import type { Locator, Page } from "@playwright/test";
 import { expect } from "../fixtures";
-import { reachableCount } from "./phone";
+import {
+  ROUTE_HEALTH,
+  ROUTE_LOGIN,
+  dmChannel,
+  voiceJoinWithTokenHandlers,
+  buildTauriMockScript,
+} from "../helpers";
+import { reachableCount, swipeOn } from "./phone";
 
 export const MUTE =
   "[data-testid='user-bar'] [data-testid='ub-mute'], [data-testid='pcb-mute'], .video-grid__controls [data-call-control='mute'], [data-testid='dcp-mute']";
@@ -73,4 +80,35 @@ export async function setVoiceFlag(
     },
     ["/src/stores/voice.store.ts", setter],
   );
+}
+
+export const PHONE_DM = 100;
+export const PHONE_DM_CHANNELS = [dmChannel(PHONE_DM, { id: 2, username: "otheruser" })];
+
+/** A session with one DM whose call can be started and connected; `ready` adds to the ready payload. */
+export function dmCallScene(
+  ready: Record<string, unknown> = {},
+): Parameters<typeof buildTauriMockScript>[0] {
+  return {
+    httpRoutes: [
+      ROUTE_HEALTH,
+      ROUTE_LOGIN,
+      { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
+      { pattern: "GET /api/v1/dms", status: 200, body: { dm_channels: PHONE_DM_CHANNELS } },
+      { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
+    ],
+    simulateWsFlow: true,
+    wsHandlers: voiceJoinWithTokenHandlers(),
+    readyOverrides: { ...ready, dm_channels: PHONE_DM_CHANNELS },
+  };
+}
+
+/** Swipes left across the chat header from near the right edge, which opens Buddies. */
+export async function swipeBuddiesOpen(page: Page): Promise<void> {
+  const width = page.viewportSize()!.width;
+  const header = await boxOf(page.locator(".chat-header"));
+  await swipeOn(page, ".chat-header", -200, 0, {
+    x: width - 30,
+    y: header.y + header.height / 2,
+  });
 }

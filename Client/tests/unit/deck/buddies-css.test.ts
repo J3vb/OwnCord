@@ -9,6 +9,7 @@ import {
   type DeckDeclaration,
 } from "../../helpers/deck-css";
 import { appCssLines, sheetRules, unscopedSelectors } from "../../helpers/deckSheet";
+import { PHONE_LAYOUT_QUERY } from "../../../src/lib/ui/phoneLayout";
 
 const POLICY: ColourPolicy = {
   colourVars: new Set(["--text-normal", "--text-muted", "--bg-secondary", "--bg-hover"]),
@@ -174,5 +175,20 @@ describe("buddies.css: foldable headers", () => {
       r.declarations.filter((d) => d.property.startsWith("outline")),
     );
     expect(outlines.map((d) => d.property)).toEqual(["outline-offset"]);
+  });
+});
+
+describe("buddies.css: on a phone", () => {
+  const FOLDABLE = `${P} .buddies-group[role="button"]`;
+
+  it("gives a foldable header a 44 px height only inside the phone query, and no min-height", () => {
+    const heights = rules().filter((r) =>
+      r.declarations.some((d) => d.property === "height" && r.selectors.includes(FOLDABLE)),
+    );
+    expect(heights.map((r) => r.media)).toEqual([PHONE_LAYOUT_QUERY]);
+    expect(valueOf(FOLDABLE, "height")).toBe(parsed("height", "44px"));
+    const phone = rules().filter((r) => r.media === PHONE_LAYOUT_QUERY);
+    expect(phone.flatMap((r) => r.selectors)).toEqual([FOLDABLE]);
+    expect(phone.flatMap((r) => r.declarations.map((d) => d.property))).toEqual(["height"]);
   });
 });

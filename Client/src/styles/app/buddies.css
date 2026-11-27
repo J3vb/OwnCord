@@ -140,3 +140,10 @@ html.layout-deck .buddy-row .mi-custom-status {
 html.layout-deck .buddy-row .mi-activity-icon {
   flex: none;
 }
+
+/* On a phone a foldable header is 44 px to hit; a plain header is not a control. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .buddies-group[role="button"] {
+    height: 44px;
+  }
+}

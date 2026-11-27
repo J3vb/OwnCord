@@ -586,3 +586,37 @@ describe("deck.css: the top bar on a phone", () => {
     expect(rules.at(-1)?.media).toBe(PHONE);
   });
 });
+
+describe("the Buddies drawer on a phone", () => {
+  const MEMBER = "html.layout-deck .member-column";
+  const drawer = (): DeckRule => {
+    const found = rulesFor(MEMBER).filter((r) => r.media === PHONE_LAYOUT_QUERY);
+    expect(found).toHaveLength(1);
+    return found[0]!;
+  };
+  const decl = (property: string): DeckDeclaration | undefined =>
+    drawer().declarations.find((d) => d.property === property);
+
+  it("is the last member column rule, from below the top bar to the status bar", () => {
+    const rules = deckRules();
+    expect(rules.indexOf(drawer())).toBe(
+      Math.max(...rulesFor(MEMBER).map((r) => rules.indexOf(r))),
+    );
+    expect(decl("top")?.vars).toEqual(["--deck-above-header"]);
+    expect(decl("bottom")?.vars).toEqual(["--deck-below", "--safe-bottom"]);
+  });
+
+  it("reads the overlay sizes without declaring them, and drops the bottom padding", () => {
+    const props = drawer().declarations.map((d) => d.property);
+    expect(props).not.toContain("--deck-above-header");
+    expect(props).not.toContain("--deck-below");
+    const zero = parseDeckCss("html.layout-deck .x { padding-bottom: 0; }")[0]!.declarations[0]!;
+    expect(JSON.stringify(decl("padding-bottom")?.value)).toBe(JSON.stringify(zero.value));
+  });
+
+  it("is min(320px, 88vw) wide", () => {
+    const want = parseDeckCss("html.layout-deck .x { width: min(320px, 88vw) !important; }")[0]!
+      .declarations[0]!;
+    expect(JSON.stringify(decl("width")?.value)).toBe(JSON.stringify(want.value));
+  });
+});

@@ -11,6 +11,7 @@ import {
   type ColourPolicy,
   type DeckRule,
 } from "../../helpers/deck-css";
+import { PHONE_LAYOUT_QUERY } from "../../../src/lib/ui/phoneLayout";
 
 const STYLES = join(process.cwd(), "src/styles");
 
@@ -230,5 +231,40 @@ describe("the Direct folder rules", () => {
     expect(breaches("html.layout-deck .x { border: 2px solid var(--status-ring); }")).not.toEqual(
       [],
     );
+  });
+});
+
+describe("the tree on a phone", () => {
+  const ROWS = [
+    "html.layout-deck .server-tree-strip",
+    "html.layout-deck .server-tree .category",
+    "html.layout-deck .server-tree .channel-item",
+    "html.layout-deck .server-tree .voice-user-item",
+    "html.layout-deck .server-tree-direct-head",
+    "html.layout-deck .server-tree-direct .dm-nav-row",
+  ];
+  const STRIP_BUTTON = "html.layout-deck .server-tree-strip .sidebar-header-action";
+  const sizes = (selector: string, property: string, media: string | null): string[] =>
+    treeRules()
+      .filter((r) => r.media === media && r.selectors.includes(selector))
+      .flatMap((r) => r.declarations.filter((d) => d.property === property))
+      .map((d) => JSON.stringify(d.value));
+  const px = (property: string, value: string): string =>
+    JSON.stringify(
+      parseDeckCss(`html.layout-deck .x { ${property}: ${value}; }`)[0]!.declarations[0]!.value,
+    );
+
+  it("makes every row at least 44 px inside the phone query and keeps 24 px on desktop", () => {
+    for (const row of ROWS) {
+      expect(sizes(row, "min-height", PHONE_LAYOUT_QUERY), row).toEqual([px("min-height", "44px")]);
+      expect(sizes(row, "min-height", null), row).toEqual([px("min-height", "24px")]);
+    }
+  });
+
+  it("makes the strip buttons 44 x 44 inside the phone query and keeps 24 x 24 on desktop", () => {
+    for (const property of ["width", "height"]) {
+      expect(sizes(STRIP_BUTTON, property, PHONE_LAYOUT_QUERY)).toEqual([px(property, "44px")]);
+      expect(sizes(STRIP_BUTTON, property, null)).toEqual([px(property, "24px")]);
+    }
   });
 });

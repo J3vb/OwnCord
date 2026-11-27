@@ -301,7 +301,14 @@ folded, the ping sits before the connection state
 (`features/deck/deckPing.ts`). At 1200 px or less the column folds into an
 overlay under the chat header, 280 px wide. It works as Classic's overlay with
 two exceptions: from 900 to 1200 px it has no shadow, and at 600 px or less it
-stays 280 px wide instead of taking the full width.
+stays 280 px wide instead of taking the full width. On a phone it is the Buddies
+drawer: it runs from just below the top bar to the status bar, so in a call
+Mute and Leave stay reachable, and it is `min(320px, 88vw)` wide, with no dim
+backdrop. The Buddies button opens it with focus on the Buddies heading
+(`tabindex="-1"`), not the member search, so the keyboard stays closed; a
+swipe opens it without moving focus. One Back closes it, and a buddy menu open
+over it closes with it. The tree drawer's rows and its strip buttons are at
+least 44 px on a phone, and foldable Buddies group headers are 44 px tall.
 
 The server switcher is a third. Classic draws the server rail; Command Deck draws
 a row of server tabs under the top bar's first row, folded into a Servers button
