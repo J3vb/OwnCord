@@ -9,8 +9,8 @@ import { isImeCommit } from "../../lib/text/ime";
 import { Disposable } from "../../lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "../../lib/ui/a11y";
 import { closeOnBackdropClick } from "../../lib/ui/modalFactory";
+import { buildEyebrowHeader } from "../../lib/ui/eyebrowHeader";
 import { appendChildren, createElement } from "../../lib/dom";
-import { createIcon } from "../../lib/icons";
 import { layoutNoticeText as t } from "../../i18n/layoutNotice";
 
 export interface LayoutNoticeDialog {
@@ -45,22 +45,14 @@ function switchBackParagraph(): HTMLParagraphElement {
 }
 
 function buildHeader(onClose: () => void, signal: AbortSignal): HTMLElement {
-  const header = createElement("div", { class: "modal-header" });
-  const heading = createElement("div", {});
-  appendChildren(
-    heading,
-    createElement("div", { class: "whats-new-eyebrow" }, t("dialog.eyebrow")),
-    createElement("h3", { id: "layout-notice-title" }, t("dialog.title")),
-  );
-  const closeBtn = createElement("button", {
-    class: "modal-close",
-    type: "button",
-    "aria-label": t("dialog.closeLabel"),
+  return buildEyebrowHeader({
+    eyebrow: t("dialog.eyebrow"),
+    title: t("dialog.title"),
+    titleId: "layout-notice-title",
+    closeLabel: t("dialog.closeLabel"),
+    onClose,
+    signal,
   });
-  closeBtn.appendChild(createIcon("x", 14));
-  closeBtn.addEventListener("click", onClose, { signal });
-  appendChildren(header, heading, closeBtn);
-  return header;
 }
 
 function buildFooter(

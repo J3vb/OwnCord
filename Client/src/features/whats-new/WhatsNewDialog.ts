@@ -8,6 +8,7 @@ import { isImeCommit } from "@lib/text/ime";
 import { Disposable } from "../../lib/disposable";
 import { applyDialogSemantics, focusDialog, trapFocus } from "../../lib/ui/a11y";
 import { closeOnBackdropClick } from "../../lib/ui/modalFactory";
+import { buildEyebrowHeader } from "../../lib/ui/eyebrowHeader";
 import { createElement, appendChildren } from "../../lib/dom";
 import { createIcon } from "../../lib/icons";
 import { whatsNewText as t } from "../../i18n/whatsNew";
@@ -47,25 +48,14 @@ export function showWhatsNewDialog(
     onClosed(toHistory);
   };
 
-  const header = createElement("div", { class: "modal-header" });
-  const heading = createElement("div", {});
-  appendChildren(
-    heading,
-    createElement(
-      "div",
-      { class: "whats-new-eyebrow" },
-      t("dialog.updatedTo", { version: entry.version }),
-    ),
-    createElement("h3", { id: "whats-new-title" }, t("dialog.title")),
-  );
-  const closeBtn = createElement("button", {
-    class: "modal-close",
-    type: "button",
-    "aria-label": t("dialog.closeLabel"),
+  const header = buildEyebrowHeader({
+    eyebrow: t("dialog.updatedTo", { version: entry.version }),
+    title: t("dialog.title"),
+    titleId: "whats-new-title",
+    closeLabel: t("dialog.closeLabel"),
+    onClose: close,
+    signal: disposable.signal,
   });
-  closeBtn.appendChild(createIcon("x", 14));
-  closeBtn.addEventListener("click", close, { signal: disposable.signal });
-  appendChildren(header, heading, closeBtn);
 
   // Focusable so the keyboard can scroll long notes (WebKitGTK does not
   // scroll an overflow box that has no focusable content).

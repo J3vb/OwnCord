@@ -539,6 +539,7 @@ export const shards = {
     "src/features/messaging/emojiSheetsData.ts",
     "src/features/whats-new/WhatsNewDialog.ts",
     "src/features/layout-notice/LayoutNoticeDialog.ts",
+    "src/lib/ui/eyebrowHeader.ts",
     "src/lib/diagnostics/eventSink.ts",
     "src/lib/presence/gameActivityBridge.ts",
     "src/lib/ui/animatedStill.ts",
