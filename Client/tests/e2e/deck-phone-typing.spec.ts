@@ -278,6 +278,15 @@ test.describe("phone Command Deck while typing, 360 x 640", () => {
     await typeIn(page, chatBox(page));
     await expectCallWhileTyping(page, "typing in a call");
     await expectOneCallRow(page, rest, testInfo);
+    // A tap on Mute mutes, and the box keeps focus, so the row stays put.
+    const mute = page.locator(BAR_MUTE);
+    const pressed = await mute.getAttribute("aria-pressed");
+    await mute.tap();
+    await expect(mute).not.toHaveAttribute("aria-pressed", pressed!);
+    await expect(chatBox(page)).toBeFocused();
+    await expectOneCallRow(page, rest, testInfo);
+    await mute.tap();
+    await expect(mute).toHaveAttribute("aria-pressed", pressed!);
     // Top bar 44, chat header 48, typing row 24, box 70, status bar 52: about 128.
     expect((await boxOf(messages(page))).height).toBeGreaterThanOrEqual(112);
     await attachScreenshot(testInfo, "360 x 380 typing, in a call", page);

@@ -382,6 +382,42 @@ describe("the typing class", () => {
     expect(typing()).toBe(true);
   });
 
+  /** The status bar with Mute, and a call widget shown or not. */
+  function bar(inCall: boolean): HTMLButtonElement {
+    const host = el(
+      '<div class="deck-status-bar"><button data-testid="ub-mute">Mute</button>' +
+        `<div class="voice-widget${inCall ? " visible" : ""}"></div></div>`,
+    );
+    return host.querySelector<HTMLButtonElement>("button")!;
+  }
+
+  const press = (target: Element): MouseEvent => {
+    const event = new MouseEvent("mousedown", { bubbles: true, cancelable: true });
+    target.dispatchEvent(event);
+    return event;
+  };
+
+  it("in a call, a press on a status-bar button keeps focus in the box", () => {
+    usePhone();
+    const { text } = page();
+    const mute = bar(true);
+    text.focus();
+    expect(press(mute).defaultPrevented).toBe(true);
+    expect(typing()).toBe(true);
+  });
+
+  it("out of a call, or not typing, a press on the status bar moves focus as usual", async () => {
+    usePhone();
+    const { text } = page();
+    const mute = bar(false);
+    text.focus();
+    expect(press(mute).defaultPrevented).toBe(false);
+    text.blur();
+    await settle();
+    const inCall = bar(true);
+    expect(press(inCall).defaultPrevented).toBe(false);
+  });
+
   it("is not started by a button in the box: only the text field starts it", () => {
     usePhone();
     page().send.focus();
