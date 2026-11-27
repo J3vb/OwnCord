@@ -14,19 +14,19 @@ import (
 	"github.com/coder/websocket"
 )
 
-// The production router carries the middleware: a 1 ns deadline fails a bound
-// authenticated GET with 503 and Retry-After, and a 50 ms deadline does not
+// The production router carries the middleware: an already-passed deadline fails
+// a bound authenticated GET with 503 and Retry-After, and a 50 ms deadline does not
 // close a WebSocket that is still open 200 ms later. Removing the r.Use in
 // routerMiddleware makes the first half fail.
 func TestRequestDeadline_ProductionRouterWiring(t *testing.T) {
 	handler, database := fullRouterWithDB(t)
 	token, _ := mintSession(t, database, mintUser(t, database, "deadline-user"))
 
-	// 1. A 1 ns deadline expires before the database calls of a bound route
-	// complete, so the handler (or the auth gate) fails after the deadline;
-	// the production stack must answer that 503. Retried because a very fast
-	// host can finish a request inside 1 ms (a 200 is never rewritten).
-	api.SetRestRequestDeadlineForTest(t, time.Nanosecond)
+	// 1. A negative deadline gives a context that is already done when the
+	// handler starts, so the database calls of a bound route fail and the
+	// production stack must answer that 503. A 1 ns deadline raced the timer
+	// that cancels it: on Windows a whole request could finish before it fired.
+	api.SetRestRequestDeadlineForTest(t, -time.Nanosecond)
 	srv := httptest.NewServer(handler)
 	defer srv.Close()
 	ok := false
@@ -43,7 +43,7 @@ func TestRequestDeadline_ProductionRouterWiring(t *testing.T) {
 		}
 	}
 	if !ok {
-		t.Fatalf("no 503 with Retry-After: 2 from the production router at a 1 ns deadline (last %d %s); the middleware is not wired", last.Code, last.Body.String())
+		t.Fatalf("no 503 with Retry-After: 2 from the production router at a passed deadline (last %d %s); the middleware is not wired", last.Code, last.Body.String())
 	}
 
 	// 2. WebSocket under a short deadline stays open.
