@@ -141,6 +141,28 @@ test.describe("phone viewport", () => {
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true);
   });
+
+  test("in the Command Deck preview the top bar shows the server's name as plain text", async ({
+    page,
+  }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem("owncord:settings:developerMode", JSON.stringify(true));
+      localStorage.setItem("owncord:settings:screenLayout", JSON.stringify("deck"));
+    });
+    await page.goto("/");
+    await signIn(page);
+    await expect(page.locator("html")).toHaveClass(/layout-deck/);
+    // A browser has no server tabs, so no Servers button and no Servers sheet.
+    const name = page.getByTestId("deck-top-name");
+    await expect(name).toBeVisible();
+    await expect(name).not.toHaveText("");
+    await expect(page.getByTestId("deck-servers-btn")).toHaveCount(0);
+    // Sign out stays in your row.
+    await expect(page.getByTestId("deck-status-bar").getByTestId("disconnect-btn")).toBeVisible();
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
 });
 
 test("stale tab after server update survives a chunk 404", async ({ page }) => {

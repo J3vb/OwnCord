@@ -465,9 +465,9 @@ test.describe("Command Deck server tabs: the fold", () => {
     await expect(page.getByTestId("disconnect-btn")).toBeVisible();
   });
 
-  test("at 640x400 the Servers button is named Servers", async ({ page }) => {
+  test("at 640x400 the Servers button is named Servers and the server", async ({ page }) => {
     await boot(page, FEW, ZOOMED);
-    await expect(serversBtn(page)).toHaveAccessibleName("Servers");
+    await expect(serversBtn(page)).toHaveAccessibleName("Servers, Hangar 9");
     await expect(serversBtn(page).locator(".deck-servers-text")).toBeHidden();
   });
 

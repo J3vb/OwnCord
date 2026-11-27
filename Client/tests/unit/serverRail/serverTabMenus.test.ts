@@ -18,6 +18,15 @@ import { serverRailText } from "../../../src/i18n/serverRail";
 import { RAIL_LAYOUT_KEY, type FolderItem } from "@lib/prefs/serverRailLayout";
 import type { ServerProfile } from "@lib/presence/profiles";
 import type { ContextMenuItem } from "@lib/ui/contextMenu";
+import {
+  ADD_JOIN,
+  addJoinItems,
+  openAddMenu,
+  openItemList,
+} from "../../../src/features/server-rail/serverTabMenus";
+import { serverSheetRows } from "../../../src/features/server-rail/serverSheet";
+import type { OpenMenu } from "@lib/ui/contextMenu";
+import { closeBottomSheet } from "@lib/ui/bottomSheet";
 
 function profile(name: string, host: string): ServerProfile {
   return {
@@ -204,5 +213,105 @@ describe("serverTabMenus", () => {
       [undefined, serverRailText("moveDown"), "arrow-down"],
       ["rail-ungroup", serverRailText("ungroup"), "folder-minus"],
     ]);
+  });
+});
+
+describe("serverTabMenus: the Servers list on a phone, and Add and Join", () => {
+  type OpenRequest = Parameters<TabMenuContext["open"]>[0];
+  const phoneMedia = (on: boolean): void => {
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((q: string) => ({ matches: on && q.includes("pointer: coarse") })),
+    );
+  };
+  /** The one request `ctx.open` received. */
+  const request = (): OpenRequest => {
+    const calls = (ctx.open as ReturnType<typeof vi.fn>).mock.calls;
+    expect(calls).toHaveLength(1);
+    return calls[0]![0] as OpenRequest;
+  };
+  /** Draws the requested menu and returns its rows' test ids. */
+  const drawn = (req: OpenRequest): { ids: string[]; menu: OpenMenu } => {
+    const menu = req.show(() => {});
+    const ids = Array.from(
+      menu.element.querySelectorAll<HTMLElement>("[data-testid]"),
+      (el) => el.dataset["testid"] ?? "",
+    );
+    return { ids, menu };
+  };
+  const ADD_JOIN_IDS = ADD_JOIN.map((r) => r.testId);
+
+  afterEach(() => {
+    document.body.innerHTML = "";
+    vi.unstubAllGlobals();
+  });
+
+  it("off a phone the Servers popover opens as today", async () => {
+    phoneMedia(false);
+    await mount([{ kind: "server", host: "a.example" }, work]);
+    const button = document.createElement("button");
+    openItemList("servers", ctl.layout(), button, ctx);
+    const req = request();
+    expect(req.openerKey).toBe("servers");
+    const { menu } = drawn(req);
+    expect(menu.element.dataset["testid"]).toBe("deck-servers-menu");
+    menu.destroy();
+    await vi.dynamicImportSettled();
+    expect(document.querySelector('[data-testid="deck-servers-sheet"]')).toBeNull();
+  });
+
+  it('"+N" stays a popover on a phone, and Servers does not use the menu slot there', async () => {
+    phoneMedia(true);
+    await mount([{ kind: "server", host: "a.example" }, work]);
+    const button = document.createElement("button");
+    openItemList("more", ctl.layout(), button, ctx);
+    const { menu } = drawn(request());
+    expect(menu.element.dataset["testid"]).toBe("server-tabs-more-menu");
+    menu.destroy();
+    openItemList("servers", ctl.layout(), button, ctx);
+    expect(ctx.open).toHaveBeenCalledTimes(1);
+    await vi.dynamicImportSettled();
+    await vi.dynamicImportSettled();
+    expect(document.querySelector('[data-testid="deck-servers-sheet"]')).not.toBeNull();
+    closeBottomSheet();
+    for (let i = 0; i < 5; i++) await new Promise((r) => setTimeout(r, 0));
+  });
+
+  it("Add and Join in the popover, the + menu and the sheet come from ADD_JOIN", async () => {
+    phoneMedia(false);
+    await mount([{ kind: "server", host: "a.example" }]);
+    expect(ADD_JOIN.map((r) => [r.key, r.icon])).toEqual([
+      ["add", "plus"],
+      ["join", "link"],
+    ]);
+    expect(addJoinItems(ctl).map((i) => [i.label, i.icon, i.testId])).toEqual(
+      ADD_JOIN.map((r) => [serverRailText(r.key), r.icon, r.testId]),
+    );
+
+    const button = document.createElement("button");
+    openItemList("servers", ctl.layout(), button, ctx);
+    const popover = drawn(request());
+    expect(popover.ids.slice(-2)).toEqual(ADD_JOIN_IDS);
+    popover.menu.destroy();
+
+    (ctx.open as ReturnType<typeof vi.fn>).mockClear();
+    openAddMenu(button, ctx);
+    const plus = drawn(request());
+    expect(plus.ids).toEqual(ADD_JOIN_IDS);
+    plus.menu.destroy();
+
+    const rows = serverSheetRows(ctl.layout(), { ctx, button, open: vi.fn() });
+    expect(rows.slice(-2).map((r) => ("testId" in r ? r.testId : null))).toEqual(ADD_JOIN_IDS);
+    expect(rows.at(-3)).toEqual({ separator: true });
+  });
+
+  it("each Add and Join row runs its controller action", async () => {
+    phoneMedia(false);
+    await mount([{ kind: "server", host: "a.example" }]);
+    const add = vi.spyOn(ctl, "add").mockImplementation(() => {});
+    const join = vi.spyOn(ctl, "openJoin").mockImplementation(() => {});
+    for (const item of addJoinItems(ctl)) click(item);
+    expect(add).toHaveBeenCalledTimes(1);
+    expect(join).toHaveBeenCalledTimes(1);
   });
 });

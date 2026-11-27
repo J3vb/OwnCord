@@ -133,7 +133,8 @@ html.layout-deck .deck-top-end > .member-list-btn[hidden] {
 }
 
 /* ─── The server tabs: row 2 of the bar, outside the fold ─── */
-/* The fold is one query, (max-width: 640px), (max-height: 499px). These are
+/* The fold is one query, (max-width: 640px), (max-height: 499px) and the
+   phone query. These are
    base rules with no query; the fold's block below holds only overrides, each
    with the selector of the rule it overrides. */
 
@@ -309,6 +310,10 @@ html.layout-deck .deck-servers-btn > svg:first-child {
   width: 14px;
   height: 14px;
 }
+/* The current server's name, shown only on a phone. */
+html.layout-deck .deck-servers-name {
+  display: none;
+}
 
 /* The menus from the tabs reuse .context-menu; these add the server rows'
    icons, the dropdown's heading and the folder headings in "+N" and Servers. */
@@ -377,7 +382,11 @@ html.layout-deck.high-contrast .server-tab.drop-into {
 }
 
 /* ─── The fold: the row folds into the Servers button in row 1 ─── */
-@media (max-width: 640px), (max-height: 499px) {
+/* The phone clauses fold every phone, a tall tablet too. */
+@media (max-width: 640px),
+  (max-height: 499px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   html.layout-deck .deck-top-bar.has-tabs-row {
     grid-template-rows: none;
   }
@@ -449,6 +458,68 @@ html.layout-deck.high-contrast .server-tab.drop-into {
   }
   html.layout-deck .deck-servers-text,
   html.layout-deck .deck-servers-btn .server-tab-chevron {
+    display: none;
+  }
+}
+
+/* On a phone the Servers button shows the server's name and takes the first
+   column; search, the end group and Direct follow at 44 px. Switch server
+   goes from your row, as the Servers sheet replaces it; a browser has no tabs,
+   so it keeps Sign out. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck {
+    --deck-direct-size: 44px;
+  }
+  html.layout-deck .deck-top-bar.has-deck-direct {
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs {
+    grid-template-columns: minmax(0, 1fr) auto auto;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs.has-deck-direct {
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs > .deck-top-name {
+    display: none;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs > .deck-servers-btn {
+    grid-column: 1;
+    justify-content: flex-start;
+    width: auto;
+    min-width: 44px;
+    max-width: 100%;
+    height: 44px;
+    padding: 0 8px;
+    overflow: hidden;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs > .deck-search {
+    grid-column: 2;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs > :is(.deck-connection, .deck-top-end) {
+    grid-column: 3;
+  }
+  html.layout-deck .deck-top-bar.has-server-tabs.has-deck-direct > .deck-direct {
+    grid-column: 4;
+  }
+  html.layout-deck .deck-servers-btn .deck-servers-name {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  html.layout-deck .deck-servers-text {
+    display: none;
+  }
+  html.layout-deck .deck-servers-btn .server-tab-chevron {
+    display: inline-block;
+    flex: none;
+  }
+  html.layout-deck
+    .deck-top-bar.has-server-tabs
+    ~ .deck-status-bar
+    .user-bar
+    [data-testid="disconnect-btn"] {
     display: none;
   }
 }
