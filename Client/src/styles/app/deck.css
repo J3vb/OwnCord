@@ -198,7 +198,8 @@ html.layout-deck .deck-status-bar {
   align-items: flex-end;
   gap: var(--deck-gap);
   min-height: var(--deck-status-min);
-  padding: 0 var(--deck-gap) var(--safe-bottom, 0px);
+  padding: 0 calc(var(--deck-gap) + env(safe-area-inset-right)) var(--safe-bottom, 0px)
+    calc(var(--deck-gap) + env(safe-area-inset-left));
   flex: none;
   background: var(--bg-tertiary);
 }
@@ -259,8 +260,10 @@ html.layout-deck
   margin: 0;
 }
 
-/* By width only: this is about room in the bar, and phones do not load Deck. */
-@media (max-width: 800px) {
+/* By width, and on a phone: room in the bar. */
+@media (max-width: 800px),
+  (pointer: coarse) and (max-width: 899px),
+  (pointer: coarse) and (max-height: 499px) {
   html.layout-deck .deck-status-bar .vw-channel {
     display: none;
   }
@@ -297,5 +300,62 @@ html.layout-deck
   }
   html.layout-deck .app.has-server-rail ~ .deck-status-bar .user-bar .ub-controls {
     gap: 6px;
+  }
+}
+
+/* On a phone in a call, Mute, hold-to-talk and Leave live only in the status
+   bar: the call bar, the call view's bar and the DM call panel hide their
+   copies. The voice widget takes its own row above yours and never clips, so
+   the call row (Leave, and "Unsecured" in its header) is always drawn; each
+   panel above it scrolls inside its own cap. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck [data-testid="pcb-mute"],
+  html.layout-deck [data-testid="pcb-leave"],
+  html.layout-deck .phone-call-bar .talk-btn--bar,
+  html.layout-deck .video-grid__controls [data-call-control="mute"],
+  html.layout-deck .video-grid__controls [data-call-control="leave"],
+  html.layout-deck .video-grid__controls .talk-btn--call,
+  html.layout-deck [data-testid="dcp-mute"],
+  html.layout-deck [data-testid="dcp-leave"],
+  html.layout-deck [data-testid="dcp-leave-call"],
+  html.layout-deck [data-testid="dm-call-panel"] .talk-btn--bar {
+    display: none;
+  }
+  html.layout-deck .deck-status-bar {
+    flex-wrap: wrap;
+  }
+  html.layout-deck .deck-status-bar .voice-widget.visible {
+    order: -1;
+    flex: 1 0 100%;
+    max-height: none;
+    overflow: visible;
+  }
+  html.layout-deck
+    .deck-status-bar
+    :is(
+      .vw-listening,
+      .vw-stats.visible,
+      .vw-grant-mic,
+      .vw-mic-notice:not(:empty),
+      .vw-stream-card
+    ) {
+    max-height: 20vh;
+    overflow-y: auto;
+  }
+  html.layout-deck .deck-status-bar .user-bar {
+    flex: 1 1 100%;
+  }
+  html.layout-deck .deck-status-bar .vw-controls button,
+  html.layout-deck .deck-status-bar .user-bar .ub-controls button {
+    width: 44px;
+    height: 44px;
+  }
+  html.layout-deck .deck-status-bar :is(.vw-signal, .vw-ns) {
+    min-width: 44px;
+    min-height: 44px;
+    justify-content: center;
+  }
+  html.layout-deck .deck-status-bar .ub-info {
+    display: flex;
   }
 }

@@ -17,6 +17,7 @@ import {
   startFullSession,
   switchSettingsTab,
 } from "./helpers";
+import { seedDeckOnce } from "./support/phone";
 
 const DEV_KEY = "owncord:settings:developerMode";
 const LAYOUT_KEY = "owncord:settings:screenLayout";
@@ -24,19 +25,6 @@ const NOTE = "Applies the next time OwnCord starts or reloads.";
 
 async function seedDeveloperMode(page: Page): Promise<void> {
   await page.addInitScript((key) => localStorage.setItem(key, JSON.stringify(true)), DEV_KEY);
-}
-
-/** Seeds Command Deck once: a reload must not put "deck" back. */
-async function seedDeckOnce(page: Page): Promise<void> {
-  await page.addInitScript(
-    ([dev, layout]) => {
-      if (sessionStorage.getItem("screen-layout-seeded") !== null) return;
-      sessionStorage.setItem("screen-layout-seeded", "1");
-      localStorage.setItem(dev, JSON.stringify(true));
-      localStorage.setItem(layout, JSON.stringify("deck"));
-    },
-    [DEV_KEY, LAYOUT_KEY] as const,
-  );
 }
 
 const hasDeckClass = (page: Page): Promise<boolean> =>

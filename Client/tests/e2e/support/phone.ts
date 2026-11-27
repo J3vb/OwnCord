@@ -1,10 +1,17 @@
 /**
  * Phone helpers the phone specs share: the device profiles, a held finger,
- * swipes made of touch pointer events, and the drag cases for the panels that
- * follow the finger (the channel drawer and the member panel).
+ * swipes made of touch pointer events, the drag cases for the panels that
+ * follow the finger (the channel drawer and the member panel), and the start
+ * of a phone Command Deck session with its restart.
  */
 import { devices, type Page } from "@playwright/test";
 import { test, expect } from "../fixtures";
+import {
+  buildTauriMockScript,
+  mockTauriFullSession,
+  mockTauriFullSessionWithVoice,
+  navigateToMainPage,
+} from "../helpers";
 import { findUnnamedControls } from "./accessibility";
 
 const { defaultBrowserType: _pixelBrowser, ...pixel7Device } = devices["Pixel 7"];
@@ -19,6 +26,125 @@ export const PROFILES = [
   { name: "Pixel 7", use: pixel7 },
   { name: "iPhone 14", use: iphone14 },
 ];
+
+const { defaultBrowserType: _seBrowser, ...iphoneSeDevice } = devices["iPhone SE (3rd gen)"];
+const { defaultBrowserType: _tabBrowser, ...tabS4Device } = devices["Galaxy Tab S4"];
+
+export interface PhoneProfile {
+  readonly name: string;
+  readonly use: typeof pixel7;
+}
+
+/** Pixel 7, 412 x 839: with the Tauri mock and its Android user agent, the Android app. */
+export const PIXEL_7: PhoneProfile = { name: "Pixel 7", use: pixel7 };
+/** iPhone SE (3rd gen), 375 x 667, on Chromium: a phone browser. */
+export const IPHONE_SE: PhoneProfile = { name: "iPhone SE", use: iphoneSeDevice };
+/** The narrowest phone the layout is made for: Pixel 7 at 360 x 640. */
+export const SMALL_PHONE: PhoneProfile = {
+  name: "360 x 640",
+  use: { ...pixel7, viewport: { width: 360, height: 640 } },
+};
+/** Pixel 7 on its side, 863 x 360. */
+export const PIXEL_7_LANDSCAPE: PhoneProfile = {
+  name: "Pixel 7 landscape",
+  use: { ...pixel7, viewport: { width: 863, height: 360 } },
+};
+/** Galaxy Tab S4 upright, 712 x 1138, with an Android user agent. */
+export const TAB_S4: PhoneProfile = { name: "Tab S4", use: tabS4Device };
+
+const DEV_KEY = "owncord:settings:developerMode";
+const LAYOUT_KEY = "owncord:settings:screenLayout";
+/** Marks a tab seeded once. `window.name` survives Clear all cache & restart,
+ *  which clears both storages, so the seed is not written back after it. */
+const SEEDED_MARK = "owncord-phone-deck-seeded";
+
+export interface PhoneDeckOptions {
+  /** Sign in with the voice routes, so a voice channel can be joined. */
+  readonly voice?: boolean;
+  /** Turn Developer mode on as well (the preview's gate). */
+  readonly developerMode?: boolean;
+  /** Write the keys on the first load only; any test that reloads needs it. */
+  readonly seedOnce?: boolean;
+  /** A session of the spec's own in place of the plain (or voice) one. */
+  readonly mock?: Parameters<typeof buildTauriMockScript>[0];
+}
+
+/**
+ * Signs in on phone Command Deck: stores "deck" (and Developer mode), installs
+ * the Tauri mock, opens the main page and waits for `html.layout-deck`, or
+ * for its absence with Developer mode off. The fixture seeds "classic" when
+ * nothing is stored, so without `seedOnce` the keys are written on every load.
+ */
+export async function startPhoneDeck(page: Page, options: PhoneDeckOptions = {}): Promise<void> {
+  const { voice = false, developerMode = true, seedOnce = false, mock } = options;
+  await page.addInitScript(
+    ([dev, layout, mark, withDev, once]) => {
+      if (once === true) {
+        if (window.name === mark) return;
+        window.name = mark;
+      }
+      localStorage.setItem(layout, JSON.stringify("deck"));
+      if (withDev === true) localStorage.setItem(dev, JSON.stringify(true));
+    },
+    [DEV_KEY, LAYOUT_KEY, SEEDED_MARK, developerMode, seedOnce] as const,
+  );
+  if (mock !== undefined) await page.addInitScript(buildTauriMockScript(mock));
+  else await (voice ? mockTauriFullSessionWithVoice(page) : mockTauriFullSession(page));
+  await page.goto("/");
+  await navigateToMainPage(page);
+  const html = page.locator("html");
+  await (developerMode
+    ? expect(html).toHaveClass(/layout-deck/)
+    : expect(html).not.toHaveClass(/layout-deck/));
+}
+
+/** Seeds Command Deck once: a reload must not put "deck" back. */
+export async function seedDeckOnce(page: Page): Promise<void> {
+  await page.addInitScript(
+    ([dev, layout]) => {
+      if (sessionStorage.getItem("screen-layout-seeded") !== null) return;
+      sessionStorage.setItem("screen-layout-seeded", "1");
+      localStorage.setItem(dev, JSON.stringify(true));
+      localStorage.setItem(layout, JSON.stringify("deck"));
+    },
+    [DEV_KEY, LAYOUT_KEY] as const,
+  );
+}
+
+/**
+ * Runs `trigger` (a press that restarts the app) and waits for the restart.
+ * The Tauri mock only logs `plugin:process|restart`, so when that entry comes
+ * before any new page load the helper reloads the page itself; a host that
+ * reloads the page on its own is waited for instead.
+ */
+export async function restartApp(page: Page, trigger: () => Promise<void>): Promise<void> {
+  const loaded = page.waitForEvent("load").then(() => "load" as const);
+  const logged = page
+    .waitForFunction(() =>
+      (window as unknown as { __invokeLog?: Array<{ cmd: string }> }).__invokeLog?.some(
+        (e) => e.cmd === "plugin:process|restart",
+      ),
+    )
+    .then(() => "log" as const);
+  await trigger();
+  const first = await Promise.race([loaded, logged.catch(() => "load" as const)]);
+  if (first === "log") await page.reload();
+  else await loaded;
+}
+
+/** How many elements matching `selectors` a tap at their own centre reaches. */
+export function reachableCount(page: Page, selectors: string): Promise<number> {
+  return page.evaluate((sel) => {
+    let count = 0;
+    for (const el of document.querySelectorAll(sel)) {
+      const box = el.getBoundingClientRect();
+      if (box.width === 0 || box.height === 0) continue;
+      const hit = document.elementFromPoint(box.left + box.width / 2, box.top + box.height / 2);
+      if (hit !== null && (hit === el || el.contains(hit))) count++;
+    }
+    return count;
+  }, selectors);
+}
 
 /** A finger held on `selector`'s centre for `holdMs`, through CDP touch input. */
 export async function holdFinger(page: Page, selector: string, holdMs: number): Promise<void> {

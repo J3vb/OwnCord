@@ -13,8 +13,10 @@ import {
   preludesOf,
   rulesFor,
   type ColourPolicy,
+  type DeckDeclaration,
   type DeckRule,
 } from "../../helpers/deck-css";
+import { PHONE_LAYOUT_QUERY } from "../../../src/lib/ui/phoneLayout";
 
 const COLOUR_VARS = new Set([
   "--bg-primary",
@@ -57,6 +59,8 @@ const MEMBER = "html.layout-deck .member-column";
 const SIDE_PANEL = "html.layout-deck .side-panel";
 const OVERLAYS = "html.layout-deck :is(.member-column, .side-panel)";
 const BAR = "html.layout-deck .deck-status-bar";
+const PHONE = PHONE_LAYOUT_QUERY;
+const NARROW_BAR = `(max-width: 800px), ${PHONE_LAYOUT_QUERY}`;
 
 describe("deck.css", () => {
   it("is parsed (the scan is not empty)", () => {
@@ -184,20 +188,133 @@ describe("deck.css", () => {
     ]);
   });
 
-  it("only the normal Secured state is hidden at 800 px, without display", () => {
+  it("only the normal Secured state is hidden at 800 px and on a phone, without display", () => {
     const hidden = deckRules().filter((r) => r.selectors.some((s) => s.includes(".vw-secured")));
     expect(hidden).toHaveLength(1);
     const rule = hidden[0]!;
     expect(rule.selectors).toEqual([`${BAR} .vw-secured:not(.vw-secured--degraded)`]);
-    expect(rule.media).toBe("(max-width: 800px)");
+    expect(rule.media).toBe(NARROW_BAR);
     const props = rule.declarations.map((d) => d.property);
     expect(props).not.toContain("display");
     expect(props).toEqual(
       expect.arrayContaining(["position", "clip", "overflow", "width", "height"]),
     );
-    expect(keywordOf(declarationOf(`${BAR} .vw-channel`, "display", "(max-width: 800px)"))).toBe(
-      "none",
-    );
+    expect(keywordOf(declarationOf(`${BAR} .vw-channel`, "display", NARROW_BAR))).toBe("none");
+  });
+
+  describe("the status bar on a phone", () => {
+    const HIDDEN_COPIES = [
+      'html.layout-deck [data-testid="pcb-mute"]',
+      'html.layout-deck [data-testid="pcb-leave"]',
+      "html.layout-deck .phone-call-bar .talk-btn--bar",
+      'html.layout-deck .video-grid__controls [data-call-control="mute"]',
+      'html.layout-deck .video-grid__controls [data-call-control="leave"]',
+      "html.layout-deck .video-grid__controls .talk-btn--call",
+      'html.layout-deck [data-testid="dcp-mute"]',
+      'html.layout-deck [data-testid="dcp-leave"]',
+      'html.layout-deck [data-testid="dcp-leave-call"]',
+      'html.layout-deck [data-testid="dm-call-panel"] .talk-btn--bar',
+    ];
+    const phoneRules = (): DeckRule[] => deckRules().filter((r) => r.media === PHONE);
+    const phoneDecl = (selector: string, property: string): DeckDeclaration | undefined =>
+      declarationOf(selector, property, PHONE);
+    const text = (d: DeckDeclaration | undefined): string => JSON.stringify(d?.value ?? null);
+    /** The declaration as Lightning CSS parses `property: value`, to compare whole values. */
+    const parsed = (property: string, value: string): string =>
+      JSON.stringify(
+        parseDeckCss(`html.layout-deck .x { ${property}: ${value}; }`)[0]!.declarations[0]!.value,
+      );
+    const is = (selector: string, property: string, value: string): void => {
+      expect(text(phoneDecl(selector, property)), `${selector} { ${property} }`).toBe(
+        parsed(property, value),
+      );
+    };
+
+    it("is one block with the phone query, after the min-width: 801px block", () => {
+      const preludes = preludesOf("app/deck.css");
+      expect(preludes.filter((p) => p === PHONE)).toHaveLength(1);
+      expect(preludes.indexOf(PHONE)).toBeGreaterThan(preludes.indexOf("(min-width: 801px)"));
+      const rules = deckRules();
+      const firstPhone = rules.findIndex((r) => r.media === PHONE);
+      const lastWide = rules.map((r) => r.media).lastIndexOf("(min-width: 801px)");
+      expect(firstPhone).toBeGreaterThan(lastWide);
+    });
+
+    it("hides exactly the other copies of Mute, hold-to-talk and Leave", () => {
+      const hiding = phoneRules().filter(
+        (r) => keywordOf(r.declarations.find((d) => d.property === "display")) === "none",
+      );
+      expect(hiding).toHaveLength(1);
+      expect([...hiding[0]!.selectors].sort()).toEqual([...HIDDEN_COPIES].sort());
+    });
+
+    it("no coarse-pointer rule hides the status bar's Mute, hold-to-talk or Leave", () => {
+      const coarse = deckRules().filter((r) => r.media?.includes("pointer: coarse") === true);
+      const hiders = coarse.filter((r) =>
+        r.declarations.some(
+          (d) =>
+            (d.property === "display" && keywordOf(d) === "none") ||
+            d.property === "visibility" ||
+            d.property === "clip",
+        ),
+      );
+      const selectors = hiders.flatMap((r) => r.selectors);
+      for (const own of ["ub-mute", "talk-btn--user", ".disconnect"]) {
+        expect(
+          selectors.filter((x) => x.includes(own)),
+          own,
+        ).toEqual([]);
+      }
+    });
+
+    it("wraps the bar and puts the unclipped widget on its own row above yours", () => {
+      is(BAR, "flex-wrap", "wrap");
+      const widget = `${BAR} .voice-widget.visible`;
+      is(widget, "order", "-1");
+      is(widget, "flex", "1 0 100%");
+      is(widget, "max-height", "none");
+      is(widget, "overflow", "visible");
+      is(`${BAR} .user-bar`, "flex", "1 1 100%");
+    });
+
+    it("caps each widget panel at 20vh and lets it scroll", () => {
+      const panels = phoneRules().find((r) =>
+        r.selectors.some((x) => x.includes(".vw-stats.visible")),
+      );
+      expect(panels).toBeDefined();
+      for (const panel of [".vw-listening", ".vw-grant-mic", ".vw-mic-notice", ".vw-stream-card"])
+        expect(panels!.selectors[0]).toContain(panel);
+      const value = (property: string): string =>
+        text(panels!.declarations.find((d) => d.property === property));
+      expect(value("max-height")).toBe(parsed("max-height", "20vh"));
+      expect(value("overflow-y")).toBe(parsed("overflow-y", "auto"));
+    });
+
+    it("makes the bar's buttons, signal and noise suppression 44 px", () => {
+      for (const sel of [`${BAR} .vw-controls button`, `${BAR} .user-bar .ub-controls button`]) {
+        is(sel, "width", "44px");
+        is(sel, "height", "44px");
+      }
+      const both = `${BAR} :is(.vw-signal, .vw-ns)`;
+      is(both, "min-width", "44px");
+      is(both, "min-height", "44px");
+    });
+
+    it("shows your name and status", () => {
+      is(`${BAR} .ub-info`, "display", "flex");
+    });
+
+    it("the 800 px block's prelude ends with the phone query", () => {
+      expect(NARROW_BAR.endsWith(PHONE_LAYOUT_QUERY)).toBe(true);
+      expect(preludesOf("app/deck.css")).toContain(NARROW_BAR);
+    });
+
+    it("the status bar's padding names both side insets", () => {
+      const padding = text(declarationOf(BAR, "padding", null));
+      expect(padding).toContain("safe-area-inset-left");
+      expect(padding).toContain("safe-area-inset-right");
+      expect(padding).toContain("safe-bottom");
+    });
   });
   it("the LED colours are allow-listed fills", () => {
     const led = deckRules().filter((r) =>

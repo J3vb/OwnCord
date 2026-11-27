@@ -6,6 +6,7 @@ import { createElement, setOwnedTimeout, setText } from "@lib/dom";
 import { isAndroidApp, isLinuxDesktop, isWindowsDesktop } from "@lib/hostOs";
 import { createLogger } from "@lib/logger";
 import {
+  isPhoneHost,
   loadStoredScreenLayout,
   runningScreenLayout,
   saveScreenLayout,
@@ -104,7 +105,7 @@ function createRestartControl(
   return { paint: (pending) => (pending ? add() : remove()) };
 }
 
-/** The row, or null when it does not show (the Android app or a phone-sized screen). */
+/** The row, or null when it does not show (a phone host without Developer mode). */
 export function buildScreenLayoutRow(signal: AbortSignal): HTMLDivElement | null {
   if (!screenLayoutAvailable()) return null;
   // Always present so a screen reader announces the text when it is set.
@@ -122,7 +123,12 @@ export function buildScreenLayoutRow(signal: AbortSignal): HTMLDivElement | null
     testId: "screen-layout",
     options: [
       ["classic", t("appearance.screenLayout.classic")],
-      ["deck", t("appearance.screenLayout.deck")],
+      [
+        "deck",
+        isPhoneHost()
+          ? t("appearance.screenLayout.deckPreview")
+          : t("appearance.screenLayout.deck"),
+      ],
     ],
     current: loadStoredScreenLayout,
     save: (value) => {

@@ -40,11 +40,19 @@ describe("screenLayout", () => {
       expect(loadScreenLayout()).toBe(expected);
     });
 
-    it("gives classic in the Android app even with deck stored and Developer mode on", () => {
+    it("gives classic in the Android app with deck stored and Developer mode off", () => {
+      localStorage.setItem(KEY, '"deck"');
+      localStorage.setItem(DEV_KEY, "false");
+      hostAndroidApp();
+      expect(loadScreenLayout()).toBe("classic");
+    });
+
+    it("gives deck in the Android app with deck stored and Developer mode on", () => {
       localStorage.setItem(KEY, '"deck"');
       localStorage.setItem(DEV_KEY, "true");
       hostAndroidApp();
-      expect(loadScreenLayout()).toBe("classic");
+      expect(loadScreenLayout()).toBe("deck");
+      expect(localStorage.getItem(KEY)).toBe('"deck"');
     });
 
     it("never rewrites the stored value as Developer mode flips", () => {

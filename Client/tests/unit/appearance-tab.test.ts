@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { useMountContainer } from "../helpers/mountContainer";
 import { clearHost, hostAndroidApp } from "../helpers/androidHost";
+import { usePhone } from "../helpers/phoneMedia";
 import { setRunningScreenLayout } from "../../src/lib/prefs/screenLayout";
 import { buildAppearanceTab } from "../../src/features/settings/AppearanceTab";
 import { refreshTimeFormat, refreshDateFormat, getDateFormat } from "@lib/text/timeFormat";
@@ -823,10 +824,42 @@ describe("AppearanceTab - screen layout", () => {
     expect(q("member-layout")).not.toBeNull();
   });
 
-  it("hides the row in the Android app even with Developer mode on", () => {
+  it("hides the row in the Android app with Developer mode off", () => {
+    hostAndroidApp();
+    mount(false, null, "classic");
+    expect(q("screen-layout")).toBeNull();
+  });
+
+  it("shows the row with (preview) in the Android app with Developer mode on", () => {
     hostAndroidApp();
     mount(true, null, "classic");
-    expect(q("screen-layout")).toBeNull();
+    expect(q("screen-layout")).not.toBeNull();
+    expect(q("screen-layout-deck")!.textContent).toBe("Command Deck (preview)");
+  });
+
+  it("shows the row with (preview) on a phone-sized screen with Developer mode on", () => {
+    usePhone();
+    try {
+      mount(true, null, "classic");
+      expect(q("screen-layout-deck")!.textContent).toBe("Command Deck (preview)");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("hides the row on a phone-sized screen with Developer mode off", () => {
+    usePhone();
+    try {
+      mount(false, null, "classic");
+      expect(q("screen-layout")).toBeNull();
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("labels Command Deck without (preview) off a phone host", () => {
+    mount(true, null, "classic");
+    expect(q("screen-layout-deck")!.textContent).toBe("Command Deck");
   });
 
   it.each(['"classic"', '"xyz"', null])(
