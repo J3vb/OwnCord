@@ -252,6 +252,20 @@ function clearTyping(): void {
 }
 
 /**
+ * While typing in a call, a press on a status-bar button keeps focus in the
+ * message box: the bar keeps its one row, so the button stays under the finger
+ * until its click, and the keyboard stays open. Keys still reach the buttons.
+ */
+function keepBoxFocus(event: MouseEvent): void {
+  if (!document.body.classList.contains(TYPING_CLASS)) return;
+  const target = event.target instanceof Element ? event.target : null;
+  const bar = target?.closest(".deck-status-bar") ?? null;
+  if (bar === null || target?.closest("button") == null) return;
+  if (bar.querySelector(".voice-widget.visible") === null) return;
+  event.preventDefault();
+}
+
+/**
  * Keeps the typing class in step with focus. On Android, Back closes the
  * keyboard but leaves focus in the box, so the class stays until focus goes
  * elsewhere. The one session reset clears it.
@@ -263,6 +277,7 @@ function watchTyping(signal: AbortSignal): void {
   // A box removed while focused sends no focusout in WebKit (a channel change,
   // a thread closing); the next press anywhere catches it.
   document.addEventListener("pointerdown", recomputeTyping, { capture: true, signal });
+  document.addEventListener("mousedown", keepBoxFocus, { capture: true, signal });
   onPhoneLayoutChange(recomputeTyping, signal);
 
   const dispose = registerSessionReset("touchInput:typing", clearTyping);

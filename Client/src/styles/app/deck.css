@@ -363,7 +363,8 @@ html.layout-deck
 /* On a phone while the message box has focus. Out of a call the status bar's
    contents hide and the bar stays as a strip of its bottom inset, so Send
    stays above the navigation bar after Back closes the keyboard. In a call the
-   status bar stays; the call bar and the tall panels go. */
+   call bar and the tall panels go, and the status bar is one row: Mute, the
+   timer, the security chip, the signal and Leave. */
 @media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
   html.layout-deck body.composer-typing .deck-status-bar:not(:has(.voice-widget.visible)) {
     min-height: 0;
@@ -378,6 +379,30 @@ html.layout-deck
     body.composer-typing
     .deck-status-bar
     :is(.vw-stats.visible, .vw-listening, .vw-mic-notice, .vw-stream-card) {
+    display: none;
+  }
+  html.layout-deck body.composer-typing .deck-status-bar:has(.voice-widget.visible) .user-bar {
+    flex: none;
+    order: -2;
+  }
+  html.layout-deck body.composer-typing .deck-status-bar .voice-widget.visible {
+    flex: 1 1 0;
+  }
+  html.layout-deck body.composer-typing .deck-status-bar .vw-header {
+    flex-direction: row;
+    align-items: center;
+  }
+  html.layout-deck
+    body.composer-typing
+    .deck-status-bar:has(.voice-widget.visible)
+    :is(
+      .vw-connected.vw-steady,
+      .vw-ns,
+      .vw-controls > :not(:last-child),
+      .ub-self,
+      [data-testid="ub-deafen"],
+      [data-testid="ub-deafen"] ~ *
+    ) {
     display: none;
   }
   /* A squeezed name clips instead of spilling over Mute. */
