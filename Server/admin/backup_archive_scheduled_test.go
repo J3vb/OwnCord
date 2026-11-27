@@ -158,6 +158,40 @@ func TestScheduledArchive_EverythingKeepsDatabaseAndArchive(t *testing.T) {
 	}
 }
 
+// A database file with its own name inside the data dir keeps that name in the archive, and the stored archive
+// is checked for that entry rather than the default one.
+func TestScheduledArchive_OwnDatabaseNameInDataDir(t *testing.T) {
+	s := newSchedFixture(t, "everything", "30")
+	for _, suffix := range []string{"", "-wal", "-shm"} {
+		if err := os.Remove(filepath.Join(s.dataDir, "chatserver.db"+suffix)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s.dbFile = filepath.Join(s.dataDir, "other.db")
+	if err := os.WriteFile(s.dbFile, []byte("not a database"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.tick(t); err != nil {
+		t.Fatalf("MaintainBackups: %v", err)
+	}
+	zips := s.names(t, ".zip")
+	if len(zips) != 1 {
+		t.Fatalf("scheduled archives = %v, want one", zips)
+	}
+	zr, err := zip.OpenReader(filepath.Join(s.backups, zips[0]))
+	if err != nil {
+		t.Fatalf("stored archive does not open: %v", err)
+	}
+	defer zr.Close() //nolint:errcheck
+	names := make([]string, 0, len(zr.File))
+	for _, f := range zr.File {
+		names = append(names, f.Name)
+	}
+	if !slices.Contains(names, "data/other.db") || slices.Contains(names, "data/chatserver.db") {
+		t.Errorf("archive entries = %v, want data/other.db and no data/chatserver.db", names)
+	}
+}
+
 func TestScheduledArchive_FileModeIsOwnerOnly(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("file modes are not enforced on Windows")
