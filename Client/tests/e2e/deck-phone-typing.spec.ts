@@ -1,15 +1,15 @@
 /**
  * Command Deck on a phone while you type (the Developer-mode preview). While
  * the message box has focus, out of a call the status bar's contents hide and
- * the bar keeps its bottom inset; in a call the status bar stays, and the call
- * bar and the tall widget panels hide. On its side your row sits beside the
- * call row, and while typing the top bar keeps only its inset and the chat
- * header goes. In every typing state the message box stays in view.
+ * the bar keeps its bottom inset; in a call the call bar and the tall widget
+ * panels hide, and the status bar is one row: Mute, the timer, the security
+ * chip, the signal and Leave. On its side your row sits beside the call row,
+ * and while typing the top bar keeps only its inset and the chat header goes. In every typing state the message box stays in view.
  *
  * Playwright cannot open a soft keyboard, so it is simulated: the box focused,
  * then the viewport 260 px shorter (upright) or 160 px tall (on its side).
  */
-import type { Locator, Page } from "@playwright/test";
+import type { Locator, Page, TestInfo } from "@playwright/test";
 import { test, expect } from "./fixtures";
 import {
   BASE_SESSION_ROUTES,
@@ -37,6 +37,7 @@ import {
 } from "./support/phone";
 import {
   BAR_LEAVE,
+  BAR_MUTE,
   boxOf,
   enterCall,
   expectOneMuteAndLeave,
@@ -106,6 +107,43 @@ async function expectCallWhileTyping(page: Page, where: string): Promise<void> {
   await expectOneMuteAndLeave(page, where);
   await expect(callBar(page)).toBeHidden();
   await expectBoxInView(page);
+}
+
+/** The status bar's parts that hide while typing in a call: how many are drawn. */
+const extrasShown = (page: Page): Promise<number> =>
+  statusBar(page)
+    .locator(
+      ".ub-self, [data-testid='ub-deafen'], [data-testid='ub-deafen'] ~ *, .vw-controls > :not(.disconnect), .vw-ns",
+    )
+    .evaluateAll((els) => els.filter((e) => e.checkVisibility()).length);
+
+/** Typing in a call: the status bar is one row of Mute, the timer, the
+ *  security chip and Leave, at most half its height at rest (`rest`). */
+async function expectOneCallRow(page: Page, rest: number, testInfo: TestInfo): Promise<void> {
+  const bar = statusBar(page);
+  const { height } = await boxOf(bar);
+  testInfo.annotations.push({
+    type: "status bar height",
+    description: `${page.viewportSize()!.width} px wide: ${rest} px at rest, ${height} px typing`,
+  });
+  expect(height).toBeLessThanOrEqual(rest / 2);
+  const timer = bar.locator(".vw-timer");
+  await expect(timer).toBeInViewport({ ratio: 1 });
+  const mute = await boxOf(page.locator(BAR_MUTE));
+  for (const part of [page.locator(BAR_LEAVE), timer]) {
+    const box = await boxOf(part);
+    expect(box.y).toBeLessThan(mute.y + mute.height);
+    expect(mute.y).toBeLessThan(box.y + box.height);
+  }
+  expect(await bar.ariaSnapshot()).toMatch(/Secured/);
+  expect(await extrasShown(page)).toBe(0);
+}
+
+/** Out of the box again: the full status bar is back. */
+async function expectFullBar(page: Page, rest: number, extras: number): Promise<void> {
+  await expect.poll(async () => (await boxOf(statusBar(page))).height).toBe(rest);
+  expect(extras).toBeGreaterThan(0);
+  expect(await extrasShown(page)).toBe(extras);
 }
 
 // As on a real phone: its WebView cannot share a screen, so the call row has
@@ -228,21 +266,25 @@ test.describe("phone Command Deck while typing, 360 x 640", () => {
     await expect(callBar(page)).toBeVisible();
   });
 
-  test("typing in a call keeps Mute and Leave, hides the call bar and the stats pane", async ({
+  test("typing in a call shrinks the bar to one row, hides the call bar and the stats pane", async ({
     page,
   }, testInfo) => {
     const size = { width: 360, height: 640 };
     await startPhoneDeck(page, GUNMETAL);
     await enterCall(page);
     await attachScreenshot(testInfo, "360 x 640 in a call", page);
+    const rest = (await boxOf(statusBar(page))).height;
+    const extras = await extrasShown(page);
     await typeIn(page, chatBox(page));
     await expectCallWhileTyping(page, "typing in a call");
-    // Top bar 36, chat header 48, typing row 24, box 70, status bar 122: about 66.
-    expect((await boxOf(messages(page))).height).toBeGreaterThanOrEqual(56);
+    await expectOneCallRow(page, rest, testInfo);
+    // Top bar 44, chat header 48, typing row 24, box 70, status bar 52: about 128.
+    expect((await boxOf(messages(page))).height).toBeGreaterThanOrEqual(112);
     await attachScreenshot(testInfo, "360 x 380 typing, in a call", page);
 
     await page.setViewportSize(size);
     await tapChat(page);
+    await expectFullBar(page, rest, extras);
     const stats = statusBar(page).locator(".vw-stats.visible");
     await statusBar(page).locator(".vw-signal").tap();
     await expect(stats).toBeVisible();
@@ -325,13 +367,23 @@ test.describe("phone Command Deck while typing, 360 x 640", () => {
 test.describe("phone Command Deck while typing, Pixel 7", () => {
   test.use(PIXEL_7.use);
 
-  test("typing in a call at 412 x 579 keeps Mute and Leave", async ({ page }, testInfo) => {
+  test("typing in a call at 412 x 579 keeps Mute and Leave in one row", async ({
+    page,
+  }, testInfo) => {
     await startPhoneDeck(page, GUNMETAL);
     await attachScreenshot(testInfo, "412 x 839 at rest", page);
     await enterCall(page);
+    const rest = (await boxOf(statusBar(page))).height;
+    const extras = await extrasShown(page);
     await typeIn(page, chatBox(page));
     expect(page.viewportSize()).toEqual({ width: 412, height: 579 });
     await expectCallWhileTyping(page, "412 x 579");
+    await expectOneCallRow(page, rest, testInfo);
+    await attachScreenshot(testInfo, "412 x 579 typing, in a call", page);
+
+    await page.setViewportSize({ width: 412, height: 839 });
+    await tapChat(page);
+    await expectFullBar(page, rest, extras);
   });
 });
 

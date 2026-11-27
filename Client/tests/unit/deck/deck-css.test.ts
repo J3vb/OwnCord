@@ -396,6 +396,35 @@ describe("deck.css", () => {
         ).toEqual([]);
       });
 
+      it("in a call, shrinks the bar to one row only under the phone query and the typing class", () => {
+        const IN_CALL = `html.layout-deck ${TYPING} .deck-status-bar:has(.voice-widget.visible)`;
+        const HIDE = `${IN_CALL} :is(.vw-connected, .vw-ns, .vw-controls > :not(:last-child), .ub-self, [data-testid="ub-deafen"], [data-testid="ub-deafen"] ~ *)`;
+        const ROW = [
+          `${IN_CALL} .user-bar`,
+          `html.layout-deck ${TYPING} .deck-status-bar .voice-widget.visible`,
+          `html.layout-deck ${TYPING} .deck-status-bar .vw-header`,
+          HIDE,
+        ];
+        for (const sel of ROW) expect(only(sel).media, sel).toBe(PHONE);
+        expect(keywordOf(declarationOf(HIDE, "display", PHONE))).toBe("none");
+        is(`${IN_CALL} .user-bar`, "flex", "none");
+        is(`html.layout-deck ${TYPING} .deck-status-bar .vw-header`, "flex-direction", "row");
+        // Mute and Leave are covered by the coarse-pointer test above.
+        for (const kept of ["vw-timer", "vw-secured", "vw-signal", "vw-header"])
+          expect(HIDE).not.toContain(kept);
+        const hidesRowParts = deckRules().filter(
+          (r) =>
+            r.selectors.some((x) => /\.(ub-self|vw-connected|vw-ns)\b/.test(x)) &&
+            keywordOf(r.declarations.find((d) => d.property === "display")) === "none",
+        );
+        expect(hidesRowParts.length).toBeGreaterThan(0);
+        for (const r of hidesRowParts)
+          expect(
+            r.selectors.every((x) => x.includes(TYPING)),
+            r.selectors.join(),
+          ).toBe(true);
+      });
+
       it("makes Grant mic, the listening Stop button and the stream-card buttons 44 px tall", () => {
         is(SMALL, "min-height", "44px");
       });
