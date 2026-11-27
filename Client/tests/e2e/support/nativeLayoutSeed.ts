@@ -2,8 +2,9 @@ import type { ScreenLayoutOption } from "./screenLayoutSeed";
 
 /**
  * Runs at the start of the document that follows a fresh native launch's first
- * load: clears storage once, then stores the layout. The clear removes what the
- * first load and its unload wrote, so none of it reads as an earlier install.
+ * load: clears storage once, then stores the layout and marks the one-time
+ * move to Command Deck settled. The clear removes what the first load and its
+ * unload wrote, so none of it reads as an earlier install.
  * The `sessionStorage` guard keeps a later `page.reload()` in a spec from
  * clearing again; a process relaunch starts a new session and attaches no
  * script. Serialised into the page, so it uses nothing from this module.
@@ -14,6 +15,7 @@ export function seedNativeDocument(layout: string): void {
   sessionStorage.setItem("owncord-e2e-layout-seeded", "1");
   localStorage.clear();
   localStorage.setItem("owncord:settings:screenLayout", JSON.stringify(layout));
+  localStorage.setItem("owncord:settings:deckSwitchDone", "true");
 }
 
 /** What the app shows after the seeded load; read in the page. */

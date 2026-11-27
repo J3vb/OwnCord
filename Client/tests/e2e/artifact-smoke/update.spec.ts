@@ -158,14 +158,11 @@ test("the previous release updates to this one, then rolls back", async ({}, inf
     await waitFor(app!, "[data-testid='app-layout']", "", 60_000);
     expect(await appVersion(app!)).toBe(version);
     await waitFor(app!, ".msg-text", text);
-    // The update moves no one to another layout or theme.
+    // The update moves an install on Classic (or with no layout stored) to
+    // Command Deck once, keeps one already there, and changes no theme.
     const after = await storedAppearance(app!);
-    if (before.layout === null) {
-      expect(after.layout).toBe(JSON.stringify("classic"));
-      expect(after.deck).toBe(false);
-    } else {
-      expect(after.layout).toBe(before.layout);
-    }
+    expect(after.layout).toBe(JSON.stringify("deck"));
+    expect(after.deck).toBe(true);
     expect(after.theme).toBe(before.theme);
 
     // Roll back: reinstall the previous release over the updated one.

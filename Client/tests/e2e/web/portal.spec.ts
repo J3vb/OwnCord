@@ -142,11 +142,10 @@ test.describe("phone viewport", () => {
     ).toBe(true);
   });
 
-  test("in the Command Deck preview the top bar shows the server's name as plain text", async ({
+  test("on phone Command Deck the top bar shows the server's name as plain text", async ({
     page,
   }) => {
     await page.addInitScript(() => {
-      localStorage.setItem("owncord:settings:developerMode", JSON.stringify(true));
       localStorage.setItem("owncord:settings:screenLayout", JSON.stringify("deck"));
     });
     await page.goto("/");

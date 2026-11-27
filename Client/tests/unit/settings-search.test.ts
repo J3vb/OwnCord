@@ -271,7 +271,7 @@ describe("settings search", () => {
         expect(openAppearance()).toContain(rowText);
       });
 
-      it("are present once the phone check lifts, and match the screen and the index", () => {
+      it("are present on a phone too, and match the screen and the index", () => {
         // The cached index must not hand back the phone-sized answer.
         vi.stubGlobal("matchMedia", (media: string) => ({
           matches: media === PHONE_LAYOUT_QUERY,
@@ -279,7 +279,7 @@ describe("settings search", () => {
           addEventListener: vi.fn(),
           removeEventListener: vi.fn(),
         }));
-        expect(appearance()).not.toContain(rowText);
+        expect(appearance()).toContain(rowText);
         vi.unstubAllGlobals();
         expect(appearance()).toContain(rowText);
         expect(appearance()).toContain(settingsText("appearance.screenLayout.desc"));
@@ -298,10 +298,10 @@ describe("settings search", () => {
         for (const text of appearance()) expect(shown).toContain(text);
       });
 
-      it("are absent in the Android app with Developer mode off", () => {
+      it("are present in the Android app with Developer mode off", () => {
         hostAndroidApp();
         try {
-          expect(appearance()).not.toContain(rowText);
+          expect(appearance()).toContain(rowText);
         } finally {
           clearHost();
         }

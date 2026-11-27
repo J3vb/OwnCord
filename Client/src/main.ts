@@ -13,7 +13,7 @@ import { installGlobalGuards } from "./app/globalGuards";
 
 import { deactivatePendingMessages } from "./features/messaging/pendingMessages";
 import { hasInstallEvidence } from "@lib/prefs/installEvidence";
-import { settleNewInstallDefaults } from "@lib/prefs/newInstallDefaults";
+import { settleStartupLayout } from "@lib/prefs/newInstallDefaults";
 import { settleNotificationLevelDefault } from "@lib/prefs/notificationLevel";
 import { createWsClient } from "@lib/ws";
 import { markActiveChannelReadOnUnload } from "./stores/readState";
@@ -37,7 +37,7 @@ import { afterCoreSteps, beforeRenderSteps, runStartupSteps } from "./app/startu
 // First, before anything writes storage: what earlier sessions left tells an install
 // that ran before from a new one. Read once, so the defaults this load writes do not count.
 const installEvidence = hasInstallEvidence();
-settleNewInstallDefaults(installEvidence);
+settleStartupLayout(installEvidence);
 settleNotificationLevelDefault(installEvidence);
 
 // Gate the log level before anything logs: debug entries are serialized and

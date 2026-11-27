@@ -62,8 +62,10 @@ const SEEDED_MARK = "owncord-phone-deck-seeded";
 export interface PhoneDeckOptions {
   /** Sign in with the voice routes, so a voice channel can be joined. */
   readonly voice?: boolean;
-  /** Turn Developer mode on as well (the preview's gate). */
+  /** Turn Developer mode on as well. */
   readonly developerMode?: boolean;
+  /** The layout to store; "deck" unless a case needs Classic. */
+  readonly layout?: "classic" | "deck";
   /** Write the keys on the first load only; any test that reloads needs it. */
   readonly seedOnce?: boolean;
   /** A session of the spec's own in place of the plain (or voice) one. */
@@ -74,31 +76,42 @@ export interface PhoneDeckOptions {
 }
 
 /**
- * Signs in on phone Command Deck: stores "deck" (and Developer mode), installs
- * the Tauri mock, opens the main page and waits for `html.layout-deck`, or
- * for its absence with Developer mode off. The fixture seeds "classic" when
- * nothing is stored, so without `seedOnce` the keys are written on every load.
+ * Signs in on phone Command Deck: stores "deck" (or `layout`) and Developer
+ * mode, installs the Tauri mock, opens the main page and waits for
+ * `html.layout-deck`, or for its absence with Classic stored. The fixture seeds
+ * "classic" when nothing is stored, so without `seedOnce` the keys are written
+ * on every load.
  */
 export async function startPhoneDeck(page: Page, options: PhoneDeckOptions = {}): Promise<void> {
   const { voice = false, developerMode = true, seedOnce = false, mock, theme } = options;
+  const stored = options.layout ?? "deck";
   await page.addInitScript(
-    ([dev, layout, mark, withDev, once, themeKey, themeName]) => {
+    ([dev, layout, mark, withDev, once, themeKey, themeName, value]) => {
       if (once === true) {
         if (window.name === mark) return;
         window.name = mark;
       }
-      localStorage.setItem(layout, JSON.stringify("deck"));
+      localStorage.setItem(layout, JSON.stringify(value));
       if (withDev === true) localStorage.setItem(dev, JSON.stringify(true));
       if (themeName !== "") localStorage.setItem(themeKey, themeName);
     },
-    [DEV_KEY, LAYOUT_KEY, SEEDED_MARK, developerMode, seedOnce, THEME_KEY, theme ?? ""] as const,
+    [
+      DEV_KEY,
+      LAYOUT_KEY,
+      SEEDED_MARK,
+      developerMode,
+      seedOnce,
+      THEME_KEY,
+      theme ?? "",
+      stored,
+    ] as const,
   );
   if (mock !== undefined) await page.addInitScript(buildTauriMockScript(mock));
   else await (voice ? mockTauriFullSessionWithVoice(page) : mockTauriFullSession(page));
   await page.goto("/");
   await navigateToMainPage(page);
   const html = page.locator("html");
-  await (developerMode
+  await (stored === "deck"
     ? expect(html).toHaveClass(/layout-deck/)
     : expect(html).not.toHaveClass(/layout-deck/));
   if (theme !== undefined)

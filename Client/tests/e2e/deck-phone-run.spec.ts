@@ -1,6 +1,6 @@
 /**
- * Command Deck on a phone, the Developer-mode preview: the gate, the bars at
- * phone sizes, and Mute and Leave living only in the status bar during a call.
+ * Command Deck on a phone: the stored layout decides it, the bars at phone
+ * sizes, and Mute and Leave living only in the status bar during a call.
  * Every other surface with its own copy (the call bar, the call view's bar,
  * the DM call panel) hides it, so exactly one of each reaches a tap.
  *
@@ -201,10 +201,17 @@ for (const profile of [PIXEL_7, IPHONE_SE, SMALL_PHONE] as readonly PhoneProfile
       expect((await focusIndicator(page)).problems).toEqual([]);
     });
 
-    test("runs Classic with Developer mode off", async ({ page }) => {
-      await startPhoneDeck(page, { developerMode: false });
+    test("runs Classic with Classic stored, and Deck with Deck stored, Developer mode off", async ({
+      page,
+    }) => {
+      await startPhoneDeck(page, { developerMode: false, layout: "classic", seedOnce: true });
       await expect(statusBar(page)).toHaveCount(0);
-      expect(await page.evaluate((k) => localStorage.getItem(k), LAYOUT_KEY)).toBe('"deck"');
+      expect(await page.evaluate((k) => localStorage.getItem(k), LAYOUT_KEY)).toBe('"classic"');
+      await page.evaluate((k) => localStorage.setItem(k, JSON.stringify("deck")), LAYOUT_KEY);
+      await page.reload();
+      await navigateToMainPage(page);
+      await expect(page.locator("html")).toHaveClass(/layout-deck/);
+      await expect(statusBar(page)).toHaveCount(1);
     });
 
     test("in a call, one Mute and one Leave, in the status bar, wherever you are", async ({
@@ -284,9 +291,7 @@ for (const profile of [PIXEL_7, IPHONE_SE, SMALL_PHONE] as readonly PhoneProfile
       expect(await findUnnamedControls(panel)).toEqual([]);
     });
 
-    test("Clear all cache & restart ends the preview, and Developer mode brings it back", async ({
-      page,
-    }) => {
+    test("Clear all cache & restart keeps Command Deck", async ({ page }) => {
       await startPhoneDeck(page, { seedOnce: true });
       await openSettings(page);
       await switchSettingsTab(page, "Advanced");
@@ -296,19 +301,8 @@ for (const profile of [PIXEL_7, IPHONE_SE, SMALL_PHONE] as readonly PhoneProfile
       await clear.tap();
       await restartApp(page, () => clear.tap());
       await navigateToMainPage(page);
-      await expect(page.locator("html")).not.toHaveClass(/layout-deck/);
-      expect(await page.evaluate((k) => localStorage.getItem(k), LAYOUT_KEY)).toBe('"deck"');
-
-      // Classic's settings button is in the drawer's user bar.
-      await openTree(page);
-      await openSettings(page);
-      await switchSettingsTab(page, "Advanced");
-      const dev = page.getByRole("switch", { name: "Developer mode" });
-      await dev.tap();
-      await expect(dev).toHaveAttribute("aria-checked", "true");
-      await page.reload();
-      await navigateToMainPage(page);
       await expect(page.locator("html")).toHaveClass(/layout-deck/);
+      expect(await page.evaluate((k) => localStorage.getItem(k), LAYOUT_KEY)).toBe('"deck"');
     });
 
     test("the emoji sheet, a profile sheet and the call view open as on Classic phone", async ({

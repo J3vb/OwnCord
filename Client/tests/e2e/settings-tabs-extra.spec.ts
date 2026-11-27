@@ -614,6 +614,7 @@ test.describe("Settings — Notifications Tab", () => {
     await page.addInitScript(() => {
       localStorage.clear();
       localStorage.setItem("owncord:settings:screenLayout", JSON.stringify("classic"));
+      localStorage.setItem("owncord:settings:deckSwitchDone", "true");
     });
     await mockSession(page, { seedMutes: [999] });
     await page.reload();

@@ -104,8 +104,7 @@ release changes the database, and anything an operator must do first.)
 
 **Appearance & layout**
 
-- A new screen layout, Command Deck: your servers in tabs across the top, your channels, voice rooms and direct messages in one list on the left, Buddies on the right grouped by what people are doing, and an Info block for the voice room you are in. Pick it in Settings > Appearance > Screen layout, on desktop and in the browser. The Android app and phone-sized screens run Classic. With Developer mode on, they can run Command Deck as a preview. Clear all cache & restart turns Developer mode off, and with it the preview; to get it back, turn Developer mode on and restart. In the preview, the top bar shows the server's name. In the Android app, tap it to switch servers. In the preview, the bottom bar hides while you type, except during a call. During a call, the bar above the chat hides instead. Applies the next time OwnCord starts or reloads; Restart now applies it at once.
-- A new screen layout, Command Deck: your servers in tabs across the top, your channels, voice rooms and direct messages in one list on the left, Buddies on the right grouped by what people are doing, and an Info block for the voice room you are in. Pick it in Settings > Appearance > Screen layout, on desktop and in the browser. The Android app and phone-sized screens run Classic. With Developer mode on, they can run Command Deck as a preview. Clear all cache & restart turns Developer mode off, and with it the preview; to get it back, turn Developer mode on and restart. In the preview, the bottom bar hides while you type, except during a call. During a call, the bar above the chat hides instead, and the bottom bar shrinks to one row with Mute, the call timer, the call's security state and Leave. In the preview, the channel list has larger rows, and Buddies opens from the right. Applies the next time OwnCord starts or reloads; Restart now applies it at once.
+- A new screen layout, Command Deck: your channels, voice rooms and direct messages in one list, Buddies on the right grouped by what people are doing, and an Info block for the voice room you are in. On desktop, your servers are in tabs across the top. Command Deck is now the layout everywhere: on desktop, in the browser, on phones and in the Android app. Your theme stays as it is. If you used Classic, OwnCord moves you to Command Deck once and shows a short note on how to go back: Settings > Appearance > Screen layout, then Classic. If you go back, you stay on Classic. On a phone, the top bar shows the server's name (in the Android app, tap it to switch servers), the channel list has larger rows, Buddies opens from the right, and the bottom bar holds Mute and Leave during a call. Out of a call, the bottom bar hides while you type. During a call, the bar above the chat hides instead, and the bottom bar shrinks to one row with Mute, the call timer, the call's security state and Leave. A layout you pick applies the next time OwnCord starts or reloads; Restart now applies it at once.
 - The Gunmetal theme, with blue-grey surfaces and an orange accent, in both layouts.
 
 **Accounts & admin**
@@ -118,7 +117,7 @@ release changes the database, and anything an operator must do first.)
 
 **Appearance & layout**
 
-- A new install starts on the Gunmetal theme, and in Command Deck on desktop and in a browser at desktop size. Phone-sized browsers run Classic. A new Android app install keeps the theme it had before and runs Classic. If you used OwnCord before, your layout and theme stay as they are.
+- A new install starts in Command Deck and on the Gunmetal theme. A new Android app install starts in Command Deck too and keeps the theme it had before. If you used OwnCord before, your theme stays as it is.
 - On phones and tablets, the channel list and the member list follow your finger when you swipe them open or closed. With Reduce motion on, they open as before.
 - In Command Deck, screen readers read the Servers button with the current server's name.
 
@@ -244,7 +243,7 @@ release changes the database, and anything an operator must do first.)
 - **Scrolling far back in a long channel while it reloads can make the list jump** to another spot. Scroll back to where you were; nothing is lost.
 - **The Windows installers are not code-signed.** Windows shows "Windows protected your PC" on install and on updates; choose "More info", then "Run anyway".
 - **A certificate change that is not a public-CA renewal shows every member a warning.** Compare the new fingerprint with the server owner through another channel before accepting.
-- **On a phone in the Command Deck preview, out of a call, after you close the keyboard with Back, the bottom bar stays hidden** until you tap outside the message box.
+- **On a phone in Command Deck, out of a call, after you close the keyboard with Back, the bottom bar stays hidden** until you tap outside the message box.
 - **In the Android app with gesture navigation, a swipe that starts at the very edge of the screen goes Back.** Start the swipe a little way in.
 
 ## v2.10.0
