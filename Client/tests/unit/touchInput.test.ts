@@ -1,5 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { installTouchInput } from "../../src/lib/ui/touchInput";
+import { listSessionResets, runSessionResets } from "../../src/lib/net/sessionRegistry";
+import { usePhone } from "../helpers/phoneMedia";
 
 type VV = EventTarget & { height: number; scale: number };
 
@@ -334,5 +336,121 @@ describe("abort", () => {
     touch("pointerdown", t);
     vi.advanceTimersByTime(600);
     expect(menus).toHaveLength(0);
+  });
+});
+
+describe("the typing class", () => {
+  const typing = (): boolean => document.body.classList.contains("composer-typing");
+
+  /** The chat's message box, a top-bar search field and a message to tap. */
+  function page(): { box: HTMLElement; text: HTMLTextAreaElement; send: HTMLButtonElement } {
+    const host = el(
+      '<input class="deck-search-field" aria-label="Search">' +
+        '<div class="message" id="m">hi</div>' +
+        '<div data-testid="message-input"><div class="message-input-box">' +
+        '<textarea class="msg-textarea" data-testid="msg-textarea"></textarea>' +
+        '<button class="send-btn">Send</button></div></div>',
+    );
+    return {
+      box: host.querySelector<HTMLElement>(".message-input-box")!,
+      text: host.querySelector<HTMLTextAreaElement>("textarea")!,
+      send: host.querySelector<HTMLButtonElement>(".send-btn")!,
+    };
+  }
+
+  /** Lets the focusout microtask run. */
+  const settle = (): Promise<void> => Promise.resolve();
+
+  it("is set while the chat's message box has focus on a phone", () => {
+    usePhone();
+    page().text.focus();
+    expect(typing()).toBe(true);
+  });
+
+  it("is not set off a phone", () => {
+    usePhone(false);
+    page().text.focus();
+    expect(typing()).toBe(false);
+  });
+
+  it("stays when focus moves to Send in the box", async () => {
+    usePhone();
+    const { text, send } = page();
+    text.focus();
+    send.focus();
+    await settle();
+    expect(typing()).toBe(true);
+  });
+
+  it("is not started by a button in the box: only the text field starts it", () => {
+    usePhone();
+    page().send.focus();
+    expect(typing()).toBe(false);
+  });
+
+  it("is not set by the top-bar search field", () => {
+    usePhone();
+    page();
+    document.querySelector<HTMLInputElement>(".deck-search-field")!.focus();
+    expect(typing()).toBe(false);
+  });
+
+  it("clears when a tap on the chat takes focus out of the box", async () => {
+    usePhone();
+    const { text } = page();
+    text.focus();
+    touch("pointerdown", document.getElementById("m")!);
+    text.blur();
+    await settle();
+    expect(typing()).toBe(false);
+  });
+
+  it("clears at the next press when the focused box was removed without a focusout", () => {
+    usePhone();
+    const { box, text } = page();
+    text.focus();
+    expect(typing()).toBe(true);
+    // WebKit sends no focusout for a removed element; stop jsdom's here.
+    document.addEventListener("focusout", (e) => e.stopImmediatePropagation(), {
+      capture: true,
+      once: true,
+    });
+    box.remove();
+    expect(typing()).toBe(true);
+    touch("pointerdown", document.getElementById("m")!);
+    expect(typing()).toBe(false);
+  });
+
+  it("clears when the window leaves the phone layout", () => {
+    usePhone();
+    const own = new AbortController();
+    installTouchInput(own.signal);
+    try {
+      page().text.focus();
+      expect(typing()).toBe(true);
+      usePhone(false);
+      window.dispatchEvent(new Event("resize"));
+      expect(typing()).toBe(false);
+    } finally {
+      own.abort();
+    }
+  });
+
+  it("is cleared, and its session reset removed, when the install's signal aborts", () => {
+    usePhone();
+    page().text.focus();
+    expect(typing()).toBe(true);
+    expect(listSessionResets()).toContain("touchInput:typing");
+    ctrl.abort();
+    expect(typing()).toBe(false);
+    expect(listSessionResets()).not.toContain("touchInput:typing");
+  });
+
+  it("is cleared by a session reset", () => {
+    usePhone();
+    page().text.focus();
+    expect(typing()).toBe(true);
+    runSessionResets("user");
+    expect(typing()).toBe(false);
   });
 });

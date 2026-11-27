@@ -727,6 +727,9 @@ const EXEMPT: readonly string[] = [
   // body-observer timers the timer-count probes read; bottomSheet.test.ts
   // ("closes from closeBottomSheet and from a session reset") runs the reset.
   "bottomSheet:open",
+  // A body class, not store state, registered inside installTouchInput, which
+  // adds document-wide listeners; touchInput.test.ts runs the reset.
+  "touchInput:typing",
   // The reset pops the history entry, and jsdom runs history.back() on a timer,
   // which the timer-count probes read; backHistory.test.ts ("a session reset
   // drops every claim and the guard, and pops the entry") runs the reset.

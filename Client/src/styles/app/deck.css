@@ -339,7 +339,7 @@ html.layout-deck
       .vw-mic-notice:not(:empty),
       .vw-stream-card
     ) {
-    max-height: 20vh;
+    max-height: 12vh;
     overflow-y: auto;
   }
   html.layout-deck .deck-status-bar .user-bar {
@@ -357,5 +357,63 @@ html.layout-deck
   }
   html.layout-deck .deck-status-bar .ub-info {
     display: flex;
+  }
+}
+
+/* On a phone while the message box has focus. Out of a call the status bar's
+   contents hide and the bar stays as a strip of its bottom inset, so Send
+   stays above the navigation bar after Back closes the keyboard. In a call the
+   status bar stays; the call bar and the tall panels go. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck body.composer-typing .deck-status-bar:not(:has(.voice-widget.visible)) {
+    min-height: 0;
+  }
+  html.layout-deck body.composer-typing .deck-status-bar:not(:has(.voice-widget.visible)) > * {
+    display: none;
+  }
+  html.layout-deck body.composer-typing .phone-call-bar {
+    display: none;
+  }
+  html.layout-deck
+    body.composer-typing
+    .deck-status-bar
+    :is(.vw-stats.visible, .vw-listening, .vw-mic-notice, .vw-stream-card) {
+    display: none;
+  }
+  /* A squeezed name clips instead of spilling over Mute. */
+  html.layout-deck .deck-status-bar .ub-info {
+    overflow: hidden;
+  }
+  /* The last small buttons in the bar. */
+  html.layout-deck
+    .deck-status-bar
+    :is(.vw-grant-mic, .vw-listening__stop, .vw-stream-card button) {
+    min-height: 44px;
+  }
+}
+
+/* A short, wide window: a phone on its side. Landscape, so a phone upright
+   with the keyboard up (as short, but narrower than tall) keeps its rows. */
+@media (max-height: 499px) and (orientation: landscape) {
+  /* Your row beside the call row. These repeat the desktop values, so only the
+     phone rules above are undone. */
+  html.layout-deck .deck-status-bar .voice-widget.visible {
+    flex: 1 1 auto;
+  }
+  html.layout-deck .deck-status-bar .user-bar {
+    flex: 0 1 240px;
+  }
+  /* With the keyboard up: the top bar keeps only its inset and the chat
+     header goes. */
+  html.layout-deck body.composer-typing .deck-top-bar {
+    min-height: 0;
+  }
+  /* The second selector outweighs the tab fold's Servers button rule. */
+  html.layout-deck body.composer-typing .deck-top-bar > *,
+  html.layout-deck body.composer-typing .deck-top-bar.has-server-tabs > * {
+    display: none;
+  }
+  html.layout-deck body.composer-typing .chat-header {
+    display: none;
   }
 }
