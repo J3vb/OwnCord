@@ -22,7 +22,8 @@ export function showWhatsNewDialog(
   container: Element,
   entry: ChangelogVersion,
   onOpenHistory: () => void,
-  onClosed: () => void,
+  /** `toHistory` is true when Version history closed it, on its way to Settings. */
+  onClosed: (toHistory: boolean) => void,
 ): WhatsNewDialog {
   const disposable = new Disposable();
   const overlay = createElement("div", {
@@ -35,6 +36,7 @@ export function showWhatsNewDialog(
 
   let restoreFocus: (() => void) | null = null;
   let closed = false;
+  let toHistory = false;
   const close = (): void => {
     if (closed) return;
     closed = true;
@@ -42,7 +44,7 @@ export function showWhatsNewDialog(
     overlay.remove();
     restoreFocus?.();
     restoreFocus = null;
-    onClosed();
+    onClosed(toHistory);
   };
 
   const header = createElement("div", { class: "modal-header" });
@@ -92,6 +94,7 @@ export function showWhatsNewDialog(
   historyBtn.addEventListener(
     "click",
     () => {
+      toHistory = true;
       close();
       onOpenHistory();
     },

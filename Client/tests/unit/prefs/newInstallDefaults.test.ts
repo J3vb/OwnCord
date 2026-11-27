@@ -247,14 +247,27 @@ describe("settleDeckSwitch", () => {
     expectSettled("deck", false);
   });
 
-  it.each([
-    ["a desktop", () => hostDesktopApp()],
+  const phones: Array<[string, () => void]> = [
     ["a phone browser", () => (clearHost(), usePhone())],
     ["the Android app", () => hostAndroidApp()],
-  ])("starts a new install on %s on Command Deck with no notice", (_name, host) => {
+  ];
+
+  it.each([["a desktop", () => hostDesktopApp()], ...phones] as Array<[string, () => void]>)(
+    "starts a new install on %s on Command Deck with no notice",
+    (_name, host) => {
+      host();
+      boot();
+      expectSettled("deck", false);
+    },
+  );
+
+  it.each(phones)("keeps a Classic already settled on %s, with no notice", (_name, host) => {
     host();
+    earlierInstall('"classic"');
+    localStorage.setItem(MARKER_KEY, "true");
     boot();
-    expectSettled("deck", false);
+    expectSettled("classic", false);
+    expect(getActiveThemeName()).toBe("light");
   });
 
   it("keeps a Classic seeded with nothing else, as the test harness seeds it", () => {

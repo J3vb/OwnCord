@@ -8,8 +8,10 @@ export type ScreenLayoutOption = "classic" | "deck" | "fresh";
  * Stores the screen layout in every page of `context` before the app's first
  * load, only when no layout is stored yet, so a spec that sets or clears its
  * own layout wins in either script order. A context script also reaches
- * pop-out windows. It also marks the one-time move to Command Deck as settled,
- * so a seeded Classic stays Classic whatever else a spec stores.
+ * pop-out windows. It also writes the marker that the one-time move to Command
+ * Deck is settled (`owncord:settings:deckSwitchDone`), so a seeded Classic
+ * stays Classic whatever else a spec stores. A spec that tests the move itself
+ * must start from `"fresh"` or clear that marker before the app loads.
  */
 export async function seedScreenLayout(
   context: BrowserContext,

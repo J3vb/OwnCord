@@ -114,6 +114,24 @@ describe("the Command Deck notice", () => {
     expect(onOpenAppearance).toHaveBeenCalledOnce();
   });
 
+  it("leaves an Esc another dialog handled, or one typed with focus outside, alone", async () => {
+    const dialog = await shown();
+    const handled = new KeyboardEvent("keydown", {
+      key: "Escape",
+      bubbles: true,
+      cancelable: true,
+    });
+    const button = dialog.querySelector<HTMLElement>("[data-testid=layout-notice-done]")!;
+    button.focus();
+    button.addEventListener("keydown", (e) => e.preventDefault(), { once: true });
+    button.dispatchEvent(handled);
+    expect(notice()).not.toBeNull();
+    opener.focus();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+    expect(notice()).not.toBeNull();
+    expect(localStorage.getItem(NOTICE_KEY)).toBe("true");
+  });
+
   it("keeps focus inside while open", async () => {
     const dialog = await shown();
     const buttons = [...dialog.querySelectorAll<HTMLElement>("button")];
@@ -193,13 +211,21 @@ describe("startup notices", () => {
     expectConsole("warn", /What's new check failed/);
   });
 
-  it("opens About from What's new and Appearance from the notice", async () => {
+  it("Version history opens About and keeps the notice for the next start", async () => {
     markVersionSeen("2.0.0");
     appVersion.mockResolvedValue("2.1.0");
     notices.mount(container);
     await vi.waitFor(() => expect(whatsNew()).not.toBeNull());
     (whatsNew()!.querySelector(".whats-new-actions .ac-btn.secondary") as HTMLElement).click();
     expect(openSettings).toHaveBeenLastCalledWith("About");
+    await vi.dynamicImportSettled();
+    expect(notice()).toBeNull();
+    expect(localStorage.getItem(NOTICE_KEY)).toBe("true");
+
+    // The next start: What's new has nothing new, so the notice shows.
+    notices.destroy?.();
+    notices = createStartupNotices(openSettings);
+    notices.mount(container);
     await vi.waitFor(() => expect(notice()).not.toBeNull());
     notice()!.querySelector<HTMLElement>("[data-testid=layout-notice-settings]")!.click();
     expect(openSettings).toHaveBeenLastCalledWith("Appearance");

@@ -136,7 +136,10 @@ export function showLayoutNoticeDialog(
   document.addEventListener(
     "keydown",
     (e: KeyboardEvent) => {
-      if (e.key === "Escape" && !isImeCommit(e)) close();
+      // Only an Esc meant for this dialog: not one a dialog on top already
+      // handled, and not one typed while focus is elsewhere.
+      if (e.key !== "Escape" || e.defaultPrevented || isImeCommit(e)) return;
+      if (modal.contains(document.activeElement)) close();
     },
     { signal: disposable.signal },
   );

@@ -1,7 +1,9 @@
 /**
  * The notices the main page shows over itself once it mounts, one at a time:
  * What's new first, then the Command Deck notice once What's new has closed or
- * found nothing to show, so one never covers the other.
+ * found nothing to show, so one never covers the other. When Version history
+ * closes What's new, Settings opens instead and the notice waits for the next
+ * start.
  */
 
 import type { MountableComponent } from "../../lib/text/safeRender";

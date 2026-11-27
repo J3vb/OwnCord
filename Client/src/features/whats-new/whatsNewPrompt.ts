@@ -16,7 +16,8 @@ const log = createLogger("whats-new");
 /** `onOpenHistory` opens Settings › About; the page passes it so the lazy
  *  dialog chunk does not pull the UI store into a shared startup chunk.
  *  `onSettled` runs once, when this start shows no notes, the check fails, or
- *  the person closes the dialog; never after `destroy()`. */
+ *  the person closes the dialog; never after `destroy()`, and not when Version
+ *  history closes it, since Settings then opens over the page. */
 export function createWhatsNewPrompt(
   onOpenHistory: () => void,
   onSettled: (container: Element) => void = () => {},
@@ -45,9 +46,9 @@ export function createWhatsNewPrompt(
     if (owner.signal.aborted) return false;
     markVersionSeen(version);
     if (entry === null) return false;
-    dialog = showWhatsNewDialog(container, entry, onOpenHistory, () => {
+    dialog = showWhatsNewDialog(container, entry, onOpenHistory, (toHistory) => {
       dialog = null;
-      settle(container);
+      if (!toHistory) settle(container);
     });
     return true;
   }
