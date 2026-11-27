@@ -446,3 +446,15 @@ html.layout-deck
     white-space: nowrap;
   }
 }
+
+/* On a phone Buddies is a drawer from below the top bar to the status bar.
+   member-list.css already pads the column's bottom inset, which the bottom
+   edge counts here. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .member-column {
+    top: var(--deck-above-header);
+    bottom: max(var(--deck-below), var(--safe-bottom, 0px));
+    width: min(320px, 88vw) !important;
+    padding-bottom: 0;
+  }
+}

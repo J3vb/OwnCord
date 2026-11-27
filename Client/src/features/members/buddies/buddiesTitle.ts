@@ -10,7 +10,11 @@ import { buddiesText } from "../../../i18n/buddies";
 
 export function createBuddiesTitle(signal: AbortSignal): HTMLElement {
   const title = createElement("div", { class: "buddies-title", "data-testid": "buddies-title" });
-  const heading = createElement("h2", { class: "buddies-title-text" }, buddiesText("title"));
+  const heading = createElement(
+    "h2",
+    { class: "buddies-title-text", tabindex: "-1" },
+    buddiesText("title"),
+  );
   const count = createElement("span", {
     class: "buddies-count",
     "data-testid": "buddies-count",

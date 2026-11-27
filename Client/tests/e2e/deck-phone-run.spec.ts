@@ -17,12 +17,10 @@ import {
   ROUTE_HEALTH,
   ROUTE_LOGIN,
   connectVoiceSession,
-  dmChannel,
   emitWsMessage,
   navigateToMainPage,
   openSettings,
   switchSettingsTab,
-  voiceJoinWithTokenHandlers,
   voiceWsHandlers,
   parkLiveKitSocket,
 } from "./helpers";
@@ -42,12 +40,16 @@ import {
   BAR_LEAVE,
   BAR_MUTE,
   LEAVE,
+  MUTE,
+  PHONE_DM as DM,
   boxOf,
+  dmCallScene,
   enterCall,
   expectOneMuteAndLeave,
   openTree,
   setVoiceFlag,
   statusBar,
+  swipeBuddiesOpen,
 } from "./support/phoneCall";
 
 const LAYOUT_KEY = "owncord:settings:screenLayout";
@@ -154,28 +156,13 @@ const SCENE = {
   },
 };
 
-const DM = 100;
-const DM_CHANNELS = [dmChannel(DM, { id: 2, username: "otheruser" })];
-
 /** A session with one DM whose call can be started and connected. */
-const DM_SCENE = {
-  httpRoutes: [
-    ROUTE_HEALTH,
-    ROUTE_LOGIN,
-    { pattern: "/pins", status: 200, body: { messages: [], has_more: false } },
-    { pattern: "GET /api/v1/dms", status: 200, body: { dm_channels: DM_CHANNELS } },
-    { pattern: "/messages", status: 200, body: { messages: [], has_more: false } },
+const DM_SCENE = dmCallScene({
+  members: [
+    { id: 1, username: "testuser", avatar: "", status: "online", role: "admin" },
+    { id: 2, username: "otheruser", avatar: "", status: "online", role: "member" },
   ],
-  simulateWsFlow: true,
-  wsHandlers: voiceJoinWithTokenHandlers(),
-  readyOverrides: {
-    members: [
-      { id: 1, username: "testuser", avatar: "", status: "online", role: "admin" },
-      { id: 2, username: "otheruser", avatar: "", status: "online", role: "member" },
-    ],
-    dm_channels: DM_CHANNELS,
-  },
-};
+});
 
 const topBar = (page: Page): Locator => page.locator(".deck-top-bar");
 
@@ -429,5 +416,26 @@ test.describe("phone Command Deck on its side", () => {
     await expectOneMuteAndLeave(page, "863 x 360");
     await expectNoPageScroll(page);
     await attachScreenshot(testInfo, "in a call", page);
+  });
+});
+
+test.describe("phone Command Deck, Buddies in a call", () => {
+  test.use(PIXEL_7.use);
+
+  test("Buddies swiped open while the message box has focus keeps Mute, Leave and the focus", async ({
+    page,
+  }) => {
+    await startPhoneDeck(page, { voice: true });
+    await enterCall(page);
+    const box = page.locator(".message-input-wrap textarea");
+    await box.focus();
+    await swipeBuddiesOpen(page);
+    await expect(page.locator("#member-column")).toBeVisible();
+    await expect(box).toBeFocused();
+    await expect.poll(() => reachableCount(page, MUTE)).toBe(1);
+    await expect.poll(() => reachableCount(page, LEAVE)).toBe(1);
+    const column = await boxOf(page.locator("#member-column"));
+    const bar = await boxOf(statusBar(page));
+    expect(column.y + column.height).toBeLessThanOrEqual(bar.y + 0.5);
   });
 });

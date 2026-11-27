@@ -397,3 +397,19 @@ html.layout-deck .server-tree-direct .dm-member-count {
   flex: none;
   padding: 0;
 }
+
+/* On a phone every row and strip button is at least 44 px to hit. */
+@media (pointer: coarse) and (max-width: 899px), (pointer: coarse) and (max-height: 499px) {
+  html.layout-deck .server-tree-strip,
+  html.layout-deck .server-tree .category,
+  html.layout-deck .server-tree .channel-item,
+  html.layout-deck .server-tree .voice-user-item,
+  html.layout-deck .server-tree-direct-head,
+  html.layout-deck .server-tree-direct .dm-nav-row {
+    min-height: 44px;
+  }
+  html.layout-deck .server-tree-strip .sidebar-header-action {
+    width: 44px;
+    height: 44px;
+  }
+}

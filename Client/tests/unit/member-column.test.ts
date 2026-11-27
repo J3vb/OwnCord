@@ -21,6 +21,16 @@ import { expectConsole } from "../helpers/console";
 import { panelSwipe } from "../../src/lib/ui/panelDrag";
 import { pressBack } from "../helpers/backNav";
 import { sendAppToBackground } from "../helpers/touch";
+import { PHONE_LAYOUT_QUERY } from "../../src/lib/ui/phoneLayout";
+import { createMemberList } from "../../src/features/members/MemberList";
+import "../../src/features/moderation/AdminActions";
+import {
+  defaultOpts,
+  resetStore,
+  rightClickMember,
+  setTestMembers,
+  testMembers,
+} from "../helpers/memberListHarness";
 
 vi.mock("../../src/features/deck/roomInfoPanel", async (importOriginal) => {
   const real = await importOriginal<typeof import("../../src/features/deck/roomInfoPanel")>();
@@ -921,7 +931,7 @@ describe("MemberColumn", () => {
 
     beforeEach(() => {
       mq = new FakeMediaQueryList();
-      media = vi.fn(() => mq);
+      media = vi.fn((q: string) => (q === PHONE_LAYOUT_QUERY ? new FakeMediaQueryList() : mq));
       vi.stubGlobal("matchMedia", media);
       buildPanel.mockImplementation(() => {
         const element = document.createElement("div");
@@ -1050,6 +1060,91 @@ describe("MemberColumn", () => {
         expect(fallbackFocus).not.toHaveBeenCalled();
         expect(localStorage.getItem("owncord:settings:memberListOpen")).toBeNull();
       });
+    });
+  });
+
+  describe("Buddies on phone Command Deck", () => {
+    beforeEach(() => {
+      const phone = new FakeMediaQueryList();
+      phone.matches = true;
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn(() => phone),
+      );
+      setRunningScreenLayout("deck");
+      buildPanel.mockImplementation(() => {
+        const element = document.createElement("div");
+        element.innerHTML =
+          '<h2 class="buddies-title-text" tabindex="-1">Buddies</h2><input data-testid="member-search">';
+        const panel = { element, destroy: vi.fn() };
+        panels.push(panel);
+        return panel;
+      });
+    });
+    afterEach(async () => {
+      ctrl?.destroy();
+      await settle();
+      setRunningScreenLayout("classic");
+      vi.unstubAllGlobals();
+    });
+
+    const heading = (): HTMLElement | null => body.querySelector(".buddies-title-text");
+
+    it("the button opens the drawer with focus on the heading, not the search", () => {
+      ctrl = make();
+      ctrl.sync();
+      ctrl.toggle();
+      expect(column.hidden).toBe(false);
+      expect(button.getAttribute("aria-pressed")).toBe("true");
+      expect(document.activeElement).toBe(heading());
+      expect(guarded()).toBe(true);
+    });
+
+    it("with no heading, nothing in the drawer takes focus", () => {
+      buildPanel.mockImplementation(() => {
+        const element = document.createElement("div");
+        element.innerHTML = '<input data-testid="member-search">';
+        const panel = { element, destroy: vi.fn() };
+        panels.push(panel);
+        return panel;
+      });
+      ctrl = make();
+      ctrl.toggle();
+      expect(column.hidden).toBe(false);
+      expect(column.contains(document.activeElement)).toBe(false);
+    });
+
+    it("Classic on a phone still focuses the search", () => {
+      setRunningScreenLayout("classic");
+      ctrl = make();
+      ctrl.toggle();
+      expect(document.activeElement).toBe(body.querySelector('[data-testid="member-search"]'));
+      expect(document.activeElement).not.toBe(heading());
+    });
+
+    it("the buddy menu and the Buddies drawer close on one Back", async () => {
+      resetStore();
+      setTestMembers(testMembers);
+      buildPanel.mockImplementation(() => {
+        const element = document.createElement("div");
+        const list = createMemberList(defaultOpts());
+        list.mount(element);
+        const panel = { element, destroy: vi.fn(() => list.destroy?.()) };
+        panels.push(panel);
+        return panel;
+      });
+      ctrl = make();
+      ctrl.toggle();
+      await rightClickMember(body, 3);
+      expect(document.querySelector(".context-menu")).not.toBeNull();
+      expect(guarded()).toBe(true);
+
+      await pressBack();
+      expect(document.querySelector(".context-menu")).toBeNull();
+      expect(ctrl.isOverlayOpen()).toBe(false);
+      expect(column.hidden).toBe(true);
+      expect(guarded()).toBe(false);
+      resetStore();
     });
   });
 });

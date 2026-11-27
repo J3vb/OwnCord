@@ -195,6 +195,10 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
     body.querySelector<HTMLElement>('[data-testid="member-search"]')?.focus();
   }
 
+  function focusHeading(): void {
+    body.querySelector<HTMLElement>(".buddies-title-text")?.focus();
+  }
+
   /** The call view or a forum wants the width. */
   function stepsAside(): boolean {
     return callView || getActiveChannel()?.type === "forum";
@@ -387,7 +391,11 @@ export function createMemberColumn(opts: MemberColumnOptions): MemberColumn {
       if (overlayMode()) {
         narrowOpen = !narrowOpen;
         sync();
-        if (narrowOpen) focusSearch();
+        // Phone Deck focuses the heading, so opening Buddies does not open the keyboard.
+        if (narrowOpen) {
+          if (runningScreenLayout() === "deck" && isPhoneLayout()) focusHeading();
+          else focusSearch();
+        }
         return;
       }
       if (stepsAside()) {
