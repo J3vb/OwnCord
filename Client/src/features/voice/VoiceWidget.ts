@@ -29,10 +29,12 @@ import { shareBlockReason } from "./shareGate";
 import { canPublishScreen } from "@lib/hostOs";
 import { createMusicButton, syncMusicButton, watchMusicSupport } from "./musicControl";
 import { createSecuredBadge, type SecuredBadge } from "./securedBadge";
-import type { StreamCard } from "./voiceWidget/streamCard";
+import { createStreamCardHost, type StreamCardHost } from "./widget/streamCardHost";
+import { createDeckPopover, type DeckPopover } from "./widget/deckPopover";
 import {
   createSignalButton,
   createStatsPane,
+  statsCallKeyOf,
   type SignalButton,
   type StatsPane,
 } from "./widget/statsPane";
@@ -69,11 +71,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let disconnectBtn: HTMLButtonElement | null = null;
   /** Quick toggle for the Enhanced Noise Suppression pref Settings also sets. */
   let nsBtn: HTMLButtonElement | null = null;
-  /** The stream card while you share; loaded on the first share. */
-  let streamCard: StreamCard | null = null;
-  /** Owns the current card's listeners; aborted when the card goes. */
-  let streamCardScope: Disposable | null = null;
-  let streamCardLoad = 0;
+  /** The share card while you share; loaded on the first share. */
+  let shareCard: StreamCardHost | null = null;
   /** Persistent polite status for a moderator-imposed mute/deafen. The
    *  disabled controls carry only a `title`, which a screen reader never
    *  reaches (a disabled button cannot take focus), so the reason is announced
@@ -88,6 +87,9 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   // Connection stats
   let signalBtn: SignalButton | null = null;
   let statsPane: StatsPane | null = null;
+  let statsPopover: DeckPopover | null = null;
+  /** The call the ping history belongs to (statsCallKeyOf). */
+  let statsCallKey: string | null = null;
   let statsPoller: ConnectionStatsPoller | null = null;
   let statsUnlisten: (() => void) | null = null;
 
@@ -123,6 +125,17 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     statsUnlisten = null;
     statsPoller?.stop();
     statsPoller = null;
+  }
+
+  /** A new call (or a dropped link) starts the ping graph over, with a fresh
+   *  poller so a sample still in flight from the old room cannot land. */
+  function syncStatsCall(voice: VoiceState): void {
+    const key = statsCallKeyOf(voice);
+    if (key === statsCallKey) return;
+    statsCallKey = key;
+    stopStatsPoller();
+    statsPane?.resetHistory();
+    if (key !== null) startStatsPoller();
   }
 
   function updateElapsedTimer(): void {
@@ -171,6 +184,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     if (btn === cameraBtn) {
       return localCamera ? t("widget.control.cameraOff") : t("widget.control.cameraOn");
     }
+    if (btn === shareBtn && shareCard?.opensCard() === true)
+      return t("widget.control.shareOptions");
     if (btn === shareBtn) {
       return localScreenshare ? t("widget.control.shareStop") : t("widget.control.shareStart");
     }
@@ -265,22 +280,21 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     const voice = voiceStore.getState();
     const channelId = voice.currentChannelId;
-    syncStreamCard(isShareLive(voice));
+    shareCard?.sync(isShareLive(voice));
+    syncStatsCall(voice);
 
     if (channelId === null) {
       root.classList.remove("visible");
       setCallRow(false);
-      stopStatsPoller();
       stopElapsedTimer();
-      statsPane?.el.classList.remove("visible");
-      signalBtn?.el.setAttribute("aria-expanded", "false");
+      statsPopover?.close();
       return;
     }
 
     root.classList.add("visible");
     setCallRow(true);
-    startStatsPoller();
     startElapsedTimer();
+    statsPopover?.sync();
     updateStatus(voice);
     updateFrozen(uiStore.getState().connectionStatus);
     renderChannelName(channelId);
@@ -289,28 +303,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     if (musicBtn !== null) syncMusicButton(musicBtn, voice);
     listenOnly?.sync(voice.listenOnly);
     listeningBar?.sync(voice);
-  }
-
-  function syncStreamCard(sharing: boolean): void {
-    if (!sharing) {
-      streamCardLoad++;
-      streamCardScope?.destroy();
-      streamCardScope = null;
-      streamCard?.el.remove();
-      streamCard = null;
-      return;
-    }
-    if (streamCard !== null) {
-      streamCard.update();
-      return;
-    }
-    const load = ++streamCardLoad;
-    void import("./voiceWidget/streamCard").then(({ createStreamCard }) => {
-      if (load !== streamCardLoad || root === null || controlsRow === null) return;
-      streamCardScope = new Disposable();
-      streamCard = createStreamCard(options.onScreenshareToggle, streamCardScope.signal);
-      root.insertBefore(streamCard.el, controlsRow);
-    });
   }
 
   function createControlButton(
@@ -343,12 +335,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       { signal: disposable.signal },
     );
     return link;
-  }
-
-  function toggleStatsPane(): void {
-    if (statsPane === null || signalBtn === null) return;
-    const open = statsPane.el.classList.toggle("visible");
-    signalBtn.el.setAttribute("aria-expanded", String(open));
   }
 
   function createNoiseButton(): HTMLButtonElement {
@@ -385,7 +371,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     securedBadge = createSecuredBadge("vw-secured");
     timerEl = createElement("span", { class: "vw-timer" }, "00:00");
     channelNameEl = createElement("span", { class: "vw-channel" }, t("widget.channelFallback"));
-    signalBtn = createSignalButton(toggleStatsPane, disposable.signal);
+    signalBtn = createSignalButton(() => statsPopover?.toggle(), disposable.signal);
 
     const headerMain = createElement("div", { class: "vw-header-main" });
     appendChildren(headerMain, statusLabel, timerEl);
@@ -407,7 +393,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     shareBtn = createControlButton(
       t("widget.control.screenshare"),
       "monitor",
-      options.onScreenshareToggle,
+      () => (shareCard === null ? options.onScreenshareToggle() : shareCard.press()),
       "vw-share-btn",
     );
     musicBtn = createMusicButton(disposable.signal);
@@ -430,7 +416,23 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     root = createElement("div", { class: "voice-widget", "data-testid": "voice-widget" });
     const header = buildHeader();
     statsPane = createStatsPane();
+    if (signalBtn !== null) {
+      statsPopover = createDeckPopover({
+        panel: statsPane.el,
+        anchor: signalBtn.el,
+        openClass: "visible",
+        inlineToggle: true,
+        signal: disposable.signal,
+      });
+    }
     const controls = buildControls();
+    shareCard = createStreamCardHost({
+      place: () =>
+        root === null || controlsRow === null ? null : { parent: root, before: controlsRow },
+      button: () => shareBtn,
+      toggleShare: options.onScreenshareToggle,
+      onChange: () => updateFrozen(uiStore.getState().connectionStatus),
+    });
     listenOnly = createListenOnlyUi(disposable.signal, render);
     listeningBar = createListeningBar(disposable.signal, render);
 
@@ -463,7 +465,10 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   function destroy(): void {
     setCallRow(false);
     stopStatsPoller();
+    statsCallKey = null;
     stopElapsedTimer();
+    shareCard?.destroy();
+    shareCard = null;
     disposable.destroy();
     for (const unsub of unsubs) {
       unsub();
@@ -480,10 +485,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     shareBtn = null;
     musicBtn = null;
     disconnectBtn = null;
-    streamCardScope?.destroy();
-    streamCardScope = null;
-    streamCard = null;
-    streamCardLoad++;
     modStatusEl = null;
     listenOnly?.dispose();
     listenOnly = null;
@@ -491,6 +492,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     signalBtn = null;
     timerEl = null;
     statsPane = null;
+    statsPopover = null;
   }
 
   return { mount, destroy };

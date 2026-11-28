@@ -293,10 +293,25 @@ subscribes each voice unless deafened, and each stream as
 the native backend still auto-subscribes, so it unsubscribes an unwatched
 stream as it is published. Every subscribed tile asks only for its displayed
 size, and a tile nobody can see (grid closed, app hidden, stopped) for none.
-Your own screen share is covered by what is going out (surface, resolution, fps, audio) with **Stop sharing** and
-**Hide preview**. While you share, the voice widget shows a stream card
-(`features/voice/voiceWidget/streamCard.ts`, loaded on the first share): what is
-going out, **Change source**, **Quality** and **Stop sharing**. Change source
+Your own screen share is covered by a compact card of what is going out (LIVE,
+the surface and the window or tab name, chips for the resolution, the sent fps
+and audio) with **Hide preview** and **Stop**. While you share, the voice
+widget shows a share card (`features/voice/voiceWidget/streamCard.ts`, loaded
+on the first share): LIVE and what is going out, a muted live preview (its
+**Hide preview** stops only that picture; there is none on the Linux native
+path), chips for the resolution, frame rate and audio, **Quality** as four
+segments (a radio group the arrow keys move), **Change source** and **Stop
+sharing**. Classic and the phone layout show it inline above the call
+controls, where the share button stops the share. Under Command Deck on a
+desktop it is a popover above the share button in the status bar
+(`features/voice/widget/deckPopover.ts`): while you share that button opens
+and closes the card, and Esc or a click outside closes it; a share that ends
+elsewhere takes an open card down with it. The ping button's connection card
+(`features/voice/widget/statsPane.ts`) opens the same way there and inline
+elsewhere: the quality and ping, a graph of the call's last 60 pings
+(`widget/pingHistory.ts`, in memory only, started over when the call
+changes, the link drops or you leave), then Upload and Download with a meter
+each and the session totals. Change source
 opens the picker and swaps the new capture under the published track
 (`features/voice/screenshareChange.ts`), so viewers keep watching and the
 server hears no `voice_screenshare`; cancelling the picker changes nothing.

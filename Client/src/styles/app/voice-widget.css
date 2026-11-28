@@ -147,40 +147,221 @@
   opacity: 0.6;
   cursor: wait;
 }
-/* The stream card while you share (WP 1C-1): what goes out, then its actions. */
+/* The share card while you share: LIVE and what goes out, a live preview,
+   its format chips, the Quality segments, then Change source and Stop
+   sharing. Inline in the widget; a popover under Deck on a desktop (deck.css). */
 .vw-stream-card {
+  display: flex;
+  flex-direction: column;
   margin: 4px 4px 0;
-  padding: 6px;
-  border-radius: var(--radius-sm);
-  background: var(--bg-active);
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--bg-secondary);
   font-size: var(--font-size-xs);
 }
-.vw-stream-card > div:last-child {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 4px;
-  margin-top: 6px;
+.vw-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
-/* The quality names are long: the select takes its own row. */
-.vw-stream-card select {
-  grid-area: 2 / 1 / 3 / 3;
+.vw-card-eyebrow {
+  color: var(--text-muted);
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
-.vw-stream-card button,
-.vw-stream-card select {
-  min-width: 0;
-  padding: 4px;
+/* LIVE: a red pill with a white dot; your own share's tile uses it too. */
+.vw-live-badge {
+  display: inline-flex;
+  flex: none;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--danger-fill);
+  color: var(--on-fill);
+  font-size: var(--font-size-xxs);
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+.vw-live-badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.vw-card-title {
+  margin-top: 8px;
+  color: var(--header-primary);
+  font-size: var(--font-size-md);
+  font-weight: 650;
+}
+.vw-card-sub {
+  overflow: hidden;
+  color: var(--text-muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vw-share-preview {
+  position: relative;
+  margin-top: 10px;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+.vw-share-preview-video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.vw-share-preview--off {
+  aspect-ratio: auto;
+  min-height: 34px;
+}
+.vw-share-preview--off :is(.vw-share-preview-video, .vw-share-preview-tag) {
+  display: none;
+}
+.vw-share-preview-tag,
+.vw-share-preview-toggle {
+  position: absolute;
+  padding: 3px 7px;
   border: none;
   border-radius: var(--radius-sm);
-  background: var(--bg-hover);
+  background: var(--scrim-strong);
+  color: var(--on-fill);
+  font: inherit;
+  font-size: var(--font-size-xxs);
+}
+.vw-share-preview-tag {
+  left: 8px;
+  bottom: 8px;
+}
+.vw-share-preview-toggle {
+  top: 6px;
+  right: 6px;
+  cursor: pointer;
+}
+.vw-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.vw-stream-card .vw-chips {
+  margin-top: 10px;
+}
+.vw-chip {
+  padding: 3px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--bg-input);
   color: var(--text-normal);
+  font-size: var(--font-size-xxs);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.vw-chip--on {
+  border-color: color-mix(in srgb, var(--text-positive) 45%, transparent);
+  color: var(--text-positive);
+}
+.vw-stream-card > .vw-card-eyebrow {
+  margin: 12px 0 6px;
+}
+.vw-quality {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+  padding: 3px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tertiary);
+}
+.vw-quality-seg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 0;
+  padding: 5px 2px;
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--text-muted);
   font: inherit;
   cursor: pointer;
 }
-.vw-stream-card .vw-stream-stop {
-  color: var(--text-danger);
+.vw-quality-seg:hover {
+  background: var(--bg-hover);
+  color: var(--text-normal);
 }
-select[hidden] + .vw-stream-stop {
-  grid-column: 1 / -1;
+.vw-quality-seg[aria-checked="true"] {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 650;
+}
+.vw-quality[aria-busy="true"] .vw-quality-seg {
+  cursor: progress;
+}
+.vw-quality-res {
+  font-size: var(--font-size-xxs);
+  opacity: 0.8;
+  white-space: nowrap;
+}
+.vw-card-actions {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+.vw-card-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg-input);
+  color: var(--text-normal);
+  font: inherit;
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.vw-card-btn[hidden] {
+  display: none;
+}
+.vw-card-btn:hover {
+  background: var(--bg-active);
+}
+.vw-stream-card .vw-stream-stop {
+  border-color: transparent;
+  background: var(--danger-fill);
+  color: var(--on-fill);
+}
+.vw-stream-card .vw-stream-stop:hover {
+  background: var(--danger-fill-hover);
+}
+/* A card lifted into a popover (deck.css places it): a stronger edge, a
+   shadow, and the arrow down to its button in the card's own colours. */
+.vw-pop {
+  border-color: var(--border-strong);
+  box-shadow: var(--shadow-lg);
+}
+.vw-pop::after {
+  border-right: 1px solid var(--border-strong);
+  border-bottom: 1px solid var(--border-strong);
+  background: var(--bg-secondary);
+}
+/* The button whose card is open. */
+:is(.vw-signal, .vw-share-btn)[aria-expanded="true"] {
+  box-shadow: inset 0 0 0 1px var(--accent);
 }
 /* The listen-only explanation sits below the Grant Microphone button: the
    state needs a reason and a next step, not just an action (BPR-092). */
@@ -221,31 +402,121 @@ select[hidden] + .vw-stream-stop {
   font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
-/* The stats pane: Upload and Download tiles over one quiet footer line. */
+/* The connection card: quality and ping over their recent history, then the
+   Upload and Download tiles and one quiet footer line of session totals. */
 .vw-stats {
   margin: 0 0 6px;
-  padding: 8px;
-  background: var(--bg-tertiary);
+  padding: 10px;
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
+  background: var(--bg-secondary);
   display: none;
 }
 .vw-stats.visible {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 8px;
+}
+.vw-conn-top,
+.vw-conn-main,
+.vw-spark-legend {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.vw-conn-top {
+  align-items: center;
+}
+.vw-conn-main {
+  align-items: flex-end;
+  margin-top: 4px;
+}
+.vw-conn-pill {
+  --vw-pill: var(--text-positive);
+  padding: 1px 8px;
+  border: 1px solid color-mix(in srgb, var(--vw-pill) 45%, transparent);
+  border-radius: var(--radius-pill);
+  background: color-mix(in srgb, var(--vw-pill) 14%, transparent);
+  color: var(--vw-pill);
+  font-size: var(--font-size-xxs);
+  font-weight: 700;
+}
+.vw-conn-pill::before {
+  content: "● ";
+}
+.vw-conn-pill[data-quality="fair"] {
+  --vw-pill: var(--text-warning);
+}
+.vw-conn-pill:is([data-quality="poor"], [data-quality="bad"]) {
+  --vw-pill: var(--text-danger);
+}
+.vw-conn-ms {
+  color: var(--header-primary);
+  font-size: calc(var(--font-size, 16px) * 2);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.vw-conn-ping small {
+  margin-left: 3px;
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+}
+.vw-conn-where {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  text-align: right;
+}
+.vw-conn-server {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.vw-conn-secured {
+  color: var(--text-positive);
+}
+.vw-conn-secured--degraded {
+  color: var(--text-danger);
+}
+.vw-spark {
+  display: block;
+  width: 100%;
+  height: 46px;
+}
+.vw-spark-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.6;
+  vector-effect: non-scaling-stroke;
+}
+.vw-spark-fill {
+  fill: currentColor;
+  fill-opacity: 0.16;
+}
+.vw-spark-legend {
+  margin-top: -6px;
+  color: var(--text-muted);
+  font-size: var(--font-size-xxs);
 }
 .vw-stats-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 6px;
+  gap: 8px;
 }
 .vw-stats-tile {
   display: flex;
   flex-direction: column;
   min-width: 0;
-  padding: 6px 8px;
-  background: var(--bg-secondary);
-  border-radius: var(--radius-sm);
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-md);
 }
 .vw-stats-tile-label {
   display: flex;
@@ -287,18 +558,33 @@ select[hidden] + .vw-stream-stop {
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
+.vw-stat-meter {
+  height: 4px;
+  margin-top: 6px;
+  overflow: hidden;
+  border-radius: 2px;
+  background: var(--bg-active);
+}
+.vw-stat-meter-fill {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: 2px;
+  background: var(--accent);
+}
 .vw-stats-footer {
   display: flex;
   justify-content: space-between;
   gap: 8px;
-  padding: 0 2px;
+  padding: 8px 2px 0;
+  border-top: 1px solid var(--border);
   color: var(--text-muted);
   font-size: var(--font-size-xs);
   white-space: nowrap;
 }
 .vw-stats-totals {
   display: inline-flex;
-  gap: 6px;
+  gap: 8px;
   min-width: 0;
 }
 .vw-stat-total {

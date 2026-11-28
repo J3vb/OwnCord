@@ -64,7 +64,7 @@ test.describe("Voice Widget", () => {
     await expect(widget.locator(".vw-stats")).toHaveClass(/visible/);
 
     // Two tiles, Upload then Download, each a big rate over its packet count,
-    // and one footer line for the RTT/session totals.
+    // and one footer line for the session totals.
     const tiles = widget.locator(".vw-stats-tile");
     await expect(tiles).toHaveCount(2);
     await expect(tiles.nth(0).locator(".vw-stats-tile-label")).toContainText("Upload");

@@ -258,15 +258,19 @@ describe("VideoGrid", () => {
           audioUserId: 1,
           isScreenshare: true,
         });
-        const detail = () => cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent;
+        // The chips, read as one line.
+        const detail = () =>
+          [...cell(1 + 1_000_000).querySelectorAll(".video-self-detail .vw-chip")]
+            .map((c) => c.textContent)
+            .join(" · ");
         const sender = () => cell(1 + 1_000_000).querySelector<HTMLElement>(".video-self-stats")!;
         // 1080p, not 1,080p; and never the requested 120 before a measurement.
-        expect(detail()).toBe("1080p · No audio");
+        expect(detail()).toBe("1080p · Audio off");
         expect(sender().hidden).toBe(true);
 
         getLocalShareStats.mockResolvedValue({ sentFps: 58.4 });
         await vi.advanceTimersByTimeAsync(2000);
-        expect(detail()).toBe("1080p · 58 fps · No audio");
+        expect(detail()).toBe("1080p · 58 fps · Audio off");
         expect(sender().hidden).toBe(true);
 
         // M-1: why the share sends what it does.
@@ -278,7 +282,7 @@ describe("VideoGrid", () => {
           encoder: "libvpx",
         });
         await vi.advanceTimersByTimeAsync(2000);
-        expect(detail()).toBe("1080p · 61 fps · No audio");
+        expect(detail()).toBe("1080p · 61 fps · Audio off");
         expect(sender().hidden).toBe(false);
         expect(sender().textContent).toBe("Capture 120 fps · Limited by CPU · VP8 · libvpx");
 
@@ -299,13 +303,13 @@ describe("VideoGrid", () => {
         getLocalShareStats.mockResolvedValue({ sentFps: 117, limitation: "none" });
         await vi.advanceTimersByTimeAsync(2000);
         expect(sender().title).toBe("");
-        expect(detail()).toBe("1080p · 117 fps · No audio");
+        expect(detail()).toBe("1080p · 117 fps · Audio off");
         expect(sender().textContent).toBe("Not limited");
 
         // A share with no sender stats (the Linux native share) says so.
         getLocalShareStats.mockResolvedValue(null);
         await vi.advanceTimersByTimeAsync(2000);
-        expect(detail()).toBe("1080p · No audio");
+        expect(detail()).toBe("1080p · Audio off");
         expect(sender().textContent).toBe("Encoder details not available");
 
         // The poll goes with the tile.
