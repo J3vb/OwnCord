@@ -293,10 +293,29 @@ subscribes each voice unless deafened, and each stream as
 the native backend still auto-subscribes, so it unsubscribes an unwatched
 stream as it is published. Every subscribed tile asks only for its displayed
 size, and a tile nobody can see (grid closed, app hidden, stopped) for none.
-Your own screen share is covered by what is going out (surface, resolution, fps, audio) with **Stop sharing** and
-**Hide preview**. While you share, the voice widget shows a stream card
-(`features/voice/voiceWidget/streamCard.ts`, loaded on the first share): what is
-going out, **Change source**, **Quality** and **Stop sharing**. Change source
+Your own screen share is covered by a compact card of what is going out (LIVE,
+the surface and the window or tab name, chips for the resolution, the sent fps
+and audio) with **Hide preview** and **Stop**. While you share, the voice
+widget shows a share card (`features/voice/voiceWidget/streamCard.ts`, loaded
+on the first share): LIVE and what is going out, a muted live preview (its
+**Hide preview** stops only that picture), chips for the resolution, frame rate and audio, **Quality** as four
+segments (a radio group the arrow keys move), **Change source** and **Stop
+sharing**. Classic and the phone layout show it inline above the call
+controls, where the share button stops the share. Under Command Deck on a
+desktop it is a popover above the share button in the status bar
+(`features/voice/widget/deckPopover.ts`): while you share that button opens
+and closes the card, and Esc or a click outside closes it; a share that ends
+elsewhere takes an open card down with it. The popover sits above the whole
+status bar, centred on its button, and only one is open at a time; opened from
+the keyboard it takes the focus (the checked Quality segment first), and it
+gives the focus back to its button when it closes from inside. The share
+button stays live while the chat connection is down, since the card's
+controls need none. The ping button's connection card
+(`features/voice/widget/statsPane.ts`) opens the same way there and inline
+elsewhere: the quality and ping, a graph of the call's last 60 pings
+(`widget/pingHistory.ts`, in memory only, started over when the call
+changes, the link drops or you leave), then Upload and Download with a meter
+each and the session totals. Change source
 opens the picker and swaps the new capture under the published track
 (`features/voice/screenshareChange.ts`), so viewers keep watching and the
 server hears no `voice_screenshare`; cancelling the picker changes nothing.
@@ -305,8 +324,9 @@ stays). On a slow uplink a web-path share gets smaller and keeps its frame
 rate; once the bandwidth is back, `lib/voice/shareResolutionRecovery.ts`
 restarts WebRTC's adaptation (Chromium's capturer never grows the source back
 by itself), so the share returns to full size after a hitch of a second or two,
-at most once per 30 s. On Linux the native capture picks in its own dialog, so the card has
-Stop sharing only. In a DM call, a focused tile stays inside the call panel and the
+at most once per 30 s. On the Linux native path the share has no stream in
+the page, so no share card appears (`widget/liveShare.ts`), and the share
+button stops the share directly in every layout, Command Deck included. In a DM call, a focused tile stays inside the call panel and the
 chat remains visible below it. **Full screen** (the button, F, or a
 double-click) puts the tile in HTML full screen and the window with it
 (`desktop.window.setFullscreen`, `core:window:allow-set-fullscreen`), since in

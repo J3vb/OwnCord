@@ -1,4 +1,8 @@
-/** The voice widget's connection readout: the signal button and the expanded transport stats. */
+/**
+ * The voice widget's connection readout: the signal button, and the
+ * connection card it opens (quality, ping and its recent history, the two
+ * directions' rates and the session totals).
+ */
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createSignalIcon } from "@lib/icons";
 import {
@@ -7,7 +11,10 @@ import {
   type ConnectionStats,
   type QualityLevel,
 } from "@lib/voice/connectionStats";
+import { authStore } from "@stores/auth.store";
+import { voiceStore } from "@stores/voice.store";
 import { voiceText as t } from "../../../i18n/voice";
+import { createPingHistory, sparklinePoints } from "./pingHistory";
 
 /** Connection-quality colour, used both for the signal bars (a fill, where
  *  --green/--yellow/--red are fine) and for the ping text beside them (text,
@@ -18,6 +25,14 @@ const QUALITY_COLORS: Record<QualityLevel, string> = {
   poor: "var(--text-danger, #ff9a9c)",
   bad: "var(--text-danger, #ff9a9c)",
 };
+
+/** The quality pill's word for each level. */
+const QUALITY_NAMES = {
+  excellent: "conn.quality.good",
+  fair: "conn.quality.fair",
+  poor: "conn.quality.poor",
+  bad: "conn.quality.bad",
+} as const satisfies Record<QualityLevel, string>;
 
 const QUALITY_BARS: Record<QualityLevel, number> = {
   excellent: 4,
@@ -33,11 +48,17 @@ function setStatValue(el: HTMLSpanElement, text: string, empty: boolean): void {
   el.classList.toggle("vw-stat-value--empty", empty);
 }
 
-/** One direction's tile: an arrow + label, a big rate, and its packet count. */
+/** One direction's tile: an arrow + label, a big rate, its packet count and
+ *  a thin meter of the rate. */
 function statTile(
   arrow: string,
   label: string,
-): { tile: HTMLDivElement; rate: HTMLSpanElement; packets: HTMLSpanElement } {
+): {
+  tile: HTMLDivElement;
+  rate: HTMLSpanElement;
+  packets: HTMLSpanElement;
+  meter: HTMLSpanElement;
+} {
   const tile = createElement("div", { class: "vw-stats-tile" });
   const labelEl = createElement("div", { class: "vw-stats-tile-label" });
   appendChildren(
@@ -47,8 +68,11 @@ function statTile(
   );
   const rate = createElement("span", { class: "vw-stat-value vw-stat-rate" });
   const packets = createElement("span", { class: "vw-stat-packets" });
-  appendChildren(tile, labelEl, rate, packets);
-  return { tile, rate, packets };
+  const track = createElement("span", { class: "vw-stat-meter", "aria-hidden": "true" });
+  const meter = createElement("span", { class: "vw-stat-meter-fill" });
+  track.appendChild(meter);
+  appendChildren(tile, labelEl, rate, packets, track);
+  return { tile, rate, packets, meter };
 }
 
 /** A direction's packet count as prose; zero reads "no packets". */
@@ -72,7 +96,10 @@ export interface SignalButton {
 /** A button, not a clickable div: the quality readout toggles the transport
  *  stats pane, and a pointer-only control is unreachable by keyboard.
  *  aria-expanded reflects the pane it owns. */
-export function createSignalButton(onToggle: () => void, signal: AbortSignal): SignalButton {
+export function createSignalButton(
+  onToggle: (e: MouseEvent) => void,
+  signal: AbortSignal,
+): SignalButton {
   const el = createElement("button", {
     type: "button",
     class: "vw-signal",
@@ -110,16 +137,114 @@ export function createSignalButton(onToggle: () => void, signal: AbortSignal): S
 export interface StatsPane {
   readonly el: HTMLDivElement;
   update(stats: ConnectionStats): void;
+  /** Forget the ping history: the call it measured is over. */
+  resetHistory(): void;
 }
 
-/** The expanded pane (hidden by default): Upload and Download tiles, then one
- *  footer line with the RTT (once known) and the session totals. */
+/** A rate's meter: the square root of its share of 1 MB/s, so a voice call's
+ *  few kB/s still shows and a busy share fills it without overflowing. */
+const METER_FULL = 1_000_000;
+export function meterShare(rate: number): number {
+  if (!(rate > 0)) return 0;
+  return Math.min(1, Math.sqrt(rate / METER_FULL));
+}
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+const SPARK_W = 300;
+const SPARK_H = 46;
+
+/** The ping graph: a line over a soft fill, in the quality's colour. */
+function createSparkline(): {
+  el: SVGSVGElement;
+  draw(values: readonly number[], color: string): void;
+} {
+  const el = document.createElementNS(SVG_NS, "svg");
+  el.setAttribute("class", "vw-spark");
+  el.setAttribute("viewBox", `0 0 ${SPARK_W} ${SPARK_H}`);
+  el.setAttribute("preserveAspectRatio", "none");
+  el.setAttribute("aria-hidden", "true");
+  el.setAttribute("data-testid", "vw-spark");
+  const fill = document.createElementNS(SVG_NS, "path");
+  fill.setAttribute("class", "vw-spark-fill");
+  const line = document.createElementNS(SVG_NS, "polyline");
+  line.setAttribute("class", "vw-spark-line");
+  el.append(fill, line);
+
+  function draw(values: readonly number[], color: string): void {
+    const points = sparklinePoints(values, SPARK_W, SPARK_H);
+    el.style.color = color;
+    line.setAttribute("points", points.map(([x, y]) => `${x},${y}`).join(" "));
+    const first = points[0];
+    const last = points[points.length - 1];
+    const area =
+      first === undefined || last === undefined
+        ? ""
+        : `M${first[0]} ${SPARK_H} ${points.map(([x, y]) => `L${x} ${y}`).join(" ")} L${last[0]} ${SPARK_H} Z`;
+    fill.setAttribute("d", area);
+  }
+
+  return { el, draw };
+}
+
+/** The card's head: "Connection" and the quality pill, then the big ping
+ *  beside the server's name and whether the call is secured. */
+function createConnectionHead(): {
+  el: HTMLDivElement;
+  draw(stats: ConnectionStats): void;
+} {
+  const el = createElement("div", { class: "vw-conn-head" });
+  const top = createElement("div", { class: "vw-conn-top" });
+  const pill = createElement("span", { class: "vw-conn-pill", "data-testid": "vw-conn-quality" });
+  appendChildren(top, createElement("span", { class: "vw-card-eyebrow" }, t("conn.eyebrow")), pill);
+  const main = createElement("div", { class: "vw-conn-main" });
+  const ping = createElement("div", { class: "vw-conn-ping" });
+  const ms = createElement("span", { class: "vw-conn-ms", "data-testid": "vw-conn-ping" }, "—");
+  appendChildren(ping, ms, createElement("small", {}, t("conn.msPing")));
+  const where = createElement("div", { class: "vw-conn-where" });
+  const server = createElement("span", { class: "vw-conn-server" });
+  const secured = createElement("span", { class: "vw-conn-secured" });
+  appendChildren(where, server, secured);
+  appendChildren(main, ping, where);
+  appendChildren(el, top, main);
+
+  function drawWhere(): void {
+    setText(server, authStore.getState().serverName ?? "");
+    const voice = voiceStore.getState();
+    const connected = voice.voiceStatus === "connected";
+    const degraded = connected && voice.encryptionDegraded === true;
+    setText(secured, connected ? t(degraded ? "widget.unsecured" : "widget.secured") : "");
+    secured.classList.toggle("vw-conn-secured--degraded", degraded);
+  }
+
+  function draw(stats: ConnectionStats): void {
+    const known = stats.available && stats.rtt > 0;
+    setText(ms, known ? String(Math.round(stats.rtt)) : "—");
+    pill.hidden = !stats.available;
+    pill.dataset["quality"] = stats.quality;
+    setText(pill, t(QUALITY_NAMES[stats.quality]));
+    drawWhere();
+  }
+
+  return { el, draw };
+}
+
+/** The connection card (hidden until its button opens it). */
 export function createStatsPane(): StatsPane {
   const el = createElement("div", {
     class: "vw-stats",
     role: "group",
     "aria-label": t("widget.transportStatistics"),
+    "data-testid": "vw-stats",
   });
+  const head = createConnectionHead();
+  const history = createPingHistory();
+  const spark = createSparkline();
+  const legend = createElement("div", { class: "vw-spark-legend" });
+  appendChildren(
+    legend,
+    createElement("span", {}, t("conn.historySpan")),
+    createElement("span", {}, t("conn.now")),
+  );
   const statsGrid = createElement("div", { class: "vw-stats-grid" });
   const upload = statTile("↑", t("widget.upload"));
   const download = statTile("↓", t("widget.download"));
@@ -130,9 +255,11 @@ export function createStatsPane(): StatsPane {
   appendChildren(statsGrid, upload.tile, download.tile);
 
   const footer = createElement("div", { class: "vw-stats-footer" });
-  /** The footer's leading slot: "RTT 42.0 ms" once known, else "Session". */
-  const footerLead = createElement("span", { class: "vw-stats-footer-lead" }, t("widget.session"));
-  const rttEl = createElement("span", { class: "vw-stat-value" });
+  const footerLead = createElement(
+    "span",
+    { class: "vw-stats-footer-lead" },
+    t("widget.thisSession"),
+  );
   const totalsRow = createElement("span", { class: "vw-stats-totals" });
   const totalUp = createElement("span", { class: "vw-stat-value" });
   const totalDown = createElement("span", { class: "vw-stat-value" });
@@ -140,40 +267,34 @@ export function createStatsPane(): StatsPane {
   setStatValue(totalDown, t("widget.zeroBytes"), true);
   appendChildren(totalsRow, totalWrap("↑", totalUp), totalWrap("↓", totalDown));
   appendChildren(footer, footerLead, totalsRow);
-  appendChildren(el, statsGrid, footer);
-
-  /** The RTT only takes the footer's lead once it is known; until then the
-   *  slot just labels the totals, so no "—" placeholder is ever shown. */
-  function updateFooterLead(rtt: number): void {
-    if (rtt > 0) {
-      // i18n-exempt: numeric RTT value with its unit, not translatable prose
-      setText(rttEl, `${rtt.toFixed(1)} ms`);
-      if (!rttEl.isConnected) footerLead.replaceChildren(`${t("widget.rtt")} `, rttEl);
-    } else if (footerLead.textContent !== t("widget.session")) {
-      setText(footerLead, t("widget.session"));
-    }
-  }
+  appendChildren(el, head.el, spark.el, legend, statsGrid, footer);
 
   /** An idle direction reads "Idle" / "no packets" softly (the CSS dims
    *  .vw-stat-value--empty) rather than as another full-strength zero
    *  competing for attention. */
+  function drawDirection(dir: ReturnType<typeof statTile>, rate: number, packets: number): void {
+    setStatValue(dir.rate, rate === 0 ? t("widget.idle") : formatRateCompact(rate), rate === 0);
+    setText(dir.packets, packetText(packets));
+    dir.meter.style.width = `${Math.round(meterShare(rate) * 100)}%`;
+  }
+
   function update(stats: ConnectionStats): void {
-    setStatValue(
-      upload.rate,
-      stats.outRate === 0 ? t("widget.idle") : formatRateCompact(stats.outRate),
-      stats.outRate === 0,
+    if (stats.available) history.push(stats.rtt);
+    head.draw(stats);
+    spark.draw(
+      history.values(),
+      stats.available ? QUALITY_COLORS[stats.quality] : "var(--text-muted)",
     );
-    setText(upload.packets, packetText(stats.outPackets));
-    setStatValue(
-      download.rate,
-      stats.inRate === 0 ? t("widget.idle") : formatRateCompact(stats.inRate),
-      stats.inRate === 0,
-    );
-    setText(download.packets, packetText(stats.inPackets));
-    updateFooterLead(stats.rtt);
+    drawDirection(upload, stats.outRate, stats.outPackets);
+    drawDirection(download, stats.inRate, stats.inPackets);
     setStatValue(totalUp, formatBytes(stats.totalUp), stats.totalUp === 0);
     setStatValue(totalDown, formatBytes(stats.totalDown), stats.totalDown === 0);
   }
 
-  return { el, update };
+  function resetHistory(): void {
+    history.reset();
+    spark.draw([], "var(--text-muted)");
+  }
+
+  return { el, update, resetHistory };
 }

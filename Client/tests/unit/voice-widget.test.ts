@@ -48,6 +48,11 @@ import { uiStore, setConnectionStatus } from "../../src/stores/ui.store";
 import type { VoiceUser } from "../../src/stores/voice.store";
 import { loadPref, savePref } from "../../src/lib/prefs/preferences";
 
+/** The quality segment marked checked, by its value. */
+function checkedQuality(group: HTMLElement): string | undefined {
+  return group.querySelector<HTMLElement>('[aria-checked="true"]')?.dataset["quality"];
+}
+
 function resetStores(): void {
   voiceWidget.resetVoiceWidgetStores();
 }
@@ -265,10 +270,9 @@ describe("VoiceWidget", () => {
     expect(card()!.textContent).toContain("You're sharing a window");
     expect(card()!.textContent).not.toContain("window:42:0");
 
-    const quality = card()!.querySelector<HTMLSelectElement>('[data-testid="vw-stream-quality"]')!;
-    expect(quality.value).toBe("medium");
-    quality.value = "high";
-    quality.dispatchEvent(new Event("change"));
+    const quality = card()!.querySelector<HTMLElement>('[data-testid="vw-stream-quality"]')!;
+    expect(checkedQuality(quality)).toBe("medium");
+    quality.querySelector<HTMLButtonElement>('[data-quality="high"]')!.click();
     expect(mockSetQuality).toHaveBeenCalledWith("high");
 
     card()!.querySelector<HTMLButtonElement>('[data-testid="vw-stream-change"]')!.click();
@@ -333,9 +337,9 @@ describe("VoiceWidget", () => {
     widget.destroy?.();
   });
 
-  it("the stream card shows the share's quality in the select and reverts a refused change", async () => {
+  it("the stream card shows the share's quality in the segments and reverts a refused change", async () => {
     // A Linux share now carries its quality (the native track changes it), so
-    // the card shows the select like a web share's.
+    // the card shows the segments like a web share's.
     mockShareQuality.mockReturnValue("high");
     mockCanChange.mockReturnValueOnce(true);
     setVoiceChannel(1, []);
@@ -343,18 +347,18 @@ describe("VoiceWidget", () => {
     voiceStore.flush();
     const widget = mountVoiceWidget();
     await vi.dynamicImportSettled();
-    const quality = container.querySelector<HTMLSelectElement>(
-      '[data-testid="vw-stream-quality"]',
-    )!;
+    const quality = container.querySelector<HTMLElement>('[data-testid="vw-stream-quality"]')!;
     expect(quality.hidden).toBe(false);
-    expect(quality.value).toBe("high");
+    expect(quality.getAttribute("role")).toBe("radiogroup");
+    expect(checkedQuality(quality)).toBe("high");
 
-    // The host refuses: the live quality stays "high", so the select goes back.
-    quality.value = "low";
-    quality.dispatchEvent(new Event("change"));
+    // The host refuses: the live quality stays "high", so the segments go back.
+    quality.querySelector<HTMLButtonElement>('[data-quality="low"]')!.click();
     expect(mockSetQuality).toHaveBeenCalledWith("low");
-    await vi.waitFor(() => expect(quality.disabled).toBe(false));
-    expect(quality.value).toBe("high");
+    expect(checkedQuality(quality)).toBe("low");
+    expect(quality.getAttribute("aria-busy")).toBe("true");
+    await vi.waitFor(() => expect(quality.getAttribute("aria-busy")).toBe("false"));
+    expect(checkedQuality(quality)).toBe("high");
     mockShareQuality.mockReturnValue("medium");
     widget.destroy?.();
   });
@@ -699,7 +703,7 @@ describe("VoiceWidget", () => {
     expect(statsPane.getAttribute("aria-label")).toBe("Transport Statistics");
     expect(statsPane.textContent).toContain("Upload");
     expect(statsPane.textContent).toContain("Download");
-    expect(statsPane.textContent).toContain("Session");
+    expect(statsPane.textContent).toContain("This session");
 
     widget.destroy?.();
   });

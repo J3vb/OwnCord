@@ -12,6 +12,7 @@ import { isPhoneLayout } from "@lib/ui/bottomSheet";
 import { voiceText } from "../../../i18n/voice";
 import { isAndroidApp } from "@lib/hostOs";
 import type { ShareSenderSample } from "../shareSenderStats";
+import { shareSource } from "../voiceWidget/shareSource";
 import {
   STATS_POLL_MS,
   log,
@@ -26,9 +27,69 @@ import type { TileConfig } from "./VideoGrid";
 import type { GridMenus } from "./gridMenus";
 import { buildTileLabel, buildTileVideo, buildViewersBadge } from "./tileParts";
 
+function selfChip(text: string): HTMLSpanElement {
+  return createElement("span", { class: "vw-chip" }, text);
+}
+
+/** The cover's chips: the height and the rate actually sent (never the
+ *  requested one: the capture can fall short of it, on a 60 Hz monitor or
+ *  a busy encoder), then whether audio goes out. */
+function selfChips(
+  track: MediaStreamTrack | undefined,
+  fps: number | null,
+  audio: boolean,
+): HTMLSpanElement[] {
+  const chips: HTMLSpanElement[] = [];
+  // Read each time: the share's quality can change while it runs.
+  const shown = track?.getSettings?.().height;
+  // Plain strings: the catalog would group 1080 as "1,080".
+  if (shown === undefined) return [selfChip(audioText(audio))];
+  chips.push(selfChip(voiceText("tile.qualityHeight", { height: String(shown) })));
+  if (fps !== null) chips.push(selfChip(voiceText("card.fps", { fps: String(Math.round(fps)) })));
+  chips.push(selfChip(audioText(audio)));
+  return chips;
+}
+
+function audioText(audio: boolean): string {
+  return audio ? voiceText("card.audioOn") : voiceText("card.audioOff");
+}
+
 export function createGridTileBuild(st: GridState, api: GridApi, menus: GridMenus) {
   const { selfMenuOptions, tileMenuOptions } = menus;
 
+  /** Your own share's actions: Hide preview, then Stop. */
+  function selfActions(tileId: number): HTMLDivElement {
+    const actions = createElement("div", { class: "video-self-actions" });
+    const stop = createElement(
+      "button",
+      {
+        type: "button",
+        class: "video-self-stop",
+        "aria-label": voiceText("tile.stopSharing"),
+        "data-tile-control": "stop-sharing",
+      },
+      voiceText("card.stop"),
+    );
+    stop.addEventListener("click", (e) => {
+      e.stopPropagation();
+      st.callbacks.onStopSharing?.();
+    });
+    const hide = createElement(
+      "button",
+      { type: "button", class: "video-self-hide", "data-tile-control": "hide-preview" },
+      voiceText("tile.hidePreview"),
+    );
+    hide.addEventListener("click", (e) => {
+      e.stopPropagation();
+      api.setStopped(tileId, true);
+    });
+    appendChildren(actions, hide, stop);
+    return actions;
+  }
+
+  /** Your own screen share's tile: a compact card of what is going out (LIVE,
+   *  the kind of source and its name, the format chips) with Hide preview and
+   *  Stop, and below it why the share sends what it does. */
   function buildSelfCover(
     tileId: number,
     stream: MediaStream,
@@ -36,31 +97,10 @@ export function createGridTileBuild(st: GridState, api: GridApi, menus: GridMenu
     signal: AbortSignal,
   ): HTMLDivElement {
     const track = stream.getVideoTracks()[0];
-    const surface = track?.getSettings?.()?.displaySurface;
-    const title =
-      surface === "window"
-        ? voiceText("tile.sharingWindow")
-        : surface === "browser"
-          ? voiceText("tile.sharingTab")
-          : voiceText("tile.sharingScreen");
-    const detail = createElement("div", { class: "video-self-detail" });
-    // The rate actually sent, never the requested one: the capture can fall
-    // short of it (a 60 Hz monitor, a busy encoder).
+    const source = shareSource(track);
+    const detail = createElement("div", { class: "video-self-detail vw-chips" });
     const renderDetail = (fps: number | null): void => {
-      const parts: string[] = [];
-      // Read each time: the share's quality can change while it runs.
-      const shown = track?.getSettings?.().height;
-      if (shown !== undefined) {
-        // Plain strings: the catalog would group 1080 as "1,080".
-        const height = String(shown);
-        parts.push(
-          fps === null
-            ? voiceText("tile.qualityHeight", { height })
-            : voiceText("tile.shareQuality", { height, fps: String(Math.round(fps)) }),
-        );
-      }
-      parts.push(hasAudio ? voiceText("tile.withAudio") : voiceText("tile.noAudio"));
-      detail.textContent = parts.join(" · ");
+      detail.replaceChildren(...selfChips(track, fps, hasAudio));
     };
     renderDetail(null);
     // Why the share sends what it does: the capture rate, what limits
@@ -85,34 +125,20 @@ export function createGridTileBuild(st: GridState, api: GridApi, menus: GridMenu
     };
     setOwnedTimeout(signal, () => void pollSender(), STATS_POLL_MS);
 
-    const cover = createElement("div", { class: "video-self-cover" });
-    const actions = createElement("div", { class: "video-self-actions" });
-    const stop = createElement(
-      "button",
-      { type: "button", class: "btn-danger", "data-tile-control": "stop-sharing" },
-      voiceText("tile.stopSharing"),
-    );
-    stop.addEventListener("click", (e) => {
-      e.stopPropagation();
-      st.callbacks.onStopSharing?.();
-    });
-    const hide = createElement(
-      "button",
-      { type: "button", class: "btn-ghost", "data-tile-control": "hide-preview" },
-      voiceText("tile.hidePreview"),
-    );
-    hide.addEventListener("click", (e) => {
-      e.stopPropagation();
-      api.setStopped(tileId, true);
-    });
-    appendChildren(actions, stop, hide);
+    const head = createElement("div", { class: "video-self-head" });
     appendChildren(
-      cover,
-      createElement("div", { class: "video-self-title" }, title),
-      detail,
-      senderLine,
-      actions,
+      head,
+      createElement("span", { class: "vw-live-badge" }, voiceText("card.live")),
+      createElement("div", { class: "video-self-title" }, source.kind),
     );
+    const sub = createElement("div", { class: "video-self-sub" }, source.name ?? "");
+    sub.hidden = source.name === null;
+    const row = createElement("div", { class: "video-self-row" });
+    appendChildren(row, detail, selfActions(tileId));
+    const card = createElement("div", { class: "video-self-card" });
+    appendChildren(card, head, sub, row, senderLine);
+    const cover = createElement("div", { class: "video-self-cover" });
+    cover.appendChild(card);
     return cover;
   }
 

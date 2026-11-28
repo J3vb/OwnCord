@@ -260,6 +260,39 @@ html.layout-deck
   margin: 0;
 }
 
+/* On a desktop the connection and share cards are popovers above their
+   buttons: widget/deckPopover.ts adds .vw-pop and places them, with the
+   arrow over the button. A share card shows only while its button has it
+   open; inline (Classic, a phone) it always shows while you share. Their
+   colours are in voice-widget.css. */
+html.layout-deck .deck-status-bar :is(.vw-stats, .vw-stream-card).vw-pop {
+  position: fixed;
+  z-index: 200;
+  order: 0;
+  flex: none;
+  width: min(360px, calc(100vw - 16px));
+  margin: 0;
+  padding: 14px;
+  border-radius: 10px;
+}
+html.layout-deck .deck-status-bar .vw-stream-card.vw-pop:not(.vw-pop--open) {
+  display: none;
+}
+html.layout-deck .deck-status-bar .vw-pop::after {
+  content: "";
+  position: absolute;
+  bottom: -7px;
+  left: calc(var(--deck-pop-arrow, 50%) - 6px);
+  width: 12px;
+  height: 12px;
+  transform: rotate(45deg);
+}
+html.layout-deck .deck-status-bar .vw-pop--tight {
+  overflow-y: auto;
+}
+html.layout-deck .deck-status-bar .vw-pop--tight::after {
+  display: none;
+}
 /* By width, and on a phone: room in the bar. */
 @media (max-width: 800px),
   (pointer: coarse) and (max-width: 899px),

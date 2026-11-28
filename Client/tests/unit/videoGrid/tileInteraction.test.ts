@@ -340,6 +340,17 @@ describe("VideoGrid", () => {
       const cover = self.querySelector<HTMLElement>(".video-self-cover")!;
       expect(cover).not.toBeNull();
       expect(cover.textContent).toContain("You're sharing your screen");
+      // A compact card: LIVE and the title, no name line for an unnamed
+      // capture, the chips beside Hide preview then Stop.
+      expect(cover.querySelector(".video-self-head .vw-live-badge")!.textContent).toBe("LIVE");
+      expect(cover.querySelector<HTMLElement>(".video-self-sub")!.hidden).toBe(true);
+      const actions = [...cover.querySelectorAll<HTMLElement>(".video-self-row button")];
+      expect(actions.map((b) => b.dataset["tileControl"])).toEqual([
+        "hide-preview",
+        "stop-sharing",
+      ]);
+      expect(actions[1]!.textContent).toBe("Stop");
+      expect(actions[1]!.getAttribute("aria-label")).toBe("Stop sharing");
       // No volume or stop-watching controls on your own preview.
       expect(self.querySelector(".tile-volume-slider")).toBeNull();
 
@@ -352,15 +363,45 @@ describe("VideoGrid", () => {
       expect(show.textContent).toBe("Show preview");
     });
 
+    it("names the shared window on your own share's card", () => {
+      const track = {
+        id: "w",
+        label: "Like Going Back In Time · YouTube",
+        getSettings: () => ({ displaySurface: "window", height: 1044 }),
+        addEventListener: () => {},
+        removeEventListener: () => {},
+      };
+      const stream = {
+        getTracks: () => [track],
+        getVideoTracks: () => [track],
+        getAudioTracks: () => [],
+      } as unknown as MediaStream;
+      grid.addStream(1 + 1_000_000, "Your Screen", stream, {
+        isSelf: true,
+        audioUserId: 1,
+        isScreenshare: true,
+        hasAudio: true,
+      });
+      const cover = cell(1 + 1_000_000).querySelector<HTMLElement>(".video-self-cover")!;
+      expect(cover.querySelector(".video-self-title")!.textContent).toBe("You're sharing a window");
+      const sub = cover.querySelector<HTMLElement>(".video-self-sub")!;
+      expect(sub.hidden).toBe(false);
+      expect(sub.textContent).toBe("Like Going Back In Time · YouTube");
+      expect([...cover.querySelectorAll(".vw-chip")].map((c) => c.textContent)).toEqual([
+        "1044p",
+        "Audio on",
+      ]);
+    });
+
     it("says whether your screen share is sending audio", () => {
       const self = { isSelf: true, audioUserId: 1, isScreenshare: true };
       grid.addStream(1 + 1_000_000, "Your Screen", fakeStream(), { ...self, hasAudio: true });
-      expect(cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent).toBe(
-        "With audio",
-      );
+      expect(cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent).toBe("Audio on");
       grid.removeStream(1 + 1_000_000);
       grid.addStream(1 + 1_000_000, "Your Screen", fakeStream(), self);
-      expect(cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent).toBe("No audio");
+      expect(cell(1 + 1_000_000).querySelector(".video-self-detail")!.textContent).toBe(
+        "Audio off",
+      );
     });
 
     it("hands focus to Back to grid when a tile opens, and back to the tile after", () => {

@@ -571,43 +571,105 @@ video[hidden] + .video-surface {
     transition: none;
   }
 }
-/* Your own screen share: what is going out, never a hall of mirrors. */
+/* Your own screen share: what is going out, never a hall of mirrors. A
+   compact card on the dimmed picture: LIVE and the kind of source, its name,
+   the format chips with Hide preview and Stop beside them, then why the share
+   sends what it does. */
 .video-self-cover {
   position: absolute;
   inset: 0;
   z-index: 2;
   display: flex;
-  flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 6px;
   padding: 8px;
-  background: var(--scrim-strong);
-  color: var(--on-fill);
-  text-align: center;
+  background: var(--scrim);
   pointer-events: none;
 }
-.video-self-title {
-  font-size: var(--font-size-sm);
-  font-weight: 700;
+.video-self-card {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  width: min(460px, 100%);
+  max-height: 100%;
+  overflow: hidden;
+  padding: 14px 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--bg-tertiary) 88%, transparent);
+  color: var(--text-normal);
+  box-shadow: var(--shadow-md);
 }
-.video-self-detail {
+.video-self-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.video-self-title {
+  overflow: hidden;
+  color: var(--header-primary);
+  font-size: var(--font-size-md);
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.video-self-sub {
+  overflow: hidden;
+  color: var(--text-muted);
   font-size: var(--font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.video-self-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 8px;
 }
 .video-self-stats {
+  color: var(--text-muted);
   font-size: var(--font-size-xs);
-  opacity: 0.8;
 }
 .video-self-actions {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
   gap: 6px;
+  margin-left: auto;
   pointer-events: auto;
 }
 .video-self-actions button {
-  padding: 4px 12px;
+  min-height: 30px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-sm);
+  font: inherit;
   font-size: var(--font-size-xs);
+  font-weight: 600;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.video-self-hide {
+  background: var(--bg-active);
+  color: var(--text-normal);
+}
+.video-self-hide:hover {
+  background: var(--bg-hover);
+}
+.video-self-stop {
+  background: var(--danger-fill);
+  color: var(--on-fill);
+}
+.video-self-stop:hover {
+  background: var(--danger-fill-hover);
+}
+/* A small tile: the card keeps its title and actions. */
+@container (max-width: 320px) {
+  .video-self-sub,
+  .video-self-stats {
+    display: none;
+  }
 }
 .video-cell--stopped .video-self-cover {
   display: none;

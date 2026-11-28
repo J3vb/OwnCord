@@ -100,6 +100,10 @@ release changes the database, and anything an operator must do first.)
 
 ## Unreleased
 
+### Changed
+
+- **Voice: the screen-share and connection panels are new cards.** The share card shows a live preview, the resolution, frame rate and audio, and picks the quality with four buttons; the connection card adds a graph of your recent ping. In Command Deck on a desktop both open above their buttons in the bottom bar, and while you share, the share button opens the card (Stop sharing is inside it).
+
 ### Known issues
 
 - **Linux: the crash with your camera on during a screen share is fixed for realtime-priority setups, but not yet confirmed on every PC that showed it.** If it still happens to you, use one at a time.

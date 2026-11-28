@@ -14,13 +14,9 @@ import { voiceStore, type VoiceState } from "@stores/voice.store";
 import { channelsStore } from "@stores/channels.store";
 import { dmStore, dmDisplayName } from "@stores/dm.store";
 import { uiStore } from "@stores/ui.store";
-import {
-  createConnectionStatsPoller,
-  type ConnectionStats,
-  type ConnectionStatsPoller,
-} from "@lib/voice/connectionStats";
+import type { ConnectionStats } from "@lib/voice/connectionStats";
 import { enhancedNoiseSuppressionEnabled } from "@lib/voice/audioPipeline";
-import { getRoomForStats, reapplyEnhancedNoiseSuppression } from "./livekitSession";
+import { reapplyEnhancedNoiseSuppression } from "./livekitSession";
 import { writeLiveStats } from "@lib/voice/liveStats";
 import { loadPref, onPrefChange, savePref } from "@lib/prefs/preferences";
 import { voiceText as t } from "../../i18n/voice";
@@ -29,7 +25,8 @@ import { shareBlockReason } from "./shareGate";
 import { canPublishScreen } from "@lib/hostOs";
 import { createMusicButton, syncMusicButton, watchMusicSupport } from "./musicControl";
 import { createSecuredBadge, type SecuredBadge } from "./securedBadge";
-import type { StreamCard } from "./voiceWidget/streamCard";
+import { createStreamCardHost, type StreamCardHost } from "./widget/streamCardHost";
+import { createDeckPopover, type DeckPopover } from "./widget/deckPopover";
 import {
   createSignalButton,
   createStatsPane,
@@ -37,6 +34,7 @@ import {
   type StatsPane,
 } from "./widget/statsPane";
 import { subscribeVoiceWidget } from "./widget/subscriptions";
+import { createStatsHost } from "./widget/statsHost";
 import { isShareLive } from "./widget/liveShare";
 import { createListenOnlyUi, type ListenOnlyUi } from "./widget/listenOnly";
 import { createListeningBar, type ListeningBar } from "./widget/listeningBar";
@@ -69,11 +67,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   let disconnectBtn: HTMLButtonElement | null = null;
   /** Quick toggle for the Enhanced Noise Suppression pref Settings also sets. */
   let nsBtn: HTMLButtonElement | null = null;
-  /** The stream card while you share; loaded on the first share. */
-  let streamCard: StreamCard | null = null;
-  /** Owns the current card's listeners; aborted when the card goes. */
-  let streamCardScope: Disposable | null = null;
-  let streamCardLoad = 0;
+  /** The share card while you share; loaded on the first share. */
+  let shareCard: StreamCardHost | null = null;
   /** Persistent polite status for a moderator-imposed mute/deafen. The
    *  disabled controls carry only a `title`, which a screen reader never
    *  reaches (a disabled button cannot take focus), so the reason is announced
@@ -88,8 +83,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
   // Connection stats
   let signalBtn: SignalButton | null = null;
   let statsPane: StatsPane | null = null;
-  let statsPoller: ConnectionStatsPoller | null = null;
-  let statsUnlisten: (() => void) | null = null;
+  let statsPopover: DeckPopover | null = null;
+  const statsHost = createStatsHost(updateSignalIcon, () => statsPane?.resetHistory());
 
   // Elapsed timer
   let timerEl: HTMLSpanElement | null = null;
@@ -102,27 +97,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     if (signalBtn === null || statsPane === null) return;
     signalBtn.draw(stats);
     statsPane.update(stats);
-  }
-
-  function startStatsPoller(): void {
-    if (statsPoller !== null) return;
-    statsPoller = createConnectionStatsPoller(() => getRoomForStats());
-    statsUnlisten = statsPoller.onUpdate(updateSignalIcon);
-    // The stats pane opens only on demand. A quality change updates the signal
-    // bars via onUpdate, but never expands the pane on its own.
-    statsPoller.start();
-    // Paint the initial state now. updateSignalIcon only runs on a sample;
-    // where none arrives (the first poll is 2 s out, or the native host has
-    // no sample) the widget would otherwise keep its constructed
-    // 4-green-bars default.
-    updateSignalIcon(statsPoller.getStats());
-  }
-
-  function stopStatsPoller(): void {
-    statsUnlisten?.();
-    statsUnlisten = null;
-    statsPoller?.stop();
-    statsPoller = null;
   }
 
   function updateElapsedTimer(): void {
@@ -171,6 +145,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     if (btn === cameraBtn) {
       return localCamera ? t("widget.control.cameraOff") : t("widget.control.cameraOn");
     }
+    if (btn === shareBtn && shareCard?.opensCard() === true)
+      return t("widget.control.shareOptions");
     if (btn === shareBtn) {
       return localScreenshare ? t("widget.control.shareStop") : t("widget.control.shareStart");
     }
@@ -185,24 +161,35 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     const reason =
       status === "reconnecting" ? t("status.reconnectingShort") : t("status.notConnected");
     controlsRow?.classList.toggle("vw-controls--frozen", frozen);
+    // Camera and share need the room, which exists only once the join has
+    // connected; before that the press would bounce off.
+    const joining = isConnecting(voiceStore.getState().voiceStatus);
     for (const btn of [cameraBtn, shareBtn, listenOnly?.grantBtn ?? null]) {
       if (btn === null) continue;
       btn.disabled = frozen;
       btn.title = frozen ? reason : liveTitle(btn);
-    }
-    // Camera and share need the room, which exists only once the join has
-    // connected; before that the press would bounce off.
-    const joining = isConnecting(voiceStore.getState().voiceStatus);
-    for (const btn of [cameraBtn, shareBtn]) {
-      if (btn === null || frozen || !joining) continue;
+      if (btn === listenOnly?.grantBtn || frozen || !joining) continue;
       btn.disabled = true;
       btn.title = t("status.joining");
     }
-    const block = shareBlockReason(voiceStore.getState());
-    if (shareBtn !== null && !shareBtn.disabled && block !== null) {
-      shareBtn.disabled = true;
-      shareBtn.title = block;
+    freezeShare();
+  }
+
+  /** The share button's own rules over the frozen state. While it opens the
+   *  share card (Deck) it stays live: the card's Stop, Quality and Change
+   *  source need no chat connection. Otherwise a share the grant or the video
+   *  limit rules out is disabled with its reason. */
+  function freezeShare(): void {
+    if (shareBtn === null) return;
+    if (shareCard?.opensCard() === true) {
+      shareBtn.disabled = false;
+      shareBtn.title = liveTitle(shareBtn);
+      return;
     }
+    const block = shareBlockReason(voiceStore.getState());
+    if (shareBtn.disabled || block === null) return;
+    shareBtn.disabled = true;
+    shareBtn.title = block;
   }
 
   function renderNs(): void {
@@ -256,7 +243,10 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     shareBtn?.classList.toggle("active-ctrl", screenshare);
     if (shareBtn) {
       swapIcon(shareBtn, screenshare ? "monitor-off" : "monitor");
-      shareBtn.setAttribute("aria-pressed", String(screenshare));
+      // A button that opens the share card is not a toggle: aria-expanded
+      // and aria-haspopup say what it does instead.
+      if (shareCard?.opensCard() === true) shareBtn.removeAttribute("aria-pressed");
+      else shareBtn.setAttribute("aria-pressed", String(screenshare));
     }
   }
 
@@ -265,22 +255,21 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
     const voice = voiceStore.getState();
     const channelId = voice.currentChannelId;
-    syncStreamCard(isShareLive(voice));
+    shareCard?.sync(isShareLive(voice));
+    statsHost.sync(voice);
 
     if (channelId === null) {
       root.classList.remove("visible");
       setCallRow(false);
-      stopStatsPoller();
       stopElapsedTimer();
-      statsPane?.el.classList.remove("visible");
-      signalBtn?.el.setAttribute("aria-expanded", "false");
+      statsPopover?.close();
       return;
     }
 
     root.classList.add("visible");
     setCallRow(true);
-    startStatsPoller();
     startElapsedTimer();
+    statsPopover?.sync();
     updateStatus(voice);
     updateFrozen(uiStore.getState().connectionStatus);
     renderChannelName(channelId);
@@ -291,32 +280,10 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     listeningBar?.sync(voice);
   }
 
-  function syncStreamCard(sharing: boolean): void {
-    if (!sharing) {
-      streamCardLoad++;
-      streamCardScope?.destroy();
-      streamCardScope = null;
-      streamCard?.el.remove();
-      streamCard = null;
-      return;
-    }
-    if (streamCard !== null) {
-      streamCard.update();
-      return;
-    }
-    const load = ++streamCardLoad;
-    void import("./voiceWidget/streamCard").then(({ createStreamCard }) => {
-      if (load !== streamCardLoad || root === null || controlsRow === null) return;
-      streamCardScope = new Disposable();
-      streamCard = createStreamCard(options.onScreenshareToggle, streamCardScope.signal);
-      root.insertBefore(streamCard.el, controlsRow);
-    });
-  }
-
   function createControlButton(
     label: string,
     icon: IconName,
-    handler: () => void,
+    handler: (e: MouseEvent) => void,
     extraClass?: string,
   ): HTMLButtonElement {
     const btn = createElement("button", {
@@ -326,6 +293,12 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     btn.appendChild(createIcon(icon, 18));
     btn.addEventListener("click", handler, { signal: disposable.signal });
     return btn;
+  }
+
+  /** What the popovers sit above: the Deck status bar, so they cover none
+   *  of the widget's rows. */
+  function statusBarTop(): Element | null {
+    return root?.closest(".deck-status-bar") ?? root;
   }
 
   function createChannelLink(): HTMLButtonElement {
@@ -343,12 +316,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
       { signal: disposable.signal },
     );
     return link;
-  }
-
-  function toggleStatsPane(): void {
-    if (statsPane === null || signalBtn === null) return;
-    const open = statsPane.el.classList.toggle("visible");
-    signalBtn.el.setAttribute("aria-expanded", String(open));
   }
 
   function createNoiseButton(): HTMLButtonElement {
@@ -385,7 +352,8 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     securedBadge = createSecuredBadge("vw-secured");
     timerEl = createElement("span", { class: "vw-timer" }, "00:00");
     channelNameEl = createElement("span", { class: "vw-channel" }, t("widget.channelFallback"));
-    signalBtn = createSignalButton(toggleStatsPane, disposable.signal);
+    // A click with no pointer (detail 0) came from the keyboard.
+    signalBtn = createSignalButton((e) => statsPopover?.toggle(e.detail === 0), disposable.signal);
 
     const headerMain = createElement("div", { class: "vw-header-main" });
     appendChildren(headerMain, statusLabel, timerEl);
@@ -407,7 +375,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     shareBtn = createControlButton(
       t("widget.control.screenshare"),
       "monitor",
-      options.onScreenshareToggle,
+      (e) => (shareCard === null ? options.onScreenshareToggle() : shareCard.press(e.detail === 0)),
       "vw-share-btn",
     );
     musicBtn = createMusicButton(disposable.signal);
@@ -430,7 +398,29 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     root = createElement("div", { class: "voice-widget", "data-testid": "voice-widget" });
     const header = buildHeader();
     statsPane = createStatsPane();
+    if (signalBtn !== null) {
+      statsPopover = createDeckPopover({
+        panel: statsPane.el,
+        anchor: signalBtn.el,
+        openClass: "visible",
+        inlineToggle: true,
+        signal: disposable.signal,
+        base: statusBarTop,
+      });
+    }
     const controls = buildControls();
+    shareCard = createStreamCardHost({
+      place: () =>
+        root === null || controlsRow === null ? null : { parent: root, before: controlsRow },
+      button: () => shareBtn,
+      toggleShare: options.onScreenshareToggle,
+      base: statusBarTop,
+      onChange: () => {
+        const { localCamera, localScreenshare } = voiceStore.getState();
+        renderMediaButtons(localCamera, localScreenshare);
+        updateFrozen(uiStore.getState().connectionStatus);
+      },
+    });
     listenOnly = createListenOnlyUi(disposable.signal, render);
     listeningBar = createListeningBar(disposable.signal, render);
 
@@ -462,8 +452,10 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
 
   function destroy(): void {
     setCallRow(false);
-    stopStatsPoller();
+    statsHost.stop();
     stopElapsedTimer();
+    shareCard?.destroy();
+    shareCard = null;
     disposable.destroy();
     for (const unsub of unsubs) {
       unsub();
@@ -480,10 +472,6 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     shareBtn = null;
     musicBtn = null;
     disconnectBtn = null;
-    streamCardScope?.destroy();
-    streamCardScope = null;
-    streamCard = null;
-    streamCardLoad++;
     modStatusEl = null;
     listenOnly?.dispose();
     listenOnly = null;
@@ -491,6 +479,7 @@ export function createVoiceWidget(options: VoiceWidgetOptions): MountableCompone
     signalBtn = null;
     timerEl = null;
     statsPane = null;
+    statsPopover = null;
   }
 
   return { mount, destroy };

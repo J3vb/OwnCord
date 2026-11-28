@@ -685,7 +685,7 @@ test.describe("settings, account and voice text", () => {
     for (const [el, english] of [
       [widget.locator(".vw-stats-tile-label span:last-child").nth(0), "Upload"],
       [widget.locator(".vw-stats-tile-label span:last-child").nth(1), "Download"],
-      [widget.locator(".vw-stats-footer-lead"), "Session"],
+      [widget.locator(".vw-stats-footer-lead"), "This session"],
     ] as const) {
       await expect(el).toHaveText(expanded(english));
       await expectWhole(el);

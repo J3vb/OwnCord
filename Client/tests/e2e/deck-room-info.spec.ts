@@ -272,11 +272,12 @@ test.describe("Command Deck room Info", () => {
     await enterCall(page);
     await page.setViewportSize(ZOOM_VIEWPORT);
     const signal = page.locator("[data-testid='voice-widget'] [data-testid='vw-signal']");
-    await signal.click();
-    await expect(signal).toHaveAttribute("aria-expanded", "true");
     const column = page.locator("#member-column");
     if (!(await column.isVisible())) await page.getByTestId("member-list-toggle").click();
     await expect(column).toBeVisible();
+    // Opened last: a click elsewhere closes the connection card.
+    await signal.click();
+    await expect(signal).toHaveAttribute("aria-expanded", "true");
     await expect(summary(page)).toBeVisible();
     expectReflowNoWorse(test.info(), await auditReflow(column), DEV_BASELINE);
   });

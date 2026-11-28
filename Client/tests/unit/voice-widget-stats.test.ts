@@ -33,8 +33,10 @@ vi.mock("@lib/voice/connectionStats", () => ({
       available: false,
     }),
     onUpdate: vi.fn().mockImplementation((cb: (stats: unknown) => void) => {
-      (connectionStatsMock.listeners as Array<(stats: unknown) => void>).push(cb);
-      return () => {};
+      const listeners = connectionStatsMock.listeners as Array<(stats: unknown) => void>;
+      listeners.push(cb);
+      // A stopped poller's listener hears nothing more.
+      return () => listeners.splice(listeners.indexOf(cb), 1);
     }),
     onQualityChanged: vi.fn().mockImplementation((cb: unknown) => {
       connectionStatsMock.qualityListeners.push(cb);
@@ -48,7 +50,11 @@ vi.mock("@lib/voice/connectionStats", () => ({
 import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
 import { voiceStore } from "../../src/stores/voice.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
-import type { ConnectionStats } from "../../src/lib/voice/connectionStats";
+import {
+  createConnectionStatsPoller,
+  type ConnectionStats,
+  type ConnectionStatsPoller,
+} from "../../src/lib/voice/connectionStats";
 import { resetMembersState } from "../helpers/storeResets";
 import { resetChannelsState } from "../helpers/storeSeeds";
 
@@ -191,21 +197,142 @@ describe("VoiceWidget connection panel (Option C)", () => {
     widget.destroy?.();
   });
 
-  it("shows the RTT in the footer only once it is known", () => {
+  it("leads the connection card with the quality and the ping, the session in its footer", () => {
     const { widget, container } = mount();
-    const footer = container.querySelector(".vw-stats-footer")!;
+    const pane = container.querySelector(".vw-stats")!;
+    const ping = pane.querySelector("[data-testid='vw-conn-ping']")!;
+    const pill = pane.querySelector<HTMLElement>("[data-testid='vw-conn-quality']")!;
+    expect(pane.querySelector(".vw-card-eyebrow")!.textContent).toBe("Connection");
+    // No sample yet: no number and no verdict.
+    expect(ping.textContent).toBe("—");
+    expect(pill.hidden).toBe(true);
 
     pushStats({ rtt: 0, totalUp: 2360, totalDown: 631 });
-    expect(footer.textContent).not.toContain("RTT");
-    expect(footer.textContent).not.toContain("—");
-    expect(footer.querySelector(".vw-stats-footer-lead")!.textContent).toBe("Session");
+    expect(ping.textContent).toBe("—");
+    expect(pill.textContent).toBe("Good");
+    expect(pane.querySelector(".vw-stats-footer-lead")!.textContent).toBe("This session");
+    expect(pane.querySelector(".vw-stats-footer")!.textContent).not.toContain("RTT");
 
-    pushStats({ rtt: 42, totalUp: 2360, totalDown: 631 });
-    const lead = footer.querySelector(".vw-stats-footer-lead")!;
-    expect(lead.textContent).toBe("RTT 42.0 ms");
-    expect(lead.querySelector(".vw-stat-value")!.textContent).toBe("42.0 ms");
+    pushStats({ rtt: 42.4, quality: "fair" });
+    expect(ping.textContent).toBe("42");
+    expect(pill.textContent).toBe("Fair");
+    expect(pill.dataset["quality"]).toBe("fair");
+    expect(pane.querySelector(".vw-conn-secured")!.textContent).toBe("Secured");
 
     widget.destroy?.();
+  });
+
+  it("meters each direction's rate", () => {
+    const { widget, container } = mount();
+    pushStats({ outRate: 250_000, inRate: 0 });
+    const meters = container.querySelectorAll<HTMLElement>(".vw-stat-meter-fill");
+    expect(meters[0]!.style.width).toBe("50%");
+    expect(meters[1]!.style.width).toBe("0%");
+    widget.destroy?.();
+  });
+
+  it("opens the card as a popover over the ping button under Deck, closed by Esc", () => {
+    document.documentElement.classList.add("layout-deck");
+    const { widget, container } = mount();
+    try {
+      const pane = container.querySelector<HTMLElement>("[data-testid='vw-stats']")!;
+      const signal = container.querySelector<HTMLButtonElement>(".vw-signal")!;
+      expect(pane.classList.contains("vw-pop")).toBe(true);
+      expect(signal.getAttribute("aria-haspopup")).toBe("dialog");
+      signal.click();
+      expect(pane.classList.contains("visible")).toBe(true);
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+      expect(pane.classList.contains("visible")).toBe(false);
+      expect(signal.getAttribute("aria-expanded")).toBe("false");
+      signal.click();
+      document.body.dispatchEvent(new Event("pointerdown", { bubbles: true }));
+      expect(pane.classList.contains("visible")).toBe(false);
+    } finally {
+      widget.destroy?.();
+      document.documentElement.classList.remove("layout-deck");
+    }
+  });
+
+  describe("the ping graph", () => {
+    const points = (container: HTMLElement): string[] => {
+      const line = container.querySelector(".vw-spark-line")!.getAttribute("points") ?? "";
+      return line === "" ? [] : line.split(" ");
+    };
+
+    it("draws one point per sample, skipping the polls with no ping", () => {
+      const { widget, container } = mount();
+      pushStats({ rtt: 30 });
+      pushStats({ rtt: 0 });
+      pushStats({ rtt: 40 });
+      pushStats({ rtt: 35, available: false });
+      expect(points(container)).toHaveLength(2);
+      expect(container.querySelector(".vw-spark-fill")!.getAttribute("d")).toMatch(/^M0 46 L/);
+      widget.destroy?.();
+    });
+
+    it("starts over for the new call when the call switches, with no old pings", () => {
+      const { widget, container } = mount();
+      container.querySelector<HTMLButtonElement>(".vw-signal")!.click();
+      pushStats({ rtt: 30 });
+      pushStats({ rtt: 31 });
+      expect(points(container)).toHaveLength(2);
+
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: 2 }));
+      voiceStore.flush();
+      expect(points(container)).toEqual([]);
+      // Only the new call's poller is heard; the card stays open.
+      pushStats({ rtt: 80 });
+      expect(points(container)).toHaveLength(1);
+      expect(container.querySelector(".vw-stats")!.classList.contains("visible")).toBe(true);
+      widget.destroy?.();
+    });
+
+    it("starts the graph over when the link drops and again once it is back, keeping the poller", () => {
+      const { widget, container } = mount();
+      const created = vi.mocked(createConnectionStatsPoller);
+      const poller = created.mock.results[0]!.value as ConnectionStatsPoller;
+      pushStats({ rtt: 30 });
+      pushStats({ rtt: 31 });
+
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "reconnecting" }));
+      voiceStore.flush();
+      expect(points(container)).toEqual([]);
+      pushStats({ rtt: 900 });
+
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
+      voiceStore.flush();
+      expect(points(container)).toEqual([]);
+      pushStats({ rtt: 32 });
+      expect(points(container)).toHaveLength(1);
+
+      // The same poller ran throughout: a restart would zero its byte
+      // counters, and the first rate after the blip would count the whole
+      // session's bytes as one interval.
+      expect(created).toHaveBeenCalledTimes(1);
+      expect(poller.start).toHaveBeenCalledTimes(1);
+      expect(poller.stop).not.toHaveBeenCalled();
+      widget.destroy?.();
+    });
+
+    it("keeps the history across store updates within the same call", () => {
+      const { widget, container } = mount();
+      pushStats({ rtt: 30 });
+      voiceStore.setState((prev) => ({ ...prev, localMuted: true }));
+      voiceStore.flush();
+      pushStats({ rtt: 31 });
+      expect(points(container)).toHaveLength(2);
+      widget.destroy?.();
+    });
+
+    it("forgets the call's pings when you leave", () => {
+      const { widget, container } = mount();
+      pushStats({ rtt: 30 });
+      voiceStore.setState((prev) => ({ ...prev, currentChannelId: null }));
+      voiceStore.flush();
+      expect(points(container)).toEqual([]);
+      expect(connectionStatsMock.listeners).toHaveLength(0);
+      widget.destroy?.();
+    });
   });
 
   it("puts the session totals on the footer line", () => {
