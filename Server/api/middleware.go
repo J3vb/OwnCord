@@ -306,18 +306,28 @@ func AdminIPRestrict(settingName string, allowedCIDRs, trustedProxyCIDRs []strin
 // SecurityHeadersWithTLS sets the defensive response headers; a non-empty tlsMode also sets
 // Strict-Transport-Security.
 func SecurityHeadersWithTLS(tlsMode string) func(http.Handler) http.Handler {
+	hsts := ""
+	if tlsMode != "" {
+		hsts = fmt.Sprintf("max-age=%d; includeSubDomains", hstsMaxAgeSeconds)
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			h := w.Header()
-			h.Set("X-Content-Type-Options", "nosniff")
-			h.Set("X-Frame-Options", "DENY")
-			h.Set("X-XSS-Protection", "0")
-			h.Set("Referrer-Policy", "strict-origin-when-cross-origin")
-			h.Set("Content-Security-Policy", "default-src 'self'")
-			h.Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
-			h.Set("Cache-Control", "no-store")
-			if tlsMode != "" {
-				h.Set("Strict-Transport-Security", fmt.Sprintf("max-age=%d; includeSubDomains", hstsMaxAgeSeconds))
+			// One backing array for all values; each header gets a capacity-1 window so a later
+			// Set/Add/Del by a handler cannot write into a neighbour. Keys are in canonical form.
+			vals := [...]string{
+				"nosniff", "DENY", "0", "strict-origin-when-cross-origin", "default-src 'self'",
+				"camera=(), microphone=(), geolocation=()", "no-store", hsts,
+			}
+			h["X-Content-Type-Options"] = vals[0:1:1]
+			h["X-Frame-Options"] = vals[1:2:2]
+			h["X-Xss-Protection"] = vals[2:3:3]
+			h["Referrer-Policy"] = vals[3:4:4]
+			h["Content-Security-Policy"] = vals[4:5:5]
+			h["Permissions-Policy"] = vals[5:6:6]
+			h["Cache-Control"] = vals[6:7:7]
+			if hsts != "" {
+				h["Strict-Transport-Security"] = vals[7:8:8]
 			}
 			next.ServeHTTP(w, r)
 		})
