@@ -10,6 +10,7 @@
 
 import { createElement, appendChildren, setText } from "@lib/dom";
 import { createIcon } from "@lib/icons";
+import { hasVideoSurface } from "@lib/voice/videoSurface";
 import {
   canChangeScreenshareSource,
   changeScreenshareSource,
@@ -64,7 +65,10 @@ function createPreview(signal: AbortSignal): {
   let shownTrackId: string | null = null;
 
   function show(stream: MediaStream | null): void {
-    const track = stream?.getVideoTracks()[0];
+    // A picture our own renderer draws (the Linux native capture) is held by
+    // the stream tile's canvas; a <video> here would stay blank.
+    const found = stream?.getVideoTracks()[0];
+    const track = found !== undefined && hasVideoSurface(found) ? undefined : found;
     el.hidden = track === undefined;
     el.classList.toggle("vw-share-preview--off", hidden);
     setText(toggle, hidden ? t("card.showPreview") : t("tile.hidePreview"));

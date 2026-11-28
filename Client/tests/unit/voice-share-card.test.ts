@@ -33,6 +33,7 @@ vi.mock("../../src/features/voice/livekitSession", () =>
 vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true));
 
 import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
+import { registerVideoSurface } from "../../src/lib/voice/videoSurface";
 import { voiceStore } from "../../src/stores/voice.store";
 import { setConnectionStatus, uiStore } from "../../src/stores/ui.store";
 
@@ -185,6 +186,18 @@ describe("the share card", () => {
       expect(card()!.querySelector<HTMLElement>(".vw-share-preview")!.hidden).toBe(true);
       expect(card()!.querySelector("video")!.srcObject ?? null).toBeNull();
       expect(chips()).toEqual(["Audio on"]);
+    });
+
+    it("hides the preview where our own renderer draws the picture (Linux native)", async () => {
+      const stream = windowStream();
+      registerVideoSurface(
+        stream.getVideoTracks()[0] as unknown as MediaStreamTrack,
+        document.createElement("canvas"),
+      );
+      share.stream = stream;
+      await startSharing();
+      expect(card()!.querySelector<HTMLElement>(".vw-share-preview")!.hidden).toBe(true);
+      expect(card()!.querySelector("video")!.srcObject ?? null).toBeNull();
     });
 
     it("lets go of the picture when the card goes", async () => {

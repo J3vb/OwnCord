@@ -24,6 +24,11 @@ export function registerVideoSurface(track: MediaStreamTrack, canvas: HTMLCanvas
   surfaces.set(track, canvas);
 }
 
+/** Whether our own code draws `track`'s picture (a <video> alone shows none of it). */
+export function hasVideoSurface(track: MediaStreamTrack): boolean {
+  return surfaces.has(track);
+}
+
 /** The canvas drawing `video`'s stream, or null when the <video> plays it. */
 export function videoSurfaceOf(video: HTMLVideoElement): HTMLCanvasElement | null {
   // Duck-typed: a <video> in a pop-out window holds the opener's MediaStream,
