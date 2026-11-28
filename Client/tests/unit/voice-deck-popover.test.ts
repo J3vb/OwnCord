@@ -107,6 +107,46 @@ describe("createDeckPopover", () => {
     expect(isDeckPopoverMode()).toBe(false);
   });
 
+  it("re-places an open panel and tells the owner when the phone layout ends", () => {
+    useDeck();
+    let phone = true;
+    const changes: (() => void)[] = [];
+    vi.stubGlobal(
+      "matchMedia",
+      vi.fn((q: string) => ({
+        matches: phone && q.includes("pointer: coarse"),
+        addEventListener: (_type: string, fn: () => void) => changes.push(fn),
+      })),
+    );
+    const onModeChange = vi.fn();
+    const pop = createDeckPopover({
+      panel,
+      anchor,
+      openClass: "open",
+      inlineToggle: true,
+      signal: scope.signal,
+      onModeChange,
+    });
+    pop.open();
+    expect(panel.classList.contains("vw-pop")).toBe(false);
+    expect(panel.style.getPropertyValue("--deck-pop-arrow")).toBe("");
+
+    // Turned on its side: the phone layout ends with the panel still open.
+    phone = false;
+    for (const fn of changes) fn();
+    expect(panel.classList.contains("vw-pop")).toBe(true);
+    expect(panel.style.getPropertyValue("--deck-pop-arrow")).not.toBe("");
+    expect(panel.style.left).not.toBe("");
+    expect(onModeChange).toHaveBeenCalledTimes(1);
+
+    // And back: inline again, the placement cleared.
+    phone = true;
+    for (const fn of changes) fn();
+    expect(panel.classList.contains("vw-pop")).toBe(false);
+    expect(panel.style.left).toBe("");
+    expect(onModeChange).toHaveBeenCalledTimes(2);
+  });
+
   it("lifts the panel into a dialog its button opens, under Deck", () => {
     useDeck();
     popover();

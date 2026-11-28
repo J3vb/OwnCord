@@ -44,6 +44,9 @@ export interface DeckPopoverOptions {
   readonly base?: () => Element | null;
   /** Told after each open or close. */
   readonly onChange?: (open: boolean) => void;
+  /** Told after the layout crosses between popover and inline mode, once the
+   *  panel is placed for the new mode. */
+  readonly onModeChange?: () => void;
 }
 
 export interface DeckPopover {
@@ -214,7 +217,15 @@ export function createDeckPopover(options: DeckPopoverOptions): DeckPopover {
   const phoneQuery =
     typeof window.matchMedia === "function" ? window.matchMedia(PHONE_LAYOUT_QUERY) : null;
   if (typeof phoneQuery?.addEventListener === "function") {
-    phoneQuery.addEventListener("change", applyMode, { signal });
+    phoneQuery.addEventListener(
+      "change",
+      () => {
+        applyMode();
+        if (isOpen()) place();
+        options.onModeChange?.();
+      },
+      { signal },
+    );
   }
   // The button outlives a share's card: it stops offering a popup with it.
   signal.addEventListener(

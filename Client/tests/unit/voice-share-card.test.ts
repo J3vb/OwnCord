@@ -448,6 +448,26 @@ describe("the share card", () => {
       expect(video.srcObject).toBeNull();
     });
 
+    it("plays the preview again when the phone layout starts with the Deck card closed", async () => {
+      document.documentElement.classList.add("layout-deck");
+      let phone = false;
+      const changes: (() => void)[] = [];
+      vi.stubGlobal(
+        "matchMedia",
+        vi.fn((q: string) => ({
+          matches: phone && q.includes("pointer: coarse"),
+          addEventListener: (_type: string, fn: () => void) => changes.push(fn),
+        })),
+      );
+      await startSharing();
+      const video = card()!.querySelector("video")!;
+      expect(video.srcObject ?? null).toBeNull();
+      // Upright again: the card is inline, always on screen, so it plays.
+      phone = true;
+      for (const fn of changes) fn();
+      expect(video.srcObject).toBe(share.stream);
+    });
+
     it("is no toggle while it opens the card: no aria-pressed there, as in Classic", async () => {
       await startSharing();
       expect(shareBtn().getAttribute("aria-pressed")).toBe("true");

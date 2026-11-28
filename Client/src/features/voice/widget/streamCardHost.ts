@@ -86,6 +86,10 @@ export function createStreamCardHost(options: StreamCardHostOptions): StreamCard
           refreshShown();
           options.onChange();
         },
+        onModeChange: () => {
+          refreshShown();
+          options.onChange();
+        },
       });
     }
     refreshShown();
