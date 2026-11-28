@@ -4,7 +4,8 @@
  * share button. The panel stays where the widget put it in the DOM and is
  * lifted out with `position: fixed` (the `vw-pop` class), placed above its
  * button with a small arrow, kept inside the window, and closed by Esc, a
- * click outside it, or its button again.
+ * click outside it, or its button again. Only one is open at a time: opening
+ * one closes the other.
  *
  * Classic and the phone layout keep the panel inline: there the controller
  * only toggles its open class, with no outside-click or Esc handling.
@@ -37,35 +38,59 @@ export interface DeckPopoverOptions {
    *  the share button stops the share there), so it reports aria-expanded
    *  in both modes. */
   readonly inlineToggle: boolean;
+  /** The element whose top the panel sits above (the status bar), so it
+   *  covers none of the bar's rows; the button when left out. The arrow stays
+   *  over the button. */
+  readonly base?: () => Element | null;
   /** Told after each open or close. */
   readonly onChange?: (open: boolean) => void;
 }
 
 export interface DeckPopover {
   isOpen(): boolean;
-  toggle(): void;
-  open(): void;
+  /** Open or close; opened from the keyboard, the focus moves into it. */
+  toggle(viaKeyboard?: boolean): void;
+  open(viaKeyboard?: boolean): void;
   /** Close; `restoreFocus` puts the focus back on the button (Esc). */
   close(restoreFocus?: boolean): void;
   /** Re-apply the mode (popover or inline) and re-place an open panel. */
   sync(): void;
 }
 
-/** Where the panel goes: above the button, centred on it where the window
- *  allows, otherwise pushed in from the nearer edge, with the arrow kept over
- *  the button. */
+/** Where the panel goes: above `top` (the top of the status bar, or of the
+ *  button itself), centred on the button where the window allows, otherwise
+ *  pushed in from the nearer edge, with the arrow kept over the button. */
 export function placePopover(
   anchor: DOMRect,
   panelWidth: number,
   viewport: { width: number; height: number },
+  top = anchor.top,
 ): { left: number; bottom: number; maxHeight: number; arrow: number } {
   const centre = anchor.left + anchor.width / 2;
   const maxLeft = Math.max(EDGE, viewport.width - panelWidth - EDGE);
   const left = Math.min(Math.max(centre - panelWidth / 2, EDGE), maxLeft);
   const arrow = Math.min(Math.max(centre - left, ARROW_INSET), panelWidth - ARROW_INSET);
-  const bottom = viewport.height - anchor.top + GAP;
-  const maxHeight = Math.max(0, anchor.top - GAP - EDGE);
+  const bottom = viewport.height - top + GAP;
+  const maxHeight = Math.max(0, top - GAP - EDGE);
   return { left, bottom, maxHeight, arrow };
+}
+
+/** The open popover, if any: opening another closes it first. */
+let openPopover: DeckPopover | null = null;
+
+const shown = (el: HTMLElement): boolean => el.closest("[hidden]") === null;
+
+/** Where the focus goes when the panel opens from the keyboard: the checked
+ *  segment of a radio group, else its first shown control, else the panel. */
+function focusTarget(panel: HTMLElement): HTMLElement {
+  const controls = [
+    ...panel.querySelectorAll<HTMLElement>('[role="radio"][aria-checked="true"]'),
+    ...panel.querySelectorAll<HTMLElement>("button:not([disabled]), [tabindex='0']"),
+  ];
+  const control = controls.find(shown);
+  if (control !== undefined) return control;
+  panel.tabIndex = -1;
+  return panel;
 }
 
 export function createDeckPopover(options: DeckPopoverOptions): DeckPopover {
@@ -77,10 +102,13 @@ export function createDeckPopover(options: DeckPopoverOptions): DeckPopover {
 
   function place(): void {
     if (!panel.classList.contains("vw-pop")) return;
-    const spot = placePopover(anchor.getBoundingClientRect(), panel.offsetWidth, {
-      width: window.innerWidth,
-      height: window.innerHeight,
-    });
+    const base = options.base?.() ?? anchor;
+    const spot = placePopover(
+      anchor.getBoundingClientRect(),
+      panel.offsetWidth,
+      { width: window.innerWidth, height: window.innerHeight },
+      base.getBoundingClientRect().top,
+    );
     panel.style.left = `${spot.left}px`;
     panel.style.bottom = `${spot.bottom}px`;
     panel.style.setProperty("--deck-pop-arrow", `${spot.arrow}px`);
@@ -104,9 +132,9 @@ export function createDeckPopover(options: DeckPopoverOptions): DeckPopover {
   /** As a popover the panel is a dialog its button opens; inline it keeps
    *  its own role. */
   function applyMode(): void {
-    const popover = isDeckPopoverMode();
-    panel.classList.toggle("vw-pop", popover);
-    if (popover) {
+    const lifted = isDeckPopoverMode();
+    panel.classList.toggle("vw-pop", lifted);
+    if (lifted) {
       panel.setAttribute("role", "dialog");
       anchor.setAttribute("aria-haspopup", "dialog");
     } else {
@@ -114,12 +142,13 @@ export function createDeckPopover(options: DeckPopoverOptions): DeckPopover {
       else panel.setAttribute("role", inlineRole);
       anchor.removeAttribute("aria-haspopup");
     }
-    if (popover || options.inlineToggle) anchor.setAttribute("aria-expanded", String(isOpen()));
+    if (lifted || options.inlineToggle) anchor.setAttribute("aria-expanded", String(isOpen()));
     else anchor.removeAttribute("aria-expanded");
-    if (popover && openScope === null && isOpen()) armDismiss();
-    if (!popover) {
+    if (lifted && openScope === null && isOpen()) armDismiss();
+    if (!lifted) {
       openScope?.destroy();
       openScope = null;
+      if (openPopover === popover) openPopover = null;
       clearPlacement();
     }
   }
@@ -131,11 +160,14 @@ export function createDeckPopover(options: DeckPopoverOptions): DeckPopover {
     close();
   }
 
+  /** Esc closes this panel, unless something else took it first (an IME
+   *  composition, a menu inside). The focus goes back to the button only when
+   *  it was in the panel or on the button, never away from elsewhere. */
   function onKeyDown(e: KeyboardEvent): void {
-    // An Escape that ends an IME composition is the input method's.
-    if (e.key !== "Escape" || isImeCommit(e)) return;
+    if (e.key !== "Escape" || e.defaultPrevented || isImeCommit(e)) return;
     e.preventDefault();
-    close(true);
+    const active = document.activeElement;
+    close(active !== null && (panel.contains(active) || active === anchor));
   }
 
   /** Esc and an outside click close the panel; a resize re-places it. */
@@ -150,21 +182,26 @@ export function createDeckPopover(options: DeckPopoverOptions): DeckPopover {
     window.addEventListener("resize", place, { signal: openSignal });
   }
 
-  function open(): void {
+  function open(viaKeyboard = false): void {
     if (signal.aborted || isOpen()) return;
     applyMode();
+    const lifted = panel.classList.contains("vw-pop");
+    if (lifted && openPopover !== popover) openPopover?.close();
     panel.classList.add(openClass);
     anchor.setAttribute("aria-expanded", "true");
-    if (panel.classList.contains("vw-pop")) {
+    if (lifted) {
+      openPopover = popover;
       armDismiss();
       place();
     }
     options.onChange?.(true);
+    if (lifted && viaKeyboard) focusTarget(panel).focus();
   }
 
   function close(restoreFocus = false): void {
     openScope?.destroy();
     openScope = null;
+    if (openPopover === popover) openPopover = null;
     if (!isOpen()) return;
     panel.classList.remove(openClass);
     anchor.setAttribute("aria-expanded", "false");
@@ -185,16 +222,15 @@ export function createDeckPopover(options: DeckPopoverOptions): DeckPopover {
     () => {
       openScope?.destroy();
       openScope = null;
+      if (openPopover === popover) openPopover = null;
       anchor.removeAttribute("aria-haspopup");
       anchor.removeAttribute("aria-expanded");
     },
     { once: true },
   );
-  applyMode();
-
-  return {
+  const popover: DeckPopover = {
     isOpen,
-    toggle: () => (isOpen() ? close() : open()),
+    toggle: (viaKeyboard = false) => (isOpen() ? close() : open(viaKeyboard)),
     open,
     close,
     sync() {
@@ -202,4 +238,6 @@ export function createDeckPopover(options: DeckPopoverOptions): DeckPopover {
       if (isOpen()) place();
     },
   };
+  applyMode();
+  return popover;
 }

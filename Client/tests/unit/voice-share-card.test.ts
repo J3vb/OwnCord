@@ -34,6 +34,7 @@ vi.mock("@lib/voice/connectionStats", () => voiceWidget.connectionStatsMock(true
 
 import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
 import { voiceStore } from "../../src/stores/voice.store";
+import { setConnectionStatus, uiStore } from "../../src/stores/ui.store";
 
 /** A captured window the way Chromium reports one: titled, 1044p at 29 fps. */
 function windowStream(label = "Like Going Back In Time · YouTube") {
@@ -84,6 +85,21 @@ describe("the share card", () => {
     if (container.childElementCount === 0) widget.mount(container);
     await vi.dynamicImportSettled();
   }
+
+  it("never shows a card for a share that ended before the card loaded", async () => {
+    voiceStore.setState((prev) => ({ ...prev, currentChannelId: 1, localScreenshare: true }));
+    voiceStore.flush();
+    widget = createVoiceWidget({
+      onDisconnect: vi.fn(),
+      onCameraToggle: vi.fn(),
+      onScreenshareToggle: toggle,
+    });
+    widget.mount(container);
+    // The card's module is still loading when the share stops.
+    stopSharingElsewhere();
+    await vi.dynamicImportSettled();
+    expect(card()).toBeNull();
+  });
 
   function stopSharingElsewhere(): void {
     voiceStore.setState((prev) => ({ ...prev, localScreenshare: false }));
@@ -354,8 +370,9 @@ describe("the share card", () => {
     it("closes the open card and puts the button back when the share stops elsewhere", async () => {
       document.documentElement.classList.add("layout-deck");
       await startSharing();
-      shareBtn().click();
+      shareBtn().dispatchEvent(new MouseEvent("click", { detail: 1 }));
       expect(card()!.classList.contains("vw-pop--open")).toBe(true);
+      document.body.focus();
 
       // The shared window closed, or Stop on the tile.
       stopSharingElsewhere();
@@ -371,6 +388,98 @@ describe("the share card", () => {
       // The next press starts a new share rather than opening a card.
       shareBtn().click();
       expect(toggle).toHaveBeenCalledOnce();
+    });
+
+    it("gives the focus back to the share button when Stop in the card ends the share", async () => {
+      document.documentElement.classList.add("layout-deck");
+      toggle.mockImplementation(stopSharingElsewhere);
+      await startSharing();
+      shareBtn().dispatchEvent(new MouseEvent("click", { detail: 1 }));
+      const stop = card()!.querySelector<HTMLButtonElement>("[data-testid='vw-stream-stop']")!;
+      stop.focus();
+      stop.click();
+      expect(card()).toBeNull();
+      expect(document.activeElement).toBe(shareBtn());
+    });
+
+    it("moves the focus into the card when the keyboard opens it, not the pointer", async () => {
+      document.documentElement.classList.add("layout-deck");
+      await startSharing();
+      shareBtn().dispatchEvent(new MouseEvent("click", { detail: 1 }));
+      expect(card()!.contains(document.activeElement)).toBe(false);
+      shareBtn().dispatchEvent(new MouseEvent("click", { detail: 1 }));
+
+      // A keyboard press is a click with no pointer (detail 0).
+      shareBtn().focus();
+      shareBtn().dispatchEvent(new MouseEvent("click", { detail: 0 }));
+      expect(document.activeElement).toBe(segment("medium"));
+      document.activeElement!.dispatchEvent(
+        new KeyboardEvent("keydown", { key: "Escape", bubbles: true }),
+      );
+      expect(card()!.classList.contains("vw-pop--open")).toBe(false);
+      expect(document.activeElement).toBe(shareBtn());
+    });
+
+    it("closes the connection card when the share card opens, and the other way round", async () => {
+      document.documentElement.classList.add("layout-deck");
+      await startSharing();
+      const stats = container.querySelector<HTMLElement>("[data-testid='vw-stats']")!;
+      const signal = container.querySelector<HTMLButtonElement>(".vw-signal")!;
+      signal.dispatchEvent(new MouseEvent("click", { detail: 1 }));
+      expect(stats.classList.contains("visible")).toBe(true);
+      shareBtn().dispatchEvent(new MouseEvent("click", { detail: 0 }));
+      expect(stats.classList.contains("visible")).toBe(false);
+      expect(card()!.classList.contains("vw-pop--open")).toBe(true);
+      signal.dispatchEvent(new MouseEvent("click", { detail: 0 }));
+      expect(card()!.classList.contains("vw-pop--open")).toBe(false);
+      expect(stats.classList.contains("visible")).toBe(true);
+      expect(signal.getAttribute("aria-expanded")).toBe("true");
+      expect(shareBtn().getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("plays the preview only while the Deck card is open", async () => {
+      document.documentElement.classList.add("layout-deck");
+      await startSharing();
+      const video = card()!.querySelector("video")!;
+      expect(video.srcObject ?? null).toBeNull();
+      shareBtn().click();
+      expect(video.srcObject).toBe(share.stream);
+      shareBtn().click();
+      expect(video.srcObject).toBeNull();
+    });
+
+    it("is no toggle while it opens the card: no aria-pressed there, as in Classic", async () => {
+      await startSharing();
+      expect(shareBtn().getAttribute("aria-pressed")).toBe("true");
+      widget?.destroy?.();
+      widget = null;
+      container.replaceChildren();
+      document.documentElement.classList.add("layout-deck");
+      await startSharing();
+      expect(shareBtn().hasAttribute("aria-pressed")).toBe(false);
+      expect(shareBtn().getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("stays live while the chat connection is down, so the card is reachable", async () => {
+      document.documentElement.classList.add("layout-deck");
+      await startSharing();
+      setConnectionStatus("reconnecting");
+      uiStore.flush();
+      expect(shareBtn().disabled).toBe(false);
+      expect(shareBtn().title).toBe("Screen share: quality, source, stop");
+      expect(container.querySelector<HTMLButtonElement>("[aria-label='Camera']")!.disabled).toBe(
+        true,
+      );
+      shareBtn().click();
+      expect(card()!.classList.contains("vw-pop--open")).toBe(true);
+    });
+
+    it("is frozen with the chat connection down in Classic, as before", async () => {
+      await startSharing();
+      setConnectionStatus("reconnecting");
+      uiStore.flush();
+      expect(shareBtn().disabled).toBe(true);
+      expect(shareBtn().title).toBe("Reconnecting…");
     });
 
     it("comes back closed for the next share", async () => {

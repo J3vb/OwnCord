@@ -12,7 +12,7 @@ import {
   type QualityLevel,
 } from "@lib/voice/connectionStats";
 import { authStore } from "@stores/auth.store";
-import { voiceStore, type VoiceState } from "@stores/voice.store";
+import { voiceStore } from "@stores/voice.store";
 import { voiceText as t } from "../../../i18n/voice";
 import { createPingHistory, sparklinePoints } from "./pingHistory";
 
@@ -96,7 +96,10 @@ export interface SignalButton {
 /** A button, not a clickable div: the quality readout toggles the transport
  *  stats pane, and a pointer-only control is unreachable by keyboard.
  *  aria-expanded reflects the pane it owns. */
-export function createSignalButton(onToggle: () => void, signal: AbortSignal): SignalButton {
+export function createSignalButton(
+  onToggle: (e: MouseEvent) => void,
+  signal: AbortSignal,
+): SignalButton {
   const el = createElement("button", {
     type: "button",
     class: "vw-signal",
@@ -129,16 +132,6 @@ export function createSignalButton(onToggle: () => void, signal: AbortSignal): S
   }
 
   return { el, draw };
-}
-
-/** The call a ping history belongs to: its channel and join time, or
- *  "reconnecting" while the link is down, null out of a call. A new key
- *  starts the graph over, so neither a switch nor a drop mixes another
- *  call's pings into it. */
-export function statsCallKeyOf(voice: VoiceState): string | null {
-  if (voice.currentChannelId === null) return null;
-  if (voice.voiceStatus === "reconnecting") return "reconnecting";
-  return `${voice.currentChannelId}:${voice.joinedAt ?? ""}`;
 }
 
 export interface StatsPane {

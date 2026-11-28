@@ -50,7 +50,11 @@ vi.mock("@lib/voice/connectionStats", () => ({
 import { createVoiceWidget } from "../../src/features/voice/VoiceWidget";
 import { voiceStore } from "../../src/stores/voice.store";
 import { setConnectionStatus } from "../../src/stores/ui.store";
-import type { ConnectionStats } from "../../src/lib/voice/connectionStats";
+import {
+  createConnectionStatsPoller,
+  type ConnectionStats,
+  type ConnectionStatsPoller,
+} from "../../src/lib/voice/connectionStats";
 import { resetMembersState } from "../helpers/storeResets";
 import { resetChannelsState } from "../helpers/storeSeeds";
 
@@ -283,8 +287,10 @@ describe("VoiceWidget connection panel (Option C)", () => {
       widget.destroy?.();
     });
 
-    it("starts over when the link drops, and again once it is back", () => {
+    it("starts the graph over when the link drops and again once it is back, keeping the poller", () => {
       const { widget, container } = mount();
+      const created = vi.mocked(createConnectionStatsPoller);
+      const poller = created.mock.results[0]!.value as ConnectionStatsPoller;
       pushStats({ rtt: 30 });
       pushStats({ rtt: 31 });
 
@@ -293,11 +299,18 @@ describe("VoiceWidget connection panel (Option C)", () => {
       expect(points(container)).toEqual([]);
       pushStats({ rtt: 900 });
 
-      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected", joinedAt: 5 }));
+      voiceStore.setState((prev) => ({ ...prev, voiceStatus: "connected" }));
       voiceStore.flush();
       expect(points(container)).toEqual([]);
       pushStats({ rtt: 32 });
       expect(points(container)).toHaveLength(1);
+
+      // The same poller ran throughout: a restart would zero its byte
+      // counters, and the first rate after the blip would count the whole
+      // session's bytes as one interval.
+      expect(created).toHaveBeenCalledTimes(1);
+      expect(poller.start).toHaveBeenCalledTimes(1);
+      expect(poller.stop).not.toHaveBeenCalled();
       widget.destroy?.();
     });
 

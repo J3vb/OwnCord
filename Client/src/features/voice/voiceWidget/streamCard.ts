@@ -27,6 +27,8 @@ export interface StreamCard {
   readonly el: HTMLElement;
   /** Redraw from the live share (its source or quality changed). */
   update(): void;
+  /** Whether the card is on screen: a closed popover plays no preview. */
+  setShown(shown: boolean): void;
 }
 
 /** The muted live picture of the share, with "What others see" and a
@@ -35,6 +37,7 @@ export interface StreamCard {
 function createPreview(signal: AbortSignal): {
   el: HTMLDivElement;
   show(stream: MediaStream | null): void;
+  setShown(shown: boolean): void;
 } {
   const el = createElement("div", { class: "vw-share-preview" });
   const video = createElement("video", { class: "vw-share-preview-video", "aria-hidden": "true" });
@@ -54,6 +57,8 @@ function createPreview(signal: AbortSignal): {
     toggle,
   );
   let hidden = false;
+  /** The card is on screen (inline, or its popover open). */
+  let onScreen = true;
   /** The track the picture plays, so a redraw of the same share does not
    *  restart it (the session hands out a new stream object each time). */
   let shownTrackId: string | null = null;
@@ -64,7 +69,7 @@ function createPreview(signal: AbortSignal): {
     el.classList.toggle("vw-share-preview--off", hidden);
     setText(toggle, hidden ? t("card.showPreview") : t("tile.hidePreview"));
     toggle.setAttribute("aria-pressed", String(hidden));
-    const next = hidden || track === undefined ? null : track.id;
+    const next = hidden || !onScreen || track === undefined ? null : track.id;
     if (next === shownTrackId) return;
     shownTrackId = next;
     video.srcObject = next === null ? null : stream;
@@ -79,7 +84,14 @@ function createPreview(signal: AbortSignal): {
     { signal },
   );
   signal.addEventListener("abort", () => (video.srcObject = null), { once: true });
-  return { el, show };
+  return {
+    el,
+    show,
+    setShown(shown) {
+      onScreen = shown;
+      show(getLocalScreenshareStream());
+    },
+  };
 }
 
 function chip(text: string, extra = ""): HTMLSpanElement {
@@ -174,5 +186,5 @@ export function createStreamCard(onStop: () => void, signal: AbortSignal): Strea
   stop.addEventListener("click", onStop, { signal });
 
   update();
-  return { el, update };
+  return { el, update, setShown: preview.setShown };
 }

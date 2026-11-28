@@ -181,6 +181,7 @@ export const shards = {
     "src/features/voice/widget/liveShare.ts",
     "src/features/voice/widget/moderationText.ts",
     "src/features/voice/widget/pingHistory.ts",
+    "src/features/voice/widget/statsHost.ts",
     "src/lib/voice/audioMusicState.ts",
   ],
   "livekit-23": [

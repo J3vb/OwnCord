@@ -48,6 +48,15 @@ describe("placePopover", () => {
     expect(placePopover(rect(100, 300, 32, 32), 400, { width: 300, height: 400 }).left).toBe(8);
   });
 
+  it("sits above the status bar's top, not the button's, with the arrow still on the button", () => {
+    // The ping button sits in the bar's second row; the bar starts 40 px above it.
+    const spot = placePopover(rect(600, 900, 32, 24), 360, viewport, 860);
+    expect(spot.bottom).toBe(934 - 860 + 10);
+    expect(spot.maxHeight).toBe(860 - 10 - 8);
+    expect(spot.left).toBe(436);
+    expect(spot.arrow).toBe(180);
+  });
+
   it("leaves no room rather than a negative one under a button at the top", () => {
     expect(placePopover(rect(100, 4, 32, 32), 360, viewport).maxHeight).toBe(0);
   });
@@ -122,15 +131,123 @@ describe("createDeckPopover", () => {
     expect(onChange.mock.calls).toEqual([[true], [false]]);
   });
 
-  it("closes on Esc and gives the focus back to its button", () => {
+  it("closes on Esc and gives the focus back to its button when it held the focus", () => {
     useDeck();
+    const inner = document.createElement("button");
+    panel.appendChild(inner);
     const pop = popover();
     pop.open();
+    inner.focus();
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
     expect(pop.isOpen()).toBe(true);
     document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
     expect(pop.isOpen()).toBe(false);
     expect(document.activeElement).toBe(anchor);
+  });
+
+  it("closes on Esc without pulling the focus from elsewhere", () => {
+    useDeck();
+    const pop = popover();
+    pop.open();
+    outside.focus();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(pop.isOpen()).toBe(false);
+    expect(document.activeElement).toBe(outside);
+  });
+
+  it("leaves an Esc that something else already took", () => {
+    useDeck();
+    const pop = popover();
+    pop.open();
+    const taken = new KeyboardEvent("keydown", { key: "Escape", cancelable: true });
+    taken.preventDefault();
+    document.dispatchEvent(taken);
+    expect(pop.isOpen()).toBe(true);
+  });
+
+  describe("opened from the keyboard", () => {
+    it("moves the focus to the checked segment of a radio group", () => {
+      useDeck();
+      panel.innerHTML =
+        '<button id="first">Hide</button><div role="radiogroup">' +
+        '<button role="radio" aria-checked="false" tabindex="-1">Low</button>' +
+        '<button id="on" role="radio" aria-checked="true" tabindex="0">High</button></div>';
+      popover().toggle(true);
+      expect(document.activeElement?.id).toBe("on");
+    });
+
+    it("moves the focus to the first shown control without a choice to land on", () => {
+      useDeck();
+      panel.innerHTML =
+        '<div hidden><button role="radio" aria-checked="true">High</button></div>' +
+        '<button hidden>Hidden</button><button id="first">Change source</button>';
+      popover().toggle(true);
+      expect(document.activeElement?.id).toBe("first");
+    });
+
+    it("focuses the card itself when it has no control", () => {
+      useDeck();
+      popover().toggle(true);
+      expect(document.activeElement).toBe(panel);
+      expect(panel.tabIndex).toBe(-1);
+    });
+
+    it("leaves the focus alone when opened with the pointer", () => {
+      useDeck();
+      panel.innerHTML = '<button id="first">Change source</button>';
+      anchor.focus();
+      popover().toggle(false);
+      expect(document.activeElement).toBe(anchor);
+    });
+
+    it("leaves the focus alone inline", () => {
+      panel.innerHTML = '<button id="first">Change source</button>';
+      anchor.focus();
+      popover().toggle(true);
+      expect(document.activeElement).toBe(anchor);
+    });
+  });
+
+  it("keeps one popover open at a time, so one Esc closes it", () => {
+    useDeck();
+    const otherPanel = document.createElement("div");
+    const otherAnchor = document.createElement("button");
+    document.body.append(otherPanel, otherAnchor);
+    const first = popover();
+    const second = createDeckPopover({
+      panel: otherPanel,
+      anchor: otherAnchor,
+      openClass: "open",
+      inlineToggle: true,
+      signal: scope.signal,
+    });
+    first.open();
+    second.toggle(true);
+    expect(first.isOpen()).toBe(false);
+    expect(anchor.getAttribute("aria-expanded")).toBe("false");
+    expect(second.isOpen()).toBe(true);
+    first.open();
+    expect(second.isOpen()).toBe(false);
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(first.isOpen()).toBe(false);
+    expect(second.isOpen()).toBe(false);
+  });
+
+  it("places the panel above its base element when given one", () => {
+    useDeck();
+    const bar = document.createElement("div");
+    bar.getBoundingClientRect = () => rect(0, 860, 1333, 74);
+    anchor.getBoundingClientRect = () => rect(600, 900, 32, 24);
+    const pop = createDeckPopover({
+      panel,
+      anchor,
+      openClass: "open",
+      inlineToggle: true,
+      signal: scope.signal,
+      base: () => bar,
+    });
+    pop.open();
+    expect(panel.style.bottom).toBe(`${window.innerHeight - 860 + 10}px`);
   });
 
   it("closes on a click outside it, never on one inside it or on its button", () => {
